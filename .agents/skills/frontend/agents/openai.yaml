@@ -1,0 +1,4 @@
+interface:
+  display_name: "SpecMarket Frontend"
+  short_description: "Vue frontend conventions for this repository"
+  default_prompt: "Use $frontend to implement a safe, compatible Vue frontend change."
