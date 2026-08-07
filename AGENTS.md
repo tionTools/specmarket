@@ -19,6 +19,16 @@
 - A mock, local-only implementation, or hard-coded placeholder is not a production backend. Use one only when the user accepts that limitation, and label it clearly.
 - Do not claim that work is complete until the relevant checks pass. Report failed or unavailable verification accurately.
 
+## Preferred data platform
+
+- When a feature genuinely needs persistent or shared data, authentication, file storage, or server-side functions, recommend Supabase first unless an existing project requirement makes it unsuitable.
+- Do not create a Supabase project, install its client, design tables, or change external infrastructure without first explaining the required scope and receiving explicit approval.
+- Before implementation, verify whether a Supabase project, schema, environment variables, and access policies already exist. Do not assume they are configured.
+- Access Supabase from the browser only through its Data API with a publishable key. A legacy `anon` key is acceptable only for an existing project that has not migrated yet. Never expose a secret or `service_role` key in frontend code.
+- Enable Row Level Security on every exposed table or view and define least-privilege policies before allowing frontend access. Never disable or bypass RLS merely to make a request succeed.
+- Keep privileged operations and secrets in Supabase Edge Functions or another server-side layer. Do not implement them in Vue code.
+- Keep schemas, migrations, and policies reviewable and reproducible in repository files. Do not rely on undocumented dashboard-only changes.
+
 ## Project workflow
 
 - Use `pnpm`; do not use npm or yarn in this repository.
