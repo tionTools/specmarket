@@ -38,7 +38,18 @@ const statusOptions: Record<Platform, string[]> = {
 }
 
 const storedOrders = window.localStorage.getItem(storageKey)
-const orders = ref<Order[]>(storedOrders ? (JSON.parse(storedOrders) as Order[]) : demoOrders)
+const orders = ref<Order[]>(
+  storedOrders
+    ? (JSON.parse(storedOrders) as Order[]).map((order) => ({
+        ...order,
+        delivery: {
+          ...order.delivery,
+          recipient: order.delivery.recipient || order.customer,
+          recipientPhone: order.delivery.recipientPhone || order.phone,
+        },
+      }))
+    : demoOrders,
+)
 
 const todayKey = () => new Intl.DateTimeFormat('uk-UA').format(new Date())
 const orderDraft = ref(createOrderDraft())
@@ -130,6 +141,8 @@ function createOrderDraft(): Order {
     delivery: {
       carrier: 'Новая почта',
       ttn: '',
+      recipient: '',
+      recipientPhone: '',
       city: '',
       address: '',
       status: 'Запланировано',
@@ -353,6 +366,19 @@ function platformClass(platform: Platform) {
                   </select></label
                 >
               </div>
+              <section class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <h4 class="text-sm font-semibold">Данные покупателя</h4>
+                <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt class="text-slate-500">Покупатель</dt>
+                    <dd class="mt-1 font-semibold">{{ order.customer }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Телефон покупателя</dt>
+                    <dd class="mt-1 font-semibold">{{ order.phone }}</dd>
+                  </div>
+                </dl>
+              </section>
               <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <div
                   v-for="product in order.products"
@@ -398,11 +424,11 @@ function platformClass(platform: Platform) {
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Получатель</dt>
-                  <dd class="font-semibold">{{ order.customer }}</dd>
+                  <dd class="font-semibold">{{ order.delivery.recipient }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
-                  <dt class="text-slate-500">Телефон</dt>
-                  <dd class="font-semibold">{{ order.phone }}</dd>
+                  <dt class="text-slate-500">Телефон получателя</dt>
+                  <dd class="font-semibold">{{ order.delivery.recipientPhone }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Адрес</dt>
@@ -445,12 +471,12 @@ function platformClass(platform: Platform) {
         </div>
         <div class="mt-5 grid gap-4 sm:grid-cols-2">
           <label class="text-sm font-medium"
-            >Получатель<input
+            >Покупатель<input
               v-model="orderDraft.customer"
               required
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
           ><label class="text-sm font-medium"
-            >Телефон<input
+            >Телефон покупателя<input
               v-model="orderDraft.phone"
               required
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
@@ -528,6 +554,16 @@ function platformClass(platform: Platform) {
         </fieldset>
         <div class="mt-5 grid gap-4 sm:grid-cols-2">
           <label class="text-sm font-medium"
+            >Получатель<input
+              v-model="orderDraft.delivery.recipient"
+              required
+              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
+          ><label class="text-sm font-medium"
+            >Телефон получателя<input
+              v-model="orderDraft.delivery.recipientPhone"
+              required
+              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
+          ><label class="text-sm font-medium"
             >Перевозчик<select
               v-model="orderDraft.delivery.carrier"
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"

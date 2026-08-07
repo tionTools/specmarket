@@ -14,6 +14,13 @@ const customers = [
   ['Виктория С.', '+380 50 555 22 11'],
 ] as const
 
+const recipients = [
+  ['Ірина Андріадакі', '+380 97 223 76 48'],
+  ['Олена Коваленко', '+380 67 111 22 33'],
+  ['Андрій Мельник', '+380 93 100 20 30'],
+  ['Вікторія Савчук', '+380 50 555 22 11'],
+] as const
+
 const platforms: Platform[] = [
   'Пром',
   'Каста',
@@ -54,6 +61,7 @@ function getDemoValue<T>(values: readonly T[], index: number): T {
 export const demoOrders: Order[] = Array.from({ length: 12 }, (_, index) => {
   const delivery = getDemoValue(deliveryDetails, index)
   const customer = getDemoValue(customers, index)
+  const recipient = getDemoValue(recipients, index)
   const platform = getDemoValue(platforms, index)
   const price = getDemoValue(
     [105, 471, 1_295, 3_915, 240, 509, 720, 480, 1_550, 210, 630, 1_120],
@@ -86,6 +94,8 @@ export const demoOrders: Order[] = Array.from({ length: 12 }, (_, index) => {
     delivery: {
       carrier: delivery[0],
       ttn: delivery[1],
+      recipient: recipient[0],
+      recipientPhone: recipient[1],
       city: delivery[2],
       address: delivery[3],
       status: index % 3 === 0 ? 'Запланировано' : 'Отправлено',

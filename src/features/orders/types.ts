@@ -12,6 +12,8 @@ export interface OrderProduct {
 export interface Delivery {
   carrier: 'Новая почта' | 'Укрпочта' | 'RozetkaDelivery' | 'Meest'
   ttn: string
+  recipient: string
+  recipientPhone: string
   city: string
   address: string
   status: string
