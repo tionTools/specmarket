@@ -39,9 +39,9 @@ const statusOptions: Record<Platform, string[]> = {
 
 const storedOrders = window.localStorage.getItem(storageKey)
 const orders = ref<Order[]>(storedOrders ? (JSON.parse(storedOrders) as Order[]) : demoOrders)
-const orderDraft = ref(createOrderDraft())
 
 const todayKey = () => new Intl.DateTimeFormat('uk-UA').format(new Date())
+const orderDraft = ref(createOrderDraft())
 const currentMonth = () => {
   const now = new Date()
   return { month: now.getMonth() + 1, year: now.getFullYear() }
