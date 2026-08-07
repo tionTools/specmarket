@@ -292,10 +292,11 @@ function platformClass(platform: Platform) {
           </select>
         </div>
         <div
-          class="hidden grid-cols-[0.7fr_1.3fr_0.7fr_1.6fr_0.9fr_0.8fr_2rem] gap-3 bg-slate-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="hidden grid-cols-[0.8fr_1.25fr_1.7fr_1fr_1fr_1.15fr_2rem] gap-3 bg-slate-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
-          <span>Заказ</span><span>Получатель</span><span>Площадка</span><span>Товары</span
-          ><span>Прибыль</span><span>Статус</span><span />
+          <span>Номер заказа</span><span>Площадка / статус заказа</span><span>Товары</span
+          ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
+          ><span>Состояние отгрузки</span><span />
         </div>
         <article
           v-for="order in visibleOrders"
@@ -303,7 +304,7 @@ function platformClass(platform: Platform) {
           class="border-t border-slate-100 first:border-t-0"
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.7fr_1.3fr_0.7fr_1.6fr_0.9fr_0.8fr_2rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.8fr_1.25fr_1.7fr_1fr_1fr_1.15fr_2rem] lg:items-center"
             type="button"
             @click="toggleOrder(order.id)"
           >
@@ -311,18 +312,20 @@ function platformClass(platform: Platform) {
               ><strong>№ {{ order.id }}</strong
               ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}</span></span
             ><span
-              ><strong>{{ order.customer }}</strong
-              ><span class="mt-1 block text-xs text-slate-500">{{ order.phone }}</span></span
-            ><span class="font-bold" :class="platformClass(order.platform)">{{
-              order.platform
-            }}</span
+              ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
+              ><span
+                class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
+                >{{ order.status }}</span
+              ></span
             ><span class="truncate text-sm">{{
               order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
             }}</span
-            ><strong>{{ formatMoney(getActualProfit(order)) }}</strong
+            ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
+            ><strong>{{ isPaid(order) ? formatMoney(getActualProfit(order)) : '—' }}</strong
+            ><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong
             ><span
-              class="w-fit rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
-              >{{ order.status }}</span
+              class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
+              >{{ order.delivery.status }}</span
             ><span class="text-xl text-slate-400">{{
               expandedOrderId === order.id ? '⌄' : '›'
             }}</span>
