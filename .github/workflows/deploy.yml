@@ -1,0 +1,86 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🛒 Checkout repository
+        uses: actions/checkout@v5
+
+      - name: 📝 Create .env "gh secret set ENV < .env"
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV }}
+        run: |
+          printf '%s' "$ENV_FILE" > .env
+          test -f .env
+
+      - name: 🟢 Setup Node.js 25
+        uses: actions/setup-node@v6
+        with:
+          node-version: 25
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: 📦 Build project
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          # pnpm lint
+          # pnpm prettier
+          # pnpm test
+          pnpm build
+
+      - name: 🏷️ Prepare deployment names
+        id: meta
+        shell: bash
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          PROJECT_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+          echo "repo_name=$REPO_NAME" >> "$GITHUB_OUTPUT"
+          echo "project_name=$PROJECT_NAME" >> "$GITHUB_OUTPUT"
+          echo "dist_name=dist-$PROJECT_NAME.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "project_path=~/tion.tools/$PROJECT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: 📦 Create deployment archive ${{ steps.meta.outputs.dist_name }}
+        run: |
+          tar -czf ${{ steps.meta.outputs.dist_name }} -C dist .
+          ls -lh ${{ steps.meta.outputs.dist_name }}
+
+      - name: 📂 Upload build and configs to server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          source: ${{ steps.meta.outputs.dist_name }}
+          target: '~/'
+
+      - name: 🚀 Deploy ${{ steps.meta.outputs.project_name }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          script: |
+            mkdir -p ${{ steps.meta.outputs.project_path }}-temp
+            tar -xzf ~/${{ steps.meta.outputs.dist_name }} -C ${{ steps.meta.outputs.project_path }}-temp
+
+            rm -rf ${{ steps.meta.outputs.project_path }}
+
+            mv ${{ steps.meta.outputs.project_path }}-temp ${{ steps.meta.outputs.project_path }}
+            rm -f ~/${{ steps.meta.outputs.dist_name }}
+
+            echo "✅ Deployment completed! ${{ steps.meta.outputs.repo_name }}"
+            ls -la ${{ steps.meta.outputs.project_path }}

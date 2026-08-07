@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "vue3": {
+      "source": "teachingai/full-stack-skills",
+      "sourceType": "github",
+      "computedHash": "35d50864b2741d5399ac19ad3d23ad158355bef9b4694708dbef8242f0c9f922"
+    }
+  }
+}
