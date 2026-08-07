@@ -292,9 +292,9 @@ function platformClass(platform: Platform) {
           </select>
         </div>
         <div
-          class="hidden grid-cols-[0.8fr_1.25fr_1.7fr_1fr_1fr_1.15fr_2rem] gap-3 bg-slate-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="hidden grid-cols-[0.8fr_0.9fr_1.95fr_1fr_1fr_1.15fr_2rem] gap-3 bg-slate-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
-          <span>Номер заказа</span><span>Площадка / статус заказа</span><span>Товары</span
+          <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
           ><span>Состояние отгрузки</span><span />
         </div>
@@ -304,7 +304,7 @@ function platformClass(platform: Platform) {
           class="border-t border-slate-100 first:border-t-0"
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.8fr_1.25fr_1.7fr_1fr_1fr_1.15fr_2rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.8fr_0.9fr_1.95fr_1fr_1fr_1.15fr_2rem] lg:items-center"
             type="button"
             @click="toggleOrder(order.id)"
           >
