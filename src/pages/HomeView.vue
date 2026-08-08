@@ -233,7 +233,7 @@ onMounted(async () => {
     .order('created_at', { ascending: false })
   if (!remoteOrders?.length) { await persistOrders(); return }
   orders.value = remoteOrders
-    .map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 })
 
@@ -345,6 +345,15 @@ function displayCarrier(carrier: string) {
 
 function displayDeliveryAddress(delivery: Delivery) {
   return [delivery.city, delivery.address].filter(Boolean).join(', ') || '—'
+}
+
+async function copyOrderNumber(order: Order) {
+  await navigator.clipboard.writeText(String(order.id))
+}
+
+function openEpicentrOrder(order: Order) {
+  if (!order.externalId) return
+  window.open(`https://admin.epicentrm.com.ua/oms/orders/${order.externalId}`, '_blank', 'noopener,noreferrer')
 }
 
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
@@ -584,7 +593,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong
+              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпик' && order.externalId" class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
               ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong

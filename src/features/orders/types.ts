@@ -25,6 +25,7 @@ export interface Delivery {
 export interface Order {
   id: number
   remoteId?: string
+  externalId?: string
   date: string
   time?: string
   customer: string
