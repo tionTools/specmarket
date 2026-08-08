@@ -18,6 +18,8 @@ const authError = ref('')
 const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
+const isSyncingEpicentr = ref(false)
+const syncEpicentrMessage = ref('')
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
@@ -204,6 +206,20 @@ async function signOut() {
   await supabase?.auth.signOut()
   user.value = null
   window.location.reload()
+}
+
+async function syncEpicentrOrders() {
+  if (!supabase || isGuest.value) return
+  isSyncingEpicentr.value = true
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', { method: 'POST' })
+  isSyncingEpicentr.value = false
+  if (error || !data?.ok) {
+    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.'
+    return
+  }
+  syncEpicentrMessage.value = `Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
+  window.setTimeout(() => window.location.reload(), 900)
 }
 
 onMounted(async () => {
@@ -405,6 +421,15 @@ function orderDateTime(order: Order) {
           </button>
           <button
             v-if="!isGuest"
+            class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingEpicentr"
+            type="button"
+            @click="syncEpicentrOrders"
+          >
+            {{ isSyncingEpicentr ? 'Обновляем Эпицентр…' : '↻ Обновить Эпицентр' }}
+          </button>
+          <button
+            v-if="!isGuest"
             class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
             type="button"
             @click="openNewOrderDialog"
@@ -415,6 +440,9 @@ function orderDateTime(order: Order) {
       </header>
       <p v-if="isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
         Гостевой режим: доступен только просмотр данных.
+      </p>
+      <p v-else-if="syncEpicentrMessage" class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
+        {{ syncEpicentrMessage }}
       </p>
 
       <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
