@@ -220,6 +220,42 @@ function openNewOrderDialog() {
   orderDialog.value?.showModal()
 }
 
+function addMultiItemDemoOrders() {
+  if (isGuest.value || orders.value.some((order) => order.id >= 9_001 && order.id <= 9_003)) return
+  const examples = demoOrders
+    .filter((order) => order.products.length > 1)
+    .slice(0, 3)
+    .map((order, index) => {
+      const copied = structuredClone(order)
+      copied.id = 9_001 + index
+      if (index === 0) copied.products.pop()
+      if (index === 1) {
+        copied.products.push({
+          id: crypto.randomUUID(),
+          name: 'Защитные наколенники',
+          size: 'L',
+          quantity: 1,
+          price: 280,
+          cost: 165,
+        })
+      }
+      if (index === 2) {
+        copied.products.push({
+          id: crypto.randomUUID(),
+          name: 'Рабочая кепка',
+          size: 'Универсальный',
+          quantity: 2,
+          price: 150,
+          cost: 82,
+        })
+      }
+      copied.customer = `Демо-заказ: ${copied.products.length} позиции`
+      return copied
+    })
+  orders.value.unshift(...examples)
+  void persistOrders()
+}
+
 function addProduct() {
   if (isGuest.value) return
   orderDraft.value.products.push(createProduct())
@@ -346,6 +382,14 @@ function finishOrderCell(key: string) {
           >
             Цены
           </RouterLink>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50"
+            type="button"
+            @click="addMultiItemDemoOrders"
+          >
+            + Демо: 2–4 товара
+          </button>
           <button
             v-if="!isGuest"
             class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
