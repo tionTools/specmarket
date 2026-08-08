@@ -454,9 +454,9 @@ function finishOrderCell(key: string) {
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ order.status }}</span
               ></span
-            ><span class="truncate text-sm">{{
+            ><span class="min-w-0"><span class="block truncate text-sm">{{
               order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
-            }}</span
+            }}</span><span class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Позиций: {{ order.products.length }}</span></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
             ><strong>{{ isPaid(order) ? formatMoney(getActualProfit(order)) : '—' }}</strong
             ><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong
