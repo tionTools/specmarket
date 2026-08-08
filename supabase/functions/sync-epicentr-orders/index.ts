@@ -173,6 +173,17 @@ Deno.serve(async (request) => {
       const pickupType = officeNumber.length === 5 ? 'Поштомат Нової пошти' : 'Відділення Нової пошти'
       address = `${pickupType} № ${officeNumber}${address ? `, ${address}` : ''}`
     }
+    const trailingNumber = address.match(/(?:,\s*)(\d{4,5})$/)?.[1]
+    if (trailingNumber && !address.includes('№')) {
+      const plainAddress = address.replace(/(?:,\s*)\d{4,5}$/, '')
+      if (shipment?.provider === 'parcel_box_epicentr') {
+        address = `Поштомат Епіцентр № ${trailingNumber}, ${plainAddress}`
+      }
+      if (shipment?.provider === 'nova_poshta') {
+        const pickupType = trailingNumber.length === 5 ? 'Поштомат Нової пошти' : 'Відділення Нової пошти'
+        address = `${pickupType} № ${trailingNumber}, ${plainAddress}`
+      }
+    }
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
     const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
