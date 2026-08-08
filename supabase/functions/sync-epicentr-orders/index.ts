@@ -195,7 +195,7 @@ Deno.serve(async (request) => {
       order_time: formatOrderTime(source.createdAt),
       customer,
       phone: source.address?.phone ?? recipient?.phone ?? '',
-      platform: 'Эпик',
+      platform: 'Эпицентр',
       status,
       shipping: Number(shipment?.deliveryPrice ?? 0),
       acquiring: 0,

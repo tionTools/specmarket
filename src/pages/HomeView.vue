@@ -22,7 +22,7 @@ const isSyncingEpicentr = ref(false)
 const syncEpicentrMessage = ref('')
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
-const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
+const platformOptions: Platform[] = ['Пром', 'Эпицентр', 'Каста', 'Р/С', 'Сайт']
 const carrierOptions: Delivery['carrier'][] = [
   'Новая почта',
   'Укрпочта',
@@ -31,7 +31,7 @@ const carrierOptions: Delivery['carrier'][] = [
 ]
 const statusOptions: Record<Platform, string[]> = {
   Пром: ['Новий', 'Прийнято', 'Виконано', 'Оплачено', 'Скасовано'],
-  Эпик: [
+  Эпицентр: [
     'Новий',
     'Підтверджено продавцем',
     'Підтверджено',
@@ -321,7 +321,7 @@ function platformClass(platform: Platform) {
   return {
     'text-blue-700': platform === 'Пром',
     'text-orange-600': platform === 'Каста',
-    'text-emerald-700': platform === 'Эпик',
+    'text-emerald-700': platform === 'Эпицентр',
   }
 }
 
@@ -593,7 +593,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпик' && order.externalId" class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
+              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
               ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong

@@ -1,4 +1,4 @@
-export type Platform = 'Пром' | 'Эпик' | 'Каста' | 'Р/С' | 'Сайт'
+export type Platform = 'Пром' | 'Эпицентр' | 'Каста' | 'Р/С' | 'Сайт'
 
 export interface OrderProduct {
   id: string
