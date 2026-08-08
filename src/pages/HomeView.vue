@@ -216,13 +216,21 @@ function platformClass(platform: Platform) {
             Демо-режим: данные сохраняются только в этом браузере
           </p>
         </div>
-        <button
-          class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
-          type="button"
-          @click="openNewOrderDialog"
-        >
-          + Новый заказ
-        </button>
+        <div class="flex flex-wrap gap-3">
+          <RouterLink
+            class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+            to="/prices"
+          >
+            Цены
+          </RouterLink>
+          <button
+            class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+            type="button"
+            @click="openNewOrderDialog"
+          >
+            + Новый заказ
+          </button>
+        </div>
       </header>
 
       <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

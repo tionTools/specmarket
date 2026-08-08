@@ -10,6 +10,7 @@ const router = createRouter({
       component: MainLayout,
       children: [
         { path: '', component: () => import('@/pages/HomeView.vue') },
+        { path: 'prices', component: () => import('@/pages/PricesView.vue') },
       ],
     },
   ],
