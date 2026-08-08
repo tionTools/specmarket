@@ -30,5 +30,6 @@ export interface Order {
   products: OrderProduct[]
   shipping: number
   acquiring: number
+  royaltyManual?: number
   delivery: Delivery
 }
