@@ -4,12 +4,15 @@ import { computed, ref } from 'vue'
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
+const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
 
 const storageKey = 'specmarket-crm-prices'
 const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
-  savedCatalog ? (JSON.parse(savedCatalog) as PriceItem[]) : structuredClone(excelPriceCatalog),
+  (savedCatalog ? (JSON.parse(savedCatalog) as PriceItem[]) : structuredClone(excelPriceCatalog)).map(
+    (item) => ({ ...item, kind: item.kind ?? (sourceGroupIds.has(item.id) ? 'group' : 'item') }),
+  ),
 )
 const searchQuery = ref('')
 const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
@@ -145,17 +148,21 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 :key="item.id"
                 class="border-t border-slate-100 hover:bg-slate-50"
               >
-                <td v-if="item.kind === 'group'" colspan="9" class="bg-emerald-50 px-4 py-3">
+                <td v-if="item.kind === 'group'" colspan="9" class="border-y-2 border-emerald-200 bg-emerald-50 px-4 py-3">
                   <div class="flex items-center gap-3">
-                    <input :value="item.name" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold text-emerald-950" @change="updateName(item, $event)" />
-                    <button class="rounded-lg px-2 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить группу</button>
+                    <input :value="item.name" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold uppercase text-emerald-950" @change="updateName(item, $event)" />
+                    <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить группу" type="button" @click="deleteItem(item.id)">
+                      <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить группу</span>
+                    </button>
                   </div>
                 </td>
                 <template v-else>
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
                   <div class="flex min-w-64 items-center gap-2">
                     <input :value="item.name" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
-                    <button class="shrink-0 rounded-lg px-2 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить</button>
+                    <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="deleteItem(item.id)">
+                      <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить позицию</span>
+                    </button>
                   </div>
                 </td>
                 <td class="px-4 py-2">
