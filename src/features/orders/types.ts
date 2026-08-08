@@ -7,6 +7,8 @@ export interface OrderProduct {
   quantity: number
   price: number
   cost: number
+  royaltyPercent?: number
+  royaltyAmount?: number
 }
 
 export interface Delivery {
@@ -30,6 +32,6 @@ export interface Order {
   products: OrderProduct[]
   shipping: number
   acquiring: number
-  royaltyManual?: number
+  acquiringPercent?: number
   delivery: Delivery
 }

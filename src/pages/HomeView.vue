@@ -62,8 +62,12 @@ const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
 const getOrderCost = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.cost * product.quantity, 0)
+const getProductRoyalty = (order: Order, product: OrderProduct) => {
+  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
+  return product.royaltyAmount ?? product.price * product.quantity * (percent / 100)
+}
 const getRoyalty = (order: Order) =>
-  order.royaltyManual ?? (order.platform === 'Каста' ? getOrderAmount(order) * 0.22 : 0)
+  order.products.reduce((sum, product) => sum + getProductRoyalty(order, product), 0)
 const getPlannedProfit = (order: Order) =>
   getOrderAmount(order) * 0.983 - getOrderCost(order) - getRoyalty(order) - order.shipping
 const isPaid = (order: Order) =>
@@ -201,6 +205,28 @@ function platformClass(platform: Platform) {
     'text-orange-600': platform === 'Каста',
     'text-emerald-700': platform === 'Эпик',
   }
+}
+
+function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
+  product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
+  persistOrders()
+}
+
+function syncProductRoyaltyPercent(order: Order, product: OrderProduct) {
+  const amount = product.price * product.quantity
+  product.royaltyPercent = amount === 0 ? 0 : ((product.royaltyAmount ?? 0) / amount) * 100
+  persistOrders()
+}
+
+function syncAcquiringAmount(order: Order) {
+  order.acquiring = getOrderAmount(order) * ((order.acquiringPercent ?? 0) / 100)
+  persistOrders()
+}
+
+function syncAcquiringPercent(order: Order) {
+  const amount = getOrderAmount(order)
+  order.acquiringPercent = amount === 0 ? 0 : (order.acquiring / amount) * 100
+  persistOrders()
 }
 </script>
 
@@ -393,21 +419,22 @@ function platformClass(platform: Platform) {
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.4fr)_0.7fr_0.8fr_0.8fr]"
+                  class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.3fr)_0.6fr_0.75fr_0.75fr_1fr]"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
                   <label class="text-xs font-medium text-slate-500">Количество<input v-model.number="product.quantity" min="1" class="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
                   <label class="text-xs font-medium text-slate-500">Продажа / ед., ₴<input v-model.number="product.price" min="0" class="mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
                   <label class="text-xs font-medium text-slate-500">С/с / ед., ₴<input v-model.number="product.cost" min="0" class="mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
-                  <div class="sm:col-span-4 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
+                  <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input v-model.number="product.royaltyPercent" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="syncProductRoyaltyAmount(order, product)" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="getProductRoyalty(order, product)" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="product.royaltyAmount = Number(($event.target as HTMLInputElement).value); syncProductRoyaltyPercent(order, product)" /></label></div>
+                  <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
                 </div>
               </div>
               <div class="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:grid-cols-5">
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
-                <label class="text-slate-500">Роялти<input v-model.number="order.royaltyManual" :placeholder="String(getRoyalty(order))" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
+                <div><span class="text-slate-500">Роялти по позициям</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
                 <label class="text-slate-500">Доставка<input v-model.number="order.shipping" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
-                <label class="text-slate-500">Эквайринг<input v-model.number="order.acquiring" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
+                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input v-model.number="order.acquiringPercent" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringAmount(order)" /></label><label class="text-slate-500">Эквайринг, ₴<input v-model.number="order.acquiring" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringPercent(order)" /></label></div>
               </div>
             </section>
             <aside class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-100">
