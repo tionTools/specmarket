@@ -29,6 +29,7 @@ const searchQuery = ref('')
 const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
+const editingUsdRate = ref(false)
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -51,6 +52,23 @@ function updateUsdRate(event: Event) {
     usdRate.value = value
     saveRate()
   }
+}
+
+async function toggleUsdRateEdit(event: KeyboardEvent) {
+  if (editingUsdRate.value) {
+    updateUsdRate(event)
+    editingUsdRate.value = false
+    return
+  }
+  editingUsdRate.value = true
+  await nextTick()
+  ;(event.target as HTMLInputElement).select()
+}
+
+function finishUsdRateEdit(event: Event) {
+  if (!editingUsdRate.value) return
+  updateUsdRate(event)
+  editingUsdRate.value = false
 }
 
 function formatPrice(value: number | null) {
@@ -187,7 +205,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-            Курс $ <input :value="formatPrice(usdRate)" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @change="updateUsdRate" />
+            Курс $ <input :value="formatPrice(usdRate)" :readonly="!editingUsdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @blur="finishUsdRateEdit" @keydown.enter.prevent="toggleUsdRateEdit" />
           </label>
           <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
             + Добавить позицию
