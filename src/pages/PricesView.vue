@@ -4,11 +4,13 @@ import { computed, ref } from 'vue'
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 
 const storageKey = 'specmarket-crm-prices'
+const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
   savedCatalog ? (JSON.parse(savedCatalog) as PriceItem[]) : structuredClone(excelPriceCatalog),
 )
 const searchQuery = ref('')
+const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -17,6 +19,34 @@ const visibleItems = computed(() => {
 
 function save() {
   window.localStorage.setItem(storageKey, JSON.stringify(items.value))
+}
+
+function saveRate() {
+  window.localStorage.setItem(rateStorageKey, String(usdRate.value))
+}
+
+function getCostUah(item: PriceItem) {
+  return item.usd === null ? item.costUah : item.usd * usdRate.value
+}
+
+function addItem() {
+  items.value.unshift({
+    id: Date.now(),
+    name: 'Новая позиция',
+    usd: null,
+    costUah: null,
+    prom: null,
+    epic: null,
+    kastaOne: null,
+    kastaTwo: null,
+    kastaThree: null,
+  })
+  save()
+}
+
+function updateName(item: PriceItem, event: Event) {
+  item.name = (event.target as HTMLInputElement).value
+  save()
 }
 
 function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name'>, event: Event) {
@@ -43,8 +73,16 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
             Перенесено из вкладки «Входящие цены». Изменения сохраняются только в этом браузере.
           </p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-          Позиций: <strong>{{ items.length }}</strong>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
+            Курс $ <input v-model.number="usdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" min="0" step="0.01" type="number" @change="saveRate" />
+          </label>
+          <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
+            + Добавить позицию
+          </button>
+          <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
+            Позиций: <strong>{{ items.length }}</strong>
+          </div>
         </div>
       </header>
 
@@ -67,9 +105,9 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                 <th class="px-4 py-3">Вход, ₴</th>
                 <th class="px-4 py-3 text-blue-700">Prom</th>
                 <th class="px-4 py-3 text-emerald-700">Эпицентр</th>
-                <th class="px-4 py-3 text-orange-600">Kasta 1</th>
-                <th class="px-4 py-3 text-orange-600">Kasta 2</th>
-                <th class="px-4 py-3 text-orange-600">Kasta 3</th>
+                <th class="px-4 py-3 text-orange-600">Kasta: обычная</th>
+                <th class="px-4 py-3 text-orange-600">Kasta: рекомендованная</th>
+                <th class="px-4 py-3 text-orange-600">Kasta: акционная</th>
               </tr>
             </thead>
             <tbody>
@@ -78,8 +116,8 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                 :key="item.id"
                 class="border-t border-slate-100 hover:bg-slate-50"
               >
-                <td class="sticky left-0 bg-white px-4 py-3 font-semibold group-hover:bg-slate-50">
-                  {{ item.name }}
+                <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
+                  <input :value="item.name" class="w-full min-w-48 rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
                 </td>
                 <td class="px-4 py-2">
                   <input
@@ -92,10 +130,12 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                 </td>
                 <td class="px-4 py-2">
                   <input
-                    :value="item.costUah ?? ''"
-                    class="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                    :value="getCostUah(item) ?? ''"
+                    :class="item.usd === null ? 'border-slate-200 bg-white' : 'border-emerald-100 bg-emerald-50 text-emerald-900'"
+                    class="w-28 rounded-lg px-2 py-1.5"
                     inputmode="decimal"
                     type="number"
+                    :readonly="item.usd !== null"
                     @change="updatePrice(item, 'costUah', $event)"
                   />
                 </td>
@@ -139,7 +179,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
         </p>
       </section>
       <p class="mt-3 text-xs text-slate-500">
-        Пустые значения отображаются как пустые поля; введённое значение сохранится автоматически.
+        Если заполнена цена в $, «Вход, ₴» = цена в $ × курс. Без долларовой цены «Вход, ₴» заполняется вручную.
       </p>
     </div>
   </div>
