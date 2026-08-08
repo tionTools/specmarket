@@ -15,6 +15,7 @@
     "format": "oxfmt src/"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
     "pinia": "^4.0.2",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
