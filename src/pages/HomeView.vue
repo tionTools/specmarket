@@ -438,7 +438,7 @@ function finishOrderCell(key: string) {
           v-for="order in visibleOrders"
           :key="order.id"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
-          :class="expandedOrderId === order.id ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-slate-200 hover:border-slate-300'"
+          :class="expandedOrderId === order.id ? 'border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-200 hover:border-slate-300'"
         >
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_1.5rem] lg:items-center"
@@ -730,7 +730,7 @@ function finishOrderCell(key: string) {
 </template>
 
 <style scoped>
-.order-edit input:not([readonly]) {
+.order-edit input:focus {
   background-color: #fffbeb;
   box-shadow: 0 0 0 2px #fbbf24;
 }
