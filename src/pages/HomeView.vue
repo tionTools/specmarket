@@ -16,6 +16,7 @@ const email = ref('')
 const password = ref('')
 const authError = ref('')
 const isSigningIn = ref(false)
+const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 
 const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
@@ -312,7 +313,7 @@ function finishOrderCell(key: string) {
       <h1 class="mt-3 text-3xl font-semibold">Вход в CRM</h1>
       <p class="mt-2 text-sm text-slate-500">Войди, чтобы увидеть общие заказы и цены на всех устройствах.</p>
       <input v-model="email" required class="mt-6 w-full rounded-xl border border-slate-200 px-3 py-3" placeholder="Email" type="email" />
-      <input v-model="password" required class="mt-3 w-full rounded-xl border border-slate-200 px-3 py-3" placeholder="Пароль" type="password" />
+      <div class="relative mt-3"><input v-model="password" required class="w-full rounded-xl border border-slate-200 px-3 py-3 pr-12" placeholder="Пароль" :type="showPassword ? 'text' : 'password'" /><button class="absolute inset-y-0 right-0 px-4 text-slate-500 hover:text-emerald-700" type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Скрыть' : 'Показать' }}</button></div>
       <p v-if="authError" class="mt-3 text-sm text-rose-700">{{ authError }}</p>
       <button class="mt-5 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800" :disabled="isSigningIn" type="submit">{{ isSigningIn ? 'Входим…' : 'Войти' }}</button>
     </form>

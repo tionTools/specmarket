@@ -37,6 +37,7 @@ const email = ref('')
 const password = ref('')
 const authError = ref('')
 const isLoading = ref(false)
+const showPassword = ref(false)
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -267,7 +268,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         <p class="mt-2 text-sm text-slate-500">Войди под общим аккаунтом, чтобы видеть общие цены на всех устройствах.</p>
         <form class="mt-5 space-y-3" @submit.prevent="signIn">
           <input v-model="email" required class="w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="Email" type="email" />
-          <input v-model="password" required class="w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="Пароль" type="password" />
+          <div class="relative"><input v-model="password" required class="w-full rounded-lg border border-slate-200 px-3 py-2 pr-20" placeholder="Пароль" :type="showPassword ? 'text' : 'password'" /><button class="absolute inset-y-0 right-0 px-3 text-sm text-slate-500 hover:text-emerald-700" type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Скрыть' : 'Показать' }}</button></div>
           <p v-if="authError" class="text-sm text-rose-700">{{ authError }}</p>
           <button class="w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white" :disabled="isLoading" type="submit">{{ isLoading ? 'Входим…' : 'Войти' }}</button>
         </form>
