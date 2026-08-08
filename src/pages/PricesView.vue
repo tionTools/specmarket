@@ -153,7 +153,10 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <template v-else>
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
-                  <input :value="item.name" class="w-full min-w-48 rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
+                  <div class="flex min-w-64 items-center gap-2">
+                    <input :value="item.name" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
+                    <button class="shrink-0 rounded-lg px-2 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить</button>
+                  </div>
                 </td>
                 <td class="px-4 py-2">
                   <input
@@ -206,7 +209,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     @change="updatePrice(item, key, $event)"
                   />
                 </td>
-                <td class="px-4 py-2"><button class="rounded-lg px-2 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить</button></td>
+                <td class="px-4 py-2" aria-hidden="true"></td>
                 </template>
               </tr>
             </tbody>
