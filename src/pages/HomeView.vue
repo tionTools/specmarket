@@ -327,7 +327,7 @@ function finishOrderCell(key: string) {
           <p
             class="mt-2 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800"
           >
-            Демо-режим: данные сохраняются только в этом браузере
+            Общие данные: цены и заказы синхронизируются через Supabase
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
