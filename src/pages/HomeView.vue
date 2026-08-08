@@ -616,7 +616,7 @@ function orderDateTime(order: Order) {
           </button>
           <div
             v-if="expandedOrderId === order.id"
-            class="grid gap-5 border-t-2 border-slate-300 bg-slate-50 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
+            class="grid gap-5 border-t-2 border-slate-400 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
@@ -672,7 +672,7 @@ function orderDateTime(order: Order) {
                 <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input :value="formatOrderNumber(order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Эквайринг, ₴<input :value="formatOrderNumber(order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
               </div>
             </section>
-            <aside class="rounded-xl border border-slate-300 bg-white p-5 shadow-sm ring-1 ring-slate-200">
+            <aside class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300">
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
