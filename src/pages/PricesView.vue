@@ -16,6 +16,7 @@ const items = ref<PriceItem[]>(
 )
 const searchQuery = ref('')
 const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
+const draggedItemId = ref<number | null>(null)
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -30,6 +31,19 @@ function save() {
 
 function saveRate() {
   window.localStorage.setItem(rateStorageKey, String(usdRate.value))
+}
+
+function updateUsdRate(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
+  if (Number.isFinite(value) && value > 0) {
+    usdRate.value = value
+    saveRate()
+  }
+}
+
+function formatPrice(value: number | null) {
+  if (value === null) return ''
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
 }
 
 function getCostUah(item: PriceItem) {
@@ -72,6 +86,23 @@ function deleteItem(itemId: number) {
   save()
 }
 
+function startDragging(itemId: number) {
+  draggedItemId.value = itemId
+}
+
+function moveItem(targetId: number) {
+  const sourceId = draggedItemId.value
+  if (sourceId === null || sourceId === targetId) return
+  const sourceIndex = items.value.findIndex((item) => item.id === sourceId)
+  const targetIndex = items.value.findIndex((item) => item.id === targetId)
+  if (sourceIndex < 0 || targetIndex < 0) return
+  const [source] = items.value.splice(sourceIndex, 1)
+  if (!source) return
+  items.value.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, source)
+  draggedItemId.value = null
+  save()
+}
+
 function updateName(item: PriceItem, event: Event) {
   item.name = (event.target as HTMLInputElement).value
   save()
@@ -103,7 +134,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-            Курс $ <input v-model.number="usdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @change="saveRate" />
+            Курс $ <input :value="formatPrice(usdRate)" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @change="updateUsdRate" />
           </label>
           <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
             + Добавить позицию
@@ -126,7 +157,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           />
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[70rem] border-collapse text-left text-sm">
+          <table class="w-full min-w-[63rem] border-collapse text-left text-sm">
             <thead
               class="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500"
             >
@@ -136,9 +167,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <th class="px-4 py-3">Вход, ₴</th>
                 <th class="px-4 py-3 text-blue-700">Prom</th>
                 <th class="px-4 py-3 text-emerald-700">Эпицентр</th>
-                <th class="px-4 py-3 text-orange-600">Kasta: обычная</th>
-                <th class="px-4 py-3 text-orange-600">Kasta: рекомендованная</th>
-                <th class="px-4 py-3 text-orange-600">Kasta: акционная</th>
+                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>обычная</span></th>
+                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>рекоменд.</span></th>
+                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>акционная</span></th>
                 <th class="px-4 py-3"><span class="sr-only">Действия</span></th>
               </tr>
             </thead>
@@ -147,9 +178,14 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 v-for="item in visibleItems"
                 :key="item.id"
                 class="border-t border-slate-100 hover:bg-slate-50"
+                draggable="true"
+                @dragover.prevent
+                @dragstart="startDragging(item.id)"
+                @drop="moveItem(item.id)"
               >
                 <td v-if="item.kind === 'group'" colspan="9" class="border-y-2 border-emerald-200 bg-emerald-50 px-4 py-3">
                   <div class="flex items-center gap-3">
+                    <span class="cursor-grab text-emerald-700" title="Перетащить">⠿</span>
                     <input :value="item.name" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold uppercase text-emerald-950" @change="updateName(item, $event)" />
                     <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить группу" type="button" @click="deleteItem(item.id)">
                       <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить группу</span>
@@ -159,6 +195,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <template v-else>
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
                   <div class="flex min-w-64 items-center gap-2">
+                    <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
                     <input :value="item.name" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
                     <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="deleteItem(item.id)">
                       <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить позицию</span>
@@ -167,7 +204,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <td class="px-4 py-2">
                   <input
-                    :value="item.usd ?? ''"
+                    :value="formatPrice(item.usd)"
                     class="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
@@ -176,7 +213,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <td class="px-4 py-2">
                   <input
-                    :value="getCostUah(item) ?? ''"
+                    :value="formatPrice(getCostUah(item))"
                     :class="item.usd === null ? 'border-slate-200 bg-white' : 'border-emerald-100 bg-emerald-50 text-emerald-900'"
                     class="w-28 rounded-lg px-2 py-1.5"
                     inputmode="decimal"
@@ -187,7 +224,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <td class="px-4 py-2">
                   <input
-                    :value="item.prom ?? ''"
+                    :value="formatPrice(item.prom)"
                     class="w-28 rounded-lg border border-blue-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
@@ -196,7 +233,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <td class="px-4 py-2">
                   <input
-                    :value="item.epic ?? ''"
+                    :value="formatPrice(item.epic)"
                     class="w-28 rounded-lg border border-emerald-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
@@ -209,7 +246,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   class="px-4 py-2"
                 >
                   <input
-                    :value="item[key] ?? ''"
+                    :value="formatPrice(item[key])"
                     class="w-28 rounded-lg border border-orange-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
