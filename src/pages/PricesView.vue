@@ -5,13 +5,24 @@ import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalo
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
+const epicQuestionValues: Record<number, number> = {
+  13: 1400, 32: 1170, 34: 1250, 35: 1300, 36: 1300, 38: 1110, 40: 1750, 45: 1485,
+  46: 1200, 61: 850, 62: 2300, 63: 2100, 65: 1770, 66: 1770, 67: 1600, 68: 1165,
+  69: 1050, 70: 1430, 71: 1150, 72: 1165, 73: 1100, 74: 850, 75: 1600, 76: 1050,
+  77: 1050, 79: 1540, 80: 1150, 81: 1050, 82: 1165, 83: 1430, 84: 1950, 85: 1100,
+  87: 1050, 88: 1600, 89: 600, 101: 50, 102: 200, 103: 250,
+}
 
 const storageKey = 'specmarket-crm-prices'
 const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
   (savedCatalog ? (JSON.parse(savedCatalog) as PriceItem[]) : structuredClone(excelPriceCatalog)).map(
-    (item) => ({ ...item, kind: item.kind ?? (sourceGroupIds.has(item.id) ? 'group' : 'item') }),
+    (item) => ({
+      ...item,
+      epic: item.epic ?? epicQuestionValues[item.id] ?? null,
+      kind: item.kind ?? (sourceGroupIds.has(item.id) ? 'group' : 'item'),
+    }),
   ),
 )
 const searchQuery = ref('')
