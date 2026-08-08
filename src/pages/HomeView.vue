@@ -467,8 +467,8 @@ function finishOrderCell(key: string) {
         </div>
       </section>
 
-      <section class="mt-6 rounded-2xl border border-slate-200 bg-slate-100 p-3 shadow-sm">
-        <div class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row">
+      <section class="mt-6 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
+        <div class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row">
           <input
             v-model="searchQuery"
             class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-emerald-600 sm:max-w-md"
@@ -494,7 +494,7 @@ function finishOrderCell(key: string) {
           v-for="order in visibleOrders"
           :key="order.id"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
-          :class="expandedOrderId === order.id ? 'border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-200 hover:border-slate-300'"
+          :class="expandedOrderId === order.id ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-300 hover:border-slate-400'"
         >
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_1.5rem] lg:items-center"
@@ -525,7 +525,7 @@ function finishOrderCell(key: string) {
           </button>
           <div
             v-if="expandedOrderId === order.id"
-            class="grid gap-5 border-t border-emerald-100 bg-slate-50 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
+            class="grid gap-5 border-t-2 border-slate-300 bg-slate-50 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
@@ -546,7 +546,7 @@ function finishOrderCell(key: string) {
                   </select></label
                 >
               </div>
-              <section class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <section class="mt-4 rounded-xl border border-slate-300 bg-white p-4">
                 <h4 class="text-sm font-semibold">Данные покупателя</h4>
                 <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                   <div>
@@ -559,21 +559,21 @@ function finishOrderCell(key: string) {
                   </div>
                 </dl>
               </section>
-              <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="order-edit grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
+                  class="order-edit grid gap-3 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
                   <label class="text-xs font-medium text-slate-500">Количество<input :value="formatOrderNumber(product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
                   <label class="text-xs font-medium text-slate-500">Продажа / ед., ₴<input :value="formatOrderNumber(product.price)" :readonly="editingOrderCell !== `${order.id}-${product.id}-price`" class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'price', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-price`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-price`, $event)" /></label>
                   <label class="text-xs font-medium text-slate-500">С/с / ед., ₴<input :value="formatOrderNumber(product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
                   <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input v-model.number="product.royaltyPercent" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="syncProductRoyaltyAmount(order, product)" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="getProductRoyalty(order, product)" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="product.royaltyAmount = Number(($event.target as HTMLInputElement).value); syncProductRoyaltyPercent(order, product)" /></label></div>
-                  <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
+                  <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-300 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
                 </div>
               </div>
-              <div class="order-edit mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:grid-cols-5">
+              <div class="order-edit mt-4 grid gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-5">
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
                 <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
@@ -581,7 +581,7 @@ function finishOrderCell(key: string) {
                 <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input v-model.number="order.acquiringPercent" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringAmount(order)" /></label><label class="text-slate-500">Эквайринг, ₴<input v-model.number="order.acquiring" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringPercent(order)" /></label></div>
               </div>
             </section>
-            <aside class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-100">
+            <aside class="rounded-xl border border-slate-300 bg-white p-5 shadow-sm ring-1 ring-slate-200">
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
