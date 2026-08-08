@@ -190,7 +190,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
       </header>
 
-      <section class="mt-7 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 p-4">
           <input
             v-model="searchQuery"
@@ -198,13 +198,13 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             placeholder="Поиск по названию товара"
           />
         </div>
-        <div class="max-h-[calc(100vh-12rem)] overflow-auto">
+        <div class="overflow-visible">
           <table class="w-max border-collapse text-left text-sm">
             <thead
               class="sticky top-0 z-20 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm"
             >
               <tr>
-                <th class="sticky left-0 z-30 min-w-80 bg-slate-50 px-3 py-2">Название</th>
+                <th class="sticky left-0 z-30 min-w-96 bg-slate-50 px-3 py-2">Название</th>
                 <th class="px-2 py-3">Цена, $</th>
                 <th class="px-2 py-3">Вход, ₴</th>
                 <th class="px-2 py-3 text-blue-700">Prom</th>
@@ -236,7 +236,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <template v-else>
                 <td class="sticky left-0 bg-white px-3 py-1.5 group-hover:bg-slate-50">
-                  <div class="flex w-80 items-center gap-1.5">
+                  <div class="flex w-96 items-center gap-1.5">
                     <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
                     <input :value="item.name" :readonly="editingCell !== getCellKey(item, 'name')" class="w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold" @blur="finishEdit(item, 'name', $event)" @keydown.enter.prevent="toggleNameEdit(item, $event)" />
                   </div>
