@@ -24,6 +24,7 @@ export interface Delivery {
 
 export interface Order {
   id: number
+  remoteId?: string
   date: string
   customer: string
   phone: string

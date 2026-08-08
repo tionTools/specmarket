@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
+import { supabase } from '@/lib/supabase'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -161,9 +162,30 @@ function createOrderDraft(): Order {
   }
 }
 
-function persistOrders() {
+async function persistOrders() {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  if (!supabase) return
+  const { data: session } = await supabase.auth.getSession()
+  if (!session.session) return
+  for (const order of orders.value) {
+    const payload = { order_number: order.id, order_date: order.date, customer: order.customer, phone: order.phone, platform: order.platform, status: order.status, shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null, delivery: order.delivery }
+    let remoteId = order.remoteId
+    if (remoteId) await supabase.from('crm_orders').update(payload).eq('id', remoteId)
+    else { const { data } = await supabase.from('crm_orders').insert(payload).select('id').single(); remoteId = data?.id; if (remoteId) order.remoteId = remoteId }
+    if (!remoteId) continue
+    await supabase.from('crm_order_items').delete().eq('order_id', remoteId)
+    await supabase.from('crm_order_items').insert(order.products.map((product, position) => ({ order_id: remoteId, position, product_name: product.name, size: product.size, quantity: product.quantity, price: product.price, cost: product.cost, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null })))
+  }
 }
+
+onMounted(async () => {
+  if (!supabase) return
+  const { data: session } = await supabase.auth.getSession()
+  if (!session.session) return
+  const { data: remoteOrders } = await supabase.from('crm_orders').select('*, crm_order_items(*)').order('created_at')
+  if (!remoteOrders?.length) { await persistOrders(); return }
+  orders.value = remoteOrders.map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+})
 
 function openNewOrderDialog() {
   orderDraft.value = createOrderDraft()

@@ -88,6 +88,26 @@ export const demoOrders: Order[] = Array.from({ length: 12 }, (_, index) => {
         price,
         cost,
       },
+      ...(index % 4 === 0
+        ? [
+            {
+              id: `product-${index}-2`,
+              name: getDemoValue(['Перчатки защитные', 'Футболка рабочая', 'Жилет сигнальный'], index),
+              size: getDemoValue(['L', 'XL', 'M'], index),
+              quantity: 1,
+              price: getDemoValue([120, 240, 310], index),
+              cost: getDemoValue([65, 150, 190], index),
+            },
+            {
+              id: `product-${index}-3`,
+              name: 'Очки защитные',
+              size: 'Универсальный',
+              quantity: 1,
+              price: 95,
+              cost: 48,
+            },
+          ]
+        : []),
     ],
     shipping: getDemoValue([90, 25, 39, 0, 10, 25], index),
     acquiring: getDemoValue([1.79, 11.71, 18.2, 0, 2.4, 11.71], index),
