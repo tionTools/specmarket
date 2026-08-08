@@ -165,8 +165,12 @@ Deno.serve(async (request) => {
         )
       }
     }
-    if (shipment?.provider === 'parcel_box_epicentr' && shipment.officeId && !address.includes(shipment.officeId)) {
-      address = `Поштомат Епіцентр № ${shipment.officeId}${address ? `, ${address}` : ''}`
+    const officeNumber = String(shipment?.officeId ?? '')
+    if (shipment?.provider === 'parcel_box_epicentr' && /^\d+$/.test(officeNumber) && !address.includes(officeNumber)) {
+      address = `Поштомат Епіцентр № ${officeNumber}${address ? `, ${address}` : ''}`
+    }
+    if (shipment?.provider === 'nova_poshta' && /^\d+$/.test(officeNumber) && !address.includes(officeNumber)) {
+      address = `Пункт видачі Нової пошти № ${officeNumber}${address ? `, ${address}` : ''}`
     }
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
