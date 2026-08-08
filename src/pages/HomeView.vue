@@ -338,6 +338,12 @@ function displayOrderStatus(status: string) {
   return names[status.toLowerCase()] ?? status
 }
 
+function statusOptionsForOrder(order: Order) {
+  const options = statusOptions[order.platform] ?? []
+  const currentStatus = displayOrderStatus(order.status)
+  return options.includes(currentStatus) ? options : [currentStatus, ...options]
+}
+
 function displayCarrier(carrier: string) {
   const names: Record<string, string> = {
     nova_poshta: 'Нова пошта',
@@ -628,12 +634,12 @@ function orderDateTime(order: Order) {
                 <h3 class="text-base font-semibold">Состав заказа</h3>
                 <label class="flex items-center gap-2 text-sm text-slate-500"
                   >Статус<select
-                    :value="order.status"
+                    :value="displayOrderStatus(order.status)"
                     class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
                     @change="updateOrderStatus(order, ($event.target as HTMLSelectElement).value)"
                   >
                     <option
-                      v-for="status in statusOptions[order.platform]"
+                      v-for="status in statusOptionsForOrder(order)"
                       :key="status"
                       :value="status"
                     >
