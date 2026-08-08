@@ -18,6 +18,7 @@ const authError = ref('')
 const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
+const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
 const carrierOptions: Delivery['carrier'][] = [
@@ -170,6 +171,7 @@ function createOrderDraft(): Order {
 }
 
 async function persistOrders() {
+  if (isGuest.value) return
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
@@ -213,15 +215,18 @@ onMounted(async () => {
 })
 
 function openNewOrderDialog() {
+  if (isGuest.value) return
   orderDraft.value = createOrderDraft()
   orderDialog.value?.showModal()
 }
 
 function addProduct() {
+  if (isGuest.value) return
   orderDraft.value.products.push(createProduct())
 }
 
 function removeProduct(productId: string) {
+  if (isGuest.value) return
   if (orderDraft.value.products.length > 1) {
     orderDraft.value.products = orderDraft.value.products.filter(
       (product) => product.id !== productId,
@@ -237,12 +242,14 @@ function updateDraftPlatform() {
 }
 
 function createOrder() {
+  if (isGuest.value) return
   orders.value.unshift(structuredClone(orderDraft.value))
   persistOrders()
   orderDialog.value?.close()
 }
 
 function updateOrderStatus(order: Order, status: string) {
+  if (isGuest.value) return
   order.status = status
   persistOrders()
 }
@@ -282,6 +289,7 @@ function syncAcquiringPercent(order: Order) {
 }
 
 async function toggleOrderCell(key: string, event: KeyboardEvent) {
+  if (isGuest.value) return
   if (editingOrderCell.value === key) {
     editingOrderCell.value = null
     persistOrders()
@@ -339,6 +347,7 @@ function finishOrderCell(key: string) {
             Цены
           </RouterLink>
           <button
+            v-if="!isGuest"
             class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
             type="button"
             @click="openNewOrderDialog"
@@ -347,6 +356,9 @@ function finishOrderCell(key: string) {
           </button>
         </div>
       </header>
+      <p v-if="isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
+        Гостевой режим: доступен только просмотр данных.
+      </p>
 
       <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -471,7 +483,7 @@ function finishOrderCell(key: string) {
             v-if="expandedOrderId === order.id"
             class="grid gap-5 border-t border-emerald-100 bg-slate-50 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
-            <section>
+            <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
                 <label class="flex items-center gap-2 text-sm text-slate-500"

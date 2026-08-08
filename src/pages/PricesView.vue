@@ -38,6 +38,7 @@ const password = ref('')
 const authError = ref('')
 const isLoading = ref(false)
 const showPassword = ref(false)
+const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -47,6 +48,7 @@ const visibleItems = computed(() => {
 })
 
 async function save() {
+  if (isGuest.value) return
   if (!supabase || !user.value) return
   for (const [position, item] of items.value.entries()) {
     const payload = { legacy_id: item.id, position, kind: item.kind ?? 'item', name: item.name, usd: item.usd, cost_uah: item.costUah, prom: item.prom, epic: item.epic, kasta_regular: item.kastaOne, kasta_recommended: item.kastaTwo, kasta_sale: item.kastaThree }
@@ -59,6 +61,7 @@ async function save() {
 }
 
 function saveRate() {
+  if (isGuest.value) return
   if (supabase && user.value) void supabase.from('crm_settings').upsert({ key: 'usd_rate', numeric_value: usdRate.value })
 }
 
@@ -123,6 +126,7 @@ function getCostUah(item: PriceItem) {
 }
 
 function addItem() {
+  if (isGuest.value) return
   items.value.unshift({
     id: Date.now(),
     name: 'Новая позиция',
@@ -138,6 +142,7 @@ function addItem() {
 }
 
 function addGroup() {
+  if (isGuest.value) return
   items.value.unshift({
     id: Date.now(),
     kind: 'group',
@@ -154,6 +159,7 @@ function addGroup() {
 }
 
 function deleteItem(itemId: number) {
+  if (isGuest.value) return
   const removed = items.value.find((item) => item.id === itemId)
   items.value = items.value.filter((item) => item.id !== itemId)
   if (removed?.remoteId && supabase) void supabase.from('crm_price_items').delete().eq('id', removed.remoteId)
@@ -161,6 +167,7 @@ function deleteItem(itemId: number) {
 }
 
 function confirmDelete(item: PriceItem) {
+  if (isGuest.value) return
   const label = item.kind === 'group' ? 'группу' : 'позицию'
   if (window.confirm(`Удалить ${label} «${item.name}»?`)) deleteItem(item.id)
 }
@@ -170,6 +177,7 @@ function startDragging(itemId: number) {
 }
 
 function moveItem(targetId: number) {
+  if (isGuest.value) return
   const sourceId = draggedItemId.value
   if (sourceId === null || sourceId === targetId) return
   const sourceIndex = items.value.findIndex((item) => item.id === sourceId)
@@ -183,6 +191,7 @@ function moveItem(targetId: number) {
 }
 
 function updateName(item: PriceItem, event: Event) {
+  if (isGuest.value) return
   item.name = (event.target as HTMLInputElement).value
   save()
 }
@@ -192,6 +201,7 @@ function getCellKey(item: PriceItem, field: string) {
 }
 
 async function toggleNameEdit(item: PriceItem, event: KeyboardEvent) {
+  if (isGuest.value) return
   const key = getCellKey(item, 'name')
   if (editingCell.value === key) {
     updateName(item, event)
@@ -204,6 +214,7 @@ async function toggleNameEdit(item: PriceItem, event: KeyboardEvent) {
 }
 
 async function togglePriceEdit(item: PriceItem, field: PriceField, event: KeyboardEvent) {
+  if (isGuest.value) return
   if (field === 'costUah' && item.usd !== null) return
   const key = getCellKey(item, field)
   if (editingCell.value === key) {
@@ -224,6 +235,7 @@ function finishEdit(item: PriceItem, field: 'name' | PriceField, event: Event) {
 }
 
 function updatePrice(item: PriceItem, key: PriceField, event: Event) {
+  if (isGuest.value) return
   const input = event.target as HTMLInputElement
   const value = input.value === '' ? null : Number(input.value.replace(',', '.'))
   item[key] = Number.isFinite(value) ? value : null
@@ -248,13 +260,13 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
-          <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
+          <label v-if="!isGuest" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
             Курс $ <input :value="formatPrice(usdRate)" :readonly="!editingUsdRate" class="catalog-cell ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @blur="finishUsdRateEdit" @keydown.enter.prevent="toggleUsdRateEdit" />
           </label>
-          <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
+          <button v-if="!isGuest" class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
             + Добавить позицию
           </button>
-          <button class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50" type="button" @click="addGroup">
+          <button v-if="!isGuest" class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50" type="button" @click="addGroup">
             + Добавить группу
           </button>
           <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
@@ -274,7 +286,8 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </form>
       </section>
 
-      <section v-else class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <p v-if="user && isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">Гостевой режим: доступен только просмотр цен и себестоимости.</p>
+      <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 p-4">
           <input
             v-model="searchQuery"
@@ -283,7 +296,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           />
         </div>
         <div class="overflow-visible">
-          <table class="catalog-table w-max border-collapse text-left text-sm">
+          <table class="catalog-table w-max border-collapse text-left text-sm" :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
             <thead
               class="sticky top-0 z-20 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm"
             >
