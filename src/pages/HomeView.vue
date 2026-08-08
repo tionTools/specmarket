@@ -648,30 +648,26 @@ function orderDateTime(order: Order) {
                   </select></label
                 >
               </div>
-              <section class="mt-4 rounded-xl border border-slate-300 bg-white p-4">
+              <section class="mt-4 w-full max-w-xl rounded-xl border border-slate-300 bg-white p-4">
                 <h4 class="text-sm font-semibold">Данные покупателя</h4>
-                <dl class="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-                  <div>
-                    <dt class="text-slate-500">Покупатель</dt>
-                    <dd class="mt-1 font-semibold">
-                      {{ order.customer }}
-                      <span v-if="order.platform === 'Эпицентр'" class="ml-1 text-xs font-medium text-slate-500">
-                        · {{ order.delivery.isAlternateRecipient ? 'другой получатель' : 'клиент' }}
-                      </span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-slate-500">Телефон покупателя</dt>
-                    <dd class="mt-1 font-semibold">{{ order.phone }}</dd>
-                  </div>
-                  <div v-if="order.customerEmail">
+                <dl class="mt-3 grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                  <dt class="text-slate-500">Покупатель</dt>
+                  <dd class="font-semibold">
+                    {{ order.customer }}
+                    <span v-if="order.platform === 'Эпицентр'" class="ml-1 text-xs font-medium text-slate-500">
+                      · {{ order.delivery.isAlternateRecipient ? 'другой получатель' : 'клиент' }}
+                    </span>
+                  </dd>
+                  <dt class="text-slate-500">Телефон</dt>
+                  <dd class="font-semibold">{{ order.phone }}</dd>
+                  <template v-if="order.customerEmail">
                     <dt class="text-slate-500">Email</dt>
-                    <dd class="mt-1 break-all font-semibold">{{ order.customerEmail }}</dd>
-                  </div>
-                  <div v-if="order.customerComment" class="sm:col-span-2 border-t border-slate-100 pt-2">
-                    <dt class="text-slate-500">Комментарий</dt>
-                    <dd class="mt-1 whitespace-pre-wrap font-semibold">{{ order.customerComment }}</dd>
-                  </div>
+                    <dd class="break-all font-semibold">{{ order.customerEmail }}</dd>
+                  </template>
+                  <template v-if="order.customerComment">
+                    <dt class="border-t border-slate-100 pt-2 text-slate-500">Комментарий</dt>
+                    <dd class="whitespace-pre-wrap border-t border-slate-100 pt-2 font-semibold">{{ order.customerComment }}</dd>
+                  </template>
                 </dl>
               </section>
               <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
