@@ -644,10 +644,15 @@ function orderDateTime(order: Order) {
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white p-4">
                 <h4 class="text-sm font-semibold">Данные покупателя</h4>
-                <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <dl class="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
                   <div>
                     <dt class="text-slate-500">Покупатель</dt>
-                    <dd class="mt-1 font-semibold">{{ order.customer }}</dd>
+                    <dd class="mt-1 font-semibold">
+                      {{ order.customer }}
+                      <span v-if="order.platform === 'Эпицентр'" class="ml-1 text-xs font-medium text-slate-500">
+                        · {{ order.delivery.isAlternateRecipient ? 'другой получатель' : 'клиент' }}
+                      </span>
+                    </dd>
                   </div>
                   <div>
                     <dt class="text-slate-500">Телефон покупателя</dt>
@@ -657,7 +662,7 @@ function orderDateTime(order: Order) {
                     <dt class="text-slate-500">Email</dt>
                     <dd class="mt-1 break-all font-semibold">{{ order.customerEmail }}</dd>
                   </div>
-                  <div v-if="order.customerComment" class="sm:col-span-2">
+                  <div v-if="order.customerComment" class="sm:col-span-2 border-t border-slate-100 pt-2">
                     <dt class="text-slate-500">Комментарий</dt>
                     <dd class="mt-1 whitespace-pre-wrap font-semibold">{{ order.customerComment }}</dd>
                   </div>
@@ -705,10 +710,6 @@ function orderDateTime(order: Order) {
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Получатель</dt>
                   <dd class="font-semibold">{{ order.delivery.recipient }}</dd>
-                </div>
-                <div v-if="order.platform === 'Эпицентр'" class="grid grid-cols-[1fr_1.35fr] gap-3">
-                  <dt class="text-slate-500">Тип получателя</dt>
-                  <dd class="font-semibold">{{ order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент' }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Телефон получателя</dt>
