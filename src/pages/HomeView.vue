@@ -419,7 +419,7 @@ function syncAcquiringPercent(order: Order) {
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.3fr)_0.6fr_0.75fr_0.75fr_1fr]"
+                  class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
                   <label class="text-xs font-medium text-slate-500">Количество<input v-model.number="product.quantity" min="1" class="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
