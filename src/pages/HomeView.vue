@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
@@ -9,6 +9,7 @@ const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 const expandedOrderId = ref<number | null>(null)
+const editingOrderCell = ref<string | null>(null)
 
 const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
 const carrierOptions: Delivery['carrier'][] = [
@@ -76,6 +77,10 @@ const getActualProfit = (order: Order) =>
   getOrderAmount(order) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
 const formatMoney = (value: number) =>
   new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 }).format(value) + ' ₴'
+const formatOrderNumber = (value: number | undefined) => {
+  if (value === undefined) return ''
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
+}
 
 const isInCurrentMonth = (order: Order) => {
   const [day, month, year] = order.date.split('.').map(Number)
@@ -227,6 +232,30 @@ function syncAcquiringPercent(order: Order) {
   const amount = getOrderAmount(order)
   order.acquiringPercent = amount === 0 ? 0 : (order.acquiring / amount) * 100
   persistOrders()
+}
+
+async function toggleOrderCell(key: string, event: KeyboardEvent) {
+  if (editingOrderCell.value === key) {
+    editingOrderCell.value = null
+    persistOrders()
+    return
+  }
+  editingOrderCell.value = key
+  await nextTick()
+  ;(event.target as HTMLInputElement).select()
+}
+
+function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 'cost', event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  const value = Number(raw.replace(',', '.'))
+  if (Number.isFinite(value)) product[field] = value
+}
+
+function finishOrderCell(key: string) {
+  if (editingOrderCell.value === key) {
+    editingOrderCell.value = null
+    persistOrders()
+  }
 }
 </script>
 
@@ -422,9 +451,9 @@ function syncAcquiringPercent(order: Order) {
                   class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
-                  <label class="text-xs font-medium text-slate-500">Количество<input v-model.number="product.quantity" min="1" class="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
-                  <label class="text-xs font-medium text-slate-500">Продажа / ед., ₴<input v-model.number="product.price" min="0" class="mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
-                  <label class="text-xs font-medium text-slate-500">С/с / ед., ₴<input v-model.number="product.cost" min="0" class="mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
+                  <label class="text-xs font-medium text-slate-500">Количество<input :value="formatOrderNumber(product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
+                  <label class="text-xs font-medium text-slate-500">Продажа / ед., ₴<input :value="formatOrderNumber(product.price)" :readonly="editingOrderCell !== `${order.id}-${product.id}-price`" class="mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'price', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-price`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-price`, $event)" /></label>
+                  <label class="text-xs font-medium text-slate-500">С/с / ед., ₴<input :value="formatOrderNumber(product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
                   <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input v-model.number="product.royaltyPercent" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="syncProductRoyaltyAmount(order, product)" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="getProductRoyalty(order, product)" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="product.royaltyAmount = Number(($event.target as HTMLInputElement).value); syncProductRoyaltyPercent(order, product)" /></label></div>
                   <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
                 </div>
