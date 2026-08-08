@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 
@@ -17,6 +17,7 @@ const items = ref<PriceItem[]>(
 const searchQuery = ref('')
 const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 const draggedItemId = ref<number | null>(null)
+const editingCell = ref<string | null>(null)
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -108,6 +109,42 @@ function updateName(item: PriceItem, event: Event) {
   save()
 }
 
+function getCellKey(item: PriceItem, field: string) {
+  return `${item.id}-${field}`
+}
+
+async function toggleNameEdit(item: PriceItem, event: KeyboardEvent) {
+  const key = getCellKey(item, 'name')
+  if (editingCell.value === key) {
+    updateName(item, event)
+    editingCell.value = null
+    return
+  }
+  editingCell.value = key
+  await nextTick()
+  ;(event.target as HTMLInputElement).select()
+}
+
+async function togglePriceEdit(item: PriceItem, field: PriceField, event: KeyboardEvent) {
+  if (field === 'costUah' && item.usd !== null) return
+  const key = getCellKey(item, field)
+  if (editingCell.value === key) {
+    updatePrice(item, field, event)
+    editingCell.value = null
+    return
+  }
+  editingCell.value = key
+  await nextTick()
+  ;(event.target as HTMLInputElement).select()
+}
+
+function finishEdit(item: PriceItem, field: 'name' | PriceField, event: Event) {
+  if (editingCell.value !== getCellKey(item, field)) return
+  if (field === 'name') updateName(item, event)
+  else updatePrice(item, field, event)
+  editingCell.value = null
+}
+
 function updatePrice(item: PriceItem, key: PriceField, event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value === '' ? null : Number(input.value.replace(',', '.'))
@@ -186,7 +223,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <td v-if="item.kind === 'group'" colspan="9" class="border-y-2 border-emerald-200 bg-emerald-50 px-4 py-3">
                   <div class="flex items-center gap-3">
                     <span class="cursor-grab text-emerald-700" title="Перетащить">⠿</span>
-                    <input :value="item.name" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold uppercase text-emerald-950" @change="updateName(item, $event)" />
+                    <input :value="item.name" :readonly="editingCell !== getCellKey(item, 'name')" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold uppercase text-emerald-950" @blur="finishEdit(item, 'name', $event)" @keydown.enter.prevent="toggleNameEdit(item, $event)" />
                     <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить группу" type="button" @click="deleteItem(item.id)">
                       <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить группу</span>
                     </button>
@@ -196,7 +233,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
                   <div class="flex w-64 items-center gap-1.5">
                     <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
-                    <input :value="item.name" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
+                    <input :value="item.name" :readonly="editingCell !== getCellKey(item, 'name')" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @blur="finishEdit(item, 'name', $event)" @keydown.enter.prevent="toggleNameEdit(item, $event)" />
                     <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="deleteItem(item.id)">
                       <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить позицию</span>
                     </button>
@@ -208,7 +245,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     class="w-20 rounded-lg border border-slate-200 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
-                    @change="updatePrice(item, 'usd', $event)"
+                    :readonly="editingCell !== getCellKey(item, 'usd')"
+                    @blur="finishEdit(item, 'usd', $event)"
+                    @keydown.enter.prevent="togglePriceEdit(item, 'usd', $event)"
                   />
                 </td>
                 <td class="px-4 py-2">
@@ -218,8 +257,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     class="w-24 rounded-lg px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
-                    :readonly="item.usd !== null"
-                    @change="updatePrice(item, 'costUah', $event)"
+                    :readonly="item.usd !== null || editingCell !== getCellKey(item, 'costUah')"
+                    @blur="finishEdit(item, 'costUah', $event)"
+                    @keydown.enter.prevent="togglePriceEdit(item, 'costUah', $event)"
                   />
                 </td>
                 <td class="px-4 py-2">
@@ -228,7 +268,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     class="w-24 rounded-lg border border-blue-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
-                    @change="updatePrice(item, 'prom', $event)"
+                    :readonly="editingCell !== getCellKey(item, 'prom')"
+                    @blur="finishEdit(item, 'prom', $event)"
+                    @keydown.enter.prevent="togglePriceEdit(item, 'prom', $event)"
                   />
                 </td>
                 <td class="px-4 py-2">
@@ -237,7 +279,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     class="w-24 rounded-lg border border-emerald-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
-                    @change="updatePrice(item, 'epic', $event)"
+                    :readonly="editingCell !== getCellKey(item, 'epic')"
+                    @blur="finishEdit(item, 'epic', $event)"
+                    @keydown.enter.prevent="togglePriceEdit(item, 'epic', $event)"
                   />
                 </td>
                 <td
@@ -250,7 +294,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     class="w-24 rounded-lg border border-orange-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
-                    @change="updatePrice(item, key, $event)"
+                    :readonly="editingCell !== getCellKey(item, key)"
+                    @blur="finishEdit(item, key, $event)"
+                    @keydown.enter.prevent="togglePriceEdit(item, key, $event)"
                   />
                 </td>
                 <td class="px-4 py-2" aria-hidden="true"></td>
