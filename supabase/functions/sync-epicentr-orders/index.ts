@@ -24,8 +24,18 @@ type EpicentrOrder = {
     lastName?: string
     patronymic?: string
     phone?: string
+    address?: unknown
+    city?: unknown
     recipient?: { firstName?: string; lastName?: string; patronymic?: string; phone?: string }
-    shipment?: { provider?: string; number?: string; address?: string; deliveryPrice?: number }
+    shipment?: {
+      provider?: string
+      number?: string
+      address?: unknown
+      settlement?: unknown
+      city?: unknown
+      office?: unknown
+      deliveryPrice?: number
+    }
   }
 }
 
@@ -61,6 +71,19 @@ function fullName(person?: { firstName?: string; lastName?: string; patronymic?:
   return [person?.lastName, person?.firstName, person?.patronymic].filter(Boolean).join(' ')
 }
 
+function readableText(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (!value || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  const preferred = ['title', 'name', 'label', 'address', 'street', 'fullName']
+  const result = preferred.map((key) => readableText(record[key])).filter(Boolean)
+  if (result.length) return result.join(', ')
+  return Object.values(record)
+    .filter((item) => typeof item === 'string' || typeof item === 'number')
+    .map(String)
+    .join(', ')
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -94,21 +117,34 @@ Deno.serve(async (request) => {
   let updated = 0
 
   for (const order of orders) {
-    const externalId = order.id
+    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
+      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+    })
+    const detailPayload: unknown = detailResponse.ok ? await detailResponse.json() : undefined
+    const detail = detailPayload && typeof detailPayload === 'object'
+      ? ((detailPayload as { data?: Partial<EpicentrOrder> }).data ?? detailPayload as Partial<EpicentrOrder>)
+      : {}
+    const source: EpicentrOrder = {
+      ...order,
+      ...detail,
+      address: detail.address ?? order.address,
+      items: detail.items ?? order.items,
+    }
+    const externalId = source.id
     const existing = await admin.from('crm_orders').select('id').eq('external_id', externalId).maybeSingle()
-    const shipment = order.address?.shipment
-    const recipient = order.address?.recipient
-    const customer = fullName(order.address) || fullName(recipient) || 'Покупатель Эпицентра'
+    const shipment = source.address?.shipment
+    const recipient = source.address?.recipient
+    const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
-    const status = statusNames[order.statusCode.toLowerCase()] ?? order.statusCode
-    const orderNumber = Number(order.number)
+    const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
+    const orderNumber = Number(source.number)
     const data = {
       external_id: externalId,
       order_number: Number.isFinite(orderNumber) ? orderNumber : 0,
-      order_date: formatOrderDate(order.createdAt),
-      order_time: formatOrderTime(order.createdAt),
+      order_date: formatOrderDate(source.createdAt),
+      order_time: formatOrderTime(source.createdAt),
       customer,
-      phone: order.address?.phone ?? recipient?.phone ?? '',
+      phone: source.address?.phone ?? recipient?.phone ?? '',
       platform: 'Эпик',
       status,
       shipping: Number(shipment?.deliveryPrice ?? 0),
@@ -118,9 +154,9 @@ Deno.serve(async (request) => {
         carrier: shipment?.provider || 'Эпицентр',
         ttn: shipment?.number ?? '',
         recipient: recipientName,
-        recipientPhone: recipient?.phone ?? order.address?.phone ?? '',
-        city: '',
-        address: shipment?.address ?? '',
+        recipientPhone: recipient?.phone || source.address?.phone || '',
+        city: readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city),
+        address: readableText(shipment?.address) || readableText(shipment?.office) || readableText(source.address?.address),
         status,
         payer: 'Не вказано',
       },
@@ -138,8 +174,8 @@ Deno.serve(async (request) => {
     if (!orderId) continue
 
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
-    if (order.items.length) {
-      await admin.from('crm_order_items').insert(order.items.map((item, position) => ({
+    if (source.items.length) {
+      await admin.from('crm_order_items').insert(source.items.map((item, position) => ({
         order_id: orderId,
         position,
         product_name: item.title,
