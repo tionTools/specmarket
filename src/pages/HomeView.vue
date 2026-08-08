@@ -347,9 +347,27 @@ function syncAcquiringPercent(order: Order) {
   persistOrders()
 }
 
-async function toggleOrderCell(key: string, event: KeyboardEvent) {
+function parseOrderNumber(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
+  return Number.isFinite(value) ? value : 0
+}
+
+function updateProductRoyaltyPercent(product: OrderProduct, event: Event) {
+  product.royaltyPercent = parseOrderNumber(event)
+}
+
+function updateProductRoyaltyAmount(product: OrderProduct, event: Event) {
+  product.royaltyAmount = parseOrderNumber(event)
+}
+
+function updateOrderFinancial(order: Order, field: 'shipping' | 'acquiring' | 'acquiringPercent', event: Event) {
+  order[field] = parseOrderNumber(event)
+}
+
+async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () => void) {
   if (isGuest.value) return
   if (editingOrderCell.value === key) {
+    onCommit?.()
     editingOrderCell.value = null
     persistOrders()
     return
@@ -365,8 +383,9 @@ function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 
   if (Number.isFinite(value)) product[field] = value
 }
 
-function finishOrderCell(key: string) {
+function finishOrderCell(key: string, onCommit?: () => void) {
   if (editingOrderCell.value === key) {
+    onCommit?.()
     editingOrderCell.value = null
     persistOrders()
   }
@@ -610,7 +629,7 @@ function orderDateTime(order: Order) {
                   <label class="text-xs font-medium text-slate-500">Количество<input :value="formatOrderNumber(product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
                   <label class="text-xs font-medium text-slate-500">Продажа / ед., ₴<input :value="formatOrderNumber(product.price)" :readonly="editingOrderCell !== `${order.id}-${product.id}-price`" class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'price', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-price`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-price`, $event)" /></label>
                   <label class="text-xs font-medium text-slate-500">С/с / ед., ₴<input :value="formatOrderNumber(product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
-                  <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input v-model.number="product.royaltyPercent" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="syncProductRoyaltyAmount(order, product)" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="getProductRoyalty(order, product)" min="0" class="mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="number" @change="product.royaltyAmount = Number(($event.target as HTMLInputElement).value); syncProductRoyaltyPercent(order, product)" /></label></div>
+                  <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input :value="formatOrderNumber(product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-percent`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyPercent(product, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () => syncProductRoyaltyAmount(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-percent`, $event, () => syncProductRoyaltyAmount(order, product))" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="formatOrderNumber(getProductRoyalty(order, product))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-amount`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyAmount(product, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () => syncProductRoyaltyPercent(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-amount`, $event, () => syncProductRoyaltyPercent(order, product))" /></label></div>
                   <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-300 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
                 </div>
               </div>
@@ -618,8 +637,8 @@ function orderDateTime(order: Order) {
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
                 <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
-                <label class="text-slate-500">Доставка<input v-model.number="order.shipping" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
-                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input v-model.number="order.acquiringPercent" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringAmount(order)" /></label><label class="text-slate-500">Эквайринг, ₴<input v-model.number="order.acquiring" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringPercent(order)" /></label></div>
+                <label class="text-slate-500">Доставка<input :value="formatOrderNumber(order.shipping)" :readonly="editingOrderCell !== `${order.id}-shipping`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'shipping', $event)" @blur="finishOrderCell(`${order.id}-shipping`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)" /></label>
+                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input :value="formatOrderNumber(order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Эквайринг, ₴<input :value="formatOrderNumber(order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
               </div>
             </section>
             <aside class="rounded-xl border border-slate-300 bg-white p-5 shadow-sm ring-1 ring-slate-200">
