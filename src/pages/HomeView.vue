@@ -325,6 +325,28 @@ function platformClass(platform: Platform) {
   }
 }
 
+function displayOrderStatus(status: string) {
+  const names: Record<string, string> = {
+    completed: 'Завершено',
+    cancelled: 'Скасовано',
+  }
+  return names[status.toLowerCase()] ?? status
+}
+
+function displayCarrier(carrier: string) {
+  const names: Record<string, string> = {
+    nova_poshta: 'Нова пошта',
+    ukrposhta: 'Укрпошта',
+    cvz_epicentr: 'ЦВЗ Епіцентр',
+    parcel_box_epicentr: 'Поштомат Епіцентр',
+  }
+  return names[carrier.toLowerCase()] ?? carrier
+}
+
+function displayDeliveryAddress(delivery: Delivery) {
+  return [delivery.city, delivery.address].filter(Boolean).join(', ') || '—'
+}
+
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
   persistOrders()
@@ -568,7 +590,7 @@ function orderDateTime(order: Order) {
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
               ><span
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
-                >{{ order.status }}</span
+                >{{ displayOrderStatus(order.status) }}</span
               ></span
             ><span class="min-w-0"><span class="block truncate text-sm">{{
               order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
@@ -578,7 +600,7 @@ function orderDateTime(order: Order) {
             ><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong
             ><span
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
-              >{{ order.delivery.status }}</span
+              >{{ displayOrderStatus(order.delivery.status) }}</span
             ><span class="text-xl text-slate-400">{{
               expandedOrderId === order.id ? '⌄' : '›'
             }}</span>
@@ -646,13 +668,13 @@ function orderDateTime(order: Order) {
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
                   class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
-                  >{{ order.delivery.status }}</span
+                  >{{ displayOrderStatus(order.delivery.status) }}</span
                 >
               </div>
               <dl class="mt-5 space-y-4 text-sm">
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Перевозчик</dt>
-                  <dd class="font-semibold">{{ order.delivery.carrier }}</dd>
+                  <dd class="font-semibold">{{ displayCarrier(order.delivery.carrier) }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">ТТН</dt>
@@ -669,7 +691,7 @@ function orderDateTime(order: Order) {
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Адрес</dt>
                   <dd class="font-semibold">
-                    {{ order.delivery.city }}, {{ order.delivery.address }}
+                    {{ displayDeliveryAddress(order.delivery) }}
                   </dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
