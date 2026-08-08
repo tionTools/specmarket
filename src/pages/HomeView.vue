@@ -195,6 +195,12 @@ async function signIn() {
   window.location.reload()
 }
 
+async function signOut() {
+  await supabase?.auth.signOut()
+  user.value = null
+  window.location.reload()
+}
+
 onMounted(async () => {
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
@@ -324,6 +330,7 @@ function finishOrderCell(key: string) {
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
+          <button class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700" type="button" @click="signOut">Выйти</button>
           <RouterLink
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
             to="/prices"
