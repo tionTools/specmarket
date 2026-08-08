@@ -1,5 +1,6 @@
 export interface PriceItem {
   id: number
+  kind?: 'item' | 'group'
   name: string
   usd: number | null
   costUah: number | null

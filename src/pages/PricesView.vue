@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 
+type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
+
 const storageKey = 'specmarket-crm-prices'
 const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
@@ -14,7 +16,9 @@ const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
-  return items.value.filter((item) => !search || item.name.toLowerCase().includes(search))
+  return items.value.filter(
+    (item) => item.kind === 'group' || !search || item.name.toLowerCase().includes(search),
+  )
 })
 
 function save() {
@@ -44,14 +48,35 @@ function addItem() {
   save()
 }
 
+function addGroup() {
+  items.value.unshift({
+    id: Date.now(),
+    kind: 'group',
+    name: 'Новая группа товаров',
+    usd: null,
+    costUah: null,
+    prom: null,
+    epic: null,
+    kastaOne: null,
+    kastaTwo: null,
+    kastaThree: null,
+  })
+  save()
+}
+
+function deleteItem(itemId: number) {
+  items.value = items.value.filter((item) => item.id !== itemId)
+  save()
+}
+
 function updateName(item: PriceItem, event: Event) {
   item.name = (event.target as HTMLInputElement).value
   save()
 }
 
-function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name'>, event: Event) {
+function updatePrice(item: PriceItem, key: PriceField, event: Event) {
   const input = event.target as HTMLInputElement
-  const value = input.value === '' ? null : Number(input.value)
+  const value = input.value === '' ? null : Number(input.value.replace(',', '.'))
   item[key] = Number.isFinite(value) ? value : null
   save()
 }
@@ -75,10 +100,13 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-            Курс $ <input v-model.number="usdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" min="0" step="0.01" type="number" @change="saveRate" />
+            Курс $ <input v-model.number="usdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @change="saveRate" />
           </label>
           <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
             + Добавить позицию
+          </button>
+          <button class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50" type="button" @click="addGroup">
+            + Добавить группу
           </button>
           <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
             Позиций: <strong>{{ items.length }}</strong>
@@ -108,6 +136,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                 <th class="px-4 py-3 text-orange-600">Kasta: обычная</th>
                 <th class="px-4 py-3 text-orange-600">Kasta: рекомендованная</th>
                 <th class="px-4 py-3 text-orange-600">Kasta: акционная</th>
+                <th class="px-4 py-3"><span class="sr-only">Действия</span></th>
               </tr>
             </thead>
             <tbody>
@@ -116,6 +145,13 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                 :key="item.id"
                 class="border-t border-slate-100 hover:bg-slate-50"
               >
+                <td v-if="item.kind === 'group'" colspan="9" class="bg-emerald-50 px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input :value="item.name" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1.5 font-bold text-emerald-950" @change="updateName(item, $event)" />
+                    <button class="rounded-lg px-2 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить группу</button>
+                  </div>
+                </td>
+                <template v-else>
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
                   <input :value="item.name" class="w-full min-w-48 rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
                 </td>
@@ -124,7 +160,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                     :value="item.usd ?? ''"
                     class="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
                     inputmode="decimal"
-                    type="number"
+                    type="text"
                     @change="updatePrice(item, 'usd', $event)"
                   />
                 </td>
@@ -134,7 +170,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                     :class="item.usd === null ? 'border-slate-200 bg-white' : 'border-emerald-100 bg-emerald-50 text-emerald-900'"
                     class="w-28 rounded-lg px-2 py-1.5"
                     inputmode="decimal"
-                    type="number"
+                    type="text"
                     :readonly="item.usd !== null"
                     @change="updatePrice(item, 'costUah', $event)"
                   />
@@ -144,7 +180,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                     :value="item.prom ?? ''"
                     class="w-28 rounded-lg border border-blue-100 px-2 py-1.5"
                     inputmode="decimal"
-                    type="number"
+                    type="text"
                     @change="updatePrice(item, 'prom', $event)"
                   />
                 </td>
@@ -153,7 +189,7 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                     :value="item.epic ?? ''"
                     class="w-28 rounded-lg border border-emerald-100 px-2 py-1.5"
                     inputmode="decimal"
-                    type="number"
+                    type="text"
                     @change="updatePrice(item, 'epic', $event)"
                   />
                 </td>
@@ -166,10 +202,12 @@ function updatePrice(item: PriceItem, key: Exclude<keyof PriceItem, 'id' | 'name
                     :value="item[key] ?? ''"
                     class="w-28 rounded-lg border border-orange-100 px-2 py-1.5"
                     inputmode="decimal"
-                    type="number"
+                    type="text"
                     @change="updatePrice(item, key, $event)"
                   />
                 </td>
+                <td class="px-4 py-2"><button class="rounded-lg px-2 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50" type="button" @click="deleteItem(item.id)">Удалить</button></td>
+                </template>
               </tr>
             </tbody>
           </table>
