@@ -77,7 +77,7 @@ function readableText(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number') return String(value)
   if (!value || typeof value !== 'object') return ''
   const record = value as Record<string, unknown>
-  const preferred = ['title', 'name', 'label', 'address', 'street', 'fullName']
+  const preferred = ['title', 'name', 'label', 'number', 'officeNumber', 'address', 'street', 'fullName']
   const result = preferred.map((key) => readableText(record[key])).filter(Boolean)
   if (result.length) return result.join(', ')
   return Object.values(record)
