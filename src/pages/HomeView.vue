@@ -214,7 +214,9 @@ onMounted(async () => {
     .select('*, crm_order_items(*)')
     .order('created_at', { ascending: false })
   if (!remoteOrders?.length) { await persistOrders(); return }
-  orders.value = remoteOrders.map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+  orders.value = remoteOrders
+    .map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 })
 
 function openNewOrderDialog() {
@@ -350,6 +352,11 @@ function finishOrderCell(key: string) {
     editingOrderCell.value = null
     persistOrders()
   }
+}
+
+function orderDateTime(order: Order) {
+  const [day, month, year] = order.date.split('.').map(Number)
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getTime()
 }
 </script>
 
