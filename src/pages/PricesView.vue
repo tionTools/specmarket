@@ -87,6 +87,11 @@ function deleteItem(itemId: number) {
   save()
 }
 
+function confirmDelete(item: PriceItem) {
+  const label = item.kind === 'group' ? 'группу' : 'позицию'
+  if (window.confirm(`Удалить ${label} «${item.name}»?`)) deleteItem(item.id)
+}
+
 function startDragging(itemId: number) {
   draggedItemId.value = itemId
 }
@@ -224,7 +229,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   <div class="flex items-center gap-3">
                     <span class="cursor-grab text-emerald-700" title="Перетащить">⠿</span>
                     <input :value="item.name" :readonly="editingCell !== getCellKey(item, 'name')" class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1 font-bold uppercase text-emerald-950" @blur="finishEdit(item, 'name', $event)" @keydown.enter.prevent="toggleNameEdit(item, $event)" />
-                    <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить группу" type="button" @click="deleteItem(item.id)">
+                    <button class="ml-auto shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить группу" type="button" @click="confirmDelete(item)">
                       <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить группу</span>
                     </button>
                   </div>
@@ -234,9 +239,6 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   <div class="flex w-64 items-center gap-1.5">
                     <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
                     <input :value="item.name" :readonly="editingCell !== getCellKey(item, 'name')" class="w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold" @blur="finishEdit(item, 'name', $event)" @keydown.enter.prevent="toggleNameEdit(item, $event)" />
-                    <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="deleteItem(item.id)">
-                      <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить позицию</span>
-                    </button>
                   </div>
                 </td>
                 <td class="px-2 py-1.5">
@@ -299,7 +301,11 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                     @keydown.enter.prevent="togglePriceEdit(item, key, $event)"
                   />
                 </td>
-                <td class="px-2 py-1.5" aria-hidden="true"></td>
+                <td class="px-2 py-1.5">
+                  <button class="rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="confirmDelete(item)">
+                    <svg aria-hidden="true" class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg><span class="sr-only">Удалить позицию</span>
+                  </button>
+                </td>
                 </template>
               </tr>
             </tbody>
