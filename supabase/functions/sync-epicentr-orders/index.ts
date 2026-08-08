@@ -170,7 +170,8 @@ Deno.serve(async (request) => {
       address = `Поштомат Епіцентр № ${officeNumber}${address ? `, ${address}` : ''}`
     }
     if (shipment?.provider === 'nova_poshta' && /^\d+$/.test(officeNumber) && !address.includes(officeNumber)) {
-      address = `Пункт видачі Нової пошти № ${officeNumber}${address ? `, ${address}` : ''}`
+      const pickupType = officeNumber.length === 5 ? 'Поштомат Нової пошти' : 'Відділення Нової пошти'
+      address = `${pickupType} № ${officeNumber}${address ? `, ${address}` : ''}`
     }
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
