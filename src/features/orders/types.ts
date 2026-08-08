@@ -20,6 +20,7 @@ export interface Delivery {
   address: string
   status: string
   payer: string
+  isAlternateRecipient?: boolean
 }
 
 export interface Order {
@@ -30,6 +31,8 @@ export interface Order {
   time?: string
   customer: string
   phone: string
+  customerEmail?: string
+  customerComment?: string
   platform: Platform
   status: string
   products: OrderProduct[]

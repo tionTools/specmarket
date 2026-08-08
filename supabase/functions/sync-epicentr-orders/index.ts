@@ -11,6 +11,7 @@ type EpicentrOrder = {
   number: string
   createdAt: string
   statusCode: string
+  comment?: string
   subtotal: number
   payed: boolean
   items: Array<{
@@ -24,6 +25,8 @@ type EpicentrOrder = {
     lastName?: string
     patronymic?: string
     phone?: string
+    email?: string
+    isAlternateRecipient?: boolean
     address?: unknown
     city?: unknown
     recipient?: { firstName?: string; lastName?: string; patronymic?: string; phone?: string }
@@ -195,6 +198,8 @@ Deno.serve(async (request) => {
       order_time: formatOrderTime(source.createdAt),
       customer,
       phone: source.address?.phone ?? recipient?.phone ?? '',
+      customer_email: source.address?.email ?? null,
+      customer_comment: source.comment ?? null,
       platform: 'Эпицентр',
       status,
       shipping: Number(shipment?.deliveryPrice ?? 0),
@@ -209,6 +214,7 @@ Deno.serve(async (request) => {
         address,
         status,
         payer: 'Не вказано',
+        isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
       },
     }
 
