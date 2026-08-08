@@ -87,8 +87,13 @@ const isPaid = (order: Order) =>
   ['Оплачено', 'Виконано', 'Завершено', 'Закрито', 'Закрыт'].includes(order.status)
 const getActualProfit = (order: Order) =>
   getOrderAmount(order) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
-const formatMoney = (value: number) =>
-  new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 }).format(value) + ' ₴'
+const formatMoney = (value: number) => {
+  const fractionDigits = Number.isInteger(value) ? 0 : 2
+  return new Intl.NumberFormat('uk-UA', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value) + ' ₴'
+}
 const formatOrderNumber = (value: number | undefined) => {
   if (value === undefined) return ''
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
