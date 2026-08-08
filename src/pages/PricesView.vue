@@ -205,7 +205,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <label class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-            Курс $ <input :value="formatPrice(usdRate)" :readonly="!editingUsdRate" class="ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @blur="finishUsdRateEdit" @keydown.enter.prevent="toggleUsdRateEdit" />
+            Курс $ <input :value="formatPrice(usdRate)" :readonly="!editingUsdRate" class="catalog-cell ml-2 w-16 rounded border border-slate-200 px-1.5 py-1" inputmode="decimal" type="text" @blur="finishUsdRateEdit" @keydown.enter.prevent="toggleUsdRateEdit" />
           </label>
           <button class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800" type="button" @click="addItem">
             + Добавить позицию
@@ -228,7 +228,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           />
         </div>
         <div class="overflow-visible">
-          <table class="w-max border-collapse text-left text-sm">
+          <table class="catalog-table w-max border-collapse text-left text-sm">
             <thead
               class="sticky top-0 z-20 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm"
             >
@@ -350,3 +350,11 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.catalog-cell:not([readonly]),
+.catalog-table input:not([readonly]) {
+  background-color: #fffbeb;
+  box-shadow: 0 0 0 2px #fbbf24;
+}
+</style>
