@@ -1,5 +1,6 @@
 export interface PriceItem {
   id: number
+  remoteId?: string
   kind?: 'item' | 'group'
   name: string
   usd: number | null

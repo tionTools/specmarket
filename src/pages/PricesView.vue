@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import type { User } from '@supabase/supabase-js'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
+import { supabase } from '@/lib/supabase'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
@@ -30,6 +32,11 @@ const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
 const editingUsdRate = ref(false)
+const user = ref<User | null>(null)
+const email = ref('')
+const password = ref('')
+const authError = ref('')
+const isLoading = ref(false)
 
 const visibleItems = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -38,13 +45,47 @@ const visibleItems = computed(() => {
   )
 })
 
-function save() {
-  window.localStorage.setItem(storageKey, JSON.stringify(items.value))
+async function save() {
+  if (!supabase || !user.value) return
+  for (const [position, item] of items.value.entries()) {
+    const payload = { legacy_id: item.id, position, kind: item.kind ?? 'item', name: item.name, usd: item.usd, cost_uah: item.costUah, prom: item.prom, epic: item.epic, kasta_regular: item.kastaOne, kasta_recommended: item.kastaTwo, kasta_sale: item.kastaThree }
+    if (item.remoteId) await supabase.from('crm_price_items').update(payload).eq('id', item.remoteId)
+    else {
+      const { data } = await supabase.from('crm_price_items').insert(payload).select('id').single()
+      if (data) item.remoteId = data.id
+    }
+  }
 }
 
 function saveRate() {
-  window.localStorage.setItem(rateStorageKey, String(usdRate.value))
+  if (supabase && user.value) void supabase.from('crm_settings').upsert({ key: 'usd_rate', numeric_value: usdRate.value })
 }
+
+async function signIn() {
+  if (!supabase) return
+  authError.value = ''
+  isLoading.value = true
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.value, password: password.value })
+  isLoading.value = false
+  if (error) authError.value = error.message
+  else { user.value = data.user; await loadCatalog() }
+}
+
+async function loadCatalog() {
+  if (!supabase || !user.value) return
+  const { data } = await supabase.from('crm_price_items').select('*').order('position')
+  if (data?.length) items.value = data.map((row) => ({ id: row.legacy_id ?? Date.now(), remoteId: row.id, kind: row.kind, name: row.name, usd: row.usd, costUah: row.cost_uah, prom: row.prom, epic: row.epic, kastaOne: row.kasta_regular, kastaTwo: row.kasta_recommended, kastaThree: row.kasta_sale }))
+  else await save()
+  const { data: setting } = await supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle()
+  if (setting?.numeric_value) usdRate.value = Number(setting.numeric_value)
+}
+
+onMounted(async () => {
+  if (!supabase) { authError.value = 'Нет настроек Supabase в опубликованной версии сайта.'; return }
+  const { data } = await supabase.auth.getSession()
+  user.value = data.session?.user ?? null
+  if (user.value) await loadCatalog()
+})
 
 function updateUsdRate(event: Event) {
   const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
@@ -112,7 +153,9 @@ function addGroup() {
 }
 
 function deleteItem(itemId: number) {
+  const removed = items.value.find((item) => item.id === itemId)
   items.value = items.value.filter((item) => item.id !== itemId)
+  if (removed?.remoteId && supabase) void supabase.from('crm_price_items').delete().eq('id', removed.remoteId)
   save()
 }
 
@@ -219,7 +262,18 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
       </header>
 
-      <section class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section v-if="!user" class="mt-7 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 class="text-xl font-semibold">Вход в CRM</h2>
+        <p class="mt-2 text-sm text-slate-500">Войди под общим аккаунтом, чтобы видеть общие цены на всех устройствах.</p>
+        <form class="mt-5 space-y-3" @submit.prevent="signIn">
+          <input v-model="email" required class="w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="Email" type="email" />
+          <input v-model="password" required class="w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="Пароль" type="password" />
+          <p v-if="authError" class="text-sm text-rose-700">{{ authError }}</p>
+          <button class="w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white" :disabled="isLoading" type="submit">{{ isLoading ? 'Входим…' : 'Войти' }}</button>
+        </form>
+      </section>
+
+      <section v-else class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 p-4">
           <input
             v-model="searchQuery"
