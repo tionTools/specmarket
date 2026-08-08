@@ -157,19 +157,19 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           />
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[63rem] border-collapse text-left text-sm">
+          <table class="w-max border-collapse text-left text-sm">
             <thead
               class="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500"
             >
               <tr>
-                <th class="sticky left-0 z-10 min-w-56 bg-slate-50 px-4 py-3">Название</th>
-                <th class="px-4 py-3">Цена, $</th>
-                <th class="px-4 py-3">Вход, ₴</th>
-                <th class="px-4 py-3 text-blue-700">Prom</th>
-                <th class="px-4 py-3 text-emerald-700">Эпицентр</th>
-                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>обычная</span></th>
-                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>рекоменд.</span></th>
-                <th class="w-24 px-3 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>акционная</span></th>
+                <th class="sticky left-0 z-10 min-w-64 bg-slate-50 px-3 py-3">Название</th>
+                <th class="px-2 py-3">Цена, $</th>
+                <th class="px-2 py-3">Вход, ₴</th>
+                <th class="px-2 py-3 text-blue-700">Prom</th>
+                <th class="px-2 py-3 text-emerald-700">Эпицентр</th>
+                <th class="w-24 px-2 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>обычная</span></th>
+                <th class="w-24 px-2 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>рекоменд.</span></th>
+                <th class="w-24 px-2 py-3 text-center text-orange-600"><span class="block">Kasta</span><span>акционная</span></th>
                 <th class="px-4 py-3"><span class="sr-only">Действия</span></th>
               </tr>
             </thead>
@@ -194,7 +194,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 </td>
                 <template v-else>
                 <td class="sticky left-0 bg-white px-4 py-3 group-hover:bg-slate-50">
-                  <div class="flex min-w-64 items-center gap-2">
+                  <div class="flex w-64 items-center gap-1.5">
                     <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
                     <input :value="item.name" class="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold" @change="updateName(item, $event)" />
                     <button class="shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50" title="Удалить позицию" type="button" @click="deleteItem(item.id)">
@@ -205,7 +205,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <td class="px-4 py-2">
                   <input
                     :value="formatPrice(item.usd)"
-                    class="w-24 rounded-lg border border-slate-200 px-2 py-1.5"
+                    class="w-20 rounded-lg border border-slate-200 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
                     @change="updatePrice(item, 'usd', $event)"
@@ -215,7 +215,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   <input
                     :value="formatPrice(getCostUah(item))"
                     :class="item.usd === null ? 'border-slate-200 bg-white' : 'border-emerald-100 bg-emerald-50 text-emerald-900'"
-                    class="w-28 rounded-lg px-2 py-1.5"
+                    class="w-24 rounded-lg px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
                     :readonly="item.usd !== null"
@@ -225,7 +225,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <td class="px-4 py-2">
                   <input
                     :value="formatPrice(item.prom)"
-                    class="w-28 rounded-lg border border-blue-100 px-2 py-1.5"
+                    class="w-24 rounded-lg border border-blue-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
                     @change="updatePrice(item, 'prom', $event)"
@@ -234,7 +234,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <td class="px-4 py-2">
                   <input
                     :value="formatPrice(item.epic)"
-                    class="w-28 rounded-lg border border-emerald-100 px-2 py-1.5"
+                    class="w-24 rounded-lg border border-emerald-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
                     @change="updatePrice(item, 'epic', $event)"
@@ -247,7 +247,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 >
                   <input
                     :value="formatPrice(item[key])"
-                    class="w-28 rounded-lg border border-orange-100 px-2 py-1.5"
+                    class="w-24 rounded-lg border border-orange-100 px-2 py-1.5"
                     inputmode="decimal"
                     type="text"
                     @change="updatePrice(item, key, $event)"
