@@ -296,8 +296,8 @@ function platformClass(platform: Platform) {
         </div>
       </section>
 
-      <section class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row">
+      <section class="mt-6 rounded-2xl border border-slate-200 bg-slate-100 p-3 shadow-sm">
+        <div class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row">
           <input
             v-model="searchQuery"
             class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-emerald-600 sm:max-w-md"
@@ -313,7 +313,7 @@ function platformClass(platform: Platform) {
           </select>
         </div>
         <div
-          class="hidden grid-cols-[0.8fr_0.9fr_1.95fr_1fr_1fr_1.15fr_2rem] gap-3 bg-slate-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.8fr_0.9fr_1.95fr_1fr_1fr_1.15fr_2rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
@@ -322,7 +322,8 @@ function platformClass(platform: Platform) {
         <article
           v-for="order in visibleOrders"
           :key="order.id"
-          class="border-t border-slate-100 first:border-t-0"
+          class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
+          :class="expandedOrderId === order.id ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-slate-200 hover:border-slate-300'"
         >
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.8fr_0.9fr_1.95fr_1fr_1fr_1.15fr_2rem] lg:items-center"
@@ -353,7 +354,7 @@ function platformClass(platform: Platform) {
           </button>
           <div
             v-if="expandedOrderId === order.id"
-            class="grid gap-6 border-t border-slate-100 bg-slate-50/70 p-5 lg:grid-cols-[minmax(0,1fr)_20rem]"
+            class="grid gap-5 border-t border-emerald-100 bg-slate-50 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
             <section>
               <div class="flex flex-wrap items-center justify-between gap-3">
@@ -413,7 +414,7 @@ function platformClass(platform: Platform) {
                 ><span>Эквайринг: {{ formatMoney(order.acquiring) }}</span>
               </div>
             </section>
-            <aside class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <aside class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-100">
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
