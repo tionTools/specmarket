@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
+import type { User } from '@supabase/supabase-js'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
@@ -10,6 +11,11 @@ const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 const expandedOrderId = ref<number | null>(null)
+const user = ref<User | null>(null)
+const email = ref('')
+const password = ref('')
+const authError = ref('')
+const isSigningIn = ref(false)
 const editingOrderCell = ref<string | null>(null)
 
 const platformOptions: Platform[] = ['Пром', 'Эпик', 'Каста', 'Р/С', 'Сайт']
@@ -178,10 +184,22 @@ async function persistOrders() {
   }
 }
 
+async function signIn() {
+  if (!supabase) { authError.value = 'Supabase не настроен.'; return }
+  isSigningIn.value = true
+  authError.value = ''
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.value, password: password.value })
+  isSigningIn.value = false
+  if (error) { authError.value = error.message; return }
+  user.value = data.user
+  window.location.reload()
+}
+
 onMounted(async () => {
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
+  user.value = session.session.user
   const { data: remoteOrders } = await supabase.from('crm_orders').select('*, crm_order_items(*)').order('created_at')
   if (!remoteOrders?.length) { await persistOrders(); return }
   orders.value = remoteOrders.map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
@@ -282,7 +300,18 @@ function finishOrderCell(key: string) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-900">
+  <div v-if="!user" class="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-slate-900">
+    <form class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl" @submit.prevent="signIn">
+      <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
+      <h1 class="mt-3 text-3xl font-semibold">Вход в CRM</h1>
+      <p class="mt-2 text-sm text-slate-500">Войди, чтобы увидеть общие заказы и цены на всех устройствах.</p>
+      <input v-model="email" required class="mt-6 w-full rounded-xl border border-slate-200 px-3 py-3" placeholder="Email" type="email" />
+      <input v-model="password" required class="mt-3 w-full rounded-xl border border-slate-200 px-3 py-3" placeholder="Пароль" type="password" />
+      <p v-if="authError" class="mt-3 text-sm text-rose-700">{{ authError }}</p>
+      <button class="mt-5 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800" :disabled="isSigningIn" type="submit">{{ isSigningIn ? 'Входим…' : 'Войти' }}</button>
+    </form>
+  </div>
+  <div v-else class="min-h-screen bg-slate-50 text-slate-900">
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
