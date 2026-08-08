@@ -648,27 +648,15 @@ function orderDateTime(order: Order) {
                   </select></label
                 >
               </div>
-              <section class="mt-4 w-full max-w-xl rounded-xl border border-slate-300 bg-white p-4">
-                <h4 class="text-sm font-semibold">Данные покупателя</h4>
-                <dl class="mt-3 grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-                  <dt class="text-slate-500">Покупатель</dt>
-                  <dd class="font-semibold">
-                    {{ order.customer }}
-                    <span v-if="order.platform === 'Эпицентр'" class="ml-1 text-xs font-medium text-slate-500">
-                      · {{ order.delivery.isAlternateRecipient ? 'другой получатель' : 'клиент' }}
-                    </span>
-                  </dd>
-                  <dt class="text-slate-500">Телефон</dt>
-                  <dd class="font-semibold">{{ order.phone }}</dd>
-                  <template v-if="order.customerEmail">
-                    <dt class="text-slate-500">Email</dt>
-                    <dd class="break-all font-semibold">{{ order.customerEmail }}</dd>
-                  </template>
-                  <template v-if="order.customerComment">
-                    <dt class="border-t border-slate-100 pt-2 text-slate-500">Комментарий</dt>
-                    <dd class="whitespace-pre-wrap border-t border-slate-100 pt-2 font-semibold">{{ order.customerComment }}</dd>
-                  </template>
-                </dl>
+              <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
+                <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+                  <h4 class="mr-2 font-semibold">Данные покупателя</h4>
+                  <span><span class="text-slate-500">Покупатель: </span><strong>{{ order.customer }}</strong></span>
+                  <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{ order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент' }}</span>
+                  <span><span class="text-slate-500">Телефон: </span><strong>{{ order.phone || order.delivery.recipientPhone || '—' }}</strong></span>
+                  <span v-if="order.customerEmail"><span class="text-slate-500">Email: </span><strong class="break-all">{{ order.customerEmail }}</strong></span>
+                  <span v-if="order.customerComment" class="basis-full border-t border-slate-100 pt-2"><span class="text-slate-500">Комментарий: </span><strong class="whitespace-pre-wrap">{{ order.customerComment }}</strong></span>
+                </div>
               </section>
               <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
                 <div
