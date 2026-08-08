@@ -34,6 +34,8 @@ type EpicentrOrder = {
       settlement?: unknown
       city?: unknown
       office?: unknown
+      settlementId?: string
+      officeId?: string
       deliveryPrice?: number
     }
   }
@@ -82,6 +84,18 @@ function readableText(value: unknown): string {
     .filter((item) => typeof item === 'string' || typeof item === 'number')
     .map(String)
     .join(', ')
+}
+
+async function deliveryReference(url: string, token: string) {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  })
+  if (!response.ok) return ''
+  const payload: unknown = await response.json()
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return readableText((payload as { data: unknown }).data)
+  }
+  return readableText(payload)
 }
 
 Deno.serve(async (request) => {
@@ -134,6 +148,23 @@ Deno.serve(async (request) => {
     const existing = await admin.from('crm_orders').select('id').eq('external_id', externalId).maybeSingle()
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
+    let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)
+    let address = readableText(shipment?.address) || readableText(shipment?.office) || readableText(source.address?.address)
+    if (shipment?.provider && shipment.settlementId) {
+      const provider = encodeURIComponent(shipment.provider)
+      const settlementId = encodeURIComponent(shipment.settlementId)
+      city ||= await deliveryReference(
+        `https://merchant-api.epicentrm.com.ua/v3/deliveries/providers/${provider}/settlements/${settlementId}`,
+        epicentrToken,
+      )
+      if (shipment.officeId) {
+        const officeId = encodeURIComponent(shipment.officeId)
+        address ||= await deliveryReference(
+          `https://merchant-api.epicentrm.com.ua/v3/deliveries/providers/${provider}/settlements/${settlementId}/offices/${officeId}`,
+          epicentrToken,
+        )
+      }
+    }
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
     const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
@@ -155,8 +186,8 @@ Deno.serve(async (request) => {
         ttn: shipment?.number ?? '',
         recipient: recipientName,
         recipientPhone: recipient?.phone || source.address?.phone || '',
-        city: readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city),
-        address: readableText(shipment?.address) || readableText(shipment?.office) || readableText(source.address?.address),
+        city,
+        address,
         status,
         payer: 'Не вказано',
       },
