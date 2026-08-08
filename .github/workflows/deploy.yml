@@ -13,18 +13,6 @@ jobs:
       - name: 🛒 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 📝 Create .env "gh secret set ENV < .env"
-        shell: bash
-        env:
-          ENV_FILE: ${{ secrets.ENV }}
-          VITE_SOME_KEY: ${{ vars.VITE_SOME_KEY }}
-        run: |
-          printf '%s' "$ENV_FILE" > .env
-          if [ -n "$VITE_SOME_KEY" ]; then
-            printf '\nVITE_SOME_KEY=%s\n' "$VITE_SOME_KEY" >> .env
-          fi
-          test -f .env
-
       - name: 🟢 Setup Node.js 25
         uses: actions/setup-node@v6
         with:
