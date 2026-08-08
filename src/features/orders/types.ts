@@ -26,6 +26,7 @@ export interface Order {
   id: number
   remoteId?: string
   date: string
+  time?: string
   customer: string
   phone: string
   platform: Platform

@@ -72,6 +72,7 @@ export const demoOrders: Order[] = Array.from({ length: 12 }, (_, index) => {
   return {
     id: 306 - index,
     date: index < 4 ? '07.08.2026' : index < 8 ? '06.08.2026' : '31.07.2026',
+    time: `${String(9 + (index % 9)).padStart(2, '0')}:${String((5 + index * 7) % 60).padStart(2, '0')}`,
     customer: customer[0],
     phone: customer[1],
     platform,

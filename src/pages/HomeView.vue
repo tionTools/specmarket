@@ -62,6 +62,7 @@ const orders = ref<Order[]>(
 )
 
 const todayKey = () => new Intl.DateTimeFormat('uk-UA').format(new Date())
+const currentTime = () => new Intl.DateTimeFormat('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
 const orderDraft = ref(createOrderDraft())
 const currentMonth = () => {
   const now = new Date()
@@ -150,6 +151,7 @@ function createOrderDraft(): Order {
   return {
     id: Math.max(0, ...orders.value.map((order) => order.id)) + 1,
     date: todayKey(),
+    time: currentTime(),
     customer: '',
     phone: '',
     platform: 'Пром',
@@ -177,7 +179,7 @@ async function persistOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   for (const order of orders.value) {
-    const payload = { order_number: order.id, order_date: order.date, customer: order.customer, phone: order.phone, platform: order.platform, status: order.status, shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null, delivery: order.delivery }
+    const payload = { order_number: order.id, order_date: order.date, order_time: order.time ?? null, customer: order.customer, phone: order.phone, platform: order.platform, status: order.status, shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null, delivery: order.delivery }
     let remoteId = order.remoteId
     if (remoteId) await supabase.from('crm_orders').update(payload).eq('id', remoteId)
     else { const { data } = await supabase.from('crm_orders').insert(payload).select('id').single(); remoteId = data?.id; if (remoteId) order.remoteId = remoteId }
@@ -215,7 +217,7 @@ onMounted(async () => {
     .order('created_at', { ascending: false })
   if (!remoteOrders?.length) { await persistOrders(); return }
   orders.value = remoteOrders
-    .map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .map((row) => ({ id: row.order_number, remoteId: row.id, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 })
 
@@ -356,7 +358,8 @@ function finishOrderCell(key: string) {
 
 function orderDateTime(order: Order) {
   const [day, month, year] = order.date.split('.').map(Number)
-  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getTime()
+  const [hours, minutes] = (order.time ?? '00:00').split(':').map(Number)
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0).getTime()
 }
 </script>
 
@@ -513,7 +516,7 @@ function orderDateTime(order: Order) {
           >
             <span
               ><strong>№ {{ order.id }}</strong
-              ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}</span></span
+              ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
               ><span
@@ -689,6 +692,12 @@ function orderDateTime(order: Order) {
                 {{ status }}
               </option>
             </select></label
+          >
+          <label class="text-sm font-medium"
+            >Время заказа<input
+              v-model="orderDraft.time"
+              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              type="time" /></label
           >
         </div>
         <fieldset class="mt-5 rounded-xl border border-slate-200 p-4">
