@@ -507,7 +507,7 @@ function finishOrderCell(key: string) {
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
+                  class="order-edit grid gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
                   <label class="text-xs font-medium text-slate-500">Количество<input :value="formatOrderNumber(product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
@@ -517,10 +517,10 @@ function finishOrderCell(key: string) {
                   <div class="sm:col-span-5 flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-3 text-sm"><span>{{ product.name }} × {{ product.quantity }} шт.</span><strong>Сумма позиции: {{ formatMoney(product.price * product.quantity) }}</strong><span class="text-slate-500">С/с позиции: {{ formatMoney(product.cost * product.quantity) }}</span></div>
                 </div>
               </div>
-              <div class="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:grid-cols-5">
+              <div class="order-edit mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:grid-cols-5">
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
-                <div><span class="text-slate-500">Роялти по позициям</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
+                <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
                 <label class="text-slate-500">Доставка<input v-model.number="order.shipping" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="persistOrders" /></label>
                 <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input v-model.number="order.acquiringPercent" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringAmount(order)" /></label><label class="text-slate-500">Эквайринг, ₴<input v-model.number="order.acquiring" min="0" class="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" type="number" @change="syncAcquiringPercent(order)" /></label></div>
               </div>
@@ -728,3 +728,10 @@ function finishOrderCell(key: string) {
     </dialog>
   </div>
 </template>
+
+<style scoped>
+.order-edit input:not([readonly]) {
+  background-color: #fffbeb;
+  box-shadow: 0 0 0 2px #fbbf24;
+}
+</style>
