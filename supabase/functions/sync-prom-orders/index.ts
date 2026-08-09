@@ -129,6 +129,12 @@ Deno.serve(async (request) => {
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order) ||
       text(previousDelivery.ttn)
+    const orderStatus = text(order.status) || 'Новий'
+    const apiDeliveryStatus =
+      readable(pick(rawDelivery, 'status', 'shipment_status', 'delivery_status', 'status_name')) ||
+      text(pick(order, 'shipment_status', 'delivery_status'))
+    const deliveryStatus = apiDeliveryStatus ||
+      (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
@@ -151,7 +157,7 @@ Deno.serve(async (request) => {
       customer: customerName(order), phone: text(order.phone) || text(order.client_phone),
       customer_email: text(order.email) || text(order.client_email) || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
-      platform: 'Пром', status: text(order.status) || 'Новий',
+      platform: 'Пром', status: orderStatus,
       shipping: hasSellerDeliveryCost
         ? number(sellerDeliveryCost)
         : promoSellerDeliveryCost ?? (previousDelivery.shippingSource === 'manual' ? number(existing?.shipping) : 0),
@@ -161,7 +167,7 @@ Deno.serve(async (request) => {
         ttn: trackingNumber,
         recipient: customerName(order), recipientPhone: text(order.phone) || text(order.client_phone),
         city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
-        status: text(order.status) || 'Новий', payer: text(order.delivery_payer) || 'Не указано',
+        status: deliveryStatus, payer: text(order.delivery_payer) || 'Не указано',
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
         shippingSource,

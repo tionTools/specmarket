@@ -34,6 +34,9 @@ type EpicentrOrder = {
       provider?: string
       paymentProvider?: string
       paymentStatus?: string
+      status?: string
+      statusCode?: string
+      shipmentStatus?: string
       number?: string
       address?: unknown
       settlement?: unknown
@@ -230,6 +233,9 @@ Deno.serve(async (request) => {
     const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
     const orderNumber = Number(source.number)
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
+    const apiDeliveryStatus = readableText(shipment?.status) || readableText(shipment?.statusCode) || readableText(shipment?.shipmentStatus)
+    const deliveryStatus = apiDeliveryStatus ||
+      (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const data = {
@@ -256,7 +262,7 @@ Deno.serve(async (request) => {
         recipientPhone: recipient?.phone || source.address?.phone || '',
         city,
         address,
-        status,
+        status: deliveryStatus,
         payer: 'Не вказано',
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
         paymentAmount,
