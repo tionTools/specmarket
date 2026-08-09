@@ -11,6 +11,19 @@ const asRecord = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(value ?? 0) || 0
+const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const firstNumber = (...values: unknown[]) => {
+  for (const value of values) {
+    const parsed = number(value)
+    if (parsed !== 0) return parsed
+  }
+  return 0
+}
+function readable(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  const record = asRecord(value)
+  return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
+}
 
 function dateParts(value: unknown) {
   const source = text(value)
@@ -71,10 +84,12 @@ Deno.serve(async (request) => {
       .select('id, shipping, acquiring, acquiring_percent, delivery')
       .eq('external_id', externalId).maybeSingle()
     const previousDelivery = asRecord(existing?.delivery)
-    const rawDelivery = asRecord(order.delivery)
-    const deliveryText = text(order.delivery_address) || text(rawDelivery.address)
-    const deliveryCost = order.delivery_cost ?? rawDelivery.cost
-    const hasApiShipping = deliveryCost !== undefined && deliveryCost !== null && deliveryCost !== ''
+    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
+    const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
+    // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
+    // Для прибыли используем только отдельную сумму, которую платит продавец.
+    const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
+    const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const data = {
       external_id: externalId,
@@ -83,16 +98,16 @@ Deno.serve(async (request) => {
       customer_email: text(order.email) || text(order.client_email) || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: text(order.status) || 'Новий',
-      shipping: hasApiShipping ? number(deliveryCost) : number(existing?.shipping),
+      shipping: hasSellerDeliveryCost ? number(sellerDeliveryCost) : number(existing?.shipping),
       acquiring: number(existing?.acquiring), acquiring_percent: existing?.acquiring_percent ?? null,
       delivery: {
-        carrier: text(order.delivery_option) || text(order.delivery_service) || text(rawDelivery.service) || 'Prom',
-        ttn: text(order.delivery_declaration_number) || text(order.delivery_declaration_id) || text(rawDelivery.declaration_number),
+        carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
+        ttn: text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) || text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')),
         recipient: customerName(order), recipientPhone: text(order.phone) || text(order.client_phone),
-        city: text(order.delivery_city) || text(rawDelivery.city), address: deliveryText,
+        city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
         status: text(order.status) || 'Новий', payer: text(order.delivery_payer) || 'Не указано',
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
-        paymentMethod: text(order.payment_option) || text(order.payment_method),
+        paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
       },
     }
     let orderId = existing?.id
@@ -108,7 +123,9 @@ Deno.serve(async (request) => {
     if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       const previous = byName.get(name)
-      return { order_id: orderId, position, product_name: name, size: text(item.variation) || text(item.size), quantity: number(item.quantity) || 1, price: number(item.price), cost: number(previous?.cost), royalty_percent: previous?.royalty_percent ?? null, royalty_amount: previous?.royalty_amount ?? null }
+      const quantity = number(pick(item, 'quantity', 'amount')) || 1
+      const price = firstNumber(pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'), number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity)
+      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: previous?.royalty_percent ?? null, royalty_amount: previous?.royalty_amount ?? null }
     }))
   }
   return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })

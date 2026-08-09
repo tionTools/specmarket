@@ -608,14 +608,6 @@ function orderDateTime(order: Order) {
           </RouterLink>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50"
-            type="button"
-            @click="addMultiItemDemoOrders"
-          >
-            + Демо: 2–4 товара
-          </button>
-          <button
-            v-if="!isGuest"
             class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
             :disabled="isSyncingEpicentr"
             type="button"
