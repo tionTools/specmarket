@@ -84,6 +84,7 @@ const getRoyalty = (order: Order) =>
 const getPlannedProfit = (order: Order) =>
   getOrderAmount(order) * 0.983 - getOrderCost(order) - getRoyalty(order) - order.shipping
 const isPaid = (order: Order) =>
+  (order.paymentAmount ?? 0) > 0 ||
   ['Оплачено', 'Виконано', 'Завершено', 'Закрито', 'Закрыт'].includes(order.status)
 const getActualProfit = (order: Order) =>
   (order.paymentAmount ?? 0) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
@@ -232,7 +233,7 @@ async function syncEpicentrOrders() {
     return
   }
   syncEpicentrMessage.value = `Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
-  window.setTimeout(() => window.location.reload(), 900)
+  await loadRemoteOrders()
 }
 
 async function syncEpicentrOrder(order: Order) {
@@ -249,10 +250,10 @@ async function syncEpicentrOrder(order: Order) {
     return
   }
   syncEpicentrMessage.value = `Заказ № ${order.id} обновлён из Эпицентра.`
-  window.setTimeout(() => window.location.reload(), 700)
+  await loadRemoteOrders()
 }
 
-onMounted(async () => {
+async function loadRemoteOrders() {
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
@@ -265,6 +266,10 @@ onMounted(async () => {
   orders.value = remoteOrders
     .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
+}
+
+onMounted(async () => {
+  await loadRemoteOrders()
 })
 
 function openNewOrderDialog() {
