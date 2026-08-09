@@ -174,7 +174,11 @@ Deno.serve(async (request) => {
       items: detail.items ?? order.items,
     }
     const externalId = source.id
-    const existing = await admin.from('crm_orders').select('id').eq('external_id', externalId).maybeSingle()
+    const existing = await admin
+      .from('crm_orders')
+      .select('id, acquiring, acquiring_percent')
+      .eq('external_id', externalId)
+      .maybeSingle()
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
     let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)
@@ -212,8 +216,9 @@ Deno.serve(async (request) => {
       platform: 'Эпицентр',
       status,
       shipping: Number(shipment?.deliveryPrice ?? 0),
-      acquiring: 0,
-      acquiring_percent: null,
+      // Эквайринг вводится в CRM, а API площадки его не возвращает.
+      acquiring: Number(existing.data?.acquiring ?? 0),
+      acquiring_percent: existing.data?.acquiring_percent ?? null,
       delivery: {
         carrier: shipment?.provider || 'Эпицентр',
         ttn: shipment?.number ?? '',
@@ -238,19 +243,33 @@ Deno.serve(async (request) => {
     }
     if (!orderId) continue
 
+    const { data: currentItems } = await admin
+      .from('crm_order_items')
+      .select('position, product_name, cost, royalty_percent, royalty_amount')
+      .eq('order_id', orderId)
+    const itemsByPositionAndName = new Map(
+      (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
+    )
+    const itemsByName = new Map(
+      (currentItems ?? []).map((item) => [item.product_name, item]),
+    )
+
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     if (source.items.length) {
-      await admin.from('crm_order_items').insert(source.items.map((item, position) => ({
-        order_id: orderId,
-        position,
-        product_name: item.title,
-        size: '',
-        quantity: Number(item.quantity ?? 1),
-        price: Number(item.price ?? 0),
-        cost: 0,
-        royalty_percent: null,
-        royalty_amount: null,
-      })))
+      await admin.from('crm_order_items').insert(source.items.map((item, position) => {
+        const currentItem = itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        return {
+          order_id: orderId,
+          position,
+          product_name: item.title,
+          size: '',
+          quantity: Number(item.quantity ?? 1),
+          price: Number(item.price ?? 0),
+          cost: Number(currentItem?.cost ?? 0),
+          royalty_percent: currentItem?.royalty_percent ?? null,
+          royalty_amount: currentItem?.royalty_amount ?? null,
+        }
+      }))
     }
   }
 
