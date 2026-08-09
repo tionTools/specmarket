@@ -517,6 +517,12 @@ function openEpicentrOrder(order: Order) {
   window.open(`https://admin.epicentrm.com.ua/oms/orders/${order.externalId}`, '_blank', 'noopener,noreferrer')
 }
 
+function openPromOrder(order: Order) {
+  const promId = String(order.externalId ?? order.id).replace(/^prom:/, '')
+  if (!promId) return
+  window.open(`https://my.prom.ua/cms/order/${promId}`, '_blank', 'noopener,noreferrer')
+}
+
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
   persistOrders()
@@ -770,7 +776,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
+              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span><span v-if="order.platform === 'Пром' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Prom" @click.stop="openPromOrder(order)">↗</span></span>
               ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
