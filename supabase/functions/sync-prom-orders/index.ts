@@ -24,6 +24,20 @@ function readable(value: unknown): string {
   const record = asRecord(value)
   return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
 }
+function commissionAmount(value: unknown): number | undefined {
+  const record = asRecord(value)
+  for (const [key, candidate] of Object.entries(record)) {
+    if (/(?:commission|prosale|royalty|catalog)/i.test(key)) {
+      const amount = number(candidate)
+      if (amount !== 0) return amount
+    }
+    if (candidate && typeof candidate === 'object') {
+      const amount = commissionAmount(candidate)
+      if (amount !== undefined) return amount
+    }
+  }
+  return undefined
+}
 
 function dateParts(value: unknown) {
   const source = text(value)
@@ -132,7 +146,11 @@ Deno.serve(async (request) => {
       const previous = byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
       const price = firstNumber(pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'), number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity)
-      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: previous?.royalty_percent ?? null, royalty_amount: previous?.royalty_amount ?? null }
+      const royaltyAmount = commissionAmount(item) ?? previous?.royalty_amount ?? null
+      const royaltyPercent = royaltyAmount === null || price * quantity === 0
+        ? previous?.royalty_percent ?? null
+        : (number(royaltyAmount) / (price * quantity)) * 100
+      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
   return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
