@@ -30,11 +30,23 @@ function readable(value: unknown): string {
 
 function deliveryPayer(value: unknown): string {
   const payer = readable(value)
+  const normalized = payer.toLowerCase()
+  if (/(?:отримувач|получател|recipient|buyer|customer)/i.test(normalized)) return 'Получатель'
+  if (/(?:відправник|отправител|sender|seller|merchant)/i.test(normalized)) return 'Отправитель'
   const names: Record<string, string> = {
     recipient: 'Получатель', buyer: 'Получатель', customer: 'Получатель',
     sender: 'Отправитель', seller: 'Отправитель', merchant: 'Отправитель',
   }
-  return names[payer.toLowerCase()] ?? payer
+  return names[normalized] ?? payer
+}
+
+// Prom не во всех ответах присылает отдельное поле payer. В таком случае
+// его тариф доставки «... (платна)» означает оплату получателем.
+function payerFromDeliveryOption(value: unknown): string {
+  const option = readable(value).toLowerCase()
+  if (/(?:безкоштов|бесплат|free)/i.test(option)) return 'Отправитель'
+  if (/(?:платн|paid)/i.test(option)) return 'Получатель'
+  return ''
 }
 
 function findDeliveryTracking(value: unknown, depth = 0): string {
@@ -57,6 +69,8 @@ function findDeliveryPayer(value: unknown, depth = 0): string {
   if (depth > 5) return ''
   const record = asRecord(value)
   for (const [key, candidate] of Object.entries(record)) {
+    if (/(?:sender_pays|seller_pays|merchant_pays)/i.test(key) && candidate === true) return 'Отправитель'
+    if (/(?:recipient_pays|buyer_pays|customer_pays)/i.test(key) && candidate === true) return 'Получатель'
     if (/(?:payer|payor|sender_pays|recipient_pays)/i.test(key)) {
       const found = deliveryPayer(candidate)
       if (found) return found
@@ -167,6 +181,7 @@ Deno.serve(async (request) => {
     const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
       deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
       findDeliveryPayer(order) ||
+      payerFromDeliveryOption(pick(order, 'delivery_option', 'delivery_service')) ||
       text(previousDelivery.payer) || 'Не указано'
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
