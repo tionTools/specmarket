@@ -80,7 +80,7 @@ Deno.serve(async (request) => {
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
   const diagnostic = requestedExternalId && orders[0]
-    ? { orderKeys: Object.keys(orders[0]), product: sourceItems(orders[0])[0] ?? {} }
+    ? sourceItems(orders[0])[0] ?? {}
     : undefined
   const admin = createClient(url, serviceKey)
   let created = 0
