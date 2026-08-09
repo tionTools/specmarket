@@ -24,6 +24,22 @@ function readable(value: unknown): string {
   const record = asRecord(value)
   return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
 }
+
+function findDeliveryTracking(value: unknown, depth = 0): string {
+  if (depth > 5) return ''
+  const record = asRecord(value)
+  for (const [key, candidate] of Object.entries(record)) {
+    if (/(?:ttn|tracking|declaration|waybill)/i.test(key)) {
+      const found = text(candidate) || readable(candidate)
+      if (found) return found
+    }
+    if (candidate && typeof candidate === 'object') {
+      const found = findDeliveryTracking(candidate, depth + 1)
+      if (found) return found
+    }
+  }
+  return ''
+}
 function commissionAmount(value: unknown): number | undefined {
   const record = asRecord(value)
   for (const [key, candidate] of Object.entries(record)) {
@@ -108,6 +124,11 @@ Deno.serve(async (request) => {
       .eq('external_id', externalId).maybeSingle()
     const previousDelivery = asRecord(existing?.delivery)
     const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
+    const trackingNumber =
+      text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) ||
+      text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
+      findDeliveryTracking(order) ||
+      text(previousDelivery.ttn)
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
@@ -128,7 +149,7 @@ Deno.serve(async (request) => {
       acquiring: number(existing?.acquiring), acquiring_percent: existing?.acquiring_percent ?? null,
       delivery: {
         carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
-        ttn: text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) || text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')),
+        ttn: trackingNumber,
         recipient: customerName(order), recipientPhone: text(order.phone) || text(order.client_phone),
         city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
         status: text(order.status) || 'Новий', payer: text(order.delivery_payer) || 'Не указано',
