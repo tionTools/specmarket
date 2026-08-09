@@ -27,6 +27,7 @@ const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const syncEpicentrMessage = ref('')
+const promStatusDebug = ref('')
 const syncNoticeVisible = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -312,13 +313,14 @@ async function syncPromOrder(order: Order) {
   isSyncingProm.value = true
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
-    method: 'POST', body: { externalId: order.externalId },
+    method: 'POST', body: { externalId: order.externalId, debugStatus: true },
   })
   isSyncingProm.value = false
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
     return
   }
+  promStatusDebug.value = Array.isArray(data.status_debug) ? data.status_debug.join(' · ') : ''
   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
   await loadRemoteOrders()
 }
@@ -881,6 +883,7 @@ function orderDateTime(order: Order) {
                       {{ status }}
                     </option>
                   </select></label>
+                  <p v-if="order.platform === 'Пром' && promStatusDebug" class="basis-full text-xs font-medium text-slate-500">API статусы: {{ promStatusDebug }}</p>
                 </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">

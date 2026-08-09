@@ -123,6 +123,20 @@ function sourceItems(order: RecordValue) {
   return Array.isArray(items) ? items.map(asRecord) : []
 }
 
+function statusFields(value: unknown, path = '', depth = 0, result: string[] = []): string[] {
+  if (depth > 5 || result.length >= 20) return result
+  const record = asRecord(value)
+  for (const [key, candidate] of Object.entries(record)) {
+    const currentPath = path ? `${path}.${key}` : key
+    if (/status/i.test(key)) {
+      const label = readable(candidate) || text(candidate) || JSON.stringify(candidate).slice(0, 120)
+      result.push(`${currentPath} = ${label}`)
+    }
+    if (candidate && typeof candidate === 'object') statusFields(candidate, currentPath, depth + 1, result)
+  }
+  return result
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -140,8 +154,9 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown, debugStatus?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+  const debugStatus = body.debugStatus === true
   const endpoint = requestedExternalId
     ? `https://my.prom.ua/api/v1/orders/${encodeURIComponent(requestedExternalId)}`
     : 'https://my.prom.ua/api/v1/orders/list?limit=100'
@@ -157,6 +172,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
+  let diagnostic: string[] = []
 
   for (const order of orders) {
     const promId = text(order.id)
@@ -179,6 +195,7 @@ Deno.serve(async (request) => {
       text(pick(order, 'shipment_status', 'delivery_status'))
     const deliveryStatus = apiDeliveryStatus ||
       (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
+    if (debugStatus) diagnostic = statusFields(order)
     const isPromFreeDelivery = order.has_order_promo_free_delivery === true
     const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
       deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
@@ -252,5 +269,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, status_debug: debugStatus ? diagnostic : undefined }, { headers: corsHeaders })
 })
