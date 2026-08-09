@@ -486,6 +486,17 @@ function displayOrderStatus(status: string) {
     completed: 'Завершено',
     cancelled: 'Скасовано',
     received: 'Принято',
+    delivered: 'Доставлено',
+  }
+  return names[status.toLowerCase()] ?? status
+}
+
+function displayDeliveryStatus(status: string) {
+  const names: Record<string, string> = {
+    received: 'Получено',
+    delivered: 'Получено',
+    in_transit: 'В дороге',
+    shipped: 'Отправлено',
   }
   return names[status.toLowerCase()] ?? status
 }
@@ -843,7 +854,7 @@ function orderDateTime(order: Order) {
             ><span><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span></span
             ><span
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
-              >{{ displayOrderStatus(order.delivery.status) }}</span
+              >{{ displayDeliveryStatus(order.delivery.status) }}</span
             ><span class="flex items-center justify-end gap-2"><span class="text-xl text-slate-400">{{ expandedOrderId === order.id ? '⌄' : '›' }}</span><span v-if="!isGuest" class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50" role="button" tabindex="0" title="Удалить заказ из CRM" aria-label="Удалить заказ из CRM" @click.stop="deleteOrder(order)" @keydown.enter.stop="deleteOrder(order)">{{ deletingOrderId === order.id ? '…' : '🗑' }}</span></span>
           </button>
           <div
@@ -910,7 +921,7 @@ function orderDateTime(order: Order) {
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
                   class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
-                  >{{ displayOrderStatus(order.delivery.status) }}</span
+                  >{{ displayDeliveryStatus(order.delivery.status) }}</span
                 >
               </div>
               <dl class="mt-5 space-y-4 text-sm">
