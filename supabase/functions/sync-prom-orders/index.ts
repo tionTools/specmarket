@@ -119,6 +119,19 @@ function orderLevelCommission(value: unknown, depth = 0): number {
   }, 0)
 }
 
+function commissionPaths(value: unknown, path = 'order', depth = 0): string[] {
+  if (depth > 5 || value === null || value === undefined) return []
+  if (Array.isArray(value)) return value.flatMap((item, index) => commissionPaths(item, `${path}[${index}]`, depth + 1))
+  const record = asRecord(value)
+  return Object.entries(record).flatMap(([key, candidate]) => {
+    const nextPath = `${path}.${key}`
+    const own = /(?:commission|royalty|prosale|catalog)/i.test(key)
+      ? [`${nextPath}=${typeof candidate === 'object' ? JSON.stringify(candidate) : text(candidate)}`]
+      : []
+    return [...own, ...commissionPaths(candidate, nextPath, depth + 1)]
+  })
+}
+
 function dateParts(value: unknown) {
   const source = text(value)
   const match = source.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
@@ -176,6 +189,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
+  let commissionDebug = ''
 
   for (const order of orders) {
     const promId = text(order.id)
@@ -214,6 +228,12 @@ Deno.serve(async (request) => {
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const websiteOrderCommission = orderLevelCommission(order)
+    if (requestedExternalId) {
+      const paths = commissionPaths(order).slice(0, 12)
+      commissionDebug = paths.length
+        ? `Комиссионные поля Prom: ${paths.join(' · ')}. Отдельная комиссия заказа: ${websiteOrderCommission}`
+        : 'Prom не передал ни одного поля комиссии в ответе этого заказа.'
+    }
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const shippingSource = hasSellerDeliveryCost
@@ -287,5 +307,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, commissionDebug }, { headers: corsHeaders })
 })
