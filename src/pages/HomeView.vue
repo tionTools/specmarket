@@ -21,6 +21,7 @@ const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
 const isSyncingEpicentr = ref(false)
 const syncEpicentrMessage = ref('')
+let persistenceQueue: Promise<void> = Promise.resolve()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 const platformOptions: Platform[] = ['Пром', 'Эпицентр', 'Каста', 'Р/С', 'Сайт']
@@ -191,7 +192,15 @@ function createOrderDraft(): Order {
   }
 }
 
-async function persistOrders() {
+function persistOrders() {
+  if (isGuest.value) return Promise.resolve()
+  persistenceQueue = persistenceQueue
+    .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
+    .then(() => persistOrdersNow())
+  return persistenceQueue
+}
+
+async function persistOrdersNow() {
   if (isGuest.value) return
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   if (!supabase) return
