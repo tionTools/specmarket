@@ -18,6 +18,7 @@ const authError = ref('')
 const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
+const editingOrderValue = ref<Record<string, string>>({})
 const isSyncingEpicentr = ref(false)
 const syncEpicentrMessage = ref('')
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
@@ -444,8 +445,15 @@ function updateProductRoyaltyAmount(product: OrderProduct, event: Event) {
   product.royaltyAmount = parseOrderNumber(event)
 }
 
-function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent', event: Event) {
-  order[field] = parseOrderNumber(event)
+function orderCellValue(key: string, value: number | undefined) {
+  return editingOrderValue.value[key] ?? formatOrderNumber(value)
+}
+
+function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent', key: string, event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  editingOrderValue.value[key] = raw
+  const value = Number(raw.replace(',', '.'))
+  if (Number.isFinite(value)) order[field] = value
 }
 
 async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () => void) {
@@ -453,10 +461,12 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
   if (editingOrderCell.value === key) {
     onCommit?.()
     editingOrderCell.value = null
+    delete editingOrderValue.value[key]
     persistOrders()
     return
   }
   editingOrderCell.value = key
+  editingOrderValue.value[key] = (event.target as HTMLInputElement).value
   await nextTick()
   ;(event.target as HTMLInputElement).select()
 }
@@ -471,6 +481,7 @@ function finishOrderCell(key: string, onCommit?: () => void) {
   if (editingOrderCell.value === key) {
     onCommit?.()
     editingOrderCell.value = null
+    delete editingOrderValue.value[key]
     persistOrders()
   }
 }
@@ -719,9 +730,9 @@ function orderDateTime(order: Order) {
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
                 <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
-                <label class="text-slate-500">Сумма оплаты<input :value="formatOrderNumber(order.paymentAmount ?? 0)" :readonly="editingOrderCell !== `${order.id}-payment-amount`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'paymentAmount', $event)" @blur="finishOrderCell(`${order.id}-payment-amount`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)" /></label>
-                <label class="text-slate-500">Доставка<input :value="formatOrderNumber(order.shipping)" :readonly="editingOrderCell !== `${order.id}-shipping`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'shipping', $event)" @blur="finishOrderCell(`${order.id}-shipping`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)" /></label>
-                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input :value="formatOrderNumber(order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Эквайринг, ₴<input :value="formatOrderNumber(order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
+                <label class="text-slate-500">Сумма оплаты<input :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)" :readonly="editingOrderCell !== `${order.id}-payment-amount`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'paymentAmount', `${order.id}-payment-amount`, $event)" @blur="finishOrderCell(`${order.id}-payment-amount`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)" /></label>
+                <label class="text-slate-500">Доставка<input :value="orderCellValue(`${order.id}-shipping`, order.shipping)" :readonly="editingOrderCell !== `${order.id}-shipping`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'shipping', `${order.id}-shipping`, $event)" @blur="finishOrderCell(`${order.id}-shipping`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)" /></label>
+                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input :value="orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', `${order.id}-acquiring-percent`, $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Эквайринг, ₴<input :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', `${order.id}-acquiring`, $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
               </div>
             </section>
             <aside class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300">

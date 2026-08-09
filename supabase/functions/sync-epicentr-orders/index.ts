@@ -196,7 +196,7 @@ Deno.serve(async (request) => {
     const externalId = source.id
     const existing = await admin
       .from('crm_orders')
-      .select('id, acquiring, acquiring_percent, delivery')
+      .select('id, shipping, acquiring, acquiring_percent, delivery')
       .eq('external_id', externalId)
       .maybeSingle()
     const shipment = source.address?.shipment
@@ -226,6 +226,7 @@ Deno.serve(async (request) => {
     const orderNumber = Number(source.number)
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
+    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const data = {
       external_id: externalId,
       order_number: Number.isFinite(orderNumber) ? orderNumber : 0,
@@ -237,7 +238,9 @@ Deno.serve(async (request) => {
       customer_comment: source.comment ?? null,
       platform: 'Эпицентр',
       status,
-      shipping: Number(shipment?.deliveryPrice ?? 0),
+      // Берём фактическую стоимость доставки из API. Если площадка её не отдала,
+      // сохраняем вручную внесённую сумму в CRM.
+      shipping: hasShippingFromApi ? Number(shipment?.deliveryPrice) : Number(existing.data?.shipping ?? 0),
       // Эквайринг вводится в CRM, а API площадки его не возвращает.
       acquiring: Number(existing.data?.acquiring ?? 0),
       acquiring_percent: existing.data?.acquiring_percent ?? null,
