@@ -100,6 +100,17 @@ function commissionAmount(value: unknown): number | undefined {
   return undefined
 }
 
+// Комиссии уровня заказа (включая «комісія за замовлення з сайту»).
+// Товары и позиции сюда не заходят, чтобы не посчитать одну комиссию дважды.
+function orderLevelCommission(value: unknown): number {
+  const record = asRecord(value)
+  return Object.entries(record).reduce((total, [key, candidate]) => {
+    if (key === 'cpa_commission' || !/(?:commission|prosale|royalty|catalog)/i.test(key)) return total
+    const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
+    return total + amount
+  }, 0)
+}
+
 function dateParts(value: unknown) {
   const source = text(value)
   const match = source.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
@@ -242,12 +253,18 @@ Deno.serve(async (request) => {
     }
     const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
     const orderCommission = number(asRecord(order.cpa_commission).amount)
+    const websiteOrderCommission = orderLevelCommission(order)
     if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       const previous = byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
       const price = itemPrice(item)
-      const royaltyAmount = commissionAmount(item) ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : previous?.royalty_amount ?? null)
+      const itemCommission = commissionAmount(item)
+      const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : previous?.royalty_amount ?? 0)
+      const websiteCommission = websiteOrderCommission && itemsAmount
+        ? websiteOrderCommission * (price * quantity / itemsAmount)
+        : 0
+      const royaltyAmount = number(cpaCommission) + websiteCommission
       const royaltyPercent = royaltyAmount === null || price * quantity === 0
         ? previous?.royalty_percent ?? null
         : (number(royaltyAmount) / (price * quantity)) * 100
