@@ -309,6 +309,7 @@ async function syncPromOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
+  if (data.diagnostic) window.alert(`Денежные поля Prom:\n${JSON.stringify(data.diagnostic, null, 2)}`)
   await loadRemoteOrders()
 }
 

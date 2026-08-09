@@ -38,6 +38,15 @@ function commissionAmount(value: unknown): number | undefined {
   }
   return undefined
 }
+function moneyFields(value: unknown, path = '', result: Record<string, unknown> = {}) {
+  const record = asRecord(value)
+  for (const [key, candidate] of Object.entries(record)) {
+    const currentPath = path ? `${path}.${key}` : key
+    if (candidate && typeof candidate === 'object') moneyFields(candidate, currentPath, result)
+    else if (/(?:price|cost|delivery|commission|prosale|royalty|catalog|fee|amount|sum)/i.test(key)) result[currentPath] = candidate
+  }
+  return result
+}
 
 function dateParts(value: unknown) {
   const source = text(value)
@@ -93,6 +102,9 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
+  const diagnostic = requestedExternalId && orders[0]
+    ? { order: moneyFields(orders[0]), product: moneyFields(sourceItems(orders[0])[0]) }
+    : undefined
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
@@ -153,5 +165,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, diagnostic }, { headers: corsHeaders })
 })
