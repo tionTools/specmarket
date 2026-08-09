@@ -79,6 +79,9 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
+  const diagnostic = requestedExternalId && orders[0]
+    ? { orderKeys: Object.keys(orders[0]), product: sourceItems(orders[0])[0] ?? {} }
+    : undefined
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
@@ -135,5 +138,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: previous?.royalty_percent ?? null, royalty_amount: previous?.royalty_amount ?? null }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, diagnostic }, { headers: corsHeaders })
 })
