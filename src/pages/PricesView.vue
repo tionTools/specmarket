@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import type { User } from '@supabase/supabase-js'
+import { useRoute } from 'vue-router'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 import { supabase } from '@/lib/supabase'
@@ -16,6 +17,7 @@ const epicQuestionValues: Record<number, number> = {
 }
 
 const storageKey = 'specmarket-crm-prices'
+const route = useRoute()
 const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
@@ -248,7 +250,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
     <div class="mx-auto max-w-[96rem] px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <RouterLink class="text-sm font-semibold text-emerald-700 hover:text-emerald-800" to="/">
+          <RouterLink class="text-sm font-semibold text-emerald-700 hover:text-emerald-800" :to="{ path: '/', query: route.query.returnOrder ? { returnOrder: route.query.returnOrder, returnSearch: route.query.returnSearch } : {} }">
             ← К заказам
           </RouterLink>
           <p class="mt-5 text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>

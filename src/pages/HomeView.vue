@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import type { User } from '@supabase/supabase-js'
+import { useRoute } from 'vue-router'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
 
 const storageKey = 'specmarket-crm-demo-orders'
+const route = useRoute()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
@@ -346,6 +348,14 @@ async function loadRemoteOrders() {
 
 onMounted(async () => {
   await loadRemoteOrders()
+  const returnOrder = Number(route.query.returnOrder)
+  const returnSearch = route.query.returnSearch
+  if (typeof returnSearch === 'string') searchQuery.value = returnSearch
+  if (Number.isFinite(returnOrder) && orders.value.some((order) => order.id === returnOrder)) {
+    expandedOrderId.value = returnOrder
+    await nextTick()
+    document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
+  }
 })
 
 function openNewOrderDialog() {
@@ -750,6 +760,7 @@ function orderDateTime(order: Order) {
         <article
           v-for="order in visibleOrders"
           :key="order.id"
+          :id="`order-${order.id}`"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
           :class="expandedOrderId === order.id ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-300 hover:border-slate-400'"
         >
@@ -782,6 +793,10 @@ function orderDateTime(order: Order) {
             v-if="expandedOrderId === order.id"
             class="grid gap-5 border-t-2 border-slate-400 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
+            <RouterLink
+              class="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-xl border border-emerald-300 bg-white px-2 py-5 text-sm font-bold text-emerald-800 shadow-lg transition hover:bg-emerald-50 [writing-mode:vertical-rl]"
+              :to="{ path: '/prices', query: { returnOrder: order.id, returnSearch: searchQuery } }"
+            >Цены</RouterLink>
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
