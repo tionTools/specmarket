@@ -52,6 +52,22 @@ function findDeliveryTracking(value: unknown, depth = 0): string {
   }
   return ''
 }
+
+function findDeliveryPayer(value: unknown, depth = 0): string {
+  if (depth > 5) return ''
+  const record = asRecord(value)
+  for (const [key, candidate] of Object.entries(record)) {
+    if (/(?:payer|payor|sender_pays|recipient_pays)/i.test(key)) {
+      const found = deliveryPayer(candidate)
+      if (found) return found
+    }
+    if (candidate && typeof candidate === 'object') {
+      const found = findDeliveryPayer(candidate, depth + 1)
+      if (found) return found
+    }
+  }
+  return ''
+}
 function commissionAmount(value: unknown): number | undefined {
   const record = asRecord(value)
   for (const [key, candidate] of Object.entries(record)) {
@@ -150,6 +166,7 @@ Deno.serve(async (request) => {
       (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
     const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
       deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
+      findDeliveryPayer(order) ||
       text(previousDelivery.payer) || 'Не указано'
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
