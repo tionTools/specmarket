@@ -12,6 +12,9 @@ const asRecord = (value: unknown): RecordValue =>
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const promStatusNames: Record<string, string> = {
+  received: 'Принято',
+}
 const firstNumber = (...values: unknown[]) => {
   for (const value of values) {
     const parsed = number(value)
@@ -129,7 +132,8 @@ Deno.serve(async (request) => {
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order) ||
       text(previousDelivery.ttn)
-    const orderStatus = text(order.status) || 'Новий'
+    const rawOrderStatus = text(order.status)
+    const orderStatus = (promStatusNames[rawOrderStatus.toLowerCase()] ?? rawOrderStatus) || 'Новий'
     const apiDeliveryStatus =
       readable(pick(rawDelivery, 'status', 'shipment_status', 'delivery_status', 'status_name')) ||
       text(pick(order, 'shipment_status', 'delivery_status'))

@@ -475,6 +475,7 @@ function displayOrderStatus(status: string) {
   const names: Record<string, string> = {
     completed: 'Завершено',
     cancelled: 'Скасовано',
+    received: 'Принято',
   }
   return names[status.toLowerCase()] ?? status
 }
