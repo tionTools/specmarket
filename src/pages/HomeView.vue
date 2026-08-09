@@ -94,6 +94,13 @@ const formatMoney = (value: number) => {
     maximumFractionDigits: fractionDigits,
   }).format(value) + ' ₴'
 }
+const formatProfitPercent = (profit: number, amount: number) => {
+  const value = amount === 0 ? 0 : (profit / amount) * 100
+  return new Intl.NumberFormat('uk-UA', {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(value) + '%'
+}
 const formatOrderNumber = (value: number | undefined) => {
   if (value === undefined) return ''
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
@@ -633,8 +640,8 @@ function orderDateTime(order: Order) {
               order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
             }}</span><span class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Позиций: {{ order.products.length }}</span></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
-            ><strong>{{ isPaid(order) ? formatMoney(getActualProfit(order)) : '—' }}</strong
-            ><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong
+            ><span v-if="isPaid(order)"><strong>{{ formatMoney(getActualProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span></span><strong v-else>—</strong
+            ><span><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span></span
             ><span
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ displayOrderStatus(order.delivery.status) }}</span
