@@ -86,7 +86,7 @@ const getPlannedProfit = (order: Order) =>
 const isPaid = (order: Order) =>
   ['Оплачено', 'Виконано', 'Завершено', 'Закрито', 'Закрыт'].includes(order.status)
 const getActualProfit = (order: Order) =>
-  (order.paymentAmount ?? getOrderAmount(order)) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
+  (order.paymentAmount ?? 0) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
 const formatMoney = (value: number) => {
   const fractionDigits = Number.isInteger(value) ? 0 : 2
   return new Intl.NumberFormat('uk-UA', {
@@ -172,6 +172,7 @@ function createOrderDraft(): Order {
     status: 'Новий',
     products: [createProduct()],
     shipping: 0,
+    paymentAmount: 0,
     acquiring: 0,
     delivery: {
       carrier: 'Новая почта',
@@ -262,7 +263,7 @@ onMounted(async () => {
     .order('created_at', { ascending: false })
   if (!remoteOrders?.length) { await persistOrders(); return }
   orders.value = remoteOrders
-    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: (row.delivery as Delivery).paymentAmount ?? undefined, acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 })
 
@@ -713,7 +714,7 @@ function orderDateTime(order: Order) {
                 <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
                 <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
                 <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
-                <label class="text-slate-500">Сумма оплаты<input :value="formatOrderNumber(order.paymentAmount ?? getOrderAmount(order))" :readonly="editingOrderCell !== `${order.id}-payment-amount`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'paymentAmount', $event)" @blur="finishOrderCell(`${order.id}-payment-amount`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)" /></label>
+                <label class="text-slate-500">Сумма оплаты<input :value="formatOrderNumber(order.paymentAmount ?? 0)" :readonly="editingOrderCell !== `${order.id}-payment-amount`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'paymentAmount', $event)" @blur="finishOrderCell(`${order.id}-payment-amount`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)" /></label>
                 <label class="text-slate-500">Доставка<input :value="formatOrderNumber(order.shipping)" :readonly="editingOrderCell !== `${order.id}-shipping`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'shipping', $event)" @blur="finishOrderCell(`${order.id}-shipping`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)" /></label>
                 <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Эквайринг, %<input :value="formatOrderNumber(order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Эквайринг, ₴<input :value="formatOrderNumber(order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
               </div>
