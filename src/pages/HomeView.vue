@@ -112,9 +112,9 @@ const getRoyalty = (order: Order) =>
   order.products.reduce((sum, product) => sum + getProductRoyalty(order, product), 0)
 const getPlannedProfit = (order: Order) =>
   getOrderAmount(order) * 0.983 - getOrderCost(order) - getRoyalty(order) - order.shipping
-const isPaid = (order: Order) =>
-  (order.paymentAmount ?? 0) > 0 ||
-  ['Оплачено', 'Виконано', 'Завершено', 'Закрито', 'Закрыт'].includes(order.status)
+// Фактическая прибыль появляется только после ручного внесения полученной
+// суммы. Статус площадки сам по себе не означает, что деньги уже получены.
+const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
 const getActualProfit = (order: Order) =>
   (order.paymentAmount ?? 0) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
 const formatMoney = (value: number) => {
