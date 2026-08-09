@@ -113,7 +113,7 @@ const visibleOrders = computed(() => {
     const matchesPlatform =
       platformFilter.value === 'all' || order.platform === platformFilter.value
     const haystack =
-      `${order.id} ${order.customer} ${order.phone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
+      `${order.id} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
     return matchesPlatform && (!search || haystack.includes(search))
   })
 })
@@ -574,7 +574,7 @@ function orderDateTime(order: Order) {
           <input
             v-model="searchQuery"
             class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-emerald-600 sm:max-w-md"
-            placeholder="Поиск: номер, покупатель, товар"
+            placeholder="Поиск: заказ, ТТН, покупатель, товар"
           /><select
             v-model="platformFilter"
             class="rounded-xl border border-slate-200 px-3 py-2 text-sm"
