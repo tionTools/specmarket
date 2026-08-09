@@ -534,7 +534,7 @@ function openEpicentrOrder(order: Order) {
 function openPromOrder(order: Order) {
   const promId = String(order.externalId ?? order.id).replace(/^prom:/, '')
   if (!promId) return
-  window.open(`https://my.prom.ua/cms/order/${promId}`, '_blank', 'noopener,noreferrer')
+  window.open(`https://my.prom.ua/cms/order/edit/${promId}`, '_blank', 'noopener,noreferrer')
 }
 
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
