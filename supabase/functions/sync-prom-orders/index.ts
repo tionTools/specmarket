@@ -106,10 +106,18 @@ function orderLevelCommission(value: unknown, depth = 0): number {
   if (depth > 4 || Array.isArray(value)) return 0
   const record = asRecord(value)
   return Object.entries(record).reduce((total, [key, candidate]) => {
-    // ProSale/CPA относятся к позиции (или cpa_commission) и не должны
-    // становиться отдельной комиссией заказа. Остальные комиссии уровня
-    // заказа Prom может прислать внутри payment/order-блока.
-    if (/(?:cpa|prosale|catalog)/i.test(key)) return total
+    // type=2 в prosale_commission — точная метка Prom «Комиссия за заказ с сайта».
+    // Это фиксированная комиссия всего заказа, а не комиссия каталога по позиции.
+    if (/prosale/i.test(key)) {
+      const commission = asRecord(candidate)
+      const title = readable(commission.title).toLowerCase()
+      if (number(commission.type) === 2 || /(?:с сайта|з сайту|site|website)/i.test(title)) {
+        return total + number(pick(commission, 'value', 'amount', 'price'))
+      }
+      return total
+    }
+    // CPA/каталог относятся к позиции и не должны дублироваться на уровне заказа.
+    if (/(?:cpa|catalog)/i.test(key)) return total
     if (/(?:commission|royalty)/i.test(key)) {
       const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
       return total + amount
@@ -117,19 +125,6 @@ function orderLevelCommission(value: unknown, depth = 0): number {
     if (/(?:product|item|position)/i.test(key)) return total
     return total + orderLevelCommission(candidate, depth + 1)
   }, 0)
-}
-
-function commissionPaths(value: unknown, path = 'order', depth = 0): string[] {
-  if (depth > 5 || value === null || value === undefined) return []
-  if (Array.isArray(value)) return value.flatMap((item, index) => commissionPaths(item, `${path}[${index}]`, depth + 1))
-  const record = asRecord(value)
-  return Object.entries(record).flatMap(([key, candidate]) => {
-    const nextPath = `${path}.${key}`
-    const own = /(?:commission|royalty|prosale|catalog)/i.test(key)
-      ? [`${nextPath}=${typeof candidate === 'object' ? JSON.stringify(candidate) : text(candidate)}`]
-      : []
-    return [...own, ...commissionPaths(candidate, nextPath, depth + 1)]
-  })
 }
 
 function dateParts(value: unknown) {
@@ -170,7 +165,7 @@ Deno.serve(async (request) => {
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = await auth.auth.getUser()
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  if (user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
   const body = await request.json().catch(() => ({})) as { externalId?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
@@ -189,7 +184,6 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
-  let commissionDebug = ''
 
   for (const order of orders) {
     const promId = text(order.id)
@@ -228,12 +222,6 @@ Deno.serve(async (request) => {
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const websiteOrderCommission = orderLevelCommission(order)
-    if (requestedExternalId) {
-      const paths = commissionPaths(order).slice(0, 12)
-      commissionDebug = paths.length
-        ? `Комиссионные поля Prom: ${paths.join(' · ')}. Отдельная комиссия заказа: ${websiteOrderCommission}`
-        : 'Prom не передал ни одного поля комиссии в ответе этого заказа.'
-    }
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const shippingSource = hasSellerDeliveryCost
@@ -307,5 +295,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, commissionDebug }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
 })

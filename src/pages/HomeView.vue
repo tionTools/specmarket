@@ -319,7 +319,7 @@ async function syncPromOrder(order: Order) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
     return
   }
-  showSyncMessage(data.commissionDebug || `Заказ № ${order.id} обновлён из Prom.`)
+  showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
   await loadRemoteOrders()
 }
 
