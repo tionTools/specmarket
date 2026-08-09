@@ -65,13 +65,20 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const response = await fetch('https://my.prom.ua/api/v1/orders/list?limit=100', {
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown }
+  const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+  const endpoint = requestedExternalId
+    ? `https://my.prom.ua/api/v1/orders/${encodeURIComponent(requestedExternalId)}`
+    : 'https://my.prom.ua/api/v1/orders/list?limit=100'
+  const response = await fetch(endpoint, {
     headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
   })
   if (!response.ok) return Response.json({ ok: false, message: 'Prom не отдал заказы.', status: response.status }, { status: 502, headers: corsHeaders })
 
   const payload = asRecord(await response.json())
-  const orders = Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
+  const orders = requestedExternalId
+    ? [asRecord(payload.order ?? payload)]
+    : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0

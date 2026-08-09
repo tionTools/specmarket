@@ -296,6 +296,22 @@ async function syncPromOrders() {
   await loadRemoteOrders()
 }
 
+async function syncPromOrder(order: Order) {
+  if (!supabase || isGuest.value || order.platform !== 'Пром' || !order.externalId) return
+  isSyncingProm.value = true
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
+    method: 'POST', body: { externalId: order.externalId },
+  })
+  isSyncingProm.value = false
+  if (error || !data?.ok) {
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
+    return
+  }
+  showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
+  await loadRemoteOrders()
+}
+
 async function syncEpicentrOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
   isSyncingEpicentr.value = true
@@ -771,6 +787,7 @@ function orderDateTime(order: Order) {
                 <h3 class="text-base font-semibold">Состав заказа</h3>
                 <div class="flex flex-wrap items-center gap-3">
                   <button v-if="order.platform === 'Эпицентр' && order.externalId" class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60" type="button" :disabled="isSyncingEpicentr" @click="syncEpicentrOrder(order)">{{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}</button>
+                  <button v-if="order.platform === 'Пром' && order.externalId" class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60" type="button" :disabled="isSyncingProm" @click="syncPromOrder(order)">{{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}</button>
                   <label class="flex items-center gap-2 text-sm text-slate-500"
                   >Статус<select
                     :value="displayOrderStatus(order.status)"
