@@ -105,9 +105,9 @@ function commissionAmount(value: unknown): number | undefined {
 function orderLevelCommission(value: unknown): number {
   const record = asRecord(value)
   return Object.entries(record).reduce((total, [key, candidate]) => {
-    // Только комиссия именно заказа с сайта. ProSale / CPA уже приходит
-    // либо по позиции, либо в cpa_commission и не должен добавляться второй раз.
-    if (!/(?:site|website)/i.test(key) || !/(?:commission|royalty)/i.test(key)) return total
+    // Комиссия уровня заказа с сайта. ProSale / CPA уже приходит либо по
+    // позиции, либо в cpa_commission, поэтому их исключаем от двойного учёта.
+    if (/(?:cpa|prosale|catalog)/i.test(key) || !/(?:commission|royalty)/i.test(key)) return total
     const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
     return total + amount
   }, 0)
