@@ -38,15 +38,6 @@ function commissionAmount(value: unknown): number | undefined {
   }
   return undefined
 }
-function moneyFields(value: unknown, path = '', result: Record<string, unknown> = {}) {
-  const record = asRecord(value)
-  for (const [key, candidate] of Object.entries(record)) {
-    const currentPath = path ? `${path}.${key}` : key
-    if (candidate && typeof candidate === 'object') moneyFields(candidate, currentPath, result)
-    else if (/(?:price|cost|delivery|commission|prosale|royalty|catalog|fee|amount|sum)/i.test(key)) result[currentPath] = candidate
-  }
-  return result
-}
 
 function dateParts(value: unknown) {
   const source = text(value)
@@ -102,9 +93,6 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
-  const diagnostic = requestedExternalId && orders[0]
-    ? { order: moneyFields(orders[0]), product: moneyFields(sourceItems(orders[0])[0]) }
-    : undefined
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
@@ -123,6 +111,9 @@ Deno.serve(async (request) => {
     // Для прибыли используем только отдельную сумму, которую платит продавец.
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+    const isPromFreeDelivery = order.has_order_promo_free_delivery === true
+    const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
+    const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const data = {
       external_id: externalId,
@@ -131,7 +122,7 @@ Deno.serve(async (request) => {
       customer_email: text(order.email) || text(order.client_email) || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: text(order.status) || 'Новий',
-      shipping: hasSellerDeliveryCost ? number(sellerDeliveryCost) : number(existing?.shipping),
+      shipping: hasSellerDeliveryCost ? number(sellerDeliveryCost) : promoSellerDeliveryCost ?? number(existing?.shipping),
       acquiring: number(existing?.acquiring), acquiring_percent: existing?.acquiring_percent ?? null,
       delivery: {
         carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
@@ -153,17 +144,23 @@ Deno.serve(async (request) => {
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const items = sourceItems(order)
+    const itemPrice = (item: RecordValue) => {
+      const quantity = number(pick(item, 'quantity', 'amount')) || 1
+      return firstNumber(pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'), number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity)
+    }
+    const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
+    const orderCommission = number(asRecord(order.cpa_commission).amount)
     if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       const previous = byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
-      const price = firstNumber(pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'), number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity)
-      const royaltyAmount = commissionAmount(item) ?? previous?.royalty_amount ?? null
+      const price = itemPrice(item)
+      const royaltyAmount = commissionAmount(item) ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : previous?.royalty_amount ?? null)
       const royaltyPercent = royaltyAmount === null || price * quantity === 0
         ? previous?.royalty_percent ?? null
         : (number(royaltyAmount) / (price * quantity)) * 100
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, diagnostic }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
 })
