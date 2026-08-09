@@ -30,6 +30,8 @@ function commissionAmount(value: unknown): number | undefined {
     if (/(?:commission|prosale|royalty|catalog)/i.test(key)) {
       const amount = number(candidate)
       if (amount !== 0) return amount
+      const nestedAmount = number(pick(asRecord(candidate), 'amount', 'price', 'value'))
+      if (nestedAmount !== 0) return nestedAmount
     }
     if (candidate && typeof candidate === 'object') {
       const amount = commissionAmount(candidate)
