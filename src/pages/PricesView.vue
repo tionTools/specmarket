@@ -289,11 +289,15 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
       <p v-if="user && isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">Гостевой режим: доступен только просмотр цен и себестоимости.</p>
       <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 p-4">
-          <input
-            v-model="searchQuery"
-            class="w-full max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-emerald-600"
-            placeholder="Поиск по названию товара"
-          />
+          <div class="relative w-full max-w-md">
+            <svg class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+            <input
+              v-model="searchQuery"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
+              placeholder="Поиск по названию товара"
+            />
+            <button v-if="searchQuery" class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700" type="button" aria-label="Очистить поиск" @click="searchQuery = ''">×</button>
+          </div>
         </div>
         <div class="overflow-visible">
           <table class="catalog-table w-max border-collapse text-left text-sm" :class="{ 'pointer-events-none select-none opacity-75': isGuest }">

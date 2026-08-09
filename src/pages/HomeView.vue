@@ -624,11 +624,15 @@ function orderDateTime(order: Order) {
 
       <section class="mt-6 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
         <div class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row">
-          <input
-            v-model="searchQuery"
-            class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-emerald-600 sm:max-w-md"
-            placeholder="Поиск: заказ, ТТН, покупатель, товар"
-          /><select
+          <div class="relative w-full sm:max-w-md">
+            <svg class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+            <input
+              v-model="searchQuery"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
+              placeholder="Поиск: заказ, ТТН, покупатель, товар"
+            />
+            <button v-if="searchQuery" class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700" type="button" aria-label="Очистить поиск" @click="searchQuery = ''">×</button>
+          </div><select
             v-model="platformFilter"
             class="rounded-xl border border-slate-200 px-3 py-2 text-sm"
           >
