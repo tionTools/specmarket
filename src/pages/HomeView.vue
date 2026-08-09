@@ -11,6 +11,7 @@ const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 const expandedOrderId = ref<number | null>(null)
+const deletingOrderId = ref<number | null>(null)
 const user = ref<User | null>(null)
 const email = ref('')
 const password = ref('')
@@ -400,6 +401,28 @@ function toggleOrder(orderId: number) {
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
 }
 
+async function deleteOrder(order: Order) {
+  if (isGuest.value || deletingOrderId.value !== null) return
+  if (!window.confirm(`Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`)) return
+  deletingOrderId.value = order.id
+  await persistenceQueue
+  if (supabase && order.remoteId) {
+    const { error: itemsError } = await supabase.from('crm_order_items').delete().eq('order_id', order.remoteId)
+    const { error: orderError } = itemsError
+      ? { error: itemsError }
+      : await supabase.from('crm_orders').delete().eq('id', order.remoteId)
+    if (orderError) {
+      window.alert(`Не удалось удалить заказ: ${orderError.message}`)
+      deletingOrderId.value = null
+      return
+    }
+  }
+  orders.value = orders.value.filter((item) => item.id !== order.id)
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  expandedOrderId.value = null
+  deletingOrderId.value = null
+}
+
 function platformClass(platform: Platform) {
   return {
     'text-blue-700': platform === 'Пром',
@@ -761,6 +784,7 @@ function orderDateTime(order: Order) {
                       {{ status }}
                     </option>
                   </select></label>
+                  <button class="grid size-8 place-items-center rounded-lg border border-rose-200 bg-white text-base font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50" type="button" :disabled="deletingOrderId === order.id" title="Удалить заказ из CRM" aria-label="Удалить заказ из CRM" @click="deleteOrder(order)">{{ deletingOrderId === order.id ? '…' : '🗑' }}</button>
                 </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
