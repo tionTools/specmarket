@@ -665,6 +665,11 @@ function orderDateTime(order: Order) {
     </form>
   </div>
   <div v-else class="min-h-screen bg-slate-50 text-slate-900">
+    <RouterLink
+      class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
+      :to="{ path: '/prices', query: expandedOrderId ? { returnOrder: expandedOrderId, returnSearch: searchQuery } : { returnSearch: searchQuery } }"
+      title="Открыть цены и себестоимость"
+    ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink>
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -845,12 +850,6 @@ function orderDateTime(order: Order) {
             v-if="expandedOrderId === order.id"
             class="grid gap-5 border-t-2 border-slate-400 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
-            <RouterLink
-              class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
-              :to="{ path: '/prices', query: { returnOrder: order.id, returnSearch: searchQuery } }"
-              title="Открыть цены и себестоимость"
-              @click.stop
-            ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink>
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
@@ -943,10 +942,6 @@ function orderDateTime(order: Order) {
                   <dd class="font-semibold">
                     {{ displayDeliveryAddress(order.delivery) }}
                   </dd>
-                </div>
-                <div class="grid grid-cols-[1fr_1.35fr] gap-3">
-                  <dt class="text-slate-500">Плательщик</dt>
-                  <dd class="font-semibold">{{ order.delivery.payer }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Спосіб оплати</dt>

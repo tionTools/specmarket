@@ -248,10 +248,10 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
 <template>
   <div class="min-h-screen bg-slate-50 text-slate-900">
     <RouterLink
-      class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-l-xl border border-r-0 border-blue-200 bg-white px-2 py-3 text-xs font-bold leading-4 text-blue-700 shadow-lg transition hover:bg-blue-50"
+      class="fixed left-0 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-r-xl border border-l-0 border-blue-200 bg-white px-2 py-3 text-xs font-bold leading-4 text-blue-700 shadow-lg transition hover:bg-blue-50"
       :to="{ path: '/', query: route.query.returnOrder ? { returnOrder: route.query.returnOrder, returnSearch: route.query.returnSearch } : {} }"
       title="Вернуться к заказам"
-    ><span>К</span><span>З</span><span>А</span><span>К</span><span>А</span><span>З</span><span>А</span><span>М</span></RouterLink>
+    ><span>К</span><span class="h-2" aria-hidden="true"></span><span>З</span><span>А</span><span>К</span><span>А</span><span>З</span><span>А</span><span>М</span></RouterLink>
     <div class="mx-auto max-w-[96rem] px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
