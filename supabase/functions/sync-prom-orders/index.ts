@@ -102,14 +102,20 @@ function commissionAmount(value: unknown): number | undefined {
 
 // Комиссии уровня заказа (включая «комісія за замовлення з сайту»).
 // Товары и позиции сюда не заходят, чтобы не посчитать одну комиссию дважды.
-function orderLevelCommission(value: unknown): number {
+function orderLevelCommission(value: unknown, depth = 0): number {
+  if (depth > 4 || Array.isArray(value)) return 0
   const record = asRecord(value)
   return Object.entries(record).reduce((total, [key, candidate]) => {
-    // Комиссия уровня заказа с сайта. ProSale / CPA уже приходит либо по
-    // позиции, либо в cpa_commission, поэтому их исключаем от двойного учёта.
-    if (/(?:cpa|prosale|catalog)/i.test(key) || !/(?:commission|royalty)/i.test(key)) return total
-    const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
-    return total + amount
+    // ProSale/CPA относятся к позиции (или cpa_commission) и не должны
+    // становиться отдельной комиссией заказа. Остальные комиссии уровня
+    // заказа Prom может прислать внутри payment/order-блока.
+    if (/(?:cpa|prosale|catalog)/i.test(key)) return total
+    if (/(?:commission|royalty)/i.test(key)) {
+      const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
+      return total + amount
+    }
+    if (/(?:product|item|position)/i.test(key)) return total
+    return total + orderLevelCommission(candidate, depth + 1)
   }, 0)
 }
 
