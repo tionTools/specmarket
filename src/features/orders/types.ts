@@ -25,6 +25,7 @@ export interface Delivery {
   paymentAmount?: number
   paymentMethod?: string
   paymentStatus?: string
+  hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
 }
 

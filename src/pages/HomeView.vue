@@ -848,7 +848,7 @@ function orderDateTime(order: Order) {
               ></span
             ><span class="min-w-0"><span class="block truncate text-sm">{{
               order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
-            }}</span><span class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Позиций: {{ order.products.length }}</span></span
+            }}</span><span class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Позиций: {{ order.products.length }}</span><span v-if="order.delivery.hasWebsiteCommission" class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"><span aria-hidden="true">◎</span> Замовлення з сайту</span></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
             ><span v-if="isPaid(order)"><strong>{{ formatMoney(getActualProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span></span><strong v-else>—</strong
             ><span><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span></span

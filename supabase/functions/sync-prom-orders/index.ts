@@ -207,6 +207,7 @@ Deno.serve(async (request) => {
     // Для прибыли используем только отдельную сумму, которую платит продавец.
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+    const websiteOrderCommission = orderLevelCommission(order)
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const shippingSource = hasSellerDeliveryCost
@@ -236,6 +237,7 @@ Deno.serve(async (request) => {
         status: deliveryStatus, payer,
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
+        hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
       },
     }
@@ -256,7 +258,6 @@ Deno.serve(async (request) => {
     }
     const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
     const orderCommission = number(asRecord(order.cpa_commission).amount)
-    const websiteOrderCommission = orderLevelCommission(order)
     if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       // Позиция стабильнее названия: одинаковые товары могут повторяться,
