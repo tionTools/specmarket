@@ -20,6 +20,7 @@ const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
 const isSyncingEpicentr = ref(false)
+const isSyncingProm = ref(false)
 const syncEpicentrMessage = ref('')
 let persistenceQueue: Promise<void> = Promise.resolve()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
@@ -245,6 +246,20 @@ async function syncEpicentrOrders() {
     return
   }
   syncEpicentrMessage.value = `Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
+  await loadRemoteOrders()
+}
+
+async function syncPromOrders() {
+  if (!supabase || isGuest.value) return
+  isSyncingProm.value = true
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
+  isSyncingProm.value = false
+  if (error || !data?.ok) {
+    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.'
+    return
+  }
+  syncEpicentrMessage.value = `Prom: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
   await loadRemoteOrders()
 }
 
@@ -552,6 +567,15 @@ function orderDateTime(order: Order) {
             @click="syncEpicentrOrders"
           >
             {{ isSyncingEpicentr ? 'Обновляем Эпицентр…' : '↻ Обновить Эпицентр' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingProm"
+            type="button"
+            @click="syncPromOrders"
+          >
+            {{ isSyncingProm ? 'Обновляем Prom…' : '↻ Обновить Prom' }}
           </button>
           <button
             v-if="!isGuest"
