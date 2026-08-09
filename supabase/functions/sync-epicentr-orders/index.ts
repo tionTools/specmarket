@@ -194,7 +194,7 @@ Deno.serve(async (request) => {
     const externalId = source.id
     const existing = await admin
       .from('crm_orders')
-      .select('id, acquiring, acquiring_percent')
+      .select('id, acquiring, acquiring_percent, delivery')
       .eq('external_id', externalId)
       .maybeSingle()
     const shipment = source.address?.shipment
@@ -222,6 +222,8 @@ Deno.serve(async (request) => {
     const recipientName = fullName(recipient) || customer
     const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
     const orderNumber = Number(source.number)
+    const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
+    const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const data = {
       external_id: externalId,
       order_number: Number.isFinite(orderNumber) ? orderNumber : 0,
@@ -247,6 +249,7 @@ Deno.serve(async (request) => {
         status,
         payer: 'Не вказано',
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
+        paymentAmount,
       },
     }
 

@@ -21,6 +21,7 @@ export interface Delivery {
   status: string
   payer: string
   isAlternateRecipient?: boolean
+  paymentAmount?: number
 }
 
 export interface Order {
@@ -37,6 +38,7 @@ export interface Order {
   status: string
   products: OrderProduct[]
   shipping: number
+  paymentAmount?: number
   acquiring: number
   acquiringPercent?: number
   delivery: Delivery
