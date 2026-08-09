@@ -227,16 +227,27 @@ async function persistOrdersNow() {
   if (isGuest.value) return
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   if (!supabase) return
-  const { data: session } = await supabase.auth.getSession()
-  if (!session.session) return
-  for (const order of orders.value) {
-    const payload = { order_number: order.id, order_date: order.date, order_time: order.time ?? null, customer: order.customer, phone: order.phone, customer_email: order.customerEmail ?? null, customer_comment: order.customerComment ?? null, platform: order.platform, status: order.status, shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null, delivery: { ...order.delivery, paymentAmount: order.paymentAmount } }
-    let remoteId = order.remoteId
-    if (remoteId) await supabase.from('crm_orders').update(payload).eq('id', remoteId)
-    else { const { data } = await supabase.from('crm_orders').insert(payload).select('id').single(); remoteId = data?.id; if (remoteId) order.remoteId = remoteId }
-    if (!remoteId) continue
-    await supabase.from('crm_order_items').delete().eq('order_id', remoteId)
-    await supabase.from('crm_order_items').insert(order.products.map((product, position) => ({ order_id: remoteId, position, product_name: product.name, size: product.size, quantity: product.quantity, price: product.price, cost: product.cost, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null })))
+  const { data, error } = await supabase.functions.invoke('save-crm-orders', {
+    method: 'POST',
+    body: {
+      orders: orders.value.map((order) => ({
+        remoteId: order.remoteId,
+        order_number: order.id, order_date: order.date, order_time: order.time ?? null,
+        customer: order.customer, phone: order.phone, customer_email: order.customerEmail ?? null,
+        customer_comment: order.customerComment ?? null, platform: order.platform, status: order.status,
+        shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null,
+        delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
+        items: order.products.map((product) => ({
+          product_name: product.name, size: product.size, quantity: product.quantity, price: product.price,
+          cost: product.cost, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
+        })),
+      })),
+    },
+  })
+  if (error || !data?.ok) throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
+  for (const saved of data.saved as Array<{ orderNumber: number; remoteId: string }>) {
+    const order = orders.value.find((item) => item.id === saved.orderNumber)
+    if (order) order.remoteId = saved.remoteId
   }
 }
 
