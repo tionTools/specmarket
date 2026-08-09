@@ -506,6 +506,15 @@ function displayCarrier(carrier: string) {
   return names[carrier.toLowerCase()] ?? carrier
 }
 
+function carrierIcon(carrier: string) {
+  const value = carrier.toLowerCase()
+  if (value.includes('nova') || value.includes('новая') || value.includes('нова пошта')) return 'nova'
+  if (value.includes('ukr') || value.includes('укр')) return 'ukr'
+  if (value.includes('rozetka')) return 'rozetka'
+  if (value.includes('meest') || value.includes('міст')) return 'meest'
+  return 'generic'
+}
+
 function displayPaymentMethod(method?: string) {
   if (!method) return '—'
   const names: Record<string, string> = {
@@ -908,7 +917,14 @@ function orderDateTime(order: Order) {
               <dl class="mt-5 space-y-4 text-sm">
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Перевозчик</dt>
-                  <dd class="font-semibold">{{ displayCarrier(order.delivery.carrier) }}</dd>
+                  <dd class="flex items-center gap-2 font-semibold">
+                    <svg v-if="carrierIcon(order.delivery.carrier) === 'nova'" aria-label="Новая почта" class="size-5 shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" /></svg>
+                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'" aria-label="Укрпочта" class="size-5 shrink-0 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 7h18v11H3zM3 8l9 6 9-6" /></svg>
+                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'" aria-label="RozetkaDelivery" class="size-5 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /></svg>
+                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'meest'" aria-label="Meest" class="size-5 shrink-0 text-sky-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 17V7l4 6 5-8 5 8 4-6v10" /></svg>
+                    <svg v-else aria-hidden="true" class="size-5 shrink-0 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /></svg>
+                    <span>{{ displayCarrier(order.delivery.carrier) }}</span>
+                  </dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">ТТН</dt>
