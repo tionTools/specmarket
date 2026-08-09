@@ -808,9 +808,11 @@ function orderDateTime(order: Order) {
             class="grid gap-5 border-t-2 border-slate-400 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
             <RouterLink
-              class="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-xl border border-emerald-300 bg-white px-2 py-5 text-sm font-bold text-emerald-800 shadow-lg transition hover:bg-emerald-50 [writing-mode:vertical-rl]"
+              class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
               :to="{ path: '/prices', query: { returnOrder: order.id, returnSearch: searchQuery } }"
-            >Цены</RouterLink>
+              title="Открыть цены и себестоимость"
+              @click.stop
+            ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink>
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
