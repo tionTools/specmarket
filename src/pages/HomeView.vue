@@ -118,12 +118,14 @@ const ordersForToday = computed(() => orders.value.filter((order) => order.date 
 const ordersForMonth = computed(() => orders.value.filter(isInCurrentMonth))
 const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
+  const ttnSearch = search.replace(/\D/g, '')
   return orders.value.filter((order) => {
     const matchesPlatform =
       platformFilter.value === 'all' || order.platform === platformFilter.value
     const haystack =
       `${order.id} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
-    return matchesPlatform && (!search || haystack.includes(search))
+    const matchesTtn = ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
+    return matchesPlatform && (!search || haystack.includes(search) || matchesTtn)
   })
 })
 
