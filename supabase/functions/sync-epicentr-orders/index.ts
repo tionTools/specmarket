@@ -146,15 +146,33 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
 
-  const response = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
-    headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-  })
-  if (!response.ok) {
-    return Response.json({ ok: false, message: 'Эпицентр не отдал заказы.', status: response.status }, { status: 502, headers: corsHeaders })
-  }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown }
+  const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
+  let orders: EpicentrOrder[] = []
 
-  const payload = await response.json() as { items?: EpicentrOrder[] }
-  const orders = payload.items ?? []
+  if (requestedExternalId) {
+    const response = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${requestedExternalId}`, {
+      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: response.status }, { status: 502, headers: corsHeaders })
+    }
+    const payload: unknown = await response.json()
+    const item = payload && typeof payload === 'object'
+      ? ((payload as { data?: Partial<EpicentrOrder> }).data ?? payload as Partial<EpicentrOrder>)
+      : {}
+    orders = [{ ...item, id: item.id ?? requestedExternalId, items: item.items ?? [] } as EpicentrOrder]
+  } else {
+    const response = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
+      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      return Response.json({ ok: false, message: 'Эпицентр не отдал заказы.', status: response.status }, { status: 502, headers: corsHeaders })
+    }
+
+    const payload = await response.json() as { items?: EpicentrOrder[] }
+    orders = payload.items ?? []
+  }
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0

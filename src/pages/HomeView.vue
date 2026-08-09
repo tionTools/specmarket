@@ -227,6 +227,23 @@ async function syncEpicentrOrders() {
   window.setTimeout(() => window.location.reload(), 900)
 }
 
+async function syncEpicentrOrder(order: Order) {
+  if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
+  isSyncingEpicentr.value = true
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
+    method: 'POST',
+    body: { externalId: order.externalId },
+  })
+  isSyncingEpicentr.value = false
+  if (error || !data?.ok) {
+    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.'
+    return
+  }
+  syncEpicentrMessage.value = `Заказ № ${order.id} обновлён из Эпицентра.`
+  window.setTimeout(() => window.location.reload(), 700)
+}
+
 onMounted(async () => {
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
@@ -604,7 +621,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
+              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span></span>
               ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
@@ -632,7 +649,9 @@ function orderDateTime(order: Order) {
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
-                <label class="flex items-center gap-2 text-sm text-slate-500"
+                <div class="flex flex-wrap items-center gap-3">
+                  <button v-if="order.platform === 'Эпицентр' && order.externalId" class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60" type="button" :disabled="isSyncingEpicentr" @click="syncEpicentrOrder(order)">{{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}</button>
+                  <label class="flex items-center gap-2 text-sm text-slate-500"
                   >Статус<select
                     :value="displayOrderStatus(order.status)"
                     class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
@@ -645,8 +664,8 @@ function orderDateTime(order: Order) {
                     >
                       {{ status }}
                     </option>
-                  </select></label
-                >
+                  </select></label>
+                </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
                 <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
