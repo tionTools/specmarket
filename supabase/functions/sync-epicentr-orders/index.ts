@@ -116,15 +116,17 @@ function formatDeliveryPointAddress(provider: string | undefined, officeId: stri
   if (!address) return deliveryPointLabel(provider, officeId)
   if (/(?:відділення|поштомат)[^,]*№/i.test(address)) return address
 
-  const trailingNumber = address.match(/(?:,\s*)(\d{4,5})$/)?.[1]
-  const leadingNumber = address.match(/^\s*(\d{4,5})\s*,?\s*/)?.[1]
-  const officeNumber = /^\d{4,5}$/.test(officeId) ? officeId : ''
+  // В Новой почте: 1–3 цифры — отделение, 5 цифр — почтомат.
+  // Пятизначные коды с ведущим нулём Эпицентр использует и для отделений.
+  const trailingNumber = address.match(/(?:,\s*)(\d{1,3}|\d{5})$/)?.[1]
+  const leadingNumber = address.match(/^\s*(\d{1,3}|\d{5})\s*,?\s*/)?.[1]
+  const officeNumber = /^(?:\d{1,3}|\d{5})$/.test(officeId) ? officeId : ''
   const number = officeNumber || trailingNumber || leadingNumber || ''
   if (!number) return address
 
   let plainAddress = address
-  if (trailingNumber) plainAddress = plainAddress.replace(/(?:,\s*)\d{4,5}$/, '')
-  if (leadingNumber) plainAddress = plainAddress.replace(/^\s*\d{4,5}\s*,?\s*/, '')
+  if (trailingNumber) plainAddress = plainAddress.replace(/(?:,\s*)(?:\d{1,3}|\d{5})$/, '')
+  if (leadingNumber) plainAddress = plainAddress.replace(/^\s*(?:\d{1,3}|\d{5})\s*,?\s*/, '')
   const label = deliveryPointLabel(provider, number)
   return `${label}${plainAddress ? `, ${plainAddress}` : ''}`
 }
