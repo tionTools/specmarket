@@ -212,10 +212,13 @@ Deno.serve(async (request) => {
       )
       if (shipment.officeId) {
         const officeId = encodeURIComponent(shipment.officeId)
-        address ||= await deliveryReference(
+        // Адрес в самом заказе нередко приходит без номера отделения.
+        // Поэтому справочник отделений имеет приоритет над этим текстом.
+        const officeAddress = await deliveryReference(
           `https://merchant-api.epicentrm.com.ua/v3/deliveries/providers/${provider}/settlements/${settlementId}/offices/${officeId}`,
           epicentrToken,
         )
+        if (officeAddress) address = officeAddress
       }
     }
     const officeNumber = String(shipment?.officeId ?? '')
