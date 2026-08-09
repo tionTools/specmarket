@@ -22,8 +22,29 @@ const editingOrderValue = ref<Record<string, string>>({})
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const syncEpicentrMessage = ref('')
+const syncNoticeVisible = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
+let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
+let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+
+function showSyncMessage(message: string) {
+  window.clearTimeout(syncNoticeTimer)
+  window.clearTimeout(syncNoticeCleanupTimer)
+  syncEpicentrMessage.value = message
+  syncNoticeVisible.value = true
+  syncNoticeTimer = window.setTimeout(() => {
+    syncNoticeVisible.value = false
+    syncNoticeCleanupTimer = window.setTimeout(() => { syncEpicentrMessage.value = '' }, 500)
+  }, 5000)
+}
+
+function showSyncError(message: string) {
+  window.clearTimeout(syncNoticeTimer)
+  window.clearTimeout(syncNoticeCleanupTimer)
+  syncEpicentrMessage.value = message
+  syncNoticeVisible.value = true
+}
 
 const platformOptions: Platform[] = ['Пром', 'Эпицентр', 'Каста', 'Р/С', 'Сайт']
 const carrierOptions: Delivery['carrier'][] = [
@@ -242,10 +263,10 @@ async function syncEpicentrOrders() {
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', { method: 'POST' })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
-    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.'
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
     return
   }
-  syncEpicentrMessage.value = `Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
+  showSyncMessage(`Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`)
   await loadRemoteOrders()
 }
 
@@ -256,10 +277,10 @@ async function syncPromOrders() {
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
   isSyncingProm.value = false
   if (error || !data?.ok) {
-    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.'
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     return
   }
-  syncEpicentrMessage.value = `Prom: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`
+  showSyncMessage(`Prom: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`)
   await loadRemoteOrders()
 }
 
@@ -273,10 +294,10 @@ async function syncEpicentrOrder(order: Order) {
   })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
-    syncEpicentrMessage.value = data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.'
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.')
     return
   }
-  syncEpicentrMessage.value = `Заказ № ${order.id} обновлён из Эпицентра.`
+  showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
   await loadRemoteOrders()
 }
 
@@ -590,7 +611,7 @@ function orderDateTime(order: Order) {
       <p v-if="isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
         Гостевой режим: доступен только просмотр данных.
       </p>
-      <p v-else-if="syncEpicentrMessage" class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
+      <p v-else-if="syncEpicentrMessage" class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 transition-opacity duration-500" :class="syncNoticeVisible ? 'opacity-100' : 'opacity-0'">
         {{ syncEpicentrMessage }}
       </p>
 
