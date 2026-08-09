@@ -568,12 +568,15 @@ function updateProductRoyaltyPercent(product: OrderProduct, key: string, event: 
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   product.royaltyPercent = parseOrderNumber(event)
+  product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
 }
 
 function updateProductRoyaltyAmount(product: OrderProduct, key: string, event: Event) {
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   product.royaltyAmount = parseOrderNumber(event)
+  const amount = product.price * product.quantity
+  product.royaltyPercent = amount === 0 ? 0 : ((product.royaltyAmount ?? 0) / amount) * 100
 }
 
 function orderCellValue(key: string, value: number | undefined) {
@@ -587,6 +590,11 @@ function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' 
   if (Number.isFinite(value)) {
     order[field] = value
     if (field === 'shipping') order.delivery.shippingSource = 'manual'
+    if (field === 'acquiringPercent') order.acquiring = getOrderAmount(order) * (value / 100)
+    if (field === 'acquiring') {
+      const amount = getOrderAmount(order)
+      order.acquiringPercent = amount === 0 ? 0 : (value / amount) * 100
+    }
   }
 }
 
