@@ -101,6 +101,32 @@ async function deliveryReference(url: string, token: string) {
   return readableText(payload)
 }
 
+function deliveryPointLabel(provider: string | undefined, number: string) {
+  if (!number) return ''
+  if (provider === 'parcel_box_epicentr') return `Поштомат № ${number}`
+  if (provider === 'nova_poshta') {
+    return number.length === 5 && !number.startsWith('0') ? `Поштомат № ${number}` : `Відділення № ${number}`
+  }
+  return `Відділення № ${number}`
+}
+
+function formatDeliveryPointAddress(provider: string | undefined, officeId: string, address: string) {
+  if (!address) return deliveryPointLabel(provider, officeId)
+  if (/(?:відділення|поштомат)[^,]*№/i.test(address)) return address
+
+  const trailingNumber = address.match(/(?:,\s*)(\d{4,5})$/)?.[1]
+  const leadingNumber = address.match(/^\s*(\d{4,5})\s*,?\s*/)?.[1]
+  const officeNumber = /^\d{4,5}$/.test(officeId) ? officeId : ''
+  const number = officeNumber || trailingNumber || leadingNumber || ''
+  if (!number) return address
+
+  let plainAddress = address
+  if (trailingNumber) plainAddress = plainAddress.replace(/(?:,\s*)\d{4,5}$/, '')
+  if (leadingNumber) plainAddress = plainAddress.replace(/^\s*\d{4,5}\s*,?\s*/, '')
+  const label = deliveryPointLabel(provider, number)
+  return `${label}${plainAddress ? `, ${plainAddress}` : ''}`
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -169,24 +195,7 @@ Deno.serve(async (request) => {
       }
     }
     const officeNumber = String(shipment?.officeId ?? '')
-    if (shipment?.provider === 'parcel_box_epicentr' && /^\d+$/.test(officeNumber) && !address.includes(officeNumber)) {
-      address = `Поштомат Епіцентр № ${officeNumber}${address ? `, ${address}` : ''}`
-    }
-    if (shipment?.provider === 'nova_poshta' && /^\d+$/.test(officeNumber) && !address.includes(officeNumber)) {
-      const pickupType = officeNumber.length === 5 ? 'Поштомат Нової пошти' : 'Відділення Нової пошти'
-      address = `${pickupType} № ${officeNumber}${address ? `, ${address}` : ''}`
-    }
-    const trailingNumber = address.match(/(?:,\s*)(\d{4,5})$/)?.[1]
-    if (trailingNumber && !address.includes('№')) {
-      const plainAddress = address.replace(/(?:,\s*)\d{4,5}$/, '')
-      if (shipment?.provider === 'parcel_box_epicentr') {
-        address = `Поштомат Епіцентр № ${trailingNumber}, ${plainAddress}`
-      }
-      if (shipment?.provider === 'nova_poshta') {
-        const pickupType = trailingNumber.length === 5 ? 'Поштомат Нової пошти' : 'Відділення Нової пошти'
-        address = `${pickupType} № ${trailingNumber}, ${plainAddress}`
-      }
-    }
+    address = formatDeliveryPointAddress(shipment?.provider, officeNumber, address)
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
     const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
