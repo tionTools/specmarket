@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import type { User } from '@supabase/supabase-js'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const route = useRoute()
+const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
@@ -356,6 +357,8 @@ onMounted(async () => {
     await nextTick()
     document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
   }
+  // This is a one-time return from the price list, not a permanent open-order state.
+  if (route.query.returnOrder || route.query.returnSearch) await router.replace({ query: {} })
 })
 
 function openNewOrderDialog() {
