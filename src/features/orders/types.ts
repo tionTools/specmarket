@@ -22,6 +22,8 @@ export interface Delivery {
   payer: string
   isAlternateRecipient?: boolean
   paymentAmount?: number
+  paymentMethod?: string
+  paymentStatus?: string
 }
 
 export interface Order {

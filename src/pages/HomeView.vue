@@ -378,6 +378,18 @@ function displayCarrier(carrier: string) {
   return names[carrier.toLowerCase()] ?? carrier
 }
 
+function displayPaymentMethod(method?: string) {
+  if (!method) return '—'
+  const names: Record<string, string> = {
+    monobank: 'Оплата через Монобанк',
+    postpayment: 'Післяплата',
+    cash_on_delivery: 'Післяплата',
+    cod: 'Післяплата',
+    invoice: 'Оплата по рахунку',
+  }
+  return names[method.toLowerCase()] ?? method
+}
+
 function displayDeliveryAddress(delivery: Delivery) {
   return [delivery.city, delivery.address].filter(Boolean).join(', ') || '—'
 }
@@ -740,6 +752,10 @@ function orderDateTime(order: Order) {
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Плательщик</dt>
                   <dd class="font-semibold">{{ order.delivery.payer }}</dd>
+                </div>
+                <div class="grid grid-cols-[1fr_1.35fr] gap-3">
+                  <dt class="text-slate-500">Спосіб оплати</dt>
+                  <dd class="font-semibold">{{ displayPaymentMethod(order.delivery.paymentMethod) }}</dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Оценочная стоимость</dt>

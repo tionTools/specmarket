@@ -32,6 +32,8 @@ type EpicentrOrder = {
     recipient?: { firstName?: string; lastName?: string; patronymic?: string; phone?: string }
     shipment?: {
       provider?: string
+      paymentProvider?: string
+      paymentStatus?: string
       number?: string
       address?: unknown
       settlement?: unknown
@@ -250,6 +252,8 @@ Deno.serve(async (request) => {
         payer: 'Не вказано',
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
         paymentAmount,
+        paymentMethod: shipment?.paymentProvider ?? '',
+        paymentStatus: shipment?.paymentStatus ?? '',
       },
     }
 
