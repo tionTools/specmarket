@@ -137,6 +137,13 @@ Deno.serve(async (request) => {
     const isPromFreeDelivery = order.has_order_promo_free_delivery === true
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
+    const shippingSource = hasSellerDeliveryCost
+      ? 'seller-api'
+      : promoSellerDeliveryCost !== undefined
+        ? 'prom-promo'
+        : previousDelivery.shippingSource === 'manual'
+          ? 'manual'
+          : 'none'
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const data = {
       external_id: externalId,
@@ -145,7 +152,9 @@ Deno.serve(async (request) => {
       customer_email: text(order.email) || text(order.client_email) || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: text(order.status) || 'Новий',
-      shipping: hasSellerDeliveryCost ? number(sellerDeliveryCost) : promoSellerDeliveryCost ?? number(existing?.shipping),
+      shipping: hasSellerDeliveryCost
+        ? number(sellerDeliveryCost)
+        : promoSellerDeliveryCost ?? (previousDelivery.shippingSource === 'manual' ? number(existing?.shipping) : 0),
       acquiring: number(existing?.acquiring), acquiring_percent: existing?.acquiring_percent ?? null,
       delivery: {
         carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
@@ -155,6 +164,7 @@ Deno.serve(async (request) => {
         status: text(order.status) || 'Новий', payer: text(order.delivery_payer) || 'Не указано',
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
+        shippingSource,
       },
     }
     let orderId = existing?.id

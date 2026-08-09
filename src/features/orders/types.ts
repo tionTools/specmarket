@@ -24,6 +24,7 @@ export interface Delivery {
   paymentAmount?: number
   paymentMethod?: string
   paymentStatus?: string
+  shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
 }
 
 export interface Order {

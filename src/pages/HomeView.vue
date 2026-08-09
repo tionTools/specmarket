@@ -573,7 +573,10 @@ function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' 
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   const value = Number(raw.replace(',', '.'))
-  if (Number.isFinite(value)) order[field] = value
+  if (Number.isFinite(value)) {
+    order[field] = value
+    if (field === 'shipping') order.delivery.shippingSource = 'manual'
+  }
 }
 
 async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () => void) {
