@@ -284,7 +284,7 @@ Deno.serve(async (request) => {
 
     const { data: currentItems } = await admin
       .from('crm_order_items')
-      .select('position, product_name, cost, royalty_percent, royalty_amount')
+      .select('position, product_name, cost, cost_usd, royalty_percent, royalty_amount')
       .eq('order_id', orderId)
     const itemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
@@ -305,6 +305,7 @@ Deno.serve(async (request) => {
           quantity: Number(item.quantity ?? 1),
           price: Number(item.price ?? 0),
           cost: Number(currentItem?.cost ?? 0),
+          cost_usd: Number(currentItem?.cost_usd ?? 0),
           royalty_percent: currentItem?.royalty_percent ?? null,
           royalty_amount: currentItem?.royalty_amount ?? null,
         }

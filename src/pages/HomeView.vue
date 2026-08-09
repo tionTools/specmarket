@@ -23,6 +23,7 @@ const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
+const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const syncEpicentrMessage = ref('')
@@ -192,6 +193,13 @@ function createProduct(): OrderProduct {
   return { id: crypto.randomUUID(), name: '', size: '', quantity: 1, price: 0, cost: 0 }
 }
 
+function updateDraftUsdCost(product: OrderProduct, event: Event) {
+  const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
+  if (!Number.isFinite(value)) return
+  product.costUsd = value
+  if (value !== 0) product.cost = value * usdRate.value
+}
+
 function createOrderDraft(): Order {
   return {
     id: Math.max(0, ...orders.value.map((order) => order.id)) + 1,
@@ -242,7 +250,7 @@ async function persistOrdersNow() {
         delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
         items: order.products.map((product) => ({
           product_name: product.name, size: product.size, quantity: product.quantity, price: product.price,
-          cost: product.cost, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
+          cost: product.cost, cost_usd: product.costUsd ?? 0, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
         })),
       })),
     },
@@ -337,13 +345,15 @@ async function loadRemoteOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   user.value = session.session.user
+  const { data: rateSetting } = await supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle()
+  if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')
     .order('created_at', { ascending: false })
   if (!remoteOrders?.length) { await persistOrders(); return }
   orders.value = remoteOrders
-    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; cost_usd: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), costUsd: Number(item.cost_usd ?? 0), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 }
 
@@ -595,11 +605,18 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
   ;(event.target as HTMLInputElement).select()
 }
 
-function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 'cost', key: string, event: Event) {
+function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 'cost' | 'costUsd', key: string, event: Event) {
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   const value = Number(raw.replace(',', '.'))
-  if (Number.isFinite(value)) product[field] = value
+  if (!Number.isFinite(value)) return
+  if (field === 'costUsd') {
+    product.costUsd = value
+    if (value !== 0) product.cost = value * usdRate.value
+    return
+  }
+  product[field] = value
+  if (field === 'cost') product.costUsd = 0
 }
 
 function finishOrderCell(key: string, onCommit?: () => void) {
@@ -853,12 +870,13 @@ function orderDateTime(order: Order) {
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="order-edit grid gap-3 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_5.5rem_10rem] sm:items-end"
+                  class="order-edit grid gap-3 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_4.5rem_5.5rem_4.5rem_5.5rem_10rem] sm:items-end"
                 >
                   <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
                   <label class="text-xs font-medium text-slate-500">Количество<input :value="orderCellValue(`${order.id}-${product.id}-quantity`, product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', `${order.id}-${product.id}-quantity`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
                   <label class="text-xs font-medium text-slate-500">Цена, ₴<input :value="orderCellValue(`${order.id}-${product.id}-price`, product.price)" :readonly="editingOrderCell !== `${order.id}-${product.id}-price`" class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'price', `${order.id}-${product.id}-price`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-price`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-price`, $event)" /></label>
-                  <label class="text-xs font-medium text-slate-500">Себест, ₴<input :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', `${order.id}-${product.id}-cost`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
+                  <label class="text-xs font-medium text-slate-500">Себест. $<input :value="orderCellValue(`${order.id}-${product.id}-cost-usd`, product.costUsd ?? 0)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost-usd`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderNumber(product, 'costUsd', `${order.id}-${product.id}-cost-usd`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost-usd`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost-usd`, $event)" /></label>
+                  <label class="text-xs font-medium text-slate-500">Себест. ₴<input :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', `${order.id}-${product.id}-cost`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
                   <div class="grid grid-cols-2 gap-2"><label class="text-xs font-medium text-slate-500">Роялти, %<input :value="orderCellValue(`${order.id}-${product.id}-royalty-percent`, product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-percent`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyPercent(product, `${order.id}-${product.id}-royalty-percent`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () => syncProductRoyaltyAmount(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-percent`, $event, () => syncProductRoyaltyAmount(order, product))" /></label><label class="text-xs font-medium text-slate-500">Роялти, ₴<input :value="orderCellValue(`${order.id}-${product.id}-royalty-amount`, getProductRoyalty(order, product))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-amount`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyAmount(product, `${order.id}-${product.id}-royalty-amount`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () => syncProductRoyaltyPercent(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-amount`, $event, () => syncProductRoyaltyPercent(order, product))" /></label></div>
                 </div>
               </div>
@@ -986,7 +1004,7 @@ function orderDateTime(order: Order) {
           <div
             v-for="product in orderDraft.products"
             :key="product.id"
-            class="mt-2 grid gap-2 sm:grid-cols-[1fr_5rem_5rem_5rem_auto]"
+            class="mt-2 grid gap-2 sm:grid-cols-[1fr_5rem_5rem_4.5rem_5rem_auto]"
           >
             <input
               v-model="product.name"
@@ -1006,12 +1024,21 @@ function orderDateTime(order: Order) {
               type="number"
               placeholder="Цена"
             /><input
+              :value="formatOrderNumber(product.costUsd ?? 0)"
+              min="0"
+              inputmode="decimal"
+              class="rounded-lg border border-emerald-100 px-2 py-2"
+              type="text"
+              placeholder="Себест. $"
+              @input="updateDraftUsdCost(product, $event)"
+            /><input
               v-model.number="product.cost"
               required
               min="0"
               class="rounded-lg border border-slate-200 px-2 py-2"
               type="number"
-              placeholder="С/с"
+              placeholder="Себест. ₴"
+              @input="product.costUsd = 0"
             /><button
               class="rounded-lg px-2 text-slate-500 hover:bg-slate-100"
               type="button"

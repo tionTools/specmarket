@@ -7,6 +7,7 @@ export interface OrderProduct {
   quantity: number
   price: number
   cost: number
+  costUsd?: number
   royaltyPercent?: number
   royaltyAmount?: number
 }

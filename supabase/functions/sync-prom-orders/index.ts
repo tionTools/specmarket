@@ -183,7 +183,7 @@ Deno.serve(async (request) => {
     if (!orderId) continue
 
     const { data: currentItems } = await admin.from('crm_order_items')
-      .select('position, product_name, cost, royalty_percent, royalty_amount').eq('order_id', orderId)
+      .select('position, product_name, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const items = sourceItems(order)
@@ -202,7 +202,7 @@ Deno.serve(async (request) => {
       const royaltyPercent = royaltyAmount === null || price * quantity === 0
         ? previous?.royalty_percent ?? null
         : (number(royaltyAmount) / (price * quantity)) * 100
-      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
+      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
   return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })

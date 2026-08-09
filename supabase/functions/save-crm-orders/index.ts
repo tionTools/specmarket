@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-type Item = { product_name: string; size?: string; quantity: number; price: number; cost: number; royalty_percent?: number | null; royalty_amount?: number | null }
+type Item = { product_name: string; size?: string; quantity: number; price: number; cost: number; cost_usd?: number; royalty_percent?: number | null; royalty_amount?: number | null }
 type SavedOrder = {
   remoteId?: string; order_number: number; order_date: string; order_time?: string | null; customer: string; phone: string
   customer_email?: string | null; customer_comment?: string | null; platform: string; status: string; shipping: number; acquiring: number
@@ -50,7 +50,7 @@ Deno.serve(async (request) => {
     if (order.items.length) {
       const { error: insertError } = await admin.from('crm_order_items').insert(order.items.map((item, position) => ({
         order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
-        price: item.price, cost: item.cost, royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
+        price: item.price, cost: item.cost, cost_usd: item.cost_usd ?? 0, royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
       })))
       if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
     }
