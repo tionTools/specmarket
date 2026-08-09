@@ -28,6 +28,15 @@ function readable(value: unknown): string {
   return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
 }
 
+function deliveryPayer(value: unknown): string {
+  const payer = readable(value)
+  const names: Record<string, string> = {
+    recipient: 'Получатель', buyer: 'Получатель', customer: 'Получатель',
+    sender: 'Отправитель', seller: 'Отправитель', merchant: 'Отправитель',
+  }
+  return names[payer.toLowerCase()] ?? payer
+}
+
 function findDeliveryTracking(value: unknown, depth = 0): string {
   if (depth > 5) return ''
   const record = asRecord(value)
@@ -139,6 +148,9 @@ Deno.serve(async (request) => {
       text(pick(order, 'shipment_status', 'delivery_status'))
     const deliveryStatus = apiDeliveryStatus ||
       (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
+    const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
+      deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
+      text(previousDelivery.payer) || 'Не указано'
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
@@ -171,7 +183,7 @@ Deno.serve(async (request) => {
         ttn: trackingNumber,
         recipient: customerName(order), recipientPhone: text(order.phone) || text(order.client_phone),
         city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
-        status: deliveryStatus, payer: text(order.delivery_payer) || 'Не указано',
+        status: deliveryStatus, payer,
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
         shippingSource,
