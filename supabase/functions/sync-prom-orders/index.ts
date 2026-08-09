@@ -244,6 +244,7 @@ Deno.serve(async (request) => {
 
     const { data: currentItems } = await admin.from('crm_order_items')
       .select('position, product_name, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
+    const byPosition = new Map((currentItems ?? []).map((item) => [item.position, item]))
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const items = sourceItems(order)
@@ -256,15 +257,20 @@ Deno.serve(async (request) => {
     const websiteOrderCommission = orderLevelCommission(order)
     if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
-      const previous = byName.get(name)
+      // Позиция стабильнее названия: одинаковые товары могут повторяться,
+      // а название в Prom иногда меняется.
+      const previous = byPosition.get(position) ?? byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
       const price = itemPrice(item)
       const itemCommission = commissionAmount(item)
-      const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : previous?.royalty_amount ?? 0)
+      const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
       const websiteCommission = websiteOrderCommission && itemsAmount
         ? websiteOrderCommission * (price * quantity / itemsAmount)
         : 0
-      const royaltyAmount = number(cpaCommission) + websiteCommission
+      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || websiteOrderCommission !== 0
+      const royaltyAmount = hasApiCommission
+        ? number(cpaCommission) + websiteCommission
+        : previous?.royalty_amount ?? null
       const royaltyPercent = royaltyAmount === null || price * quantity === 0
         ? previous?.royalty_percent ?? null
         : (number(royaltyAmount) / (price * quantity)) * 100
