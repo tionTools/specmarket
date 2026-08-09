@@ -178,17 +178,19 @@ Deno.serve(async (request) => {
       text(pick(order, 'shipment_status', 'delivery_status'))
     const deliveryStatus = apiDeliveryStatus ||
       (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
+    const isPromFreeDelivery = order.has_order_promo_free_delivery === true
     const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
       deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
       findDeliveryPayer(order) ||
       payerFromDeliveryOption(pick(order, 'delivery_option', 'delivery_service')) ||
-      text(previousDelivery.payer) || 'Не указано'
+      // В части заказов API Prom вообще не возвращает плательщика. Обычная
+      // доставка Prom оплачивается получателем; промо-доставка — продавцом.
+      (isPromFreeDelivery ? 'Отправитель' : 'Получатель')
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
-    const isPromFreeDelivery = order.has_order_promo_free_delivery === true
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const shippingSource = hasSellerDeliveryCost
