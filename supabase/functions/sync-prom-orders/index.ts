@@ -10,7 +10,7 @@ type RecordValue = Record<string, unknown>
 const asRecord = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
-const number = (value: unknown) => Number(value ?? 0) || 0
+const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const firstNumber = (...values: unknown[]) => {
   for (const value of values) {
@@ -79,9 +79,6 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
-  const diagnostic = requestedExternalId && orders[0]
-    ? sourceItems(orders[0])[0] ?? {}
-    : undefined
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
@@ -138,5 +135,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), royalty_percent: previous?.royalty_percent ?? null, royalty_amount: previous?.royalty_amount ?? null }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, diagnostic }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
 })
