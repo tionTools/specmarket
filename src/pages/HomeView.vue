@@ -733,7 +733,7 @@ function orderDateTime(order: Order) {
           </select>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_1.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
@@ -746,7 +746,7 @@ function orderDateTime(order: Order) {
           :class="expandedOrderId === order.id ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-300 hover:border-slate-400'"
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_1.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             type="button"
             @click="toggleOrder(order.id)"
           >
@@ -768,9 +768,7 @@ function orderDateTime(order: Order) {
             ><span
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ displayOrderStatus(order.delivery.status) }}</span
-            ><span class="text-xl text-slate-400">{{
-              expandedOrderId === order.id ? '⌄' : '›'
-            }}</span>
+            ><span class="flex items-center justify-end gap-2"><span class="text-xl text-slate-400">{{ expandedOrderId === order.id ? '⌄' : '›' }}</span><span v-if="!isGuest" class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50" role="button" tabindex="0" title="Удалить заказ из CRM" aria-label="Удалить заказ из CRM" @click.stop="deleteOrder(order)" @keydown.enter.stop="deleteOrder(order)">{{ deletingOrderId === order.id ? '…' : '🗑' }}</span></span>
           </button>
           <div
             v-if="expandedOrderId === order.id"
@@ -795,7 +793,6 @@ function orderDateTime(order: Order) {
                       {{ status }}
                     </option>
                   </select></label>
-                  <button class="grid size-8 place-items-center rounded-lg border border-rose-200 bg-white text-base font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50" type="button" :disabled="deletingOrderId === order.id" title="Удалить заказ из CRM" aria-label="Удалить заказ из CRM" @click="deleteOrder(order)">{{ deletingOrderId === order.id ? '…' : '🗑' }}</button>
                 </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
