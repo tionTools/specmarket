@@ -486,7 +486,7 @@ function displayOrderStatus(status: string) {
     completed: 'Завершено',
     cancelled: 'Скасовано',
     received: 'Принято',
-    delivered: 'Доставлено',
+    delivered: 'Виконано',
   }
   return names[status.toLowerCase()] ?? status
 }

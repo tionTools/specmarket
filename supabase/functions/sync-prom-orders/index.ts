@@ -14,7 +14,7 @@ const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const promStatusNames: Record<string, string> = {
   received: 'Принято',
-  delivered: 'Доставлено',
+  delivered: 'Виконано',
 }
 const firstNumber = (...values: unknown[]) => {
   for (const value of values) {
