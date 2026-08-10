@@ -320,11 +320,21 @@ Deno.serve(async (request) => {
       (currentItems ?? []).map((item) => [item.product_name, item]),
     )
 
-    await admin.from('crm_order_items').delete().eq('order_id', orderId)
-    if (source.items.length) {
-      await admin.from('crm_order_items').insert(source.items.map((item, position) => {
+    // Неполный ответ API не должен очищать уже сохранённые позиции заказа.
+    // Заменяем их только если для каждой позиции есть название, цена и количество.
+    const validItems = source.items.filter((item) =>
+      Boolean(item.title?.trim()) && Number.isFinite(Number(item.price)) && Number.isFinite(Number(item.quantity)),
+    )
+    if (validItems.length) {
+      const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+      if (deleteError) {
+        return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
+      }
+      const { error: insertError } = await admin.from('crm_order_items').insert(validItems.map((item, position) => {
         const snapshotItem = manualItems[position]
-        const currentItem = snapshotItem?.name === item.title ? snapshotItem : itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        // В ручной синхронизации снимок позиции приоритетнее: API иногда
+        // меняет написание товара, но это не повод терять введённые финансы.
+        const currentItem = snapshotItem ?? itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
         return {
           order_id: orderId,
           position,
@@ -338,6 +348,9 @@ Deno.serve(async (request) => {
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
         }
       }))
+      if (insertError) {
+        return Response.json({ ok: false, message: `Не удалось записать позиции: ${insertError.message}` }, { status: 500, headers: corsHeaders })
+      }
     }
   }
 
