@@ -150,6 +150,12 @@ function sourceItems(order: RecordValue) {
   return Array.isArray(items) ? items.map(asRecord) : []
 }
 
+function productSize(item: RecordValue, name: string) {
+  const direct = readable(pick(item, 'variation', 'size', 'option', 'variant', 'variation_name', 'size_name'))
+  if (direct) return direct
+  return name.match(/(?:розмір|размер|size|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?|xs|s|m|l|xl|xxl|xxxl)/i)?.[1]?.replace(/\s/g, '') ?? ''
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -313,7 +319,7 @@ Deno.serve(async (request) => {
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
-      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
+      return { order_id: orderId, position, product_name: name, size: productSize(item, name), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
     }))
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
