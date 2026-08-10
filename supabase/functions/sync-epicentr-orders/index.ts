@@ -129,6 +129,16 @@ function normalizeItems(order: unknown): NormalizedItem[] {
   }).filter((item) => Boolean(item.title))
 }
 
+function extractOrder(payload: unknown): Record<string, unknown> {
+  const root = asRecord(payload)
+  const data = asRecord(root.data)
+  const nestedOrder = asRecord(data.order)
+  if (Object.keys(nestedOrder).length) return nestedOrder
+  if (Object.keys(data).length) return data
+  const order = asRecord(root.order)
+  return Object.keys(order).length ? order : root
+}
+
 async function deliveryReference(url: string, token: string) {
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
@@ -202,10 +212,8 @@ Deno.serve(async (request) => {
       return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: response.status }, { status: 502, headers: corsHeaders })
     }
     const payload: unknown = await response.json()
-    const item = payload && typeof payload === 'object'
-      ? ((payload as { data?: Partial<EpicentrOrder> }).data ?? payload as Partial<EpicentrOrder>)
-      : {}
-    orders = [{ ...item, id: item.id ?? requestedExternalId, items: item.items ?? [] } as EpicentrOrder]
+    const item = extractOrder(payload)
+    orders = [{ ...item, id: readableText(item.id) || requestedExternalId, items: (item.items as EpicentrOrder['items']) ?? [] } as EpicentrOrder]
   } else {
     const response = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
@@ -237,9 +245,7 @@ Deno.serve(async (request) => {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
     })
     const detailPayload: unknown = detailResponse.ok ? await detailResponse.json() : undefined
-    const detail = detailPayload && typeof detailPayload === 'object'
-      ? ((detailPayload as { data?: Partial<EpicentrOrder> }).data ?? detailPayload as Partial<EpicentrOrder>)
-      : {}
+    const detail = extractOrder(detailPayload)
     const source: EpicentrOrder = {
       ...order,
       ...detail,
@@ -280,14 +286,15 @@ Deno.serve(async (request) => {
     address = formatDeliveryPointAddress(shipment?.provider, officeNumber, address)
     const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
     const recipientName = fullName(recipient) || customer
-    const status = statusNames[source.statusCode.toLowerCase()] ?? source.statusCode
+    const statusCode = readableText(source.statusCode ?? (source as unknown as Record<string, unknown>).status)
+    const status = (statusNames[statusCode.toLowerCase()] ?? statusCode) || 'Не указан'
     const orderNumber = Number(source.number)
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const apiDeliveryStatus = readableText(shipment?.status) || readableText(shipment?.statusCode) || readableText(shipment?.shipmentStatus)
     // Для Эпицентра статус finished означает, что покупатель уже получил
     // отправление. Если отдельный статус перевозчика отсутствует, это более
     // точный источник, чем старое значение «Запланировано» в CRM.
-    const deliveryStatus = source.statusCode.toLowerCase() === 'finished'
+    const deliveryStatus = ['finished', 'completed'].includes(statusCode.toLowerCase())
       ? 'Получено'
       : apiDeliveryStatus ||
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
