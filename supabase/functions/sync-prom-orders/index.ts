@@ -150,9 +150,39 @@ function sourceItems(order: RecordValue) {
   return Array.isArray(items) ? items.map(asRecord) : []
 }
 
+function findNestedSize(value: unknown, depth = 0): string {
+  if (depth > 5) return ''
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findNestedSize(child, depth + 1)
+      if (found) return found
+    }
+    return ''
+  }
+  const record = asRecord(value)
+  const ownLabel = readable(pick(record, 'name', 'title', 'label')).toLowerCase()
+  if (/(?:size|розмір|размер)/i.test(ownLabel)) {
+    const ownValue = readable(pick(record, 'value', 'values', 'text', 'description'))
+    if (ownValue) return ownValue
+  }
+  for (const [key, candidate] of Object.entries(record)) {
+    if (/(?:^size$|size|розмір|размер)/i.test(key)) {
+      const found = readable(candidate) || findNestedSize(candidate, depth + 1)
+      if (found) return found
+    }
+    if (candidate && typeof candidate === 'object') {
+      const found = findNestedSize(candidate, depth + 1)
+      if (found) return found
+    }
+  }
+  return ''
+}
+
 function productSize(item: RecordValue, name: string) {
   const direct = readable(pick(item, 'variation', 'size', 'option', 'variant', 'variation_name', 'size_name'))
   if (direct) return direct
+  const nested = findNestedSize(pick(item, 'product', 'product_data', 'product_variant', 'variants', 'attributes', 'characteristics', 'parameters', 'properties'))
+  if (nested) return nested
   return name.match(/(?:розмір|размер|size|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?|xs|s|m|l|xl|xxl|xxxl)/i)?.[1]?.replace(/\s/g, '') ?? ''
 }
 
