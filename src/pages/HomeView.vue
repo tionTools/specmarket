@@ -823,6 +823,16 @@ function openPromOrder(order: Order) {
   window.open(`https://my.prom.ua/cms/order/edit/${promId}`, '_blank', 'noopener,noreferrer')
 }
 
+function openKastaOrder(order: Order) {
+  const kastaId = String(order.externalId ?? order.id).replace(/^kasta:/, '')
+  if (!kastaId) return
+  window.open(
+    `https://hub.kasta.ua/customer-orders/all?order=${encodeURIComponent(kastaId)}`,
+    '_blank',
+    'noopener,noreferrer',
+  )
+}
+
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
   persistOrders(order)
@@ -1253,6 +1263,12 @@ function orderDateTime(order: Order) {
                   class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
                   title="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
+                  >↗</span
+                ><span
+                  v-if="order.platform === 'Каста' && order.externalId"
+                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  title="Открыть заказ в Каста"
+                  @click.stop="openKastaOrder(order)"
                   >↗</span
                 ></span
               >
