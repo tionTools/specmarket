@@ -249,8 +249,12 @@ Deno.serve(async (request) => {
     const orderNumber = Number(source.number)
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const apiDeliveryStatus = readableText(shipment?.status) || readableText(shipment?.statusCode) || readableText(shipment?.shipmentStatus)
+    // Для Эпицентра статус finished означает, что покупатель уже получил
+    // отправление. Если отдельный статус перевозчика отсутствует, это более
+    // точный источник, чем старое значение «Запланировано» в CRM.
     const deliveryStatus = apiDeliveryStatus ||
-      (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
+      (source.statusCode.toLowerCase() === 'finished' ? 'Получено' :
+        (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано'))
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const data = {
