@@ -261,8 +261,8 @@ Deno.serve(async (request) => {
 	customer_comment: Array.isArray(order.comments) ? order.comments.map(text).filter(Boolean).join('\n') || null : null,
 	platform: 'Каста',
 	status: (orderStatuses[text(status.type)] ?? text(status.type)) || 'Новый',
-	// Existing records stay untouched: the user may have corrected shipping manually.
-	shipping: existing ? Number(existing.shipping ?? 0) : calculatedShipping,
+	// Since 1 August 2026 Kasta co-finance is authoritative and is recalculated on every sync.
+	shipping: isCurrentCoFinanceRate(createdAt) ? calculatedShipping : Number(existing?.shipping ?? 0),
 	acquiring: Number(existing?.acquiring ?? 0),
 	acquiring_percent: existing?.acquiring_percent ?? null,
 	delivery: {
