@@ -94,6 +94,10 @@ function readableText(value: unknown): string {
     .join(', ')
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
 function itemSize(item: Record<string, unknown>) {
   const explicitSize = readableText(item.size) || readableText(item.variation) || readableText(item.option) || readableText(item.characteristics)
   if (explicitSize) return explicitSize
