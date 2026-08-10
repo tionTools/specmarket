@@ -51,7 +51,7 @@ function itemRows(order: RecordValue) {
 }
 
 function itemQuantity(item: RecordValue) {
-  return number(pick(item, 'returned_quantity', 'cancelled_quantity', 'quantity', 'original_quantity')) || 1
+  return number(pick(item, 'quantity', 'returned_quantity', 'cancelled_quantity', 'original_quantity')) || 1
 }
 
 function itemImage(item: RecordValue) {
