@@ -32,6 +32,7 @@ export interface Delivery {
 
 export interface Order {
   id: number
+  displayNumber?: string
   remoteId?: string
   externalId?: string
   date: string

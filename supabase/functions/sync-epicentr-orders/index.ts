@@ -203,8 +203,9 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; manual?: unknown }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
+  const fullSync = body.full === true
   const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}
   const manualItems = Array.isArray(manual.items) ? manual.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []
   let orders: EpicentrOrder[] = []
@@ -242,7 +243,7 @@ Deno.serve(async (request) => {
   }
 
   for (const order of orders) {
-    if (!requestedExternalId && knownExternalIds.has(order.id)) {
+    if (!requestedExternalId && !fullSync && knownExternalIds.has(order.id)) {
       skipped += 1
       continue
     }
@@ -258,7 +259,7 @@ Deno.serve(async (request) => {
       items: detail.items ?? order.items,
     }
     const externalId = source.id
-    const existing = requestedExternalId
+    const existing = requestedExternalId || fullSync
       ? await admin.from('crm_orders')
         .select('id, shipping, acquiring, acquiring_percent, delivery')
         .eq('external_id', externalId).maybeSingle()

@@ -295,8 +295,9 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; manual?: unknown }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+  const fullSync = body.full === true
   const manual = asRecord(body.manual)
   const manualItems = Array.isArray(manual.items) ? manual.items.map(asRecord) : []
   const endpoint = requestedExternalId
@@ -328,12 +329,12 @@ Deno.serve(async (request) => {
     const promId = text(order.id)
     if (!promId) continue
     const externalId = `prom:${promId}`
-    if (!requestedExternalId && knownExternalIds.has(externalId)) {
+    if (!requestedExternalId && !fullSync && knownExternalIds.has(externalId)) {
       skipped += 1
       continue
     }
     let existing: RecordValue | null = null
-    if (requestedExternalId) {
+    if (requestedExternalId || fullSync) {
       const { data } = await admin.from('crm_orders')
         .select('id, shipping, acquiring, acquiring_percent, delivery')
         .eq('external_id', externalId).maybeSingle()

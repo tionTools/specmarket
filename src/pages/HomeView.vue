@@ -26,6 +26,7 @@ const editingOrderValue = ref<Record<string, string>>({})
 const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
+const isSyncingKasta = ref(false)
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
@@ -88,7 +89,7 @@ const statusOptions: Record<Platform, string[]> = {
     'Запит на повернення',
     'Скасовано продавцем',
   ],
-  Каста: ['В дороге', 'Закрыт', 'Возврат'],
+  Каста: ['Новый', 'Принято', 'В дороге', 'Закрыт', 'Скасовано', 'Возврат'],
   'Р/С': ['В дороге', 'Закрыт', 'Возврат'],
   Сайт: ['В дороге', 'Закрыт', 'Возврат'],
 }
@@ -185,7 +186,7 @@ const visibleOrders = computed(() => {
     const matchesPlatform =
       platformFilter.value === 'all' || order.platform === platformFilter.value
     const haystack =
-      `${order.id} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
+      `${order.id} ${order.displayNumber ?? ''} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
     const matchesTtn =
       ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
     return matchesPlatform && (!search || haystack.includes(search) || matchesTtn)
@@ -272,6 +273,7 @@ function persistOrders(order?: Order) {
 function serializeOrder(order: Order) {
   return {
     remoteId: order.remoteId,
+    order_label: order.displayNumber ?? null,
     order_number: order.id,
     order_date: order.date,
     order_time: order.time ?? null,
@@ -343,8 +345,8 @@ async function signOut() {
   window.location.reload()
 }
 
-async function syncEpicentrOrders() {
-  if (!supabase || isGuest.value) return
+async function syncEpicentrOrders(full = false) {
+  if (!supabase || isGuest.value || isSyncingEpicentr.value) return
   isSyncingEpicentr.value = true
   if (!(await waitForPendingSaves())) {
     isSyncingEpicentr.value = false
@@ -353,6 +355,7 @@ async function syncEpicentrOrders() {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
     method: 'POST',
+    body: full ? { full: true } : undefined,
   })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
@@ -360,33 +363,101 @@ async function syncEpicentrOrders() {
     return
   }
   showSyncMessage(
-    `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+    full
+      ? `Эпицентр: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+      : `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
   )
   await loadRemoteOrders()
 }
 
-async function syncPromOrders() {
-  if (!supabase || isGuest.value) return
+async function syncNewEpicentrOrders() {
+  await syncEpicentrOrders()
+}
+
+async function syncPromOrders(full = false) {
+  if (!supabase || isGuest.value || isSyncingProm.value) return
   isSyncingProm.value = true
   if (!(await waitForPendingSaves())) {
     isSyncingProm.value = false
     return
   }
   syncEpicentrMessage.value = ''
-  const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
+  const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
+    method: 'POST',
+    body: full ? { full: true } : undefined,
+  })
   isSyncingProm.value = false
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     return
   }
   showSyncMessage(
-    `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+    full
+      ? `Prom: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+      : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
   )
   await loadRemoteOrders()
 }
 
+async function syncNewPromOrders() {
+  await syncPromOrders()
+}
+
+async function syncFullEpicentrOrders() {
+  if (!window.confirm('Полная синхронизация обновит все доступные заказы Эпицентра. Продолжить?'))
+    return
+  await syncEpicentrOrders(true)
+}
+
+async function syncFullPromOrders() {
+  if (!window.confirm('Полная синхронизация обновит все доступные заказы Prom. Продолжить?')) return
+  await syncPromOrders(true)
+}
+
+async function syncKastaOrders(full = false) {
+  if (!supabase || isGuest.value || isSyncingKasta.value) return
+  isSyncingKasta.value = true
+  if (!(await waitForPendingSaves())) {
+    isSyncingKasta.value = false
+    return
+  }
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-kasta-orders', {
+    method: 'POST',
+    body: full ? { full: true } : undefined,
+  })
+  isSyncingKasta.value = false
+  if (error || !data?.ok) {
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.')
+    return
+  }
+  showSyncMessage(
+    full
+      ? `Каста: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+      : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+  )
+  await loadRemoteOrders()
+}
+
+async function syncNewKastaOrders() {
+  await syncKastaOrders()
+}
+
+async function syncFullKastaOrders() {
+  if (!window.confirm('Полная синхронизация обновит все доступные заказы Касты. Продолжить?'))
+    return
+  await syncKastaOrders(true)
+}
+
 async function syncPromOrder(order: Order) {
-  if (!supabase || isGuest.value || order.platform !== 'Пром' || !order.externalId) return
+  if (
+    !supabase ||
+    isGuest.value ||
+    isSyncingProm.value ||
+    order.platform !== 'Пром' ||
+    !order.externalId
+  )
+    return
   isSyncingProm.value = true
   if (!(await waitForPendingSaves())) {
     isSyncingProm.value = false
@@ -407,7 +478,14 @@ async function syncPromOrder(order: Order) {
 }
 
 async function syncEpicentrOrder(order: Order) {
-  if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
+  if (
+    !supabase ||
+    isGuest.value ||
+    isSyncingEpicentr.value ||
+    order.platform !== 'Эпицентр' ||
+    !order.externalId
+  )
+    return
   isSyncingEpicentr.value = true
   if (!(await waitForPendingSaves())) {
     isSyncingEpicentr.value = false
@@ -463,6 +541,7 @@ async function loadRemoteOrders() {
   orders.value = remoteOrders
     .map((row) => ({
       id: row.order_number,
+      displayNumber: row.order_label ?? undefined,
       remoteId: row.id,
       externalId: row.external_id ?? undefined,
       date: row.order_date,
@@ -672,7 +751,7 @@ function displayDeliveryAddress(delivery: Delivery) {
 }
 
 async function copyOrderNumber(order: Order) {
-  await navigator.clipboard.writeText(String(order.id))
+  await navigator.clipboard.writeText(order.displayNumber ?? String(order.id))
 }
 
 function openEpicentrOrder(order: Order) {
@@ -900,7 +979,7 @@ function orderDateTime(order: Order) {
             class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
             :disabled="isSyncingEpicentr"
             type="button"
-            @click="syncEpicentrOrders"
+            @click="syncNewEpicentrOrders"
           >
             {{ isSyncingEpicentr ? 'Ищем новые в Эпицентре…' : '↻ Загрузить новые Эпицентр' }}
           </button>
@@ -909,9 +988,45 @@ function orderDateTime(order: Order) {
             class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
             :disabled="isSyncingProm"
             type="button"
-            @click="syncPromOrders"
+            @click="syncNewPromOrders"
           >
             {{ isSyncingProm ? 'Ищем новые в Prom…' : '↻ Загрузить новые Prom' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingEpicentr"
+            type="button"
+            @click="syncFullEpicentrOrders"
+          >
+            {{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Полная Эпицентр' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingProm"
+            type="button"
+            @click="syncFullPromOrders"
+          >
+            {{ isSyncingProm ? 'Синхронизация…' : '↻ Полная Prom' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-orange-200 bg-white px-4 py-3 text-sm font-semibold text-orange-700 shadow-sm transition hover:bg-orange-50 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingKasta"
+            type="button"
+            @click="syncNewKastaOrders"
+          >
+            {{ isSyncingKasta ? 'Ищем новые в Касте…' : '↻ Загрузить новые Каста' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingKasta"
+            type="button"
+            @click="syncFullKastaOrders"
+          >
+            {{ isSyncingKasta ? 'Синхронизация…' : '↻ Полная Каста' }}
           </button>
           <button
             v-if="!isGuest"
@@ -1065,7 +1180,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong
+              ><strong>№ {{ order.displayNumber ?? order.id }}</strong
               ><span
                 class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
                 ><span
