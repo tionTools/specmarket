@@ -70,7 +70,8 @@ function itemPrice(item: RecordValue) {
 
 // Kasta co-finance rate effective from 1 August 2026 (VAT included).
 // Kept pure so the rate table can be extended for earlier periods safely.
-function calculateKastaDeliveryCost(orderAmount: number): number {
+function calculateKastaDeliveryCost(customerDeliveryFee: number, orderAmount: number): number {
+  if (customerDeliveryFee > 0) return 0
   if (orderAmount < 400) return 19
   if (orderAmount < 700) return 25
   if (orderAmount < 1500) return 39
@@ -81,6 +82,11 @@ function orderAmount(order: RecordValue, items: RecordValue[]): number {
   const apiAmount = number(pick(order, 'order_amount', 'total_amount', 'amount', 'total_price'))
   if (apiAmount > 0) return apiAmount
   return items.reduce((total, item) => total + itemPrice(item) * itemQuantity(item), 0)
+}
+
+function customerDeliveryFee(order: RecordValue, delivery: RecordValue): number {
+  return number(pick(order, 'delivery_cost', 'shipping_fee', 'delivery_fee'))
+    || number(pick(delivery, 'delivery_cost', 'shipping_fee', 'delivery_fee', 'cost'))
 }
 
 function isCurrentCoFinanceRate(createdAt: string): boolean {
@@ -242,8 +248,9 @@ Deno.serve(async (request) => {
     const createdStatus = (Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []).find((item) => text(item.type) === 'Created') ?? status
     const createdAt = text(createdStatus.created_at) || text(status.created_at)
     const items = itemRows(order)
+    const deliveryFee = customerDeliveryFee(order, delivery)
     const calculatedShipping = isCurrentCoFinanceRate(createdAt)
-      ? calculateKastaDeliveryCost(orderAmount(order, items))
+      ? calculateKastaDeliveryCost(deliveryFee, orderAmount(order, items))
       : 0
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
