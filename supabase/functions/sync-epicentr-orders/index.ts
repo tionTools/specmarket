@@ -153,8 +153,10 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown; manual?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
+  const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}
+  const manualItems = Array.isArray(manual.items) ? manual.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []
   let orders: EpicentrOrder[] = []
 
   if (requestedExternalId) {
@@ -260,8 +262,8 @@ Deno.serve(async (request) => {
       // сохраняем вручную внесённую сумму в CRM.
       shipping: hasShippingFromApi ? Number(shipment?.deliveryPrice) : Number(existing.data?.shipping ?? 0),
       // Эквайринг вводится в CRM, а API площадки его не возвращает.
-      acquiring: Number(existing.data?.acquiring ?? 0),
-      acquiring_percent: existing.data?.acquiring_percent ?? null,
+      acquiring: manual.acquiring !== undefined ? Number(manual.acquiring) : Number(existing.data?.acquiring ?? 0),
+      acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : Number(manual.acquiringPercent)) : existing.data?.acquiring_percent ?? null,
       delivery: {
         carrier: shipment?.provider || 'Эпицентр',
         ttn: shipment?.number ?? '',
@@ -303,7 +305,8 @@ Deno.serve(async (request) => {
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     if (source.items.length) {
       await admin.from('crm_order_items').insert(source.items.map((item, position) => {
-        const currentItem = itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        const snapshotItem = manualItems[position]
+        const currentItem = snapshotItem?.name === item.title ? snapshotItem : itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
         return {
           order_id: orderId,
           position,
@@ -312,9 +315,9 @@ Deno.serve(async (request) => {
           quantity: Number(item.quantity ?? 1),
           price: Number(item.price ?? 0),
           cost: Number(currentItem?.cost ?? 0),
-          cost_usd: Number(currentItem?.cost_usd ?? 0),
-          royalty_percent: currentItem?.royalty_percent ?? null,
-          royalty_amount: currentItem?.royalty_amount ?? null,
+          cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
+          royalty_percent: currentItem?.royalty_percent ?? currentItem?.royaltyPercent ?? null,
+          royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
         }
       }))
     }

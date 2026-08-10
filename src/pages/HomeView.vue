@@ -328,7 +328,7 @@ async function syncPromOrder(order: Order) {
   if (!await waitForPendingSaves()) { isSyncingProm.value = false; return }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
-    method: 'POST', body: { externalId: order.externalId },
+    method: 'POST', body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
   })
   isSyncingProm.value = false
   if (error || !data?.ok) {
@@ -346,7 +346,7 @@ async function syncEpicentrOrder(order: Order) {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
     method: 'POST',
-    body: { externalId: order.externalId },
+    body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
   })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
@@ -355,6 +355,20 @@ async function syncEpicentrOrder(order: Order) {
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
   await loadRemoteOrders()
+}
+
+function orderSyncSnapshot(order: Order) {
+  return {
+    acquiring: order.acquiring,
+    acquiringPercent: order.acquiringPercent ?? null,
+    items: order.products.map((product) => ({
+      name: product.name,
+      cost: product.cost,
+      costUsd: product.costUsd ?? 0,
+      royaltyPercent: product.royaltyPercent ?? null,
+      royaltyAmount: product.royaltyAmount ?? null,
+    })),
+  }
 }
 
 async function loadRemoteOrders() {

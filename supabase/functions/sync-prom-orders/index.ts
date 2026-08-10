@@ -167,8 +167,10 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown }
+  const body = await request.json().catch(() => ({})) as { externalId?: unknown; manual?: unknown }
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+  const manual = asRecord(body.manual)
+  const manualItems = Array.isArray(manual.items) ? manual.items.map(asRecord) : []
   const endpoint = requestedExternalId
     ? `https://my.prom.ua/api/v1/orders/${encodeURIComponent(requestedExternalId)}`
     : 'https://my.prom.ua/api/v1/orders/list?limit=100'
@@ -249,7 +251,8 @@ Deno.serve(async (request) => {
       shipping: hasSellerDeliveryCost
         ? number(sellerDeliveryCost)
         : promoSellerDeliveryCost ?? (previousDelivery.shippingSource === 'manual' ? number(existing?.shipping) : 0),
-      acquiring: number(existing?.acquiring), acquiring_percent: existing?.acquiring_percent ?? null,
+      acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
+      acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
       delivery: {
         carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
         ttn: trackingNumber,
@@ -283,7 +286,8 @@ Deno.serve(async (request) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       // Позиция стабильнее названия: одинаковые товары могут повторяться,
       // а название в Prom иногда меняется.
-      const previous = byPosition.get(position) ?? byName.get(name)
+      const manualItem = manualItems[position]
+      const previous = manualItem && text(manualItem.name) === name ? manualItem : byPosition.get(position) ?? byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
       const price = itemPrice(item)
       const itemCommission = commissionAmount(item)
@@ -299,7 +303,7 @@ Deno.serve(async (request) => {
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
-      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
+      return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
     }))
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
