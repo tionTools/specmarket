@@ -31,7 +31,8 @@ export interface Delivery {
 }
 
 export interface Order {
-  id: number
+  id: string | number
+  orderNumber?: number
   displayNumber?: string
   remoteId?: string
   externalId?: string

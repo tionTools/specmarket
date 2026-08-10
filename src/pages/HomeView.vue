@@ -13,8 +13,8 @@ const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
-const expandedOrderId = ref<number | null>(null)
-const deletingOrderId = ref<number | null>(null)
+const expandedOrderId = ref<string | number | null>(null)
+const deletingOrderId = ref<string | number | null>(null)
 const user = ref<User | null>(null)
 const email = ref('')
 const password = ref('')
@@ -238,7 +238,13 @@ function updateDraftUsdCost(product: OrderProduct, event: Event) {
 
 function createOrderDraft(): Order {
   return {
-    id: Math.max(0, ...orders.value.map((order) => order.id)) + 1,
+    id:
+      Math.max(
+        0,
+        ...orders.value
+          .map((order) => order.orderNumber ?? Number(order.id))
+          .filter(Number.isFinite),
+      ) + 1,
     date: todayKey(),
     time: currentTime(),
     customer: '',
@@ -274,7 +280,7 @@ function serializeOrder(order: Order) {
   return {
     remoteId: order.remoteId,
     order_label: order.displayNumber ?? null,
-    order_number: order.id,
+    order_number: order.orderNumber ?? Number(order.id),
     order_date: order.date,
     order_time: order.time ?? null,
     customer: order.customer,
@@ -314,7 +320,10 @@ async function persistOrdersNow(savedOrders: Order[]) {
   if (error || !data?.ok)
     throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
   for (const saved of data.saved as Array<{ orderNumber: number; remoteId: string }>) {
-    const order = orders.value.find((item) => item.id === saved.orderNumber)
+    const order = orders.value.find(
+      (item) =>
+        item.remoteId === saved.remoteId || (item.orderNumber ?? item.id) === saved.orderNumber,
+    )
     if (order) order.remoteId = saved.remoteId
   }
 }
@@ -574,7 +583,8 @@ async function loadRemoteOrders() {
   }
   orders.value = remoteOrders
     .map((row) => ({
-      id: row.order_number,
+      id: row.order_label ?? String(row.order_number),
+      orderNumber: Number(row.order_number),
       displayNumber: row.order_label ?? undefined,
       remoteId: row.id,
       externalId: row.external_id ?? undefined,
@@ -620,15 +630,19 @@ async function loadRemoteOrders() {
           royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
         })),
     }))
-    .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
+    .sort(
+      (left, right) =>
+        orderDateTime(right) - orderDateTime(left) ||
+        (right.orderNumber ?? 0) - (left.orderNumber ?? 0),
+    )
 }
 
 onMounted(async () => {
   await loadRemoteOrders()
-  const returnOrder = Number(route.query.returnOrder)
+  const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
-  if (Number.isFinite(returnOrder) && orders.value.some((order) => order.id === returnOrder)) {
+  if (returnOrder && orders.value.some((order) => String(order.id) === returnOrder)) {
     expandedOrderId.value = returnOrder
     await nextTick()
     document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
@@ -677,7 +691,7 @@ function updateOrderStatus(order: Order, status: string) {
   persistOrders(order)
 }
 
-function toggleOrder(orderId: number) {
+function toggleOrder(orderId: string | number) {
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
 }
 

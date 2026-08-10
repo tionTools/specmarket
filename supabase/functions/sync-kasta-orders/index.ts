@@ -41,13 +41,41 @@ function latestStatus(order: RecordValue) {
 }
 
 function itemRows(order: RecordValue) {
-  const items = Array.isArray(order.ordered_items) ? order.ordered_items : Array.isArray(order.items) ? order.items : []
+  const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
+  const isReturn = statuses.some((status) => /^(?:Return|Refund)/.test(text(status.type)))
+  const returnedItems = Array.isArray(order.returned_items) ? order.returned_items : []
+  const orderedItems = Array.isArray(order.ordered_items) ? order.ordered_items : Array.isArray(order.items) ? order.items : []
+  const cancelledItems = Array.isArray(order.cancelled_items) ? order.cancelled_items : []
+  const items = isReturn && returnedItems.length ? returnedItems : orderedItems.length ? orderedItems : returnedItems.length ? returnedItems : cancelledItems
   return items.map(asRecord).filter((item) => text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')))
+}
+
+function itemQuantity(item: RecordValue) {
+  return number(pick(item, 'returned_quantity', 'cancelled_quantity', 'quantity', 'original_quantity')) || 1
 }
 
 function itemImage(item: RecordValue) {
   const images = Array.isArray(item.images) ? item.images.map(text).filter(Boolean) : []
   return images[0] ?? text(pick(item, 'image', 'image_url', 'picture', 'photo'))
+}
+
+function itemBonus(item: RecordValue) {
+  const bonuses = Array.isArray(item.bonuses) ? item.bonuses.map(asRecord) : []
+  return bonuses.reduce((total, bonus) => total + number(bonus.amount), 0)
+}
+
+function itemPrice(item: RecordValue) {
+  return number(pick(item, 'new_price', 'paid_price', 'price'))
+}
+
+function itemBarcode(item: RecordValue) {
+  const barcodes = Array.isArray(item.barcode) ? item.barcode.map(text).filter(Boolean) : []
+  return barcodes[0] ?? text(item.barcode)
+}
+
+function royaltyPercent(value: unknown) {
+  const royalty = number(value)
+  return royalty > 0 && royalty <= 1 ? royalty * 100 : royalty
 }
 
 function decodeXmlText(value: string) {
@@ -69,8 +97,11 @@ async function imagesFromFeed(feedUrl: string | undefined) {
     if (!response.ok) return images
     const xml = await response.text()
     for (const offer of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
-      const imageUrl = decodeXmlText(offer[3].match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
+      const body = offer[3]
+      const imageUrl = decodeXmlText(body.match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
       if (imageUrl) images.set(offer[2], imageUrl)
+      const vendorCode = decodeXmlText(body.match(/<vendorCode\b[^>]*>([\s\S]*?)<\/vendorCode>/i)?.[1] ?? '')
+      if (imageUrl && vendorCode) images.set(vendorCode, imageUrl)
     }
   } catch {
     // The order still syncs when the catalogue feed is temporarily unavailable.
@@ -78,12 +109,51 @@ async function imagesFromFeed(feedUrl: string | undefined) {
   return images
 }
 
-async function fetchKastaOrders(token: string, query: URLSearchParams) {
-  const response = await fetch(`https://hub.kasta.ua/api/orders/list?${query}`, {
+async function fetchKastaOrders(token: string, query: URLSearchParams, path = '/api/orders/list') {
+  const response = await fetch(`https://hub.kasta.ua${path}?${query}`, {
     headers: { Authorization: token, Accept: 'application/json' },
   })
   if (!response.ok) throw new Error(String(response.status))
   return asRecord(await response.json())
+}
+
+function productRows(payload: RecordValue) {
+  const rows = [payload.items, payload.products, payload.data].find(Array.isArray)
+  return Array.isArray(rows) ? rows.map(asRecord) : []
+}
+
+async function kastaRoyaltyForItem(token: string, item: RecordValue, cache: Map<string, number>) {
+  const barcode = itemBarcode(item)
+  const supplierCode = text(item.supplier_code)
+  const uniqueSkuId = text(item.unique_sku_id)
+  const size = text(pick(item, 'kasta_size', 'size'))
+  const cacheKey = [barcode, supplierCode, uniqueSkuId, size].join('|')
+  if (cache.has(cacheKey)) return cache.get(cacheKey)
+  try {
+    let cursor = ''
+    for (let page = 0; page < 30; page += 1) {
+      const query = new URLSearchParams()
+      if (barcode) query.set('barcode', barcode)
+      else if (cursor) query.set('cursor', cursor)
+      const payload = await fetchKastaOrders(token, query, '/api/products/list')
+      const product = productRows(payload).find((candidate) =>
+        (uniqueSkuId && text(candidate.unique_sku_id) === uniqueSkuId) ||
+        (supplierCode && text(candidate.supplier_code) === supplierCode && (!size || text(candidate.size) === size)),
+      )
+      if (product) {
+        const royalty = royaltyPercent(product.royalty)
+        console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, page, productKeys: Object.keys(product), royalty } }))
+        cache.set(cacheKey, royalty)
+        return royalty || undefined
+      }
+      cursor = text(payload.cursor)
+      if (!cursor || barcode) break
+    }
+    console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, found: false } }))
+    return undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function latestKastaPage(token: string) {
@@ -134,6 +204,7 @@ Deno.serve(async (request) => {
   const orders = Array.isArray(payload.items) ? payload.items.map(asRecord) : []
   const nextCursor = text(payload.cursor)
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
+  const royaltyCache = new Map<string, number>()
   let created = 0
   let updated = 0
   let skipped = 0
@@ -192,12 +263,30 @@ Deno.serve(async (request) => {
     const items = itemRows(order)
     if (!items.length) continue
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
-    await admin.from('crm_order_items').insert(items.map((item, position) => {
+    const savedItems = []
+    for (const [position, item] of items.entries()) {
       const previous = byPosition.get(position)
-      const quantity = number(item.quantity) || 1
-      const feedImage = feedImages.get(text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id')))
-      return { order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: number(pick(item, 'paid_price', 'new_price', 'price')) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: previous?.royalty_percent ?? 22, royalty_amount: previous?.royalty_amount ?? null }
-    }))
+      const quantity = itemQuantity(item)
+      const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
+      const supplierCode = text(item.supplier_code)
+      const feedImage = feedImages.get(uniqueSkuId) || feedImages.get(supplierCode)
+      const directRoyalty = royaltyPercent(item.royalty)
+      const apiRoyalty = directRoyalty || (targetOrderId ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
+      if (targetOrderId) {
+        console.log(JSON.stringify({ kastaOrderItem: {
+          orderId: kastaId,
+          supplierCode,
+          barcode: itemBarcode(item),
+          paidPrice: number(item.paid_price),
+          newPrice: number(item.new_price),
+          bonus: itemBonus(item),
+          directRoyalty,
+          apiRoyalty,
+        } }))
+      }
+      savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
+    }
+    await admin.from('crm_order_items').insert(savedItems)
   }
   if (!targetOrderId && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta', cursor: nextCursor, updated_at: new Date().toISOString() })
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, remains: number(payload.remains) }, { headers: corsHeaders })
