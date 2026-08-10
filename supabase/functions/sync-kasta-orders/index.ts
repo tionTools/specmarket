@@ -75,12 +75,20 @@ type CoFinanceTariff = { effective_date: string, rates: CoFinanceRate[] }
 // Add a new entry when Kasta changes its co-finance terms; no end date is needed.
 const TARIF_SCHEDULE: CoFinanceTariff[] = [
   {
-    effective_date: '2024-01-01',
+    effective_date: '2026-08-01',
     rates: [
       { max: 399, cost: 19 },
       { max: 699, cost: 25 },
       { max: 1499, cost: 39 },
       { max: Infinity, cost: 102 },
+    ],
+  },
+  {
+    effective_date: '2026-04-14',
+    rates: [
+      { max: 399, cost: 19 },
+      { max: 699, cost: 25 },
+      { max: 1499, cost: 39 },
     ],
   },
 ]
@@ -101,7 +109,7 @@ function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: numb
     .find((candidate) => orderDate >= candidate.effective_date)
   if (!tariff) return undefined
   if (customerDeliveryFee > 0) return 0
-  return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost
+  return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost ?? 0
 }
 
 function orderAmount(order: RecordValue, items: RecordValue[]): number {
