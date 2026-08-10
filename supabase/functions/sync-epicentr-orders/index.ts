@@ -94,6 +94,13 @@ function readableText(value: unknown): string {
     .join(', ')
 }
 
+function itemSize(item: Record<string, unknown>) {
+  const explicitSize = readableText(item.size) || readableText(item.variation) || readableText(item.option) || readableText(item.characteristics)
+  if (explicitSize) return explicitSize
+  const title = readableText(item.title)
+  return title.match(/(?:розмір|размер|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?)/i)?.[1]?.replace(/\s/g, '') ?? ''
+}
+
 async function deliveryReference(url: string, token: string) {
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
@@ -321,7 +328,7 @@ Deno.serve(async (request) => {
           order_id: orderId,
           position,
           product_name: item.title,
-          size: '',
+          size: itemSize(asRecord(item)),
           quantity: Number(item.quantity ?? 1),
           price: Number(item.price ?? 0),
           cost: Number(currentItem?.cost ?? 0),
