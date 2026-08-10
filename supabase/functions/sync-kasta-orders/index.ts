@@ -68,6 +68,26 @@ function itemPrice(item: RecordValue) {
   return number(pick(item, 'new_price', 'paid_price', 'price'))
 }
 
+// Kasta co-finance rate effective from 1 August 2026 (VAT included).
+// Kept pure so the rate table can be extended for earlier periods safely.
+function calculateKastaDeliveryCost(orderAmount: number): number {
+  if (orderAmount < 400) return 19
+  if (orderAmount < 700) return 25
+  if (orderAmount < 1500) return 39
+  return 102
+}
+
+function orderAmount(order: RecordValue, items: RecordValue[]): number {
+  const apiAmount = number(pick(order, 'order_amount', 'total_amount', 'amount', 'total_price'))
+  if (apiAmount > 0) return apiAmount
+  return items.reduce((total, item) => total + itemPrice(item) * itemQuantity(item), 0)
+}
+
+function isCurrentCoFinanceRate(createdAt: string): boolean {
+  const orderDate = new Date(createdAt)
+  return !Number.isNaN(orderDate.getTime()) && orderDate >= new Date('2026-08-01T00:00:00+03:00')
+}
+
 function itemBarcode(item: RecordValue) {
   const barcodes = Array.isArray(item.barcode) ? item.barcode.map(text).filter(Boolean) : []
   return barcodes[0] ?? text(item.barcode)
@@ -221,6 +241,10 @@ Deno.serve(async (request) => {
     const status = latestStatus(order)
     const createdStatus = (Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []).find((item) => text(item.type) === 'Created') ?? status
     const createdAt = text(createdStatus.created_at) || text(status.created_at)
+    const items = itemRows(order)
+    const calculatedShipping = isCurrentCoFinanceRate(createdAt)
+      ? calculateKastaDeliveryCost(orderAmount(order, items))
+      : 0
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
@@ -237,7 +261,8 @@ Deno.serve(async (request) => {
 	customer_comment: Array.isArray(order.comments) ? order.comments.map(text).filter(Boolean).join('\n') || null : null,
 	platform: 'Каста',
 	status: (orderStatuses[text(status.type)] ?? text(status.type)) || 'Новый',
-	shipping: Number(existing?.shipping ?? 0),
+	// Existing records stay untouched: the user may have corrected shipping manually.
+	shipping: existing ? Number(existing.shipping ?? 0) : calculatedShipping,
 	acquiring: Number(existing?.acquiring ?? 0),
 	acquiring_percent: existing?.acquiring_percent ?? null,
 	delivery: {
@@ -260,7 +285,6 @@ Deno.serve(async (request) => {
     if (!orderId) continue
     const { data: previousItems } = await admin.from('crm_order_items').select('position, product_name, size, image_url, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
     const byPosition = new Map((previousItems ?? []).map((item) => [item.position, item]))
-    const items = itemRows(order)
     if (!items.length) continue
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const savedItems = []
