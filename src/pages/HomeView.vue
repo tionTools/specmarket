@@ -433,7 +433,13 @@ async function syncKastaOrders(full = false, latest = false) {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-kasta-orders', {
     method: 'POST',
-    body: full ? { full: true } : latest ? { latest: true } : undefined,
+    body: full
+      ? latest
+        ? { full: true, latest: true }
+        : { full: true }
+      : latest
+        ? { latest: true }
+        : undefined,
   })
   isSyncingKasta.value = false
   if (error || !data?.ok) {
@@ -461,7 +467,7 @@ async function syncFullKastaOrders() {
     )
   )
     return
-  await syncKastaOrders(false, true)
+  await syncKastaOrders(true, true)
 }
 
 async function syncKastaOrder(order: Order) {
