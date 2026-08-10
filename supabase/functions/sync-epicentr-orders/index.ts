@@ -259,9 +259,10 @@ Deno.serve(async (request) => {
     // Для Эпицентра статус finished означает, что покупатель уже получил
     // отправление. Если отдельный статус перевозчика отсутствует, это более
     // точный источник, чем старое значение «Запланировано» в CRM.
-    const deliveryStatus = apiDeliveryStatus ||
-      (source.statusCode.toLowerCase() === 'finished' ? 'Получено' :
-        (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано'))
+    const deliveryStatus = source.statusCode.toLowerCase() === 'finished'
+      ? 'Получено'
+      : apiDeliveryStatus ||
+        (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const data = {
