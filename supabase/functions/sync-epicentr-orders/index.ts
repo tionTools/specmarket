@@ -186,8 +186,18 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const knownExternalIds = new Set<string>()
+  if (!requestedExternalId && orders.length) {
+    const externalIds = orders.map((order) => order.id).filter(Boolean)
+    const { data: existingOrders } = await admin.from('crm_orders').select('external_id').in('external_id', externalIds)
+    for (const row of existingOrders ?? []) if (row.external_id) knownExternalIds.add(row.external_id)
+  }
 
   for (const order of orders) {
+    if (!requestedExternalId && knownExternalIds.has(order.id)) {
+      skipped += 1
+      continue
+    }
     const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
     })
@@ -202,17 +212,13 @@ Deno.serve(async (request) => {
       items: detail.items ?? order.items,
     }
     const externalId = source.id
-    const existing = await admin
-      .from('crm_orders')
-      .select('id, shipping, acquiring, acquiring_percent, delivery')
-      .eq('external_id', externalId)
-      .maybeSingle()
+    const existing = requestedExternalId
+      ? await admin.from('crm_orders')
+        .select('id, shipping, acquiring, acquiring_percent, delivery')
+        .eq('external_id', externalId).maybeSingle()
+      : { data: null }
     // Массовая кнопка добавляет только отсутствующие заказы. Обновление
     // существующего заказа остаётся отдельным действием в его карточке.
-    if (existing.data?.id && !requestedExternalId) {
-      skipped += 1
-      continue
-    }
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
     let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)

@@ -187,20 +187,30 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const knownExternalIds = new Set<string>()
+  if (!requestedExternalId && orders.length) {
+    const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
+    const { data: existingOrders } = await admin.from('crm_orders').select('external_id').in('external_id', externalIds)
+    for (const row of existingOrders ?? []) if (row.external_id) knownExternalIds.add(row.external_id)
+  }
 
   for (const order of orders) {
     const promId = text(order.id)
     if (!promId) continue
     const externalId = `prom:${promId}`
-    const { data: existing } = await admin.from('crm_orders')
-      .select('id, shipping, acquiring, acquiring_percent, delivery')
-      .eq('external_id', externalId).maybeSingle()
-    // Массовая кнопка ищет только новые заказы. Старые обновляются только
-    // отдельной кнопкой в карточке конкретного заказа.
-    if (existing?.id && !requestedExternalId) {
+    if (!requestedExternalId && knownExternalIds.has(externalId)) {
       skipped += 1
       continue
     }
+    let existing: any = null
+    if (requestedExternalId) {
+      const { data } = await admin.from('crm_orders')
+        .select('id, shipping, acquiring, acquiring_percent, delivery')
+        .eq('external_id', externalId).maybeSingle()
+      existing = data
+    }
+    // Массовая кнопка ищет только новые заказы. Старые обновляются только
+    // отдельной кнопкой в карточке конкретного заказа.
     const previousDelivery = asRecord(existing?.delivery)
     const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
     const deliveryProvider = asRecord(order.delivery_provider_data)
