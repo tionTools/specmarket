@@ -68,14 +68,40 @@ function itemPrice(item: RecordValue) {
   return number(pick(item, 'new_price', 'paid_price', 'price'))
 }
 
-// Kasta co-finance rate effective from 1 August 2026 (VAT included).
-// Kept pure so the rate table can be extended for earlier periods safely.
-function calculateKastaDeliveryCost(customerDeliveryFee: number, orderAmount: number): number {
+type CoFinanceRate = { max: number, cost: number }
+type CoFinanceTariff = { effective_date: string, rates: CoFinanceRate[] }
+
+// A tariff is active from its effective date until the next tariff begins.
+// Add a new entry when Kasta changes its co-finance terms; no end date is needed.
+const TARIF_SCHEDULE: CoFinanceTariff[] = [
+  {
+    effective_date: '2024-01-01',
+    rates: [
+      { max: 399, cost: 19 },
+      { max: 699, cost: 25 },
+      { max: 1499, cost: 39 },
+      { max: Infinity, cost: 102 },
+    ],
+  },
+]
+
+function orderDateKey(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date)
+  const part = (kind: string) => parts.find((item) => item.type === kind)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number): number | undefined {
+  const tariff = [...TARIF_SCHEDULE]
+    .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
+    .find((candidate) => orderDate >= candidate.effective_date)
+  if (!tariff) return undefined
   if (customerDeliveryFee > 0) return 0
-  if (orderAmount < 400) return 19
-  if (orderAmount < 700) return 25
-  if (orderAmount < 1500) return 39
-  return 102
+  return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost
 }
 
 function orderAmount(order: RecordValue, items: RecordValue[]): number {
@@ -87,11 +113,6 @@ function orderAmount(order: RecordValue, items: RecordValue[]): number {
 function customerDeliveryFee(order: RecordValue, delivery: RecordValue): number {
   return number(pick(order, 'delivery_cost', 'shipping_fee', 'delivery_fee'))
     || number(pick(delivery, 'delivery_cost', 'shipping_fee', 'delivery_fee', 'cost'))
-}
-
-function isCurrentCoFinanceRate(createdAt: string): boolean {
-  const orderDate = new Date(createdAt)
-  return !Number.isNaN(orderDate.getTime()) && orderDate >= new Date('2026-08-01T00:00:00+03:00')
 }
 
 function itemBarcode(item: RecordValue) {
@@ -249,9 +270,7 @@ Deno.serve(async (request) => {
     const createdAt = text(createdStatus.created_at) || text(status.created_at)
     const items = itemRows(order)
     const deliveryFee = customerDeliveryFee(order, delivery)
-    const calculatedShipping = isCurrentCoFinanceRate(createdAt)
-      ? calculateKastaDeliveryCost(deliveryFee, orderAmount(order, items))
-      : 0
+    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(createdAt), deliveryFee, orderAmount(order, items))
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
@@ -268,8 +287,7 @@ Deno.serve(async (request) => {
 	customer_comment: Array.isArray(order.comments) ? order.comments.map(text).filter(Boolean).join('\n') || null : null,
 	platform: 'Каста',
 	status: (orderStatuses[text(status.type)] ?? text(status.type)) || 'Новый',
-	// Since 1 August 2026 Kasta co-finance is authoritative and is recalculated on every sync.
-	shipping: isCurrentCoFinanceRate(createdAt) ? calculatedShipping : Number(existing?.shipping ?? 0),
+	shipping: calculatedShipping ?? Number(existing?.shipping ?? 0),
 	acquiring: Number(existing?.acquiring ?? 0),
 	acquiring_percent: existing?.acquiring_percent ?? null,
 	delivery: {
