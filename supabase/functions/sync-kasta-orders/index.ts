@@ -103,11 +103,12 @@ function orderDateKey(value: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number): number | undefined {
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, isReceived: boolean): number | undefined {
   const tariff = [...TARIF_SCHEDULE]
     .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
     .find((candidate) => orderDate >= candidate.effective_date)
   if (!tariff) return undefined
+  if (!isReceived) return 0
   if (customerDeliveryFee > 0) return 0
   return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost ?? 0
 }
@@ -278,7 +279,8 @@ Deno.serve(async (request) => {
     const createdAt = text(createdStatus.created_at) || text(status.created_at)
     const items = itemRows(order)
     const deliveryFee = customerDeliveryFee(order, delivery)
-    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(createdAt), deliveryFee, orderAmount(order, items))
+    const isReceived = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery'
+    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(createdAt), deliveryFee, orderAmount(order, items), isReceived)
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
