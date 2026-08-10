@@ -303,7 +303,7 @@ async function syncEpicentrOrders() {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
     return
   }
-  showSyncMessage(`Эпицентр: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`)
+  showSyncMessage(`Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`)
   await loadRemoteOrders()
 }
 
@@ -318,7 +318,7 @@ async function syncPromOrders() {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     return
   }
-  showSyncMessage(`Prom: получено ${data.received}, новых ${data.created}, обновлено ${data.updated}.`)
+  showSyncMessage(`Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`)
   await loadRemoteOrders()
 }
 
@@ -724,7 +724,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncEpicentrOrders"
           >
-            {{ isSyncingEpicentr ? 'Обновляем Эпицентр…' : '↻ Обновить Эпицентр' }}
+            {{ isSyncingEpicentr ? 'Ищем новые в Эпицентре…' : '↻ Загрузить новые Эпицентр' }}
           </button>
           <button
             v-if="!isGuest"
@@ -733,7 +733,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncPromOrders"
           >
-            {{ isSyncingProm ? 'Обновляем Prom…' : '↻ Обновить Prom' }}
+            {{ isSyncingProm ? 'Ищем новые в Prom…' : '↻ Загрузить новые Prom' }}
           </button>
           <button
             v-if="!isGuest"

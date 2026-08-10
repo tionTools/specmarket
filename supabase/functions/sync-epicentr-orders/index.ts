@@ -183,6 +183,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
+  let skipped = 0
 
   for (const order of orders) {
     const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
@@ -204,6 +205,12 @@ Deno.serve(async (request) => {
       .select('id, shipping, acquiring, acquiring_percent, delivery')
       .eq('external_id', externalId)
       .maybeSingle()
+    // Массовая кнопка добавляет только отсутствующие заказы. Обновление
+    // существующего заказа остаётся отдельным действием в его карточке.
+    if (existing.data?.id && !requestedExternalId) {
+      skipped += 1
+      continue
+    }
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
     let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)
@@ -313,5 +320,5 @@ Deno.serve(async (request) => {
     }
   }
 
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
 })

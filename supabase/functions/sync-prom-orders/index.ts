@@ -184,6 +184,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
+  let skipped = 0
 
   for (const order of orders) {
     const promId = text(order.id)
@@ -192,6 +193,12 @@ Deno.serve(async (request) => {
     const { data: existing } = await admin.from('crm_orders')
       .select('id, shipping, acquiring, acquiring_percent, delivery')
       .eq('external_id', externalId).maybeSingle()
+    // Массовая кнопка ищет только новые заказы. Старые обновляются только
+    // отдельной кнопкой в карточке конкретного заказа.
+    if (existing?.id && !requestedExternalId) {
+      skipped += 1
+      continue
+    }
     const previousDelivery = asRecord(existing?.delivery)
     const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
     const deliveryProvider = asRecord(order.delivery_provider_data)
@@ -295,5 +302,5 @@ Deno.serve(async (request) => {
       return { order_id: orderId, position, product_name: name, size: readable(pick(item, 'variation', 'size', 'option')), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: royaltyPercent, royalty_amount: royaltyAmount }
     }))
   }
-  return Response.json({ ok: true, received: orders.length, created, updated }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
 })
