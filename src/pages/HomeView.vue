@@ -239,33 +239,37 @@ function createOrderDraft(): Order {
   }
 }
 
-function persistOrders() {
+function persistOrders(order?: Order) {
   if (isGuest.value) return Promise.resolve()
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
-    .then(() => persistOrdersNow())
+    .then(() => persistOrdersNow(order ? [order] : orders.value))
   return persistenceQueue
 }
 
-async function persistOrdersNow() {
+function serializeOrder(order: Order) {
+  return {
+    remoteId: order.remoteId,
+    order_number: order.id, order_date: order.date, order_time: order.time ?? null,
+    customer: order.customer, phone: order.phone, customer_email: order.customerEmail ?? null,
+    customer_comment: order.customerComment ?? null, platform: order.platform, status: order.status,
+    shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null,
+    delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
+    items: order.products.map((product) => ({
+      product_name: product.name, size: product.size, quantity: product.quantity, price: product.price,
+      cost: product.cost, cost_usd: product.costUsd ?? 0, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
+    })),
+  }
+}
+
+async function persistOrdersNow(savedOrders: Order[]) {
   if (isGuest.value) return
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   if (!supabase) return
   const { data, error } = await supabase.functions.invoke('save-crm-orders', {
     method: 'POST',
     body: {
-      orders: orders.value.map((order) => ({
-        remoteId: order.remoteId,
-        order_number: order.id, order_date: order.date, order_time: order.time ?? null,
-        customer: order.customer, phone: order.phone, customer_email: order.customerEmail ?? null,
-        customer_comment: order.customerComment ?? null, platform: order.platform, status: order.status,
-        shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null,
-        delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
-        items: order.products.map((product) => ({
-          product_name: product.name, size: product.size, quantity: product.quantity, price: product.price,
-          cost: product.cost, cost_usd: product.costUsd ?? 0, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
-        })),
-      })),
+      orders: savedOrders.map(serializeOrder),
     },
   })
   if (error || !data?.ok) throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
@@ -475,7 +479,7 @@ function createOrder() {
 function updateOrderStatus(order: Order, status: string) {
   if (isGuest.value) return
   order.status = status
-  persistOrders()
+  persistOrders(order)
 }
 
 function toggleOrder(orderId: number) {
@@ -590,24 +594,24 @@ function openPromOrder(order: Order) {
 
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
-  persistOrders()
+  persistOrders(order)
 }
 
 function syncProductRoyaltyPercent(order: Order, product: OrderProduct) {
   const amount = product.price * product.quantity
   product.royaltyPercent = amount === 0 ? 0 : ((product.royaltyAmount ?? 0) / amount) * 100
-  persistOrders()
+  persistOrders(order)
 }
 
 function syncAcquiringAmount(order: Order) {
   order.acquiring = getOrderAmount(order) * ((order.acquiringPercent ?? 0) / 100)
-  persistOrders()
+  persistOrders(order)
 }
 
 function syncAcquiringPercent(order: Order) {
   const amount = getOrderAmount(order)
   order.acquiringPercent = amount === 0 ? 0 : (order.acquiring / amount) * 100
-  persistOrders()
+  persistOrders(order)
 }
 
 function parseOrderNumber(event: Event) {
@@ -649,13 +653,18 @@ function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' 
   }
 }
 
+function orderFromEditKey(key: string) {
+  return orders.value.find((order) => key.startsWith(`${order.id}-`))
+}
+
 async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () => void) {
   if (isGuest.value) return
+  const order = orderFromEditKey(key)
   if (editingOrderCell.value === key) {
     onCommit?.()
     editingOrderCell.value = null
     delete editingOrderValue.value[key]
-    persistOrders()
+    persistOrders(order)
     return
   }
   editingOrderCell.value = key
@@ -680,10 +689,11 @@ function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 
 
 function finishOrderCell(key: string, onCommit?: () => void) {
   if (editingOrderCell.value === key) {
+    const order = orderFromEditKey(key)
     onCommit?.()
     editingOrderCell.value = null
     delete editingOrderValue.value[key]
-    persistOrders()
+    persistOrders(order)
   }
 }
 
