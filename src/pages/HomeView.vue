@@ -51,6 +51,19 @@ function showSyncError(message: string) {
   syncNoticeVisible.value = true
 }
 
+// Ручное изменение поля сохраняется асинхронно. Синхронизация не должна
+// читать старую версию заказа из базы и затем вернуть в него нули.
+async function waitForPendingSaves(): Promise<boolean> {
+  try {
+    await persistenceQueue
+    return true
+  } catch (error) {
+    console.error('Не удалось завершить сохранение перед синхронизацией:', error)
+    showSyncError('Сначала не удалось сохранить изменения. Синхронизация не запускалась.')
+    return false
+  }
+}
+
 const platformOptions: Platform[] = ['Пром', 'Эпицентр', 'Каста', 'Р/С', 'Сайт']
 const carrierOptions: Delivery['carrier'][] = [
   'Новая почта',
@@ -281,6 +294,7 @@ async function signOut() {
 
 async function syncEpicentrOrders() {
   if (!supabase || isGuest.value) return
+  if (!await waitForPendingSaves()) return
   isSyncingEpicentr.value = true
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', { method: 'POST' })
@@ -295,6 +309,7 @@ async function syncEpicentrOrders() {
 
 async function syncPromOrders() {
   if (!supabase || isGuest.value) return
+  if (!await waitForPendingSaves()) return
   isSyncingProm.value = true
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
@@ -309,6 +324,7 @@ async function syncPromOrders() {
 
 async function syncPromOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Пром' || !order.externalId) return
+  if (!await waitForPendingSaves()) return
   isSyncingProm.value = true
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
@@ -325,6 +341,7 @@ async function syncPromOrder(order: Order) {
 
 async function syncEpicentrOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
+  if (!await waitForPendingSaves()) return
   isSyncingEpicentr.value = true
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
