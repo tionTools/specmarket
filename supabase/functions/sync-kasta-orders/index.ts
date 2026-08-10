@@ -88,7 +88,7 @@ const TARIF_SCHEDULE: CoFinanceTariff[] = [
     rates: [
       { max: 399, cost: 19 },
       { max: 699, cost: 25 },
-      { max: 1499, cost: 39 },
+      { max: Infinity, cost: 39 },
     ],
   },
 ]
