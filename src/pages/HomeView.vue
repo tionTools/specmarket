@@ -40,7 +40,9 @@ function showSyncMessage(message: string) {
   syncNoticeVisible.value = true
   syncNoticeTimer = window.setTimeout(() => {
     syncNoticeVisible.value = false
-    syncNoticeCleanupTimer = window.setTimeout(() => { syncEpicentrMessage.value = '' }, 500)
+    syncNoticeCleanupTimer = window.setTimeout(() => {
+      syncEpicentrMessage.value = ''
+    }, 500)
   }, 5000)
 }
 
@@ -106,7 +108,10 @@ const orders = ref<Order[]>(
 )
 
 const todayKey = () => new Intl.DateTimeFormat('uk-UA').format(new Date())
-const currentTime = () => new Intl.DateTimeFormat('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
+const currentTime = () =>
+  new Intl.DateTimeFormat('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false }).format(
+    new Date(),
+  )
 const orderDraft = ref(createOrderDraft())
 const currentMonth = () => {
   const now = new Date()
@@ -130,13 +135,19 @@ const getPlannedProfit = (order: Order) =>
 // суммы. Статус площадки сам по себе не означает, что деньги уже получены.
 const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
 const getActualProfit = (order: Order) =>
-  (order.paymentAmount ?? 0) - getOrderCost(order) - getRoyalty(order) - order.shipping - order.acquiring
+  (order.paymentAmount ?? 0) -
+  getOrderCost(order) -
+  getRoyalty(order) -
+  order.shipping -
+  order.acquiring
 const formatMoney = (value: number) => {
   const fractionDigits = Number.isInteger(value) ? 0 : 2
-  return new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(value) + ' ₴'
+  return (
+    new Intl.NumberFormat('uk-UA', {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(value) + ' ₴'
+  )
 }
 const formatNumber = (value: number) => {
   const fractionDigits = Number.isInteger(value) ? 0 : 2
@@ -147,10 +158,12 @@ const formatNumber = (value: number) => {
 }
 const formatProfitPercent = (profit: number, amount: number) => {
   const value = amount === 0 ? 0 : (profit / amount) * 100
-  return new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(value) + '%'
+  return (
+    new Intl.NumberFormat('uk-UA', {
+      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(value) + '%'
+  )
 }
 const formatOrderNumber = (value: number | undefined) => {
   if (value === undefined) return ''
@@ -173,7 +186,8 @@ const visibleOrders = computed(() => {
       platformFilter.value === 'all' || order.platform === platformFilter.value
     const haystack =
       `${order.id} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
-    const matchesTtn = ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
+    const matchesTtn =
+      ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
     return matchesPlatform && (!search || haystack.includes(search) || matchesTtn)
   })
 })
@@ -258,14 +272,29 @@ function persistOrders(order?: Order) {
 function serializeOrder(order: Order) {
   return {
     remoteId: order.remoteId,
-    order_number: order.id, order_date: order.date, order_time: order.time ?? null,
-    customer: order.customer, phone: order.phone, customer_email: order.customerEmail ?? null,
-    customer_comment: order.customerComment ?? null, platform: order.platform, status: order.status,
-    shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiringPercent ?? null,
+    order_number: order.id,
+    order_date: order.date,
+    order_time: order.time ?? null,
+    customer: order.customer,
+    phone: order.phone,
+    customer_email: order.customerEmail ?? null,
+    customer_comment: order.customerComment ?? null,
+    platform: order.platform,
+    status: order.status,
+    shipping: order.shipping,
+    acquiring: order.acquiring,
+    acquiring_percent: order.acquiringPercent ?? null,
     delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
     items: order.products.map((product) => ({
-      product_name: product.name, size: product.size, quantity: product.quantity, price: product.price,
-      cost: product.cost, cost_usd: product.costUsd ?? 0, royalty_percent: product.royaltyPercent ?? null, royalty_amount: product.royaltyAmount ?? null,
+      product_name: product.name,
+      size: product.size,
+      quantity: product.quantity,
+      price: product.price,
+      image_url: product.imageUrl ?? null,
+      cost: product.cost,
+      cost_usd: product.costUsd ?? 0,
+      royalty_percent: product.royaltyPercent ?? null,
+      royalty_amount: product.royaltyAmount ?? null,
     })),
   }
 }
@@ -280,7 +309,8 @@ async function persistOrdersNow(savedOrders: Order[]) {
       orders: savedOrders.map(serializeOrder),
     },
   })
-  if (error || !data?.ok) throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
+  if (error || !data?.ok)
+    throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
   for (const saved of data.saved as Array<{ orderNumber: number; remoteId: string }>) {
     const order = orders.value.find((item) => item.id === saved.orderNumber)
     if (order) order.remoteId = saved.remoteId
@@ -288,12 +318,21 @@ async function persistOrdersNow(savedOrders: Order[]) {
 }
 
 async function signIn() {
-  if (!supabase) { authError.value = 'Supabase не настроен.'; return }
+  if (!supabase) {
+    authError.value = 'Supabase не настроен.'
+    return
+  }
   isSigningIn.value = true
   authError.value = ''
-  const { data, error } = await supabase.auth.signInWithPassword({ email: email.value, password: password.value })
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.value,
+    password: password.value,
+  })
   isSigningIn.value = false
-  if (error) { authError.value = error.message; return }
+  if (error) {
+    authError.value = error.message
+    return
+  }
   user.value = data.user
   window.location.reload()
 }
@@ -307,22 +346,32 @@ async function signOut() {
 async function syncEpicentrOrders() {
   if (!supabase || isGuest.value) return
   isSyncingEpicentr.value = true
-  if (!await waitForPendingSaves()) { isSyncingEpicentr.value = false; return }
+  if (!(await waitForPendingSaves())) {
+    isSyncingEpicentr.value = false
+    return
+  }
   syncEpicentrMessage.value = ''
-  const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', { method: 'POST' })
+  const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
+    method: 'POST',
+  })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
     return
   }
-  showSyncMessage(`Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`)
+  showSyncMessage(
+    `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+  )
   await loadRemoteOrders()
 }
 
 async function syncPromOrders() {
   if (!supabase || isGuest.value) return
   isSyncingProm.value = true
-  if (!await waitForPendingSaves()) { isSyncingProm.value = false; return }
+  if (!(await waitForPendingSaves())) {
+    isSyncingProm.value = false
+    return
+  }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
   isSyncingProm.value = false
@@ -330,17 +379,23 @@ async function syncPromOrders() {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     return
   }
-  showSyncMessage(`Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`)
+  showSyncMessage(
+    `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+  )
   await loadRemoteOrders()
 }
 
 async function syncPromOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Пром' || !order.externalId) return
   isSyncingProm.value = true
-  if (!await waitForPendingSaves()) { isSyncingProm.value = false; return }
+  if (!(await waitForPendingSaves())) {
+    isSyncingProm.value = false
+    return
+  }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
-    method: 'POST', body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
+    method: 'POST',
+    body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
   })
   isSyncingProm.value = false
   if (error || !data?.ok) {
@@ -354,7 +409,10 @@ async function syncPromOrder(order: Order) {
 async function syncEpicentrOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
   isSyncingEpicentr.value = true
-  if (!await waitForPendingSaves()) { isSyncingEpicentr.value = false; return }
+  if (!(await waitForPendingSaves())) {
+    isSyncingEpicentr.value = false
+    return
+  }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
     method: 'POST',
@@ -388,15 +446,67 @@ async function loadRemoteOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   user.value = session.session.user
-  const { data: rateSetting } = await supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle()
+  const { data: rateSetting } = await supabase
+    .from('crm_settings')
+    .select('numeric_value')
+    .eq('key', 'usd_rate')
+    .maybeSingle()
   if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')
     .order('created_at', { ascending: false })
-  if (!remoteOrders?.length) { await persistOrders(); return }
+  if (!remoteOrders?.length) {
+    await persistOrders()
+    return
+  }
   orders.value = remoteOrders
-    .map((row) => ({ id: row.order_number, remoteId: row.id, externalId: row.external_id ?? undefined, date: row.order_date, time: row.order_time ?? undefined, customer: row.customer, phone: row.phone, customerEmail: row.customer_email ?? undefined, customerComment: row.customer_comment ?? undefined, platform: row.platform as Platform, status: row.status, shipping: Number(row.shipping), paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0), acquiring: Number(row.acquiring), acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent), delivery: row.delivery as Delivery, products: (row.crm_order_items as Array<{ id: string; position: number; product_name: string; size: string | null; quantity: number; price: number; cost: number; cost_usd: number; royalty_percent: number | null; royalty_amount: number | null }>).sort((a, b) => a.position - b.position).map((item) => ({ id: item.id, name: item.product_name, size: item.size ?? '', quantity: Number(item.quantity), price: Number(item.price), cost: Number(item.cost), costUsd: Number(item.cost_usd ?? 0), royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent), royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount) })) }))
+    .map((row) => ({
+      id: row.order_number,
+      remoteId: row.id,
+      externalId: row.external_id ?? undefined,
+      date: row.order_date,
+      time: row.order_time ?? undefined,
+      customer: row.customer,
+      phone: row.phone,
+      customerEmail: row.customer_email ?? undefined,
+      customerComment: row.customer_comment ?? undefined,
+      platform: row.platform as Platform,
+      status: row.status,
+      shipping: Number(row.shipping),
+      paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
+      acquiring: Number(row.acquiring),
+      acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent),
+      delivery: row.delivery as Delivery,
+      products: (
+        row.crm_order_items as Array<{
+          id: string
+          position: number
+          product_name: string
+          size: string | null
+          image_url: string | null
+          quantity: number
+          price: number
+          cost: number
+          cost_usd: number
+          royalty_percent: number | null
+          royalty_amount: number | null
+        }>
+      )
+        .sort((a, b) => a.position - b.position)
+        .map((item) => ({
+          id: item.id,
+          name: item.product_name,
+          size: item.size ?? '',
+          imageUrl: item.image_url ?? undefined,
+          quantity: Number(item.quantity),
+          price: Number(item.price),
+          cost: Number(item.cost),
+          costUsd: Number(item.cost_usd ?? 0),
+          royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent),
+          royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
+        })),
+    }))
     .sort((left, right) => orderDateTime(right) - orderDateTime(left) || right.id - left.id)
 }
 
@@ -418,42 +528,6 @@ function openNewOrderDialog() {
   if (isGuest.value) return
   orderDraft.value = createOrderDraft()
   orderDialog.value?.showModal()
-}
-
-function addMultiItemDemoOrders() {
-  if (isGuest.value || orders.value.some((order) => order.id >= 9_001 && order.id <= 9_003)) return
-  const examples = demoOrders
-    .filter((order) => order.products.length > 1)
-    .slice(0, 3)
-    .map((order, index) => {
-      const copied = structuredClone(order)
-      copied.id = 9_001 + index
-      if (index === 0) copied.products.pop()
-      if (index === 1) {
-        copied.products.push({
-          id: crypto.randomUUID(),
-          name: 'Защитные наколенники',
-          size: 'L',
-          quantity: 1,
-          price: 280,
-          cost: 165,
-        })
-      }
-      if (index === 2) {
-        copied.products.push({
-          id: crypto.randomUUID(),
-          name: 'Рабочая кепка',
-          size: 'Универсальный',
-          quantity: 2,
-          price: 150,
-          cost: 82,
-        })
-      }
-      copied.customer = `Демо-заказ: ${copied.products.length} позиции`
-      return copied
-    })
-  orders.value.unshift(...examples)
-  void persistOrders()
 }
 
 function addProduct() {
@@ -500,7 +574,10 @@ async function deleteOrder(order: Order) {
   deletingOrderId.value = order.id
   await persistenceQueue
   if (supabase && order.remoteId) {
-    const { error: itemsError } = await supabase.from('crm_order_items').delete().eq('order_id', order.remoteId)
+    const { error: itemsError } = await supabase
+      .from('crm_order_items')
+      .delete()
+      .eq('order_id', order.remoteId)
     const { error: orderError } = itemsError
       ? { error: itemsError }
       : await supabase.from('crm_orders').delete().eq('id', order.remoteId)
@@ -547,7 +624,8 @@ function displayDeliveryStatus(status: string) {
 function deliveryStatusForOrder(order: Order) {
   // У Эпицентра «Завершено» означает, что отправление получено покупателем.
   // Это правило площадки, поэтому не показываем устаревшее «Запланировано».
-  if (order.platform === 'Эпицентр' && displayOrderStatus(order.status) === 'Завершено') return 'Получено'
+  if (order.platform === 'Эпицентр' && displayOrderStatus(order.status) === 'Завершено')
+    return 'Получено'
   return displayDeliveryStatus(order.delivery.status)
 }
 
@@ -569,7 +647,8 @@ function displayCarrier(carrier: string) {
 
 function carrierIcon(carrier: string) {
   const value = carrier.toLowerCase()
-  if (value.includes('nova') || value.includes('новая') || value.includes('нова пошта')) return 'nova'
+  if (value.includes('nova') || value.includes('новая') || value.includes('нова пошта'))
+    return 'nova'
   if (value.includes('ukr') || value.includes('укр')) return 'ukr'
   if (value.includes('rozetka')) return 'rozetka'
   if (value.includes('meest') || value.includes('міст')) return 'meest'
@@ -598,7 +677,11 @@ async function copyOrderNumber(order: Order) {
 
 function openEpicentrOrder(order: Order) {
   if (!order.externalId) return
-  window.open(`https://admin.epicentrm.com.ua/oms/orders/${order.externalId}`, '_blank', 'noopener,noreferrer')
+  window.open(
+    `https://admin.epicentrm.com.ua/oms/orders/${order.externalId}`,
+    '_blank',
+    'noopener,noreferrer',
+  )
 }
 
 function openPromOrder(order: Order) {
@@ -653,7 +736,12 @@ function orderCellValue(key: string, value: number | undefined) {
   return editingOrderValue.value[key] ?? formatOrderNumber(value)
 }
 
-function updateOrderFinancial(order: Order, field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent', key: string, event: Event) {
+function updateOrderFinancial(
+  order: Order,
+  field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent',
+  key: string,
+  event: Event,
+) {
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   const value = Number(raw.replace(',', '.'))
@@ -688,7 +776,12 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
   ;(event.target as HTMLInputElement).select()
 }
 
-function updateOrderNumber(product: OrderProduct, field: 'quantity' | 'price' | 'cost' | 'costUsd', key: string, event: Event) {
+function updateOrderNumber(
+  product: OrderProduct,
+  field: 'quantity' | 'price' | 'cost' | 'costUsd',
+  key: string,
+  event: Event,
+) {
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   const value = Number(raw.replace(',', '.'))
@@ -720,23 +813,63 @@ function orderDateTime(order: Order) {
 </script>
 
 <template>
-  <div v-if="!user" class="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-slate-900">
-    <form class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl" @submit.prevent="signIn">
+  <div
+    v-if="!user"
+    class="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-slate-900"
+  >
+    <form
+      class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl"
+      @submit.prevent="signIn"
+    >
       <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
       <h1 class="mt-3 text-3xl font-semibold">Вход в CRM</h1>
-      <p class="mt-2 text-sm text-slate-500">Войди, чтобы увидеть общие заказы и цены на всех устройствах.</p>
-      <input v-model="email" required class="mt-6 w-full rounded-xl border border-slate-200 px-3 py-3" placeholder="Email" type="email" />
-      <div class="relative mt-3"><input v-model="password" required class="w-full rounded-xl border border-slate-200 px-3 py-3 pr-12" placeholder="Пароль" :type="showPassword ? 'text' : 'password'" /><button class="absolute inset-y-0 right-0 px-4 text-slate-500 hover:text-emerald-700" type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Скрыть' : 'Показать' }}</button></div>
+      <p class="mt-2 text-sm text-slate-500">
+        Войди, чтобы увидеть общие заказы и цены на всех устройствах.
+      </p>
+      <input
+        v-model="email"
+        required
+        class="mt-6 w-full rounded-xl border border-slate-200 px-3 py-3"
+        placeholder="Email"
+        type="email"
+      />
+      <div class="relative mt-3">
+        <input
+          v-model="password"
+          required
+          class="w-full rounded-xl border border-slate-200 px-3 py-3 pr-12"
+          placeholder="Пароль"
+          :type="showPassword ? 'text' : 'password'"
+        /><button
+          class="absolute inset-y-0 right-0 px-4 text-slate-500 hover:text-emerald-700"
+          type="button"
+          @click="showPassword = !showPassword"
+        >
+          {{ showPassword ? 'Скрыть' : 'Показать' }}
+        </button>
+      </div>
       <p v-if="authError" class="mt-3 text-sm text-rose-700">{{ authError }}</p>
-      <button class="mt-5 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800" :disabled="isSigningIn" type="submit">{{ isSigningIn ? 'Входим…' : 'Войти' }}</button>
+      <button
+        class="mt-5 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800"
+        :disabled="isSigningIn"
+        type="submit"
+      >
+        {{ isSigningIn ? 'Входим…' : 'Войти' }}
+      </button>
     </form>
   </div>
   <div v-else class="min-h-screen bg-slate-50 text-slate-900">
     <RouterLink
       class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
-      :to="{ path: '/prices', query: expandedOrderId ? { returnOrder: expandedOrderId, returnSearch: searchQuery } : { returnSearch: searchQuery } }"
+      :to="{
+        path: '/prices',
+        query: expandedOrderId
+          ? { returnOrder: expandedOrderId, returnSearch: searchQuery }
+          : { returnSearch: searchQuery },
+      }"
       title="Открыть цены и себестоимость"
-    ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink>
+      ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink
+    >
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -749,7 +882,13 @@ function orderDateTime(order: Order) {
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <button class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700" type="button" @click="signOut">Выйти</button>
+          <button
+            class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
+            type="button"
+            @click="signOut"
+          >
+            Выйти
+          </button>
           <RouterLink
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
             to="/prices"
@@ -784,10 +923,17 @@ function orderDateTime(order: Order) {
           </button>
         </div>
       </header>
-      <p v-if="isGuest" class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900">
+      <p
+        v-if="isGuest"
+        class="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-900"
+      >
         Гостевой режим: доступен только просмотр данных.
       </p>
-      <p v-else-if="syncEpicentrMessage" class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 transition-opacity duration-500" :class="syncNoticeVisible ? 'opacity-100' : 'opacity-0'">
+      <p
+        v-else-if="syncEpicentrMessage"
+        class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 transition-opacity duration-500"
+        :class="syncNoticeVisible ? 'opacity-100' : 'opacity-0'"
+      >
         {{ syncEpicentrMessage }}
       </p>
 
@@ -855,16 +1001,37 @@ function orderDateTime(order: Order) {
       </section>
 
       <section class="mt-6 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
-        <div class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row">
+        <div
+          class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row"
+        >
           <div class="relative w-full sm:max-w-md">
-            <svg class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+            <svg
+              class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-4-4" />
+            </svg>
             <input
               v-model="searchQuery"
               class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
               placeholder="Поиск: заказ, ТТН, покупатель, товар"
             />
-            <button v-if="searchQuery" class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700" type="button" aria-label="Очистить поиск" @click="searchQuery = ''">×</button>
-          </div><select
+            <button
+              v-if="searchQuery"
+              class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+              type="button"
+              aria-label="Очистить поиск"
+              @click="searchQuery = ''"
+            >
+              ×
+            </button>
+          </div>
+          <select
             v-model="platformFilter"
             class="rounded-xl border border-slate-200 px-3 py-2 text-sm"
           >
@@ -886,7 +1053,11 @@ function orderDateTime(order: Order) {
           :key="order.id"
           :id="`order-${order.id}`"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
-          :class="expandedOrderId === order.id ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100' : 'border-slate-300 hover:border-slate-400'"
+          :class="
+            expandedOrderId === order.id
+              ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100'
+              : 'border-slate-300 hover:border-slate-400'
+          "
         >
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
@@ -894,24 +1065,80 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.id }}</strong><span class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"><span class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700" title="Скопировать номер" @click.stop="copyOrderNumber(order)">⧉</span><span v-if="order.platform === 'Эпицентр' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Эпицентре" @click.stop="openEpicentrOrder(order)">↗</span><span v-if="order.platform === 'Пром' && order.externalId" class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700" title="Открыть заказ в Prom" @click.stop="openPromOrder(order)">↗</span></span>
-              ><span class="mt-1 block text-xs text-slate-500">{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span></span
+              ><strong>№ {{ order.id }}</strong
+              ><span
+                class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
+                ><span
+                  class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700"
+                  title="Скопировать номер"
+                  @click.stop="copyOrderNumber(order)"
+                  >⧉</span
+                ><span
+                  v-if="order.platform === 'Эпицентр' && order.externalId"
+                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  title="Открыть заказ в Эпицентре"
+                  @click.stop="openEpicentrOrder(order)"
+                  >↗</span
+                ><span
+                  v-if="order.platform === 'Пром' && order.externalId"
+                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  title="Открыть заказ в Prom"
+                  @click.stop="openPromOrder(order)"
+                  >↗</span
+                ></span
+              >
+              ><span class="mt-1 block text-xs text-slate-500"
+                >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
+              ></span
             ><span
               ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
               ><span
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ displayOrderStatus(order.status) }}</span
               ></span
-            ><span class="min-w-0"><span class="block truncate text-sm">{{
-              order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
-            }}</span><span class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Позиций: {{ order.products.length }}</span><span v-if="order.delivery.hasWebsiteCommission" class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"><span aria-hidden="true">◎</span> Замовлення з сайту</span></span
+            ><span class="min-w-0"
+              ><span class="block truncate text-sm">{{
+                order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
+              }}</span
+              ><span
+                class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600"
+                >Позиций: {{ order.products.length }}</span
+              ><span
+                v-if="order.delivery.hasWebsiteCommission"
+                class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
+                ><span aria-hidden="true">◎</span> Замовлення з сайту</span
+              ></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
-            ><span v-if="isPaid(order)"><strong>{{ formatMoney(getActualProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span></span><strong v-else>—</strong
-            ><span><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong> <span class="text-xs text-slate-500">({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span></span
+            ><span v-if="isPaid(order)"
+              ><strong>{{ formatMoney(getActualProfit(order)) }}</strong>
+              <span class="text-xs text-slate-500"
+                >({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span
+              ></span
+            ><strong v-else>—</strong
+            ><span
+              ><strong>{{ formatMoney(getPlannedProfit(order)) }}</strong>
+              <span class="text-xs text-slate-500"
+                >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
+              ></span
             ><span
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ deliveryStatusForOrder(order) }}</span
-            ><span class="flex items-center justify-end gap-2"><span class="text-xl text-slate-400">{{ expandedOrderId === order.id ? '⌄' : '›' }}</span><span v-if="!isGuest" class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50" role="button" tabindex="0" title="Удалить заказ из CRM" aria-label="Удалить заказ из CRM" @click.stop="deleteOrder(order)" @keydown.enter.stop="deleteOrder(order)">{{ deletingOrderId === order.id ? '…' : '🗑' }}</span></span>
+            ><span class="flex items-center justify-end gap-2"
+              ><span class="text-xl text-slate-400">{{
+                expandedOrderId === order.id ? '⌄' : '›'
+              }}</span
+              ><span
+                v-if="!isGuest"
+                class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50"
+                role="button"
+                tabindex="0"
+                title="Удалить заказ из CRM"
+                aria-label="Удалить заказ из CRM"
+                @click.stop="deleteOrder(order)"
+                @keydown.enter.stop="deleteOrder(order)"
+                >{{ deletingOrderId === order.id ? '…' : '🗑' }}</span
+              ></span
+            >
           </button>
           <div
             v-if="expandedOrderId === order.id"
@@ -921,32 +1148,67 @@ function orderDateTime(order: Order) {
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <h3 class="text-base font-semibold">Состав заказа</h3>
                 <div class="flex flex-wrap items-center gap-3">
-                  <button v-if="order.platform === 'Эпицентр' && order.externalId" class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60" type="button" :disabled="isSyncingEpicentr" @click="syncEpicentrOrder(order)">{{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}</button>
-                  <button v-if="order.platform === 'Пром' && order.externalId" class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60" type="button" :disabled="isSyncingProm" @click="syncPromOrder(order)">{{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}</button>
-                  <label class="flex items-center gap-2 text-sm text-slate-500"
-                  >Статус<select
-                    :value="displayOrderStatus(order.status)"
-                    class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
-                    @change="updateOrderStatus(order, ($event.target as HTMLSelectElement).value)"
+                  <button
+                    v-if="order.platform === 'Эпицентр' && order.externalId"
+                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    type="button"
+                    :disabled="isSyncingEpicentr"
+                    @click="syncEpicentrOrder(order)"
                   >
-                    <option
-                      v-for="status in statusOptionsForOrder(order)"
-                      :key="status"
-                      :value="status"
+                    {{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                  </button>
+                  <button
+                    v-if="order.platform === 'Пром' && order.externalId"
+                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    type="button"
+                    :disabled="isSyncingProm"
+                    @click="syncPromOrder(order)"
+                  >
+                    {{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                  </button>
+                  <label class="flex items-center gap-2 text-sm text-slate-500"
+                    >Статус<select
+                      :value="displayOrderStatus(order.status)"
+                      class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
+                      @change="updateOrderStatus(order, ($event.target as HTMLSelectElement).value)"
                     >
-                      {{ status }}
-                    </option>
-                  </select></label>
+                      <option
+                        v-for="status in statusOptionsForOrder(order)"
+                        :key="status"
+                        :value="status"
+                      >
+                        {{ status }}
+                      </option>
+                    </select></label
+                  >
                 </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
                 <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
                   <h4 class="mr-2 font-semibold">Данные покупателя</h4>
-                  <span><span class="text-slate-500">Покупатель: </span><strong>{{ order.customer }}</strong></span>
-                  <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{ order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент' }}</span>
-                  <span><span class="text-slate-500">Телефон: </span><strong>{{ order.phone || order.delivery.recipientPhone || '—' }}</strong></span>
-                  <span v-if="order.customerEmail"><span class="text-slate-500">Email: </span><strong class="break-all">{{ order.customerEmail }}</strong></span>
-                  <span v-if="order.customerComment" class="basis-full border-t border-slate-100 pt-2"><span class="text-slate-500">Комментарий: </span><strong class="whitespace-pre-wrap">{{ order.customerComment }}</strong></span>
+                  <span
+                    ><span class="text-slate-500">Покупатель: </span
+                    ><strong>{{ order.customer }}</strong></span
+                  >
+                  <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{
+                    order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент'
+                  }}</span>
+                  <span
+                    ><span class="text-slate-500">Телефон: </span
+                    ><strong>{{
+                      order.phone || order.delivery.recipientPhone || '—'
+                    }}</strong></span
+                  >
+                  <span v-if="order.customerEmail"
+                    ><span class="text-slate-500">Email: </span
+                    ><strong class="break-all">{{ order.customerEmail }}</strong></span
+                  >
+                  <span
+                    v-if="order.customerComment"
+                    class="basis-full border-t border-slate-100 pt-2"
+                    ><span class="text-slate-500">Комментарий: </span
+                    ><strong class="whitespace-pre-wrap">{{ order.customerComment }}</strong></span
+                  >
                 </div>
               </section>
               <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
@@ -955,25 +1217,274 @@ function orderDateTime(order: Order) {
                   :key="product.id"
                   class="order-edit grid gap-2 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_3rem_3.5rem_4rem_3.3rem_4rem_10rem] sm:items-end"
                 >
-                  <div><strong>{{ product.name }}</strong><span class="mt-1 block text-sm text-slate-500">Размер: {{ product.size }}</span></div>
-                  <label class="text-xs font-medium text-slate-500">Кол.<input :value="orderCellValue(`${order.id}-${product.id}-quantity`, product.quantity)" :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`" class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'quantity', `${order.id}-${product.id}-quantity`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)" /></label>
-                  <label class="text-xs font-medium text-slate-500">Цена, ₴<input :value="orderCellValue(`${order.id}-${product.id}-price`, product.price)" :readonly="editingOrderCell !== `${order.id}-${product.id}-price`" class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'price', `${order.id}-${product.id}-price`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-price`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-price`, $event)" /></label>
-                  <div class="text-xs font-medium text-slate-500">Итого<strong class="mt-1 block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-900">{{ formatNumber(getProductAmount(product)) }}</strong></div>
-                  <label class="text-xs font-medium text-slate-500"><span class="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800">С/С $</span><input :value="orderCellValue(`${order.id}-${product.id}-cost-usd`, product.costUsd ?? 0)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost-usd`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderNumber(product, 'costUsd', `${order.id}-${product.id}-cost-usd`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost-usd`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost-usd`, $event)" /></label>
-                  <label class="text-xs font-medium text-slate-500"><span class="inline-flex whitespace-nowrap rounded-full bg-[#f7e2df] px-2 py-0.5 font-bold text-[#8d4d58]">С/С ₴</span><input :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)" :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`" class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900" type="text" @input="updateOrderNumber(product, 'cost', `${order.id}-${product.id}-cost`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-cost`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-cost`, $event)" /></label>
-                  <div class="grid grid-cols-2 gap-1.5"><label class="text-xs font-medium text-slate-500">Роялти,<br>%<input :value="orderCellValue(`${order.id}-${product.id}-royalty-percent`, product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-percent`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyPercent(product, `${order.id}-${product.id}-royalty-percent`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () => syncProductRoyaltyAmount(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-percent`, $event, () => syncProductRoyaltyAmount(order, product))" /></label><label class="text-xs font-medium text-slate-500">Роялти,<br>₴<input :value="orderCellValue(`${order.id}-${product.id}-royalty-amount`, getProductRoyalty(order, product))" :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-amount`" class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateProductRoyaltyAmount(product, `${order.id}-${product.id}-royalty-amount`, $event)" @blur="finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () => syncProductRoyaltyPercent(order, product))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-${product.id}-royalty-amount`, $event, () => syncProductRoyaltyPercent(order, product))" /></label></div>
+                  <div class="flex min-w-0 gap-3">
+                    <img
+                      v-if="product.imageUrl"
+                      :src="product.imageUrl"
+                      :alt="product.name"
+                      class="size-14 shrink-0 rounded-lg border border-slate-200 object-contain"
+                    />
+                    <div class="min-w-0">
+                      <strong>{{ product.name }}</strong
+                      ><span class="mt-1 block text-sm text-slate-500"
+                        >Размер: {{ product.size }}</span
+                      >
+                    </div>
+                  </div>
+                  <label class="text-xs font-medium text-slate-500"
+                    >Кол.<input
+                      :value="
+                        orderCellValue(`${order.id}-${product.id}-quantity`, product.quantity)
+                      "
+                      :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`"
+                      class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                      type="text"
+                      @input="
+                        updateOrderNumber(
+                          product,
+                          'quantity',
+                          `${order.id}-${product.id}-quantity`,
+                          $event,
+                        )
+                      "
+                      @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)"
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)
+                      "
+                  /></label>
+                  <label class="text-xs font-medium text-slate-500"
+                    >Цена, ₴<input
+                      :value="orderCellValue(`${order.id}-${product.id}-price`, product.price)"
+                      :readonly="editingOrderCell !== `${order.id}-${product.id}-price`"
+                      class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                      type="text"
+                      @input="
+                        updateOrderNumber(
+                          product,
+                          'price',
+                          `${order.id}-${product.id}-price`,
+                          $event,
+                        )
+                      "
+                      @blur="finishOrderCell(`${order.id}-${product.id}-price`)"
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-${product.id}-price`, $event)
+                      "
+                  /></label>
+                  <div class="text-xs font-medium text-slate-500">
+                    Итого<strong
+                      class="mt-1 block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-900"
+                      >{{ formatNumber(getProductAmount(product)) }}</strong
+                    >
+                  </div>
+                  <label class="text-xs font-medium text-slate-500"
+                    ><span
+                      class="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800"
+                      >С/С $</span
+                    ><input
+                      :value="
+                        orderCellValue(`${order.id}-${product.id}-cost-usd`, product.costUsd ?? 0)
+                      "
+                      :readonly="editingOrderCell !== `${order.id}-${product.id}-cost-usd`"
+                      class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                      inputmode="decimal"
+                      type="text"
+                      @input="
+                        updateOrderNumber(
+                          product,
+                          'costUsd',
+                          `${order.id}-${product.id}-cost-usd`,
+                          $event,
+                        )
+                      "
+                      @blur="finishOrderCell(`${order.id}-${product.id}-cost-usd`)"
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-${product.id}-cost-usd`, $event)
+                      "
+                  /></label>
+                  <label class="text-xs font-medium text-slate-500"
+                    ><span
+                      class="inline-flex whitespace-nowrap rounded-full bg-[#f7e2df] px-2 py-0.5 font-bold text-[#8d4d58]"
+                      >С/С ₴</span
+                    ><input
+                      :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)"
+                      :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`"
+                      class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                      type="text"
+                      @input="
+                        updateOrderNumber(product, 'cost', `${order.id}-${product.id}-cost`, $event)
+                      "
+                      @blur="finishOrderCell(`${order.id}-${product.id}-cost`)"
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-${product.id}-cost`, $event)
+                      "
+                  /></label>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <label class="text-xs font-medium text-slate-500"
+                      >Роялти,<br />%<input
+                        :value="
+                          orderCellValue(
+                            `${order.id}-${product.id}-royalty-percent`,
+                            product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0),
+                          )
+                        "
+                        :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-percent`"
+                        class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                        inputmode="decimal"
+                        type="text"
+                        @input="
+                          updateProductRoyaltyPercent(
+                            product,
+                            `${order.id}-${product.id}-royalty-percent`,
+                            $event,
+                          )
+                        "
+                        @blur="
+                          finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () =>
+                            syncProductRoyaltyAmount(order, product),
+                          )
+                        "
+                        @keydown.enter.prevent="
+                          toggleOrderCell(`${order.id}-${product.id}-royalty-percent`, $event, () =>
+                            syncProductRoyaltyAmount(order, product),
+                          )
+                        " /></label
+                    ><label class="text-xs font-medium text-slate-500"
+                      >Роялти,<br />₴<input
+                        :value="
+                          orderCellValue(
+                            `${order.id}-${product.id}-royalty-amount`,
+                            getProductRoyalty(order, product),
+                          )
+                        "
+                        :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-amount`"
+                        class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                        inputmode="decimal"
+                        type="text"
+                        @input="
+                          updateProductRoyaltyAmount(
+                            product,
+                            `${order.id}-${product.id}-royalty-amount`,
+                            $event,
+                          )
+                        "
+                        @blur="
+                          finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () =>
+                            syncProductRoyaltyPercent(order, product),
+                          )
+                        "
+                        @keydown.enter.prevent="
+                          toggleOrderCell(`${order.id}-${product.id}-royalty-amount`, $event, () =>
+                            syncProductRoyaltyPercent(order, product),
+                          )
+                        "
+                    /></label>
+                  </div>
                 </div>
               </div>
-              <div class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
-                <div><span class="text-slate-500">Итого продажа</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderAmount(order)) }}</strong></div>
-                <div><span class="text-slate-500">Итого с/с</span><strong class="mt-1 block text-base">{{ formatMoney(getOrderCost(order)) }}</strong></div>
-                <div><span class="text-slate-500">Роялти</span><strong class="mt-1 block text-base">{{ formatMoney(getRoyalty(order)) }}</strong></div>
-                <label class="text-slate-500">Доставка<input :value="orderCellValue(`${order.id}-shipping`, order.shipping)" :readonly="editingOrderCell !== `${order.id}-shipping`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'shipping', `${order.id}-shipping`, $event)" @blur="finishOrderCell(`${order.id}-shipping`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)" /></label>
-                <label class="text-slate-500">Сумма оплаты<input :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)" :readonly="editingOrderCell !== `${order.id}-payment-amount`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'paymentAmount', `${order.id}-payment-amount`, $event)" @blur="finishOrderCell(`${order.id}-payment-amount`)" @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)" /></label>
-                <div class="grid grid-cols-2 gap-2"><label class="text-slate-500">Экв., %<input :value="orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)" :readonly="editingOrderCell !== `${order.id}-acquiring-percent`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiringPercent', `${order.id}-acquiring-percent`, $event)" @blur="finishOrderCell(`${order.id}-acquiring-percent`, () => syncAcquiringAmount(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring-percent`, $event, () => syncAcquiringAmount(order))" /></label><label class="text-slate-500">Экв., ₴<input :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)" :readonly="editingOrderCell !== `${order.id}-acquiring`" class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900" inputmode="decimal" type="text" @input="updateOrderFinancial(order, 'acquiring', `${order.id}-acquiring`, $event)" @blur="finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))" @keydown.enter.prevent="toggleOrderCell(`${order.id}-acquiring`, $event, () => syncAcquiringPercent(order))" /></label></div>
+              <div
+                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-6"
+              >
+                <div>
+                  <span class="text-slate-500">Итого продажа</span
+                  ><strong class="mt-1 block text-base">{{
+                    formatMoney(getOrderAmount(order))
+                  }}</strong>
+                </div>
+                <div>
+                  <span class="text-slate-500">Итого с/с</span
+                  ><strong class="mt-1 block text-base">{{
+                    formatMoney(getOrderCost(order))
+                  }}</strong>
+                </div>
+                <div>
+                  <span class="text-slate-500">Роялти</span
+                  ><strong class="mt-1 block text-base">{{
+                    formatMoney(getRoyalty(order))
+                  }}</strong>
+                </div>
+                <label class="text-slate-500"
+                  >Доставка<input
+                    :value="orderCellValue(`${order.id}-shipping`, order.shipping)"
+                    :readonly="editingOrderCell !== `${order.id}-shipping`"
+                    class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                    inputmode="decimal"
+                    type="text"
+                    @input="updateOrderFinancial(order, 'shipping', `${order.id}-shipping`, $event)"
+                    @blur="finishOrderCell(`${order.id}-shipping`)"
+                    @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)"
+                /></label>
+                <label class="text-slate-500"
+                  >Сумма оплаты<input
+                    :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
+                    :readonly="editingOrderCell !== `${order.id}-payment-amount`"
+                    class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                    inputmode="decimal"
+                    type="text"
+                    @input="
+                      updateOrderFinancial(
+                        order,
+                        'paymentAmount',
+                        `${order.id}-payment-amount`,
+                        $event,
+                      )
+                    "
+                    @blur="finishOrderCell(`${order.id}-payment-amount`)"
+                    @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)"
+                /></label>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="text-slate-500"
+                    >Экв., %<input
+                      :value="
+                        orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)
+                      "
+                      :readonly="editingOrderCell !== `${order.id}-acquiring-percent`"
+                      class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                      inputmode="decimal"
+                      type="text"
+                      @input="
+                        updateOrderFinancial(
+                          order,
+                          'acquiringPercent',
+                          `${order.id}-acquiring-percent`,
+                          $event,
+                        )
+                      "
+                      @blur="
+                        finishOrderCell(`${order.id}-acquiring-percent`, () =>
+                          syncAcquiringAmount(order),
+                        )
+                      "
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-acquiring-percent`, $event, () =>
+                          syncAcquiringAmount(order),
+                        )
+                      " /></label
+                  ><label class="text-slate-500"
+                    >Экв., ₴<input
+                      :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)"
+                      :readonly="editingOrderCell !== `${order.id}-acquiring`"
+                      class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                      inputmode="decimal"
+                      type="text"
+                      @input="
+                        updateOrderFinancial(order, 'acquiring', `${order.id}-acquiring`, $event)
+                      "
+                      @blur="
+                        finishOrderCell(`${order.id}-acquiring`, () => syncAcquiringPercent(order))
+                      "
+                      @keydown.enter.prevent="
+                        toggleOrderCell(`${order.id}-acquiring`, $event, () =>
+                          syncAcquiringPercent(order),
+                        )
+                      "
+                  /></label>
+                </div>
               </div>
             </section>
-            <aside class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300">
+            <aside
+              class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300"
+            >
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
@@ -985,11 +1496,67 @@ function orderDateTime(order: Order) {
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Перевозчик</dt>
                   <dd class="flex items-center gap-2 font-semibold">
-                    <svg v-if="carrierIcon(order.delivery.carrier) === 'nova'" aria-label="Новая почта" class="size-5 shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" /></svg>
-                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'" aria-label="Укрпочта" class="size-5 shrink-0 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 7h18v11H3zM3 8l9 6 9-6" /></svg>
-                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'" aria-label="RozetkaDelivery" class="size-5 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /></svg>
-                    <svg v-else-if="carrierIcon(order.delivery.carrier) === 'meest'" aria-label="Meest" class="size-5 shrink-0 text-sky-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 17V7l4 6 5-8 5 8 4-6v10" /></svg>
-                    <svg v-else aria-hidden="true" class="size-5 shrink-0 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /></svg>
+                    <svg
+                      v-if="carrierIcon(order.delivery.carrier) === 'nova'"
+                      aria-label="Новая почта"
+                      class="size-5 shrink-0 text-red-500"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.8"
+                    >
+                      <path
+                        d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"
+                      />
+                    </svg>
+                    <svg
+                      v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'"
+                      aria-label="Укрпочта"
+                      class="size-5 shrink-0 text-yellow-500"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                    >
+                      <path d="M3 7h18v11H3zM3 8l9 6 9-6" />
+                    </svg>
+                    <svg
+                      v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'"
+                      aria-label="RozetkaDelivery"
+                      class="size-5 shrink-0 text-emerald-600"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                    >
+                      <path
+                        d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
+                      />
+                    </svg>
+                    <svg
+                      v-else-if="carrierIcon(order.delivery.carrier) === 'meest'"
+                      aria-label="Meest"
+                      class="size-5 shrink-0 text-sky-600"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <path d="M3 17V7l4 6 5-8 5 8 4-6v10" />
+                    </svg>
+                    <svg
+                      v-else
+                      aria-hidden="true"
+                      class="size-5 shrink-0 text-slate-500"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
+                      />
+                    </svg>
                     <span>{{ displayCarrier(order.delivery.carrier) }}</span>
                   </dd>
                 </div>
@@ -1013,7 +1580,9 @@ function orderDateTime(order: Order) {
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Спосіб оплати</dt>
-                  <dd class="font-semibold">{{ displayPaymentMethod(order.delivery.paymentMethod) }}</dd>
+                  <dd class="font-semibold">
+                    {{ displayPaymentMethod(order.delivery.paymentMethod) }}
+                  </dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Оценочная стоимость</dt>
@@ -1083,8 +1652,8 @@ function orderDateTime(order: Order) {
             >Время заказа<input
               v-model="orderDraft.time"
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              type="time" /></label
-          >
+              type="time"
+          /></label>
         </div>
         <fieldset class="mt-5 rounded-xl border border-slate-200 p-4">
           <legend class="px-2 text-sm font-semibold">Товары в заказе</legend>

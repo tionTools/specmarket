@@ -17,6 +17,7 @@ type EpicentrOrder = {
   items: Array<{
     offerId: string
     title: string
+    image?: string
     quantity: number
     price: number
   }>
@@ -379,6 +380,7 @@ Deno.serve(async (request) => {
           position,
           product_name: item.title,
           size: itemSize(item.raw),
+          image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
           cost: Number(currentItem?.cost ?? 0),

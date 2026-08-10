@@ -179,11 +179,103 @@ function findNestedSize(value: unknown, depth = 0): string {
 }
 
 function productSize(item: RecordValue, name: string) {
-  const direct = readable(pick(item, 'variation', 'size', 'option', 'variant', 'variation_name', 'size_name'))
+  const direct = readable(pick(item, 'variation', 'size', 'option', 'options', 'variant', 'variation_name', 'size_name'))
   if (direct) return direct
-  const nested = findNestedSize(pick(item, 'product', 'product_data', 'product_variant', 'variants', 'attributes', 'characteristics', 'parameters', 'properties'))
+  const nested = findNestedSize(pick(item, 'product', 'product_data', 'product_variant', 'variants', 'options', 'attributes', 'characteristics', 'parameters', 'properties'))
   if (nested) return nested
+  // For text modifications Prom appends the selected value to the order item
+  // name: "... трикотажні 09" or "... черевики (42)". SKU stays an article
+  // and is deliberately never used to determine a size.
+  const trailingSize = name.match(/(?:\s|\()((?:\d{1,2}(?:[.,]\d+)?)|xxxl|xxl|xl|xs|s|m|l)\)?\s*$/i)?.[1]
+  return trailingSize?.replace(',', '.') ?? ''
+  /* Legacy fallback retained only for source-history context; do not execute it.
+  // In Prom order lines the selected size is often the final separate value in
+  // the product name, for example "... трикотажні 09" or "... Польща 42".
+  // Do not infer it from SKU: SKU is an article, not a size.
+  const legacyTrailingSize = name.match(/(?:^|\s)(\d{1,2})\s*$/)?.[1]
+  if (legacyTrailingSize) return legacyTrailingSize
   return name.match(/(?:розмір|размер|size|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?|xs|s|m|l|xl|xxl|xxxl)/i)?.[1]?.replace(/\s/g, '') ?? ''
+  */
+}
+
+async function resolvedProductSize(
+  item: RecordValue,
+  name: string,
+  promToken: string,
+  feedProducts: Map<string, FeedProductInfo>,
+  productCache: Map<string, string>,
+  useProductFallback: boolean,
+) {
+  const fromOrder = productSize(item, name)
+  if (fromOrder) return fromOrder
+
+  // The item id points to the Prom product variation (rzid). It is a fallback
+  // only for an individual order refresh, so a bulk "new orders" scan remains fast.
+  const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
+  if (!rzid) return ''
+  const fromFeed = feedProducts.get(rzid)?.size
+  if (fromFeed) return fromFeed
+  if (!useProductFallback) return ''
+  if (productCache.has(rzid)) return productCache.get(rzid) ?? ''
+
+  try {
+    const response = await fetch(`https://my.prom.ua/api/v1/products/${encodeURIComponent(rzid)}`, {
+      headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+    })
+    if (!response.ok) return ''
+    const payload = asRecord(await response.json())
+    const product = asRecord(payload.product ?? payload.data ?? payload)
+    const resolved = productSize(product, text(product.name) || name)
+    productCache.set(rzid, resolved)
+    return resolved
+  } catch {
+    return ''
+  }
+}
+
+function isSizeParameter(name: string) {
+  const normalized = name.trim().toLocaleLowerCase()
+  const ukrainian = String.fromCodePoint(0x440, 0x43e, 0x437, 0x43c, 0x456, 0x440)
+  const russian = String.fromCodePoint(0x440, 0x430, 0x437, 0x43c, 0x435, 0x440)
+  return normalized === ukrainian || normalized === russian || normalized === 'size'
+}
+
+function decodeXmlText(value: string) {
+  return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
+}
+
+type FeedProductInfo = { size: string; imageUrl: string }
+
+function productFromFeedXml(xml: string, wantedOfferId: string): FeedProductInfo {
+  for (const match of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
+    if (match[2] !== wantedOfferId) continue
+    const body = match[3]
+    const imageUrl = decodeXmlText(body.match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
+    for (const param of body.matchAll(/<param\b[^>]*\bname=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/param>/gi)) {
+      if (isSizeParameter(decodeXmlText(param[2]))) return { size: decodeXmlText(param[3]), imageUrl }
+    }
+    return { size: '', imageUrl }
+  }
+  return { size: '', imageUrl: '' }
+}
+
+async function productsFromPromFeed(feedUrl: string | undefined) {
+  const products = new Map<string, FeedProductInfo>()
+  if (!feedUrl) return products
+  try {
+    const response = await fetch(feedUrl)
+    if (!response.ok) return products
+    const xml = await response.text()
+    for (const match of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
+      const offerId = match[2]
+      const product = productFromFeedXml(match[0], offerId)
+      if (product.size || product.imageUrl) products.set(offerId, product)
+    }
+  } catch {
+    // The marketplace sync continues with order data if the catalogue feed is unavailable.
+  }
+  return products
 }
 
 Deno.serve(async (request) => {
@@ -219,10 +311,12 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
+  const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
   let skipped = 0
+  const productSizeCache = new Map<string, string>()
   const knownExternalIds = new Set<string>()
   if (!requestedExternalId && orders.length) {
     const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
@@ -238,7 +332,7 @@ Deno.serve(async (request) => {
       skipped += 1
       continue
     }
-    let existing: any = null
+    let existing: RecordValue | null = null
     if (requestedExternalId) {
       const { data } = await admin.from('crm_orders')
         .select('id, shipping, acquiring, acquiring_percent, delivery')
@@ -317,7 +411,7 @@ Deno.serve(async (request) => {
     if (!orderId) continue
 
     const { data: currentItems } = await admin.from('crm_order_items')
-      .select('position, product_name, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
+      .select('position, product_name, size, image_url, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
     const byPosition = new Map((currentItems ?? []).map((item) => [item.position, item]))
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
     await admin.from('crm_order_items').delete().eq('order_id', orderId)
@@ -328,7 +422,8 @@ Deno.serve(async (request) => {
     }
     const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
     const orderCommission = number(asRecord(order.cpa_commission).amount)
-    if (items.length) await admin.from('crm_order_items').insert(items.map((item, position) => {
+    if (items.length) {
+      const itemRows = await Promise.all(items.map(async (item, position) => {
       const name = text(item.name) || text(item.product_name) || 'Товар Prom'
       // Позиция стабильнее названия: одинаковые товары могут повторяться,
       // а название в Prom иногда меняется.
@@ -349,8 +444,15 @@ Deno.serve(async (request) => {
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
-      return { order_id: orderId, position, product_name: name, size: productSize(item, name), quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
-    }))
+      const apiSize = await resolvedProductSize(item, name, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
+      // A missing value in Prom's response must never erase a manually saved size.
+      const size = apiSize || text(previous?.size) || ''
+      const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
+      const imageUrl = feedProducts.get(rzid)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
+      return { order_id: orderId, position, product_name: name, size, image_url: imageUrl || null, quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
+      }))
+      await admin.from('crm_order_items').insert(itemRows)
+    }
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
 })

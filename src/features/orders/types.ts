@@ -4,6 +4,7 @@ export interface OrderProduct {
   id: string
   name: string
   size: string
+  imageUrl?: string
   quantity: number
   price: number
   cost: number

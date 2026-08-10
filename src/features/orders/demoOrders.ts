@@ -93,7 +93,10 @@ export const demoOrders: Order[] = Array.from({ length: 12 }, (_, index) => {
         ? [
             {
               id: `product-${index}-2`,
-              name: getDemoValue(['Перчатки защитные', 'Футболка рабочая', 'Жилет сигнальный'], index),
+              name: getDemoValue(
+                ['Перчатки защитные', 'Футболка рабочая', 'Жилет сигнальный'],
+                index,
+              ),
               size: getDemoValue(['L', 'XL', 'M'], index),
               quantity: 1,
               price: getDemoValue([120, 240, 310], index),
