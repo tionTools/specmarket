@@ -414,7 +414,7 @@ async function syncFullPromOrders() {
   await syncPromOrders(true)
 }
 
-async function syncKastaOrders(full = false) {
+async function syncKastaOrders(full = false, latest = false) {
   if (!supabase || isGuest.value || isSyncingKasta.value) return
   isSyncingKasta.value = true
   if (!(await waitForPendingSaves())) {
@@ -424,7 +424,7 @@ async function syncKastaOrders(full = false) {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-kasta-orders', {
     method: 'POST',
-    body: full ? { full: true } : undefined,
+    body: full ? { full: true } : latest ? { latest: true } : undefined,
   })
   isSyncingKasta.value = false
   if (error || !data?.ok) {
@@ -434,7 +434,9 @@ async function syncKastaOrders(full = false) {
   showSyncMessage(
     full
       ? `Каста: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
-      : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
+      : latest
+        ? `Каста: последние заказы — найдено ${data.received}, добавлено ${data.created}, уже есть ${data.skipped ?? 0}.`
+        : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
   )
   await loadRemoteOrders()
 }
@@ -444,9 +446,13 @@ async function syncNewKastaOrders() {
 }
 
 async function syncFullKastaOrders() {
-  if (!window.confirm('Полная синхронизация обновит все доступные заказы Касты. Продолжить?'))
+  if (
+    !window.confirm(
+      'Загрузить последние 100 заказов Касты и перевести обычную синхронизацию на актуальный курсор?',
+    )
+  )
     return
-  await syncKastaOrders(true)
+  await syncKastaOrders(false, true)
 }
 
 async function syncKastaOrder(order: Order) {
@@ -1054,7 +1060,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncFullKastaOrders"
           >
-            {{ isSyncingKasta ? 'Синхронизация…' : '↻ Полная Каста' }}
+            {{ isSyncingKasta ? 'Синхронизация…' : '↻ Последние 100 Каста' }}
           </button>
           <button
             v-if="!isGuest"

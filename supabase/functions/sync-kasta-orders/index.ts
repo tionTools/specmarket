@@ -50,6 +50,58 @@ function itemImage(item: RecordValue) {
   return images[0] ?? text(pick(item, 'image', 'image_url', 'picture', 'photo'))
 }
 
+function decodeXmlText(value: string) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
+}
+
+async function imagesFromFeed(feedUrl: string | undefined) {
+  const images = new Map<string, string>()
+  if (!feedUrl) return images
+  try {
+    const response = await fetch(feedUrl)
+    if (!response.ok) return images
+    const xml = await response.text()
+    for (const offer of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
+      const imageUrl = decodeXmlText(offer[3].match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
+      if (imageUrl) images.set(offer[2], imageUrl)
+    }
+  } catch {
+    // The order still syncs when the catalogue feed is temporarily unavailable.
+  }
+  return images
+}
+
+async function fetchKastaOrders(token: string, query: URLSearchParams) {
+  const response = await fetch(`https://hub.kasta.ua/api/orders/list?${query}`, {
+    headers: { Authorization: token, Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error(String(response.status))
+  return asRecord(await response.json())
+}
+
+async function latestKastaPage(token: string) {
+  let earliest = Date.parse('2023-01-01T00:00:00.000Z')
+  let latest = Date.now()
+  let candidate: RecordValue = {}
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const middle = new Date((earliest + latest) / 2).toISOString()
+    const payload = await fetchKastaOrders(token, new URLSearchParams({ limit: '100', from: middle }))
+    const received = Array.isArray(payload.items) ? payload.items.length : 0
+    const remains = number(payload.remains)
+    if (received === 100 && remains === 0) candidate = payload
+    if (received < 100 || (received === 100 && remains === 0)) latest = Date.parse(middle)
+    else earliest = Date.parse(middle)
+  }
+  return candidate
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const url = Deno.env.get('SUPABASE_URL')
@@ -64,19 +116,24 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
+  const body = await request.json().catch(() => ({})) as { full?: unknown; latest?: unknown; externalId?: unknown }
   const fullSync = body.full === true
+  const latestOnly = body.latest === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
   const admin = createClient(url, serviceKey)
   const { data: cursorRow } = await admin.from('crm_sync_cursors').select('cursor').eq('source', 'kasta').maybeSingle()
   const query = new URLSearchParams({ limit: '100' })
   if (targetOrderId) query.append('order_id', targetOrderId)
   else if (!fullSync && cursorRow?.cursor) query.set('cursor', cursorRow.cursor)
-  const response = await fetch(`https://hub.kasta.ua/api/orders/list?${query}`, { headers: { Authorization: kastaToken, Accept: 'application/json' } })
-  if (!response.ok) return Response.json({ ok: false, message: `Каста не отдала заказы (${response.status}).` }, { status: 502, headers: corsHeaders })
-  const payload = asRecord(await response.json())
+  let payload: RecordValue
+  try {
+    payload = latestOnly ? await latestKastaPage(kastaToken) : await fetchKastaOrders(kastaToken, query)
+  } catch (error) {
+    return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status: 502, headers: corsHeaders })
+  }
   const orders = Array.isArray(payload.items) ? payload.items.map(asRecord) : []
   const nextCursor = text(payload.cursor)
+  const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   let created = 0
   let updated = 0
   let skipped = 0
@@ -138,9 +195,10 @@ Deno.serve(async (request) => {
     await admin.from('crm_order_items').insert(items.map((item, position) => {
       const previous = byPosition.get(position)
       const quantity = number(item.quantity) || 1
-      return { order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || previous?.image_url || null, quantity, price: number(pick(item, 'paid_price', 'new_price', 'price')) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: previous?.royalty_percent ?? 22, royalty_amount: previous?.royalty_amount ?? null }
+      const feedImage = feedImages.get(text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id')))
+      return { order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: number(pick(item, 'paid_price', 'new_price', 'price')) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: previous?.royalty_percent ?? 22, royalty_amount: previous?.royalty_amount ?? null }
     }))
   }
-  if (nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta', cursor: nextCursor, updated_at: new Date().toISOString() })
+  if (!targetOrderId && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta', cursor: nextCursor, updated_at: new Date().toISOString() })
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, remains: number(payload.remains) }, { headers: corsHeaders })
 })
