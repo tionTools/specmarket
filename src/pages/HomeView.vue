@@ -56,13 +56,6 @@ function showSyncError(message: string) {
 async function waitForPendingSaves(): Promise<boolean> {
   try {
     await persistenceQueue
-  } catch (error) {
-    // Не оставляем кнопку заблокированной после старой сетевой ошибки:
-    // persistOrders() начнёт новую очередь и повторно запишет текущую версию.
-    console.error('Повторяем сохранение перед синхронизацией:', error)
-  }
-  try {
-    await persistOrders()
     return true
   } catch (error) {
     console.error('Не удалось сохранить изменения перед синхронизацией:', error)
@@ -301,8 +294,8 @@ async function signOut() {
 
 async function syncEpicentrOrders() {
   if (!supabase || isGuest.value) return
-  if (!await waitForPendingSaves()) return
   isSyncingEpicentr.value = true
+  if (!await waitForPendingSaves()) { isSyncingEpicentr.value = false; return }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', { method: 'POST' })
   isSyncingEpicentr.value = false
@@ -316,8 +309,8 @@ async function syncEpicentrOrders() {
 
 async function syncPromOrders() {
   if (!supabase || isGuest.value) return
-  if (!await waitForPendingSaves()) return
   isSyncingProm.value = true
+  if (!await waitForPendingSaves()) { isSyncingProm.value = false; return }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', { method: 'POST' })
   isSyncingProm.value = false
@@ -331,8 +324,8 @@ async function syncPromOrders() {
 
 async function syncPromOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Пром' || !order.externalId) return
-  if (!await waitForPendingSaves()) return
   isSyncingProm.value = true
+  if (!await waitForPendingSaves()) { isSyncingProm.value = false; return }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
     method: 'POST', body: { externalId: order.externalId },
@@ -348,8 +341,8 @@ async function syncPromOrder(order: Order) {
 
 async function syncEpicentrOrder(order: Order) {
   if (!supabase || isGuest.value || order.platform !== 'Эпицентр' || !order.externalId) return
-  if (!await waitForPendingSaves()) return
   isSyncingEpicentr.value = true
+  if (!await waitForPendingSaves()) { isSyncingEpicentr.value = false; return }
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
     method: 'POST',
