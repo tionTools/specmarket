@@ -808,6 +808,11 @@ async function copyOrderNumber(order: Order) {
   await navigator.clipboard.writeText(order.displayNumber ?? String(order.id))
 }
 
+async function copyTtn(ttn: string) {
+  if (!ttn) return
+  await navigator.clipboard.writeText(ttn)
+}
+
 function openEpicentrOrder(order: Order) {
   if (!order.externalId) return
   window.open(
@@ -1756,7 +1761,18 @@ function orderDateTime(order: Order) {
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">ТТН</dt>
-                  <dd class="font-semibold text-blue-700">{{ order.delivery.ttn }}</dd>
+                  <dd class="flex items-center gap-1 font-semibold text-blue-700">
+                    <span>{{ order.delivery.ttn || '—' }}</span>
+                    <button
+                      v-if="order.delivery.ttn"
+                      class="grid size-6 shrink-0 place-items-center rounded text-blue-600 hover:bg-blue-100 hover:text-blue-800"
+                      title="Скопировать номер ТТН"
+                      type="button"
+                      @click="copyTtn(order.delivery.ttn)"
+                    >
+                      ⧉
+                    </button>
+                  </dd>
                 </div>
                 <div class="grid grid-cols-[1fr_1.35fr] gap-3">
                   <dt class="text-slate-500">Получатель</dt>
