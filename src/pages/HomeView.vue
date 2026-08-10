@@ -56,10 +56,17 @@ function showSyncError(message: string) {
 async function waitForPendingSaves(): Promise<boolean> {
   try {
     await persistenceQueue
+  } catch (error) {
+    // Не оставляем кнопку заблокированной после старой сетевой ошибки:
+    // persistOrders() начнёт новую очередь и повторно запишет текущую версию.
+    console.error('Повторяем сохранение перед синхронизацией:', error)
+  }
+  try {
+    await persistOrders()
     return true
   } catch (error) {
-    console.error('Не удалось завершить сохранение перед синхронизацией:', error)
-    showSyncError('Сначала не удалось сохранить изменения. Синхронизация не запускалась.')
+    console.error('Не удалось сохранить изменения перед синхронизацией:', error)
+    showSyncError('Не удалось сохранить изменения. Синхронизация не запускалась.')
     return false
   }
 }
