@@ -101,6 +101,34 @@ function itemSize(item: Record<string, unknown>) {
   return title.match(/(?:розмір|размер|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?)/i)?.[1]?.replace(/\s/g, '') ?? ''
 }
 
+function apiNumber(value: unknown) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value !== 'string') return 0
+  const normalized = value.replace(/\s/g, '').replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]
+  return normalized ? Number(normalized) : 0
+}
+
+type NormalizedItem = { title: string; quantity: number; price: number; raw: Record<string, unknown> }
+
+function normalizeItems(order: unknown): NormalizedItem[] {
+  const source = asRecord(order)
+  const nestedOrder = asRecord(source.order)
+  const candidates = [source.items, source.products, source.orderItems, nestedOrder.items, nestedOrder.products]
+  const rawItems = candidates.find(Array.isArray) as unknown[] | undefined
+  return (rawItems ?? []).map((raw) => {
+    const item = asRecord(raw)
+    const quantity = apiNumber(item.quantity ?? item.qty ?? item.count ?? 1) || 1
+    const subtotal = apiNumber(item.subtotal ?? item.total ?? item.amount)
+    const directPrice = apiNumber(item.price ?? item.unitPrice ?? item.unit_price)
+    return {
+      title: readableText(item.title) || readableText(item.name) || readableText(item.productName) || readableText(asRecord(item.product).title),
+      quantity,
+      price: directPrice || (subtotal ? subtotal / quantity : 0),
+      raw: item,
+    }
+  }).filter((item) => Boolean(item.title))
+}
+
 async function deliveryReference(url: string, token: string) {
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
@@ -322,8 +350,8 @@ Deno.serve(async (request) => {
 
     // Неполный ответ API не должен очищать уже сохранённые позиции заказа.
     // Заменяем их только если для каждой позиции есть название, цена и количество.
-    const validItems = source.items.filter((item) =>
-      Boolean(item.title?.trim()) && Number.isFinite(Number(item.price)) && Number.isFinite(Number(item.quantity)),
+    const validItems = normalizeItems(source).filter((item) =>
+      Boolean(item.title.trim()) && Number.isFinite(item.price) && Number.isFinite(item.quantity),
     )
     if (validItems.length) {
       const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
@@ -339,9 +367,9 @@ Deno.serve(async (request) => {
           order_id: orderId,
           position,
           product_name: item.title,
-          size: itemSize(asRecord(item)),
-          quantity: Number(item.quantity ?? 1),
-          price: Number(item.price ?? 0),
+          size: itemSize(item.raw),
+          quantity: item.quantity,
+          price: item.price,
           cost: Number(currentItem?.cost ?? 0),
           cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
           royalty_percent: currentItem?.royalty_percent ?? currentItem?.royaltyPercent ?? null,
