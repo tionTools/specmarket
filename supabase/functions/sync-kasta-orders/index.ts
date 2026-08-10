@@ -45,6 +45,11 @@ function itemRows(order: RecordValue) {
   return items.map(asRecord).filter((item) => text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')))
 }
 
+function itemImage(item: RecordValue) {
+  const images = Array.isArray(item.images) ? item.images.map(text).filter(Boolean) : []
+  return images[0] ?? text(pick(item, 'image', 'image_url', 'picture', 'photo'))
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const url = Deno.env.get('SUPABASE_URL')
@@ -59,12 +64,14 @@ Deno.serve(async (request) => {
   if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { full?: unknown }
+  const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
   const fullSync = body.full === true
+  const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
   const admin = createClient(url, serviceKey)
   const { data: cursorRow } = await admin.from('crm_sync_cursors').select('cursor').eq('source', 'kasta').maybeSingle()
   const query = new URLSearchParams({ limit: '100' })
-  if (!fullSync && cursorRow?.cursor) query.set('cursor', cursorRow.cursor)
+  if (targetOrderId) query.append('order_id', targetOrderId)
+  else if (!fullSync && cursorRow?.cursor) query.set('cursor', cursorRow.cursor)
   const response = await fetch(`https://hub.kasta.ua/api/orders/list?${query}`, { headers: { Authorization: kastaToken, Accept: 'application/json' } })
   if (!response.ok) return Response.json({ ok: false, message: `Каста не отдала заказы (${response.status}).` }, { status: 502, headers: corsHeaders })
   const payload = asRecord(await response.json())
@@ -79,7 +86,7 @@ Deno.serve(async (request) => {
     if (!kastaId) continue
     const externalId = `kasta:${kastaId}`
     const { data: existing } = await admin.from('crm_orders').select('id, shipping, acquiring, acquiring_percent, delivery').eq('external_id', externalId).maybeSingle()
-    if (existing && !fullSync) { skipped += 1; continue }
+    if (existing && !fullSync && !targetOrderId) { skipped += 1; continue }
     const client = asRecord(order.client)
     const address = asRecord(order.shipping_address)
     const delivery = asRecord(order.delivery_properties)
@@ -131,7 +138,7 @@ Deno.serve(async (request) => {
     await admin.from('crm_order_items').insert(items.map((item, position) => {
       const previous = byPosition.get(position)
       const quantity = number(item.quantity) || 1
-      return { order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: text(pick(item, 'image', 'image_url', 'picture', 'photo')) || previous?.image_url || null, quantity, price: number(pick(item, 'paid_price', 'new_price', 'price')) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: previous?.royalty_percent ?? 22, royalty_amount: previous?.royalty_amount ?? null }
+      return { order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || previous?.image_url || null, quantity, price: number(pick(item, 'paid_price', 'new_price', 'price')) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: previous?.royalty_percent ?? 22, royalty_amount: previous?.royalty_amount ?? null }
     }))
   }
   if (nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta', cursor: nextCursor, updated_at: new Date().toISOString() })

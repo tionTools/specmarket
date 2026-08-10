@@ -449,6 +449,34 @@ async function syncFullKastaOrders() {
   await syncKastaOrders(true)
 }
 
+async function syncKastaOrder(order: Order) {
+  if (
+    !supabase ||
+    isGuest.value ||
+    isSyncingKasta.value ||
+    order.platform !== 'Каста' ||
+    !order.externalId
+  )
+    return
+  isSyncingKasta.value = true
+  if (!(await waitForPendingSaves())) {
+    isSyncingKasta.value = false
+    return
+  }
+  syncEpicentrMessage.value = ''
+  const { data, error } = await supabase.functions.invoke('sync-kasta-orders', {
+    method: 'POST',
+    body: { externalId: order.externalId },
+  })
+  isSyncingKasta.value = false
+  if (error || !data?.ok) {
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Каста.')
+    return
+  }
+  showSyncMessage(`Заказ № ${order.displayNumber ?? order.id} обновлён из Каста.`)
+  await loadRemoteOrders()
+}
+
 async function syncPromOrder(order: Order) {
   if (
     !supabase ||
@@ -1280,6 +1308,15 @@ function orderDateTime(order: Order) {
                     @click="syncPromOrder(order)"
                   >
                     {{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                  </button>
+                  <button
+                    v-if="order.platform === 'Каста' && order.externalId"
+                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    type="button"
+                    :disabled="isSyncingKasta"
+                    @click="syncKastaOrder(order)"
+                  >
+                    {{ isSyncingKasta ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
                   </button>
                   <label class="flex items-center gap-2 text-sm text-slate-500"
                     >Статус<select
