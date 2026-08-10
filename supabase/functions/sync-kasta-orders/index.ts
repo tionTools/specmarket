@@ -271,7 +271,8 @@ Deno.serve(async (request) => {
       const supplierCode = text(item.supplier_code)
       const feedImage = feedImages.get(uniqueSkuId) || feedImages.get(supplierCode)
       const directRoyalty = royaltyPercent(item.royalty)
-      const apiRoyalty = directRoyalty || (targetOrderId ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
+      const needsCatalogRoyalty = targetOrderId || previous === undefined
+      const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
       if (targetOrderId) {
         console.log(JSON.stringify({ kastaOrderItem: {
           orderId: kastaId,
