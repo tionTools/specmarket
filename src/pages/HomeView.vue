@@ -1900,19 +1900,19 @@ function orderDateTime(order: Order) {
                   class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Эпицентре"
                   @click.stop="openEpicentrOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link.png" alt="" /></span
+                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
                 ><span
                   v-if="order.platform === 'Пром' && order.externalId"
                   class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link.png" alt="" /></span
+                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
                 ><span
                   v-if="order.platform === 'Каста' && order.externalId"
                   class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Каста"
                   @click.stop="openKastaOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link.png" alt="" /></span
+                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
                 ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
                   class="inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
