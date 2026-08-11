@@ -11,6 +11,7 @@ import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
+const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -46,6 +47,12 @@ type PromRegistryEntry = {
 }
 type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта' | 'Meest Express'
 type RegistryKeyType = 'orderNumber' | 'ttn'
+type RegistryDraftNavigation = {
+  entries: PromRegistryEntry[]
+  fileName: string
+  source: RegistrySource
+  keyType: RegistryKeyType
+}
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
 const promRegistryError = ref('')
@@ -284,7 +291,37 @@ function clearPromRegistry() {
   registryKeyType.value = 'orderNumber'
   expandedRegistryOrderIds.value = []
   expandedOrderId.value = null
+  window.sessionStorage.removeItem(registryDraftNavigationStorageKey)
   if (promRegistryFileInput.value) promRegistryFileInput.value.value = ''
+}
+
+function saveRegistryDraftNavigation() {
+  if (!isPromRegistryDraft.value || !registrySource.value) return
+  const draft: RegistryDraftNavigation = {
+    entries: promRegistryEntries.value,
+    fileName: promRegistryFileName.value,
+    source: registrySource.value,
+    keyType: registryKeyType.value,
+  }
+  window.sessionStorage.setItem(registryDraftNavigationStorageKey, JSON.stringify(draft))
+}
+
+function restoreRegistryDraftNavigation() {
+  const rawDraft = window.sessionStorage.getItem(registryDraftNavigationStorageKey)
+  if (!rawDraft) return
+  try {
+    const draft = JSON.parse(rawDraft) as Partial<RegistryDraftNavigation>
+    if (!Array.isArray(draft.entries) || !draft.entries.length || !draft.source || !draft.keyType)
+      return
+    promRegistryEntries.value = draft.entries
+    promRegistryFileName.value = draft.fileName ?? 'реестр'
+    registrySource.value = draft.source
+    registryKeyType.value = draft.keyType
+    isPromRegistryDraft.value = true
+    applyPromRegistryPreview(draft.entries)
+  } catch {
+    window.sessionStorage.removeItem(registryDraftNavigationStorageKey)
+  }
 }
 
 function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
@@ -338,8 +375,7 @@ function isPromRegistryNewField(order: Order, field: 'paymentAmount' | 'acquirin
 }
 
 function isPromRegistryFieldMismatch(order: Order, field: 'paymentAmount' | 'acquiring') {
-  const key = `${order.id}-${field}`
-  if (!isPromRegistryDraft.value || !promRegistryMismatchedFields.value.has(key)) return false
+  if (!isPromRegistryDraft.value) return false
   const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
   if (!entry) return false
   if (field === 'acquiring' && !entry.hasAcquiring) return false
@@ -353,10 +389,17 @@ function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquirin
   if (isPromRegistryFieldMismatch(order, field)) {
     return 'border-amber-400 bg-amber-100 text-amber-950'
   }
+  const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
+  const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
+  const expected =
+    field === 'paymentAmount' && entry
+      ? getRegistryPaymentAmount(order, entry)
+      : (entry?.acquiring ?? 0)
   if (
     isPromRegistryDraft.value &&
-    (isPromRegistryNewField(order, field) ||
-      promRegistryMismatchedFields.value.has(`${order.id}-${field}`))
+    isPromRegistryNewField(order, field) &&
+    expected > 0 &&
+    Math.abs(actual - expected) <= 0.01
   ) {
     return 'border-violet-300 bg-violet-100 text-violet-950'
   }
@@ -472,6 +515,7 @@ async function handlePromRegistryFile(event: Event) {
     platformFilter.value = 'all'
     isShowingCancelledAndReturned.value = false
     applyPromRegistryPreview(entries)
+    saveRegistryDraftNavigation()
   } catch (error) {
     promRegistryError.value =
       error instanceof Error ? error.message : 'Не удалось прочитать реестр.'
@@ -912,7 +956,7 @@ async function syncKastaOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.displayNumber ?? order.id} обновлён из Каста.`)
-  await loadRemoteOrders()
+  await reloadOrdersAfterManualSync()
 }
 
 async function syncPromOrder(order: Order) {
@@ -932,7 +976,10 @@ async function syncPromOrder(order: Order) {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-prom-orders', {
     method: 'POST',
-    body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
+    body: {
+      externalId: order.externalId,
+      manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+    },
   })
   isSyncingProm.value = false
   if (error || !data?.ok) {
@@ -940,7 +987,7 @@ async function syncPromOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
-  await loadRemoteOrders()
+  await reloadOrdersAfterManualSync()
 }
 
 async function syncEpicentrOrder(order: Order) {
@@ -960,7 +1007,10 @@ async function syncEpicentrOrder(order: Order) {
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-epicentr-orders', {
     method: 'POST',
-    body: { externalId: order.externalId, manual: orderSyncSnapshot(order) },
+    body: {
+      externalId: order.externalId,
+      manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+    },
   })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
@@ -968,7 +1018,7 @@ async function syncEpicentrOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
-  await loadRemoteOrders()
+  await reloadOrdersAfterManualSync()
 }
 
 function orderSyncSnapshot(order: Order) {
@@ -983,6 +1033,11 @@ function orderSyncSnapshot(order: Order) {
       royaltyAmount: product.royaltyAmount ?? null,
     })),
   }
+}
+
+async function reloadOrdersAfterManualSync() {
+  await loadRemoteOrders()
+  if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
 async function loadRemoteOrders() {
@@ -1065,6 +1120,7 @@ onMounted(async () => {
   await loadRemoteOrders()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
+  if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
   if (returnOrder && orders.value.some((order) => String(order.id) === returnOrder)) {
     expandedOrderId.value = returnOrder
@@ -1072,7 +1128,8 @@ onMounted(async () => {
     document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
   }
   // This is a one-time return from the price list, not a permanent open-order state.
-  if (route.query.returnOrder || route.query.returnSearch) await router.replace({ query: {} })
+  if (route.query.returnOrder || route.query.returnSearch || route.query.returnRegistry)
+    await router.replace({ query: {} })
 })
 
 function openNewOrderDialog() {
@@ -1510,9 +1567,11 @@ function orderDateTime(order: Order) {
       class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
       :to="{
         path: '/prices',
-        query: expandedOrderId
-          ? { returnOrder: expandedOrderId, returnSearch: searchQuery }
-          : { returnSearch: searchQuery },
+        query: {
+          ...(expandedOrderId ? { returnOrder: expandedOrderId } : {}),
+          ...(searchQuery ? { returnSearch: searchQuery } : {}),
+          ...(isPromRegistryDraft ? { returnRegistry: '1' } : {}),
+        },
       }"
       title="Открыть цены и себестоимость"
       ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink

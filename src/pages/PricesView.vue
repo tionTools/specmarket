@@ -325,9 +325,11 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
       class="fixed left-0 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-r-xl border border-l-0 border-blue-200 bg-white px-2 py-3 text-xs font-bold leading-4 text-blue-700 shadow-lg transition hover:bg-blue-50"
       :to="{
         path: '/',
-        query: route.query.returnOrder
-          ? { returnOrder: route.query.returnOrder, returnSearch: route.query.returnSearch }
-          : {},
+        query: {
+          ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+          ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+          ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
+        },
       }"
       title="Вернуться к заказам"
       ><span>К</span><span class="h-2" aria-hidden="true"></span><span>З</span><span>А</span
@@ -340,9 +342,13 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             class="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
             :to="{
               path: '/',
-              query: route.query.returnOrder
-                ? { returnOrder: route.query.returnOrder, returnSearch: route.query.returnSearch }
-                : {},
+              query: {
+                ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+                ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+                ...(route.query.returnRegistry
+                  ? { returnRegistry: route.query.returnRegistry }
+                  : {}),
+              },
             }"
           >
             ← К заказам
