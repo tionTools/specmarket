@@ -2130,7 +2130,7 @@ function orderDateTime(order: Order) {
               </section>
               <div
                 data-order-card
-                class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white"
+                class="mt-4 overflow-visible rounded-xl border border-slate-300 bg-white"
               >
                 <div
                   v-for="product in order.products"
@@ -2138,12 +2138,18 @@ function orderDateTime(order: Order) {
                   class="order-edit grid gap-2 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_3rem_3.5rem_4rem_3.3rem_4rem_10rem] sm:items-end"
                 >
                   <div class="flex min-w-0 gap-3">
-                    <img
-                      v-if="product.imageUrl"
-                      :src="product.imageUrl"
-                      :alt="product.name"
-                      class="size-14 shrink-0 rounded-lg border border-slate-200 object-contain"
-                    />
+                    <div v-if="product.imageUrl" class="group relative z-20 shrink-0">
+                      <img
+                        :src="product.imageUrl"
+                        :alt="product.name"
+                        class="size-14 rounded-lg border border-slate-200 bg-white object-contain"
+                      />
+                      <img
+                        :src="product.imageUrl"
+                        :alt="product.name"
+                        class="pointer-events-none absolute bottom-0 left-0 z-30 size-64 rounded-xl border-2 border-indigo-200 bg-white object-contain p-1 opacity-0 shadow-2xl transition duration-150 group-hover:opacity-100"
+                      />
+                    </div>
                     <div class="min-w-0">
                       <strong>{{ product.name }}</strong
                       ><span class="mt-1 block text-sm text-slate-500"
