@@ -792,7 +792,18 @@ function carrierIcon(carrier: string): 'nova' | 'ukr' | 'rozetka' | 'meest' | 'g
 
 function carrierLogoKind(order: Order) {
   const kind = carrierIcon(order.delivery.carrier)
-  return kind === 'meest' && order.platform === 'Эпицентр' ? 'meest-pachtmate' : kind
+  const carrier = order.delivery.carrier.toLowerCase()
+  const address = order.delivery.address.toLowerCase()
+  const isEpicentrDelivery = order.platform === 'Эпицентр'
+  const isEpicentrCollectionPoint =
+    isEpicentrDelivery && (carrier.includes('cvz') || /центр видачі|центр выдачи/.test(address))
+  if (isEpicentrCollectionPoint) return 'meest-epicentr-cvz'
+  if (
+    isEpicentrDelivery &&
+    (kind === 'meest' || carrier.includes('parcel_box') || address.includes('поштомат'))
+  )
+    return 'meest-pachtmate'
+  return kind
 }
 
 function displayPaymentMethod(method?: string) {

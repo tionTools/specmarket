@@ -7,6 +7,7 @@ const logoSources: Record<string, string> = {
   rozetka: '/carrier-logos/rozetka-delivery.png',
   meest: '/carrier-logos/meest.png',
   'meest-pachtmate': '/carrier-logos/meest-pachtmate.png',
+  'meest-epicentr-cvz': '/carrier-logos/meest-epicentr-cvz.png',
 }
 
 const logoNames: Record<string, string> = {
@@ -15,6 +16,7 @@ const logoNames: Record<string, string> = {
   rozetka: 'Rozetka Delivery',
   meest: 'Meest',
   'meest-pachtmate': 'Meest-поштомат',
+  'meest-epicentr-cvz': 'Центр выдачи Meest-Эпицентр',
 }
 </script>
 
