@@ -42,8 +42,9 @@ type PromRegistryEntry = {
   orderNumber: string
   paymentAmount: number
   acquiring: number
+  hasAcquiring: boolean
 }
-type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta'
+type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта'
 type RegistryKeyType = 'orderNumber' | 'ttn'
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
@@ -205,12 +206,20 @@ function normalizePromRegistryOrderNumber(value: unknown) {
   return String(value ?? '').replace(/\D/g, '')
 }
 
+function normalizeRegistryKey(value: unknown, preserveLetters = registrySource.value === 'Kasta') {
+  if (preserveLetters)
+    return String(value ?? '')
+      .replace(/\s/g, '')
+      .toUpperCase()
+  return normalizePromRegistryOrderNumber(value)
+}
+
 const registrySourceLabel = computed(() => registrySource.value ?? 'реестр')
 
 function registryKeyForOrder(order: Order) {
   return registryKeyType.value === 'ttn'
-    ? normalizePromRegistryOrderNumber(order.delivery.ttn)
-    : normalizePromRegistryOrderNumber(order.displayNumber ?? order.id)
+    ? normalizeRegistryKey(order.delivery.ttn)
+    : normalizeRegistryKey(order.displayNumber ?? order.id)
 }
 
 function getRegistryPaymentAmount(order: Order, entry: PromRegistryEntry) {
@@ -294,7 +303,7 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
     })
     const hasPayment = (order.paymentAmount ?? 0) > 0
     const hasAcquiring = order.acquiring > 0
-    if (hasPayment && hasAcquiring) complete += 1
+    if (hasPayment && (!entry.hasAcquiring || hasAcquiring)) complete += 1
     else if (hasPayment || hasAcquiring) partial += 1
 
     const registryPaymentAmount = getRegistryPaymentAmount(order, entry)
@@ -305,13 +314,13 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
     if (hasPayment && Math.abs((order.paymentAmount ?? 0) - registryPaymentAmount) > 0.01) {
       mismatchedFields.add(`${order.id}-paymentAmount`)
     }
-    if (!hasAcquiring && entry.acquiring > 0) {
+    if (entry.hasAcquiring && !hasAcquiring && entry.acquiring > 0) {
       order.acquiring = entry.acquiring
       const amount = getOrderAmount(order)
       order.acquiringPercent = amount === 0 ? 0 : (entry.acquiring / amount) * 100
       newFields.add(`${order.id}-acquiring`)
     }
-    if (hasAcquiring && Math.abs(order.acquiring - entry.acquiring) > 0.01) {
+    if (entry.hasAcquiring && hasAcquiring && Math.abs(order.acquiring - entry.acquiring) > 0.01) {
       mismatchedFields.add(`${order.id}-acquiring`)
     }
   }
@@ -332,6 +341,7 @@ function isPromRegistryFieldMismatch(order: Order, field: 'paymentAmount' | 'acq
   if (!isPromRegistryDraft.value || !promRegistryMismatchedFields.value.has(key)) return false
   const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
   if (!entry) return false
+  if (field === 'acquiring' && !entry.hasAcquiring) return false
   const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
   const expected =
     field === 'paymentAmount' ? getRegistryPaymentAmount(order, entry) : entry.acquiring
@@ -367,7 +377,10 @@ async function handlePromRegistryFile(event: Event) {
       row?.some((cell) => {
         const headerName = normalizePromRegistryHeader(cell)
         return (
-          headerName === '№ замовлення' || headerName === '№ ен нп' || headerName === 'замовлення'
+          headerName === '№ замовлення' ||
+          headerName === '№ ен нп' ||
+          headerName === 'замовлення' ||
+          headerName === 'шкі'
         )
       }),
     )
@@ -375,14 +388,23 @@ async function handlePromRegistryFile(event: Event) {
     if (!header) throw new Error('Не найдена строка заголовков реестра.')
     const isNovaPay = header.some((cell) => normalizePromRegistryHeader(cell) === '№ ен нп')
     const isKasta = header.some((cell) => normalizePromRegistryHeader(cell) === 'замовлення')
-    const source: RegistrySource = isNovaPay ? 'NovaPay' : isKasta ? 'Kasta' : 'RozetkaPay'
-    const keyType: RegistryKeyType = isNovaPay ? 'ttn' : 'orderNumber'
+    const isUkrposhta = header.some((cell) => normalizePromRegistryHeader(cell) === 'шкі')
+    const source: RegistrySource = isNovaPay
+      ? 'NovaPay'
+      : isKasta
+        ? 'Kasta'
+        : isUkrposhta
+          ? 'Укрпочта'
+          : 'RozetkaPay'
+    const keyType: RegistryKeyType = isNovaPay || isUkrposhta ? 'ttn' : 'orderNumber'
     const keyColumn = header.findIndex((cell) =>
       isNovaPay
         ? normalizePromRegistryHeader(cell) === '№ ен нп'
         : isKasta
           ? normalizePromRegistryHeader(cell) === 'замовлення'
-          : normalizePromRegistryHeader(cell) === '№ замовлення',
+          : isUkrposhta
+            ? normalizePromRegistryHeader(cell) === 'шкі'
+            : normalizePromRegistryHeader(cell) === '№ замовлення',
     )
     const paymentColumn = isKasta
       ? -1
@@ -391,30 +413,36 @@ async function handlePromRegistryFile(event: Event) {
             ? ['сума прийнятих коштів', 'сума принятих коштів'].includes(
                 normalizePromRegistryHeader(cell),
               )
-            : normalizePromRegistryHeader(cell) === 'сума платежу',
+            : isUkrposhta
+              ? normalizePromRegistryHeader(cell) === 'сума, грн.'
+              : normalizePromRegistryHeader(cell) === 'сума платежу',
         )
-    const acquiringColumn = header.findIndex((cell) =>
-      isNovaPay
-        ? normalizePromRegistryHeader(cell) === 'сума утриманої винагороди'
-        : isKasta
-          ? normalizePromRegistryHeader(cell) === 'комісія'
-          : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
-    )
-    if (keyColumn < 0 || acquiringColumn < 0 || (!isKasta && paymentColumn < 0)) {
+    const acquiringColumn = isUkrposhta
+      ? -1
+      : header.findIndex((cell) =>
+          isNovaPay
+            ? normalizePromRegistryHeader(cell) === 'сума утриманої винагороди'
+            : isKasta
+              ? normalizePromRegistryHeader(cell) === 'комісія'
+              : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
+        )
+    if (keyColumn < 0 || (!isUkrposhta && acquiringColumn < 0) || (!isKasta && paymentColumn < 0)) {
       throw new Error(`В реестре ${source} не найдены нужные колонки.`)
     }
     const entriesByOrder = new Map<string, PromRegistryEntry>()
     for (const row of rows.slice(headerIndex + 1)) {
       if (!row) continue
-      const orderNumber = normalizePromRegistryOrderNumber(row[keyColumn])
+      const orderNumber = normalizeRegistryKey(row[keyColumn], isKasta)
       if (!orderNumber) continue
+      if ((isNovaPay || isUkrposhta) && orderNumber.length < 10) continue
       const entry = entriesByOrder.get(orderNumber) ?? {
         orderNumber,
         paymentAmount: 0,
         acquiring: 0,
+        hasAcquiring: !isUkrposhta,
       }
       if (!isKasta) entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
-      entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
+      if (!isUkrposhta) entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
       entriesByOrder.set(orderNumber, entry)
     }
     const entries = [...entriesByOrder.values()]
