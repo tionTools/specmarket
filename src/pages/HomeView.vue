@@ -1779,7 +1779,7 @@ function orderDateTime(order: Order) {
           </button>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
@@ -1797,7 +1797,7 @@ function orderDateTime(order: Order) {
           "
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
@@ -1805,66 +1805,68 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>{{ order.displayNumber ?? order.id }}</strong
-              ><span
-                class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
+              ><span class="inline-flex items-center gap-1.5 whitespace-nowrap"
+                ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
-                  class="cursor-pointer rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
-                  title="Скопировать номер"
-                  @click.stop="copyOrderNumber(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.25"
-                    aria-hidden="true"
-                  >
-                    <rect x="9" y="9" width="11" height="11" rx="2" />
-                    <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg></span
-                ><span
-                  v-if="order.platform === 'Эпицентр' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
-                  title="Открыть заказ в Эпицентре"
-                  @click.stop="openEpicentrOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
-                ><span
-                  v-if="order.platform === 'Пром' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
-                  title="Открыть заказ в Prom"
-                  @click.stop="openPromOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
-                ><span
-                  v-if="order.platform === 'Каста' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
-                  title="Открыть заказ в Каста"
-                  @click.stop="openKastaOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
-              ></span>
+                  class="inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
+                  ><span
+                    class="cursor-pointer rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                    title="Скопировать номер"
+                    @click.stop="copyOrderNumber(order)"
+                    ><svg
+                      class="size-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.25"
+                      aria-hidden="true"
+                    >
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path
+                        d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"
+                      /></svg></span
+                  ><span
+                    v-if="order.platform === 'Эпицентр' && order.externalId"
+                    class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                    title="Открыть заказ в Эпицентре"
+                    @click.stop="openEpicentrOrder(order)"
+                    ><svg
+                      class="size-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M7 17 17 7M9 7h8v8" /></svg></span
+                  ><span
+                    v-if="order.platform === 'Пром' && order.externalId"
+                    class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                    title="Открыть заказ в Prom"
+                    @click.stop="openPromOrder(order)"
+                    ><svg
+                      class="size-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M7 17 17 7M9 7h8v8" /></svg></span
+                  ><span
+                    v-if="order.platform === 'Каста' && order.externalId"
+                    class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                    title="Открыть заказ в Каста"
+                    @click.stop="openKastaOrder(order)"
+                    ><svg
+                      class="size-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M7 17 17 7M9 7h8v8" /></svg></span></span></span
               ><span class="mt-1 block text-xs text-slate-500"
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
               ></span
