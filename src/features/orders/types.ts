@@ -42,6 +42,7 @@ export interface Order {
   phone: string
   customerEmail?: string
   customerComment?: string
+  internalComment?: string
   platform: Platform
   status: string
   products: OrderProduct[]

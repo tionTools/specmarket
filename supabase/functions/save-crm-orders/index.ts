@@ -8,7 +8,7 @@ const corsHeaders = {
 type Item = { product_name: string; size?: string; image_url?: string | null; quantity: number; price: number; cost: number; cost_usd?: number; royalty_percent?: number | null; royalty_amount?: number | null }
 type SavedOrder = {
   remoteId?: string; order_number: number; order_label?: string | null; order_date: string; order_time?: string | null; customer: string; phone: string
-  customer_email?: string | null; customer_comment?: string | null; platform: string; status: string; shipping: number; acquiring: number
+  customer_email?: string | null; customer_comment?: string | null; internal_comment?: string | null; platform: string; status: string; shipping: number; acquiring: number
   acquiring_percent?: number | null; delivery: Record<string, unknown>; items: Item[]
 }
 
@@ -33,7 +33,7 @@ Deno.serve(async (request) => {
     const data = {
       order_number: order.order_number, order_label: order.order_label ?? null, order_date: order.order_date, order_time: order.order_time ?? null,
       customer: order.customer, phone: order.phone, customer_email: order.customer_email ?? null,
-      customer_comment: order.customer_comment ?? null, platform: order.platform, status: order.status,
+      customer_comment: order.customer_comment ?? null, internal_comment: order.internal_comment ?? null, platform: order.platform, status: order.status,
       shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiring_percent ?? null, delivery: order.delivery,
     }
     let remoteId = order.remoteId

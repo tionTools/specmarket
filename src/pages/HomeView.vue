@@ -26,6 +26,7 @@ const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
+const commentEditorOrderId = ref<string | number | null>(null)
 const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
@@ -311,6 +312,7 @@ function serializeOrder(order: Order) {
     phone: order.phone,
     customer_email: order.customerEmail ?? null,
     customer_comment: order.customerComment ?? null,
+    internal_comment: order.internalComment ?? null,
     platform: order.platform,
     status: order.status,
     shipping: order.shipping,
@@ -624,6 +626,7 @@ async function loadRemoteOrders() {
       phone: row.phone,
       customerEmail: row.customer_email ?? undefined,
       customerComment: row.customer_comment ?? undefined,
+      internalComment: row.internal_comment ?? undefined,
       platform: row.platform as Platform,
       status: row.status,
       shipping: Number(row.shipping),
@@ -723,6 +726,26 @@ function updateOrderStatus(order: Order, status: string) {
 
 function toggleOrder(orderId: string | number) {
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
+}
+
+function isInternalCommentVisible(order: Order) {
+  return commentEditorOrderId.value === order.id || Boolean(order.internalComment?.trim())
+}
+
+function toggleInternalComment(order: Order) {
+  if (isGuest.value) return
+  if (order.internalComment?.trim()) {
+    commentEditorOrderId.value = order.id
+    return
+  }
+  commentEditorOrderId.value = commentEditorOrderId.value === order.id ? null : order.id
+}
+
+function saveInternalComment(order: Order, event: Event) {
+  if (isGuest.value) return
+  const value = (event.target as HTMLTextAreaElement).value.trim()
+  order.internalComment = value || undefined
+  persistOrders(order)
 }
 
 async function deleteOrder(order: Order) {
@@ -1391,6 +1414,7 @@ function orderDateTime(order: Order) {
           <div
             v-if="expandedOrderId === order.id"
             class="grid gap-5 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
+            @click.self="toggleOrder(order.id)"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1441,31 +1465,46 @@ function orderDateTime(order: Order) {
                 </div>
               </div>
               <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
-                <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
-                  <h4 class="mr-2 font-semibold">Данные покупателя</h4>
-                  <span
-                    ><span class="text-slate-500">Покупатель: </span
-                    ><strong>{{ order.customer }}</strong></span
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+                    <h4 class="mr-2 font-semibold">Данные покупателя</h4>
+                    <span
+                      ><span class="text-slate-500">Покупатель: </span
+                      ><strong>{{ order.customer }}</strong></span
+                    >
+                    <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{
+                      order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент'
+                    }}</span>
+                    <span
+                      ><span class="text-slate-500">Телефон: </span
+                      ><strong>{{
+                        order.phone || order.delivery.recipientPhone || '—'
+                      }}</strong></span
+                    >
+                    <span v-if="order.customerEmail"
+                      ><span class="text-slate-500">Email: </span
+                      ><strong class="break-all">{{ order.customerEmail }}</strong></span
+                    >
+                    <span
+                      v-if="order.customerComment"
+                      class="basis-full border-t border-slate-100 pt-2"
+                      ><span class="text-slate-500">Комментарий покупателя: </span
+                      ><strong class="whitespace-pre-wrap">{{
+                        order.customerComment
+                      }}</strong></span
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    :class="{ 'bg-blue-100 text-blue-700': isInternalCommentVisible(order) }"
+                    :disabled="isGuest"
+                    title="Комментарий к заказу"
+                    aria-label="Комментарий к заказу"
+                    @click="toggleInternalComment(order)"
                   >
-                  <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{
-                    order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент'
-                  }}</span>
-                  <span
-                    ><span class="text-slate-500">Телефон: </span
-                    ><strong>{{
-                      order.phone || order.delivery.recipientPhone || '—'
-                    }}</strong></span
-                  >
-                  <span v-if="order.customerEmail"
-                    ><span class="text-slate-500">Email: </span
-                    ><strong class="break-all">{{ order.customerEmail }}</strong></span
-                  >
-                  <span
-                    v-if="order.customerComment"
-                    class="basis-full border-t border-slate-100 pt-2"
-                    ><span class="text-slate-500">Комментарий: </span
-                    ><strong class="whitespace-pre-wrap">{{ order.customerComment }}</strong></span
-                  >
+                    💬
+                  </button>
                 </div>
               </section>
               <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
@@ -1738,6 +1777,17 @@ function orderDateTime(order: Order) {
                   /></label>
                 </div>
               </div>
+              <label
+                v-if="isInternalCommentVisible(order)"
+                class="mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
+                >Комментарий к заказу<textarea
+                  :value="order.internalComment ?? ''"
+                  :readonly="isGuest"
+                  class="mt-2 block min-h-20 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="Введите внутренний комментарий"
+                  @blur="saveInternalComment(order, $event)"
+                />
+              </label>
             </section>
             <aside
               class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300"
