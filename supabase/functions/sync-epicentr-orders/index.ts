@@ -196,10 +196,13 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Не хватает настроек функции.' }, { status: 500, headers: corsHeaders })
   }
 
+  const admin = createClient(url, serviceKey)
+  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
+  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = await auth.auth.getUser()
-  if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (user.email?.toLowerCase() === 'guest@gmail.com') {
+  if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
 
@@ -231,7 +234,6 @@ Deno.serve(async (request) => {
     const payload = await response.json() as { items?: EpicentrOrder[] }
     orders = payload.items ?? []
   }
-  const admin = createClient(url, serviceKey)
   let created = 0
   let updated = 0
   let skipped = 0

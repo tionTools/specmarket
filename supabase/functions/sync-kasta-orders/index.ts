@@ -245,16 +245,18 @@ Deno.serve(async (request) => {
   const authorization = request.headers.get('Authorization')
   if (!url || !anonKey || !serviceKey || !kastaToken || !authorization) return Response.json({ ok: false, message: 'Не хватает настроек Касты.' }, { status: 500, headers: corsHeaders })
 
+  const admin = createClient(url, serviceKey)
+  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
+  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = await auth.auth.getUser()
-  if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
   const body = await request.json().catch(() => ({})) as { full?: unknown; latest?: unknown; externalId?: unknown }
   const fullSync = body.full === true
   const latestOnly = body.latest === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
-  const admin = createClient(url, serviceKey)
   const { data: cursorRow } = await admin.from('crm_sync_cursors').select('cursor').eq('source', 'kasta').maybeSingle()
   const query = new URLSearchParams({ limit: '100' })
   if (targetOrderId) query.append('order_id', targetOrderId)
