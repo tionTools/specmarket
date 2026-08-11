@@ -1,9 +1,8 @@
+
 -- Automatic marketplace synchronization. All schedules use Kyiv local time.
 create extension if not exists pg_cron with schema extensions;
 create extension if not exists pg_net with schema extensions;
 create extension if not exists pgcrypto with schema extensions;
-
-alter database postgres set "cron.timezone" = 'Europe/Kyiv';
 
 do $$
 begin
@@ -63,6 +62,36 @@ $$;
 revoke all on function public.invoke_crm_marketplace_sync(text) from public, anon, authenticated;
 grant execute on function public.invoke_crm_marketplace_sync(text) to postgres;
 
+create or replace function public.crm_marketplace_sync_is_due(platform text)
+returns boolean
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+  kyiv_time time := (now() at time zone 'Europe/Kyiv')::time;
+  kyiv_hour integer := extract(hour from (now() at time zone 'Europe/Kyiv'));
+  kyiv_minute integer := extract(minute from (now() at time zone 'Europe/Kyiv'));
+  platform_offset integer;
+begin
+  platform_offset := case platform
+    when 'prom' then 0
+    when 'epicentr' then 2
+    when 'kasta' then 4
+    else -1
+  end;
+
+  if platform_offset < 0 then return false; end if;
+  if kyiv_hour between 8 and 22 then
+    return kyiv_minute in (platform_offset, platform_offset + 30);
+  end if;
+  return kyiv_minute = platform_offset;
+end;
+$$;
+
+revoke all on function public.crm_marketplace_sync_is_due(text) from public, anon, authenticated;
+grant execute on function public.crm_marketplace_sync_is_due(text) to postgres;
+
 select cron.unschedule(jobid)
 from cron.job
 where jobname in (
@@ -71,12 +100,17 @@ where jobname in (
   'crm-sync-kasta-day', 'crm-sync-kasta-night'
 );
 
--- 08:00–22:59: each platform every 30 minutes, staggered by two minutes.
-select cron.schedule('crm-sync-prom-day', '0,30 8-22 * * *', $$select public.invoke_crm_marketplace_sync('sync-prom-orders');$$);
-select cron.schedule('crm-sync-epicentr-day', '2,32 8-22 * * *', $$select public.invoke_crm_marketplace_sync('sync-epicentr-orders');$$);
-select cron.schedule('crm-sync-kasta-day', '4,34 8-22 * * *', $$select public.invoke_crm_marketplace_sync('sync-kasta-orders');$$);
-
--- 23:00–07:59: once an hour, keeping the same two-minute offsets.
-select cron.schedule('crm-sync-prom-night', '0 0-7,23 * * *', $$select public.invoke_crm_marketplace_sync('sync-prom-orders');$$);
-select cron.schedule('crm-sync-epicentr-night', '2 0-7,23 * * *', $$select public.invoke_crm_marketplace_sync('sync-epicentr-orders');$$);
-select cron.schedule('crm-sync-kasta-night', '4 0-7,23 * * *', $$select public.invoke_crm_marketplace_sync('sync-kasta-orders');$$);
+-- The scheduler checks every two minutes. The function gates real calls by Kyiv time,
+-- so summer/winter time changes do not shift the business schedule.
+select cron.schedule('crm-sync-prom-day', '*/2 * * * *', $$
+  select case when public.crm_marketplace_sync_is_due('prom')
+    then public.invoke_crm_marketplace_sync('sync-prom-orders') end;
+$$);
+select cron.schedule('crm-sync-epicentr-day', '*/2 * * * *', $$
+  select case when public.crm_marketplace_sync_is_due('epicentr')
+    then public.invoke_crm_marketplace_sync('sync-epicentr-orders') end;
+$$);
+select cron.schedule('crm-sync-kasta-day', '*/2 * * * *', $$
+  select case when public.crm_marketplace_sync_is_due('kasta')
+    then public.invoke_crm_marketplace_sync('sync-kasta-orders') end;
+$$);

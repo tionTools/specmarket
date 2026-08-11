@@ -1296,7 +1296,12 @@ function orderDateTime(order: Order) {
           "
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
+            :class="
+              expandedOrderId === order.id
+                ? 'bg-slate-200/80 hover:bg-slate-200'
+                : 'hover:bg-slate-50'
+            "
             type="button"
             @click="toggleOrder(order.id)"
           >
