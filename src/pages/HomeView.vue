@@ -1390,7 +1390,7 @@ function orderDateTime(order: Order) {
           </button>
           <div
             v-if="expandedOrderId === order.id"
-            class="grid gap-5 border-t-2 border-slate-400 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
+            class="grid gap-5 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
