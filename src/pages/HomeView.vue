@@ -27,6 +27,8 @@ const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
 const commentEditorOrderId = ref<string | number | null>(null)
+const editingInternalCommentOrderId = ref<string | number | null>(null)
+const editingInternalCommentValue = ref<Record<string, string>>({})
 const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
@@ -741,11 +743,36 @@ function toggleInternalComment(order: Order) {
   commentEditorOrderId.value = commentEditorOrderId.value === order.id ? null : order.id
 }
 
-function saveInternalComment(order: Order, event: Event) {
+function internalCommentKey(order: Order) {
+  return String(order.id)
+}
+
+function internalCommentValue(order: Order) {
+  return editingInternalCommentOrderId.value === order.id
+    ? (editingInternalCommentValue.value[internalCommentKey(order)] ?? '')
+    : (order.internalComment ?? '')
+}
+
+function updateInternalCommentDraft(order: Order, event: Event) {
+  editingInternalCommentValue.value[internalCommentKey(order)] = (
+    event.target as HTMLTextAreaElement
+  ).value
+}
+
+function toggleInternalCommentEdit(order: Order) {
   if (isGuest.value) return
-  const value = (event.target as HTMLTextAreaElement).value.trim()
+  const key = internalCommentKey(order)
+  if (editingInternalCommentOrderId.value !== order.id) {
+    editingInternalCommentOrderId.value = order.id
+    editingInternalCommentValue.value[key] = order.internalComment ?? ''
+    return
+  }
+  const value = (editingInternalCommentValue.value[key] ?? '').trim()
   order.internalComment = value || undefined
+  editingInternalCommentOrderId.value = null
+  delete editingInternalCommentValue.value[key]
   persistOrders(order)
+  showSyncMessage('Комментарий к заказу сохранён.')
 }
 
 async function deleteOrder(order: Order) {
@@ -1781,11 +1808,17 @@ function orderDateTime(order: Order) {
                 v-if="isInternalCommentVisible(order)"
                 class="mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
                 >Комментарий к заказу<textarea
-                  :value="order.internalComment ?? ''"
-                  :readonly="isGuest"
-                  class="mt-2 block min-h-20 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  :value="internalCommentValue(order)"
+                  :readonly="isGuest || editingInternalCommentOrderId !== order.id"
+                  class="mt-2 block min-h-20 w-full resize-y rounded-lg border px-3 py-2 text-sm text-slate-900 outline-none transition"
+                  :class="
+                    editingInternalCommentOrderId === order.id
+                      ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100'
+                      : 'border-slate-200 bg-slate-50'
+                  "
                   placeholder="Введите внутренний комментарий"
-                  @blur="saveInternalComment(order, $event)"
+                  @input="updateInternalCommentDraft(order, $event)"
+                  @keydown.enter.prevent="toggleInternalCommentEdit(order)"
                 />
               </label>
             </section>
