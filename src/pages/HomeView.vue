@@ -2144,11 +2144,15 @@ function orderDateTime(order: Order) {
                         :alt="product.name"
                         class="size-14 rounded-lg border border-slate-200 bg-white object-contain"
                       />
-                      <img
-                        :src="product.imageUrl"
-                        :alt="product.name"
-                        class="pointer-events-none absolute bottom-0 left-0 z-30 size-64 rounded-xl border-2 border-indigo-200 bg-white object-contain p-1 opacity-0 shadow-2xl transition duration-150 group-hover:opacity-100"
-                      />
+                      <div
+                        class="pointer-events-none absolute bottom-0 left-0 z-30 size-64 rounded-xl border-2 border-indigo-200 bg-white p-1 opacity-0 shadow-2xl transition duration-150 group-hover:opacity-100"
+                      >
+                        <img
+                          :src="product.imageUrl"
+                          :alt="product.name"
+                          class="size-full max-w-none rounded-lg object-contain"
+                        />
+                      </div>
                     </div>
                     <div class="min-w-0">
                       <strong>{{ product.name }}</strong
