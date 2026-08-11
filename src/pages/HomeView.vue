@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import type { User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
+import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
@@ -13,6 +14,7 @@ const storageKey = 'specmarket-crm-demo-orders'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
+const promRegistryFileInput = useTemplateRef<HTMLInputElement>('promRegistryFileInput')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 const isShowingCancelledAndReturned = ref(false)
@@ -33,8 +35,22 @@ const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
+const isApplyingPromRegistry = ref(false)
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
+type PromRegistryEntry = {
+  orderNumber: string
+  paymentAmount: number
+  acquiring: number
+}
+const promRegistryEntries = ref<PromRegistryEntry[]>([])
+const promRegistryFileName = ref('')
+const promRegistryError = ref('')
+const isPromRegistryDraft = ref(false)
+const promRegistryOriginalFinancials = new Map<
+  string | number,
+  { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
+>()
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -177,6 +193,160 @@ const formatOrderNumber = (value: number | undefined) => {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
 }
 
+function normalizePromRegistryOrderNumber(value: unknown) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+function parsePromRegistryAmount(value: unknown) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  const normalized = String(value ?? '')
+    .replace(/\s/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.-]/g, '')
+  const amount = Number(normalized)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+function rowsFromPromRegistrySheet(sheet: XLSX.WorkSheet) {
+  const rows: unknown[][] = []
+  for (const [address, cell] of Object.entries(sheet)) {
+    if (address.startsWith('!')) continue
+    const position = XLSX.utils.decode_cell(address)
+    const row = (rows[position.r] ??= [])
+    row[position.c] = cell.v
+  }
+  return rows
+}
+
+function openPromRegistryFilePicker() {
+  if (isGuest.value) return
+  promRegistryFileInput.value?.click()
+}
+
+function restorePromRegistryFinancials() {
+  for (const order of orders.value) {
+    const original = promRegistryOriginalFinancials.get(order.id)
+    if (!original) continue
+    order.paymentAmount = original.paymentAmount
+    order.acquiring = original.acquiring
+    order.acquiringPercent = original.acquiringPercent
+  }
+  promRegistryOriginalFinancials.clear()
+}
+
+function clearPromRegistry() {
+  if (isPromRegistryDraft.value) restorePromRegistryFinancials()
+  promRegistryEntries.value = []
+  promRegistryFileName.value = ''
+  promRegistryError.value = ''
+  isPromRegistryDraft.value = false
+  expandedOrderId.value = null
+  if (promRegistryFileInput.value) promRegistryFileInput.value.value = ''
+}
+
+function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
+  restorePromRegistryFinancials()
+  const entriesByOrder = new Map(entries.map((entry) => [entry.orderNumber, entry]))
+  for (const order of orders.value) {
+    if (order.platform !== 'Пром') continue
+    const entry = entriesByOrder.get(
+      normalizePromRegistryOrderNumber(order.displayNumber ?? order.id),
+    )
+    if (!entry) continue
+    promRegistryOriginalFinancials.set(order.id, {
+      paymentAmount: order.paymentAmount ?? 0,
+      acquiring: order.acquiring,
+      acquiringPercent: order.acquiringPercent,
+    })
+    order.paymentAmount = entry.paymentAmount
+    order.acquiring = entry.acquiring
+    const amount = getOrderAmount(order)
+    order.acquiringPercent = amount === 0 ? 0 : (entry.acquiring / amount) * 100
+  }
+}
+
+async function handlePromRegistryFile(event: Event) {
+  if (isGuest.value) return
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  promRegistryError.value = ''
+  try {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const firstSheetName = workbook.SheetNames[0]
+    const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined
+    if (!sheet) throw new Error('В файле нет листа с реестром.')
+    const rows = rowsFromPromRegistrySheet(sheet)
+    const headerIndex = rows.findIndex((row) =>
+      row.some((cell) => String(cell ?? '').trim() === '№ замовлення'),
+    )
+    const header = rows[headerIndex]
+    if (!header) throw new Error('Не найдена строка заголовков реестра Prom.')
+    const orderColumn = header.findIndex((cell) => String(cell ?? '').trim() === '№ замовлення')
+    const paymentColumn = header.findIndex((cell) => String(cell ?? '').trim() === 'Сума платежу')
+    const acquiringColumn = header.findIndex(
+      (cell) => String(cell ?? '').trim() === 'Сума комісії з отримувача',
+    )
+    if (orderColumn < 0 || paymentColumn < 0 || acquiringColumn < 0) {
+      throw new Error(
+        'В реестре нужны колонки: № замовлення, Сума платежу и Сума комісії з отримувача.',
+      )
+    }
+    const entriesByOrder = new Map<string, PromRegistryEntry>()
+    for (const row of rows.slice(headerIndex + 1)) {
+      const orderNumber = normalizePromRegistryOrderNumber(row[orderColumn])
+      if (!orderNumber) continue
+      const entry = entriesByOrder.get(orderNumber) ?? {
+        orderNumber,
+        paymentAmount: 0,
+        acquiring: 0,
+      }
+      entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
+      entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
+      entriesByOrder.set(orderNumber, entry)
+    }
+    const entries = [...entriesByOrder.values()]
+    if (!entries.length) throw new Error('В реестре не найдены строки платежей.')
+    clearPromRegistry()
+    promRegistryEntries.value = entries
+    promRegistryFileName.value = file.name
+    isPromRegistryDraft.value = true
+    platformFilter.value = 'Пром'
+    isShowingCancelledAndReturned.value = false
+    applyPromRegistryPreview(entries)
+  } catch (error) {
+    promRegistryError.value =
+      error instanceof Error ? error.message : 'Не удалось прочитать реестр Prom.'
+  }
+}
+
+async function confirmPromRegistryDistribution() {
+  if (isGuest.value || !isPromRegistryDraft.value || isApplyingPromRegistry.value) return
+  const matchedOrders = promRegistryOrders.value
+  if (!matchedOrders.length) {
+    promRegistryError.value = 'В CRM не найдены заказы из этого реестра.'
+    return
+  }
+  if (
+    !window.confirm(
+      `Разнести оплаты и эквайринг из реестра по ${matchedOrders.length} заказам Prom? Это запишет значения в общую CRM.`,
+    )
+  )
+    return
+  isApplyingPromRegistry.value = true
+  try {
+    isPromRegistryDraft.value = false
+    await persistOrdersNow(matchedOrders)
+    promRegistryOriginalFinancials.clear()
+    showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
+  } catch (error) {
+    isPromRegistryDraft.value = true
+    promRegistryError.value =
+      error instanceof Error ? error.message : 'Не удалось сохранить разнесение.'
+  } finally {
+    isApplyingPromRegistry.value = false
+  }
+}
+
 const isInCurrentMonth = (order: Order) => {
   const [day, month, year] = order.date.split('.').map(Number)
   const current = currentMonth()
@@ -194,6 +364,38 @@ const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
 )
 const ordersForMonth = computed(() => reportOrders.value.filter(isInCurrentMonth))
+const promRegistryEntriesByOrder = computed(
+  () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
+)
+const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
+const promRegistryOrders = computed(() =>
+  orders.value.filter(
+    (order) =>
+      order.platform === 'Пром' &&
+      promRegistryEntriesByOrder.value.has(
+        normalizePromRegistryOrderNumber(order.displayNumber ?? order.id),
+      ),
+  ),
+)
+const unmatchedPromRegistryEntries = computed(() =>
+  promRegistryEntries.value.filter(
+    (entry) =>
+      !orders.value.some(
+        (order) =>
+          order.platform === 'Пром' &&
+          normalizePromRegistryOrderNumber(order.displayNumber ?? order.id) === entry.orderNumber,
+      ),
+  ),
+)
+const promRegistryTotals = computed(() =>
+  promRegistryEntries.value.reduce(
+    (total, entry) => ({
+      paymentAmount: total.paymentAmount + entry.paymentAmount,
+      acquiring: total.acquiring + entry.acquiring,
+    }),
+    { paymentAmount: 0, acquiring: 0 },
+  ),
+)
 const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
@@ -202,15 +404,20 @@ const visibleOrders = computed(() => {
       isShowingCancelledAndReturned.value ||
       platformFilter.value === 'all' ||
       order.platform === platformFilter.value
-    const matchesOrderState = isShowingCancelledAndReturned.value
-      ? isCancelledOrReturned(order)
-      : !isCancelledOrReturned(order)
+    const matchesOrderState = isPromRegistryView.value
+      ? true
+      : isShowingCancelledAndReturned.value
+        ? isCancelledOrReturned(order)
+        : !isCancelledOrReturned(order)
     const haystack =
       `${order.id} ${order.displayNumber ?? ''} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
     const matchesTtn =
       ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
     return (
-      matchesPlatform && matchesOrderState && (!search || haystack.includes(search) || matchesTtn)
+      matchesPlatform &&
+      matchesOrderState &&
+      (!isPromRegistryView.value || promRegistryOrders.value.includes(order)) &&
+      (!search || haystack.includes(search) || matchesTtn)
     )
   })
 })
@@ -296,7 +503,7 @@ function createOrderDraft(): Order {
 }
 
 function persistOrders(order?: Order) {
-  if (isGuest.value) return Promise.resolve()
+  if (isGuest.value || (isPromRegistryDraft.value && order)) return Promise.resolve()
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
     .then(() => persistOrdersNow(order ? [order] : orders.value))
@@ -730,6 +937,12 @@ function toggleOrder(orderId: string | number) {
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
 }
 
+function handleOrderWorkspaceClick(order: Order, event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.closest('[data-order-card], button, input, select, textarea, a')) return
+  toggleOrder(order.id)
+}
+
 function isInternalCommentVisible(order: Order) {
   return commentEditorOrderId.value === order.id || Boolean(order.internalComment?.trim())
 }
@@ -1120,6 +1333,21 @@ function orderDateTime(order: Order) {
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
+          <input
+            ref="promRegistryFileInput"
+            class="hidden"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            @change="handlePromRegistryFile"
+          />
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
+            type="button"
+            @click="openPromRegistryFilePicker"
+          >
+            ↑ Загрузить реестр Prom
+          </button>
           <button
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
             type="button"
@@ -1210,6 +1438,49 @@ function orderDateTime(order: Order) {
       >
         {{ syncEpicentrMessage }}
       </p>
+      <section
+        v-if="isPromRegistryView"
+        class="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm"
+      >
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="font-semibold text-violet-950">Реестр Prom: {{ promRegistryFileName }}</p>
+            <p class="mt-1 text-sm text-violet-800">
+              Заказов в реестре: {{ promRegistryEntries.length }} · найдено в CRM:
+              {{ promRegistryOrders.length }} · не найдено:
+              {{ unmatchedPromRegistryEntries.length }}
+            </p>
+            <p class="mt-1 text-sm text-violet-800">
+              Оплаты: {{ formatMoney(promRegistryTotals.paymentAmount) }} · эквайринг:
+              {{ formatMoney(promRegistryTotals.acquiring) }}
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <button
+              class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+              type="button"
+              @click="clearPromRegistry"
+            >
+              Отменить черновик
+            </button>
+            <button
+              v-if="isPromRegistryDraft"
+              class="rounded-xl bg-violet-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60"
+              :disabled="isApplyingPromRegistry || promRegistryOrders.length === 0"
+              type="button"
+              @click="confirmPromRegistryDistribution"
+            >
+              {{ isApplyingPromRegistry ? 'Сохраняем…' : 'Подтвердить разнесение реестра' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="isPromRegistryDraft" class="mt-3 text-sm font-medium text-violet-900">
+          Это черновик: суммы видны только для проверки и не записаны в CRM до подтверждения.
+        </p>
+        <p v-if="promRegistryError" class="mt-3 text-sm font-medium text-rose-700">
+          {{ promRegistryError }}
+        </p>
+      </section>
 
       <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1441,7 +1712,7 @@ function orderDateTime(order: Order) {
           <div
             v-if="expandedOrderId === order.id"
             class="grid gap-5 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
-            @click.self="toggleOrder(order.id)"
+            @click="handleOrderWorkspaceClick(order, $event)"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1491,7 +1762,10 @@ function orderDateTime(order: Order) {
                   >
                 </div>
               </div>
-              <section class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3">
+              <section
+                data-order-card
+                class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3"
+              >
                 <div class="flex items-start justify-between gap-3">
                   <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
                     <h4 class="mr-2 font-semibold">Данные покупателя</h4>
@@ -1534,7 +1808,10 @@ function orderDateTime(order: Order) {
                   </button>
                 </div>
               </section>
-              <div class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white">
+              <div
+                data-order-card
+                class="mt-4 overflow-hidden rounded-xl border border-slate-300 bg-white"
+              >
                 <div
                   v-for="product in order.products"
                   :key="product.id"
@@ -1706,6 +1983,7 @@ function orderDateTime(order: Order) {
                 </div>
               </div>
               <div
+                data-order-card
                 class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-6"
               >
                 <div>
@@ -1806,6 +2084,7 @@ function orderDateTime(order: Order) {
               </div>
               <label
                 v-if="isInternalCommentVisible(order)"
+                data-order-card
                 class="mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
                 >Комментарий к заказу<textarea
                   :value="internalCommentValue(order)"
@@ -1823,6 +2102,7 @@ function orderDateTime(order: Order) {
               </label>
             </section>
             <aside
+              data-order-card
               class="rounded-xl border-2 border-slate-400 bg-white p-5 shadow-md ring-1 ring-slate-300"
             >
               <div class="flex items-start justify-between gap-3">
