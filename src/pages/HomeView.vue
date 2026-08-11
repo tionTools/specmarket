@@ -2129,7 +2129,7 @@ function orderDateTime(order: Order) {
                       :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`"
                       class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
                       :class="{
-                        'border-orange-300 bg-orange-50':
+                        'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
                           product.cost === 0 && (product.costUsd ?? 0) === 0,
                       }"
                       type="text"
