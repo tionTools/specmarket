@@ -315,12 +315,25 @@ function isPromRegistryNewField(order: Order, field: 'paymentAmount' | 'acquirin
   return isPromRegistryDraft.value && promRegistryNewFields.value.has(`${order.id}-${field}`)
 }
 
-function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquiring') {
+function isPromRegistryFieldMismatch(order: Order, field: 'paymentAmount' | 'acquiring') {
   const key = `${order.id}-${field}`
-  if (isPromRegistryDraft.value && promRegistryMismatchedFields.value.has(key)) {
+  if (!isPromRegistryDraft.value || !promRegistryMismatchedFields.value.has(key)) return false
+  const entry = promRegistryEntriesByOrder.value.get(
+    normalizePromRegistryOrderNumber(order.displayNumber ?? order.id),
+  )
+  if (!entry) return false
+  const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
+  return Math.abs(actual - entry[field]) > 0.01
+}
+
+function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquiring') {
+  if (isPromRegistryFieldMismatch(order, field)) {
     return 'border-amber-400 bg-amber-100 text-amber-950'
   }
-  if (isPromRegistryNewField(order, field)) {
+  if (
+    isPromRegistryNewField(order, field) ||
+    promRegistryMismatchedFields.value.has(`${order.id}-${field}`)
+  ) {
     return 'border-violet-300 bg-violet-100 text-violet-950'
   }
   return 'border-slate-200 text-slate-900'
@@ -432,6 +445,15 @@ const ordersForToday = computed(() =>
 const ordersForMonth = computed(() => reportOrders.value.filter(isInCurrentMonth))
 const promRegistryEntriesByOrder = computed(
   () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
+)
+const promRegistryMismatchCount = computed(() =>
+  orders.value.reduce(
+    (count, order) =>
+      count +
+      Number(isPromRegistryFieldMismatch(order, 'paymentAmount')) +
+      Number(isPromRegistryFieldMismatch(order, 'acquiring')),
+    0,
+  ),
 )
 const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
 const promRegistryOrders = computed(() =>
@@ -1559,11 +1581,11 @@ function orderDateTime(order: Order) {
           дозаполнил этот черновик.
         </p>
         <p
-          v-if="isPromRegistryDraft && promRegistryMismatchedFields.size"
+          v-if="isPromRegistryDraft && promRegistryMismatchCount"
           class="mt-3 rounded-xl border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-950"
         >
-          Расхождений с RozetkaPay: {{ promRegistryMismatchedFields.size }}. Такие поля отмечены
-          янтарным и не будут заменены автоматически.
+          Расхождений с RozetkaPay: {{ promRegistryMismatchCount }}. Такие поля отмечены янтарным и
+          не будут заменены автоматически.
         </p>
       </section>
 
