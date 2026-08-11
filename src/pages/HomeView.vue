@@ -43,10 +43,14 @@ type PromRegistryEntry = {
   paymentAmount: number
   acquiring: number
 }
+type RegistrySource = 'RozetkaPay' | 'NovaPay'
+type RegistryKeyType = 'orderNumber' | 'ttn'
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
 const promRegistryError = ref('')
 const isPromRegistryDraft = ref(false)
+const registrySource = ref<RegistrySource | null>(null)
+const registryKeyType = ref<RegistryKeyType>('orderNumber')
 const promRegistryOriginalFinancials = new Map<
   string | number,
   { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
@@ -70,7 +74,7 @@ function showSyncMessage(message: string) {
     syncNoticeCleanupTimer = window.setTimeout(() => {
       syncEpicentrMessage.value = ''
     }, 500)
-  }, 5000)
+  }, 30000)
 }
 
 function showSyncError(message: string) {
@@ -201,6 +205,14 @@ function normalizePromRegistryOrderNumber(value: unknown) {
   return String(value ?? '').replace(/\D/g, '')
 }
 
+const registrySourceLabel = computed(() => registrySource.value ?? 'реестр')
+
+function registryKeyForOrder(order: Order) {
+  return registryKeyType.value === 'ttn'
+    ? normalizePromRegistryOrderNumber(order.delivery.ttn)
+    : normalizePromRegistryOrderNumber(order.displayNumber ?? order.id)
+}
+
 function parsePromRegistryAmount(value: unknown) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
   const normalized = String(value ?? '')
@@ -254,6 +266,8 @@ function clearPromRegistry() {
   promRegistryFileName.value = ''
   promRegistryError.value = ''
   isPromRegistryDraft.value = false
+  registrySource.value = null
+  registryKeyType.value = 'orderNumber'
   expandedRegistryOrderIds.value = []
   expandedOrderId.value = null
   if (promRegistryFileInput.value) promRegistryFileInput.value.value = ''
@@ -267,10 +281,7 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   let complete = 0
   let partial = 0
   for (const order of orders.value) {
-    if (order.platform !== 'Пром') continue
-    const entry = entriesByOrder.get(
-      normalizePromRegistryOrderNumber(order.displayNumber ?? order.id),
-    )
+    const entry = entriesByOrder.get(registryKeyForOrder(order))
     if (!entry) continue
     promRegistryOriginalFinancials.set(order.id, {
       paymentAmount: order.paymentAmount ?? 0,
@@ -303,11 +314,7 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   promRegistryMismatchedFields.value = mismatchedFields
   promRegistryExistingFinancials.value = { complete, partial }
   expandedRegistryOrderIds.value = orders.value
-    .filter(
-      (order) =>
-        order.platform === 'Пром' &&
-        entriesByOrder.has(normalizePromRegistryOrderNumber(order.displayNumber ?? order.id)),
-    )
+    .filter((order) => entriesByOrder.has(registryKeyForOrder(order)))
     .map((order) => order.id)
 }
 
@@ -331,8 +338,9 @@ function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquirin
     return 'border-amber-400 bg-amber-100 text-amber-950'
   }
   if (
-    isPromRegistryNewField(order, field) ||
-    promRegistryMismatchedFields.value.has(`${order.id}-${field}`)
+    isPromRegistryDraft.value &&
+    (isPromRegistryNewField(order, field) ||
+      promRegistryMismatchedFields.value.has(`${order.id}-${field}`))
   ) {
     return 'border-violet-300 bg-violet-100 text-violet-950'
   }
@@ -351,28 +359,40 @@ async function handlePromRegistryFile(event: Event) {
     if (!sheet) throw new Error('В файле нет листа с реестром.')
     const rows = rowsFromPromRegistrySheet(sheet)
     const headerIndex = rows.findIndex((row) =>
-      row?.some((cell) => normalizePromRegistryHeader(cell) === '№ замовлення'),
+      row?.some((cell) => {
+        const headerName = normalizePromRegistryHeader(cell)
+        return headerName === '№ замовлення' || headerName === '№ ен нп'
+      }),
     )
     const header = rows[headerIndex]
-    if (!header) throw new Error('Не найдена строка заголовков реестра RozetkaPay.')
-    const orderColumn = header.findIndex(
-      (cell) => normalizePromRegistryHeader(cell) === '№ замовлення',
+    if (!header) throw new Error('Не найдена строка заголовков реестра.')
+    const isNovaPay = header.some((cell) => normalizePromRegistryHeader(cell) === '№ ен нп')
+    const source: RegistrySource = isNovaPay ? 'NovaPay' : 'RozetkaPay'
+    const keyType: RegistryKeyType = isNovaPay ? 'ttn' : 'orderNumber'
+    const keyColumn = header.findIndex((cell) =>
+      isNovaPay
+        ? normalizePromRegistryHeader(cell) === '№ ен нп'
+        : normalizePromRegistryHeader(cell) === '№ замовлення',
     )
-    const paymentColumn = header.findIndex(
-      (cell) => normalizePromRegistryHeader(cell) === 'сума платежу',
+    const paymentColumn = header.findIndex((cell) =>
+      isNovaPay
+        ? ['сума прийнятих коштів', 'сума принятих коштів'].includes(
+            normalizePromRegistryHeader(cell),
+          )
+        : normalizePromRegistryHeader(cell) === 'сума платежу',
     )
-    const acquiringColumn = header.findIndex(
-      (cell) => normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
+    const acquiringColumn = header.findIndex((cell) =>
+      isNovaPay
+        ? normalizePromRegistryHeader(cell) === 'сума утриманої винагороди'
+        : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
     )
-    if (orderColumn < 0 || paymentColumn < 0 || acquiringColumn < 0) {
-      throw new Error(
-        'В реестре нужны колонки: № замовлення, Сума платежу и Сума комісії з отримувача.',
-      )
+    if (keyColumn < 0 || paymentColumn < 0 || acquiringColumn < 0) {
+      throw new Error(`В реестре ${source} не найдены нужные колонки оплаты.`)
     }
     const entriesByOrder = new Map<string, PromRegistryEntry>()
     for (const row of rows.slice(headerIndex + 1)) {
       if (!row) continue
-      const orderNumber = normalizePromRegistryOrderNumber(row[orderColumn])
+      const orderNumber = normalizePromRegistryOrderNumber(row[keyColumn])
       if (!orderNumber) continue
       const entry = entriesByOrder.get(orderNumber) ?? {
         orderNumber,
@@ -388,13 +408,15 @@ async function handlePromRegistryFile(event: Event) {
     clearPromRegistry()
     promRegistryEntries.value = entries
     promRegistryFileName.value = file.name
+    registrySource.value = source
+    registryKeyType.value = keyType
     isPromRegistryDraft.value = true
-    platformFilter.value = 'Пром'
+    platformFilter.value = 'all'
     isShowingCancelledAndReturned.value = false
     applyPromRegistryPreview(entries)
   } catch (error) {
     promRegistryError.value =
-      error instanceof Error ? error.message : 'Не удалось прочитать реестр RozetkaPay.'
+      error instanceof Error ? error.message : 'Не удалось прочитать реестр.'
   }
 }
 
@@ -407,7 +429,7 @@ async function confirmPromRegistryDistribution() {
   }
   if (
     !window.confirm(
-      `Разнести оплаты и эквайринг из реестра RozetkaPay по ${matchedOrders.length} заказам Prom? Это запишет значения в общую CRM.`,
+      `Разнести оплаты и эквайринг из реестра ${registrySourceLabel.value} по ${matchedOrders.length} заказам? Это запишет значения в общую CRM.`,
     )
   )
     return
@@ -416,6 +438,9 @@ async function confirmPromRegistryDistribution() {
     isPromRegistryDraft.value = false
     await persistOrdersNow(matchedOrders)
     promRegistryOriginalFinancials.clear()
+    promRegistryNewFields.value = new Set()
+    promRegistryMismatchedFields.value = new Set()
+    promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
     showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
     isPromRegistryDraft.value = true
@@ -457,22 +482,11 @@ const promRegistryMismatchCount = computed(() =>
 )
 const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
 const promRegistryOrders = computed(() =>
-  orders.value.filter(
-    (order) =>
-      order.platform === 'Пром' &&
-      promRegistryEntriesByOrder.value.has(
-        normalizePromRegistryOrderNumber(order.displayNumber ?? order.id),
-      ),
-  ),
+  orders.value.filter((order) => promRegistryEntriesByOrder.value.has(registryKeyForOrder(order))),
 )
 const unmatchedPromRegistryEntries = computed(() =>
   promRegistryEntries.value.filter(
-    (entry) =>
-      !orders.value.some(
-        (order) =>
-          order.platform === 'Пром' &&
-          normalizePromRegistryOrderNumber(order.displayNumber ?? order.id) === entry.orderNumber,
-      ),
+    (entry) => !orders.value.some((order) => registryKeyForOrder(order) === entry.orderNumber),
   ),
 )
 const promRegistryTotals = computed(() =>
@@ -1450,7 +1464,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="openPromRegistryFilePicker"
           >
-            ↑ Загрузить реестр RozetkaPay
+            ↑ Импортировать реестр
           </button>
           <button
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
@@ -1553,7 +1567,9 @@ function orderDateTime(order: Order) {
         class="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm"
       >
         <div>
-          <p class="font-semibold text-violet-950">Реестр RozetkaPay: {{ promRegistryFileName }}</p>
+          <p class="font-semibold text-violet-950">
+            Реестр {{ registrySourceLabel }}: {{ promRegistryFileName }}
+          </p>
           <p class="mt-1 text-sm text-violet-800">
             Заказов в реестре: {{ promRegistryEntries.length }} · найдено в CRM:
             {{ promRegistryOrders.length }} · не найдено:
@@ -1584,8 +1600,8 @@ function orderDateTime(order: Order) {
           v-if="isPromRegistryDraft && promRegistryMismatchCount"
           class="mt-3 rounded-xl border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-950"
         >
-          Расхождений с RozetkaPay: {{ promRegistryMismatchCount }}. Такие поля отмечены янтарным и
-          не будут заменены автоматически.
+          Расхождений с {{ registrySourceLabel }}: {{ promRegistryMismatchCount }}. Такие поля
+          отмечены янтарным и не будут заменены автоматически.
         </p>
       </section>
 
@@ -1736,10 +1752,19 @@ function orderDateTime(order: Order) {
               ><span
                 class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
                 ><span
-                  class="cursor-pointer rounded p-1 hover:bg-slate-200 hover:text-emerald-700"
+                  class="cursor-pointer rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
                   title="Скопировать номер"
                   @click.stop="copyOrderNumber(order)"
-                  >⧉</span
+                  ><svg
+                    class="size-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.25"
+                    aria-hidden="true"
+                  >
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg></span
                 ><span
                   v-if="order.platform === 'Эпицентр' && order.externalId"
                   class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
@@ -2298,12 +2323,22 @@ function orderDateTime(order: Order) {
                     <span>{{ order.delivery.ttn || '—' }}</span>
                     <button
                       v-if="order.delivery.ttn"
-                      class="grid size-6 shrink-0 place-items-center rounded text-blue-600 hover:bg-blue-100 hover:text-blue-800"
+                      class="grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
                       title="Скопировать номер ТТН"
                       type="button"
                       @click="copyTtn(order.delivery.ttn)"
                     >
-                      ⧉
+                      <svg
+                        class="size-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.25"
+                        aria-hidden="true"
+                      >
+                        <rect x="9" y="9" width="11" height="11" rx="2" />
+                        <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+                      </svg>
                     </button>
                   </dd>
                 </div>
