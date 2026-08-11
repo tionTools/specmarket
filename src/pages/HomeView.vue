@@ -790,6 +790,11 @@ function carrierIcon(carrier: string): 'nova' | 'ukr' | 'rozetka' | 'meest' | 'g
   return 'generic'
 }
 
+function carrierLogoKind(order: Order) {
+  const kind = carrierIcon(order.delivery.carrier)
+  return kind === 'meest' && order.platform === 'Эпицентр' ? 'meest-pachtmate' : kind
+}
+
 function displayPaymentMethod(method?: string) {
   if (!method) return '—'
   const names: Record<string, string> = {
@@ -1699,8 +1704,8 @@ function orderDateTime(order: Order) {
                   <dt class="text-slate-500">Перевозчик</dt>
                   <dd class="flex items-center gap-2 font-semibold">
                     <CarrierLogo
-                      v-if="carrierIcon(order.delivery.carrier) !== 'generic'"
-                      :kind="carrierIcon(order.delivery.carrier)"
+                      v-if="carrierLogoKind(order) !== 'generic'"
+                      :kind="carrierLogoKind(order)"
                     />
                     <template v-else>
                       <svg
