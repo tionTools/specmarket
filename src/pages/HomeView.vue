@@ -44,7 +44,7 @@ type PromRegistryEntry = {
   acquiring: number
   hasAcquiring: boolean
 }
-type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта'
+type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта' | 'Meest Express'
 type RegistryKeyType = 'orderNumber' | 'ttn'
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
@@ -380,7 +380,8 @@ async function handlePromRegistryFile(event: Event) {
           headerName === '№ замовлення' ||
           headerName === '№ ен нп' ||
           headerName === 'замовлення' ||
-          headerName === 'шкі'
+          headerName === 'шкі' ||
+          headerName === 'номер посилки'
         )
       }),
     )
@@ -389,14 +390,17 @@ async function handlePromRegistryFile(event: Event) {
     const isNovaPay = header.some((cell) => normalizePromRegistryHeader(cell) === '№ ен нп')
     const isKasta = header.some((cell) => normalizePromRegistryHeader(cell) === 'замовлення')
     const isUkrposhta = header.some((cell) => normalizePromRegistryHeader(cell) === 'шкі')
+    const isMeest = header.some((cell) => normalizePromRegistryHeader(cell) === 'номер посилки')
     const source: RegistrySource = isNovaPay
       ? 'NovaPay'
       : isKasta
         ? 'Kasta'
         : isUkrposhta
           ? 'Укрпочта'
-          : 'RozetkaPay'
-    const keyType: RegistryKeyType = isNovaPay || isUkrposhta ? 'ttn' : 'orderNumber'
+          : isMeest
+            ? 'Meest Express'
+            : 'RozetkaPay'
+    const keyType: RegistryKeyType = isNovaPay || isUkrposhta || isMeest ? 'ttn' : 'orderNumber'
     const keyColumn = header.findIndex((cell) =>
       isNovaPay
         ? normalizePromRegistryHeader(cell) === '№ ен нп'
@@ -404,7 +408,9 @@ async function handlePromRegistryFile(event: Event) {
           ? normalizePromRegistryHeader(cell) === 'замовлення'
           : isUkrposhta
             ? normalizePromRegistryHeader(cell) === 'шкі'
-            : normalizePromRegistryHeader(cell) === '№ замовлення',
+            : isMeest
+              ? normalizePromRegistryHeader(cell) === 'номер посилки'
+              : normalizePromRegistryHeader(cell) === '№ замовлення',
     )
     const paymentColumn = isKasta
       ? -1
@@ -415,18 +421,25 @@ async function handlePromRegistryFile(event: Event) {
               )
             : isUkrposhta
               ? normalizePromRegistryHeader(cell) === 'сума, грн.'
-              : normalizePromRegistryHeader(cell) === 'сума платежу',
+              : isMeest
+                ? normalizePromRegistryHeader(cell) === 'cod оплачено'
+                : normalizePromRegistryHeader(cell) === 'сума платежу',
         )
-    const acquiringColumn = isUkrposhta
-      ? -1
-      : header.findIndex((cell) =>
-          isNovaPay
-            ? normalizePromRegistryHeader(cell) === 'сума утриманої винагороди'
-            : isKasta
-              ? normalizePromRegistryHeader(cell) === 'комісія'
-              : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
-        )
-    if (keyColumn < 0 || (!isUkrposhta && acquiringColumn < 0) || (!isKasta && paymentColumn < 0)) {
+    const acquiringColumn =
+      isUkrposhta || isMeest
+        ? -1
+        : header.findIndex((cell) =>
+            isNovaPay
+              ? normalizePromRegistryHeader(cell) === 'сума утриманої винагороди'
+              : isKasta
+                ? normalizePromRegistryHeader(cell) === 'комісія'
+                : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
+          )
+    if (
+      keyColumn < 0 ||
+      (!isUkrposhta && !isMeest && acquiringColumn < 0) ||
+      (!isKasta && paymentColumn < 0)
+    ) {
       throw new Error(`В реестре ${source} не найдены нужные колонки.`)
     }
     const entriesByOrder = new Map<string, PromRegistryEntry>()
@@ -434,15 +447,17 @@ async function handlePromRegistryFile(event: Event) {
       if (!row) continue
       const orderNumber = normalizeRegistryKey(row[keyColumn], isKasta)
       if (!orderNumber) continue
-      if ((isNovaPay || isUkrposhta) && orderNumber.length < 10) continue
+      if ((isNovaPay || isUkrposhta || isMeest) && orderNumber.length < 10) continue
       const entry = entriesByOrder.get(orderNumber) ?? {
         orderNumber,
         paymentAmount: 0,
         acquiring: 0,
-        hasAcquiring: !isUkrposhta,
+        hasAcquiring: !isUkrposhta && !isMeest,
       }
       if (!isKasta) entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
-      if (!isUkrposhta) entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
+      if (!isUkrposhta && !isMeest) {
+        entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
+      }
       entriesByOrder.set(orderNumber, entry)
     }
     const entries = [...entriesByOrder.values()]
