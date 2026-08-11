@@ -15,6 +15,7 @@ const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
+const isShowingCancelledAndReturned = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
 const user = ref<User | null>(null)
@@ -179,21 +180,42 @@ const isInCurrentMonth = (order: Order) => {
   return day !== undefined && month === current.month && year === current.year
 }
 
-const ordersForToday = computed(() => orders.value.filter((order) => order.date === todayKey()))
-const ordersForMonth = computed(() => orders.value.filter(isInCurrentMonth))
+function isCancelledOrReturned(order: Order) {
+  return /скас|отмен|cancel|повер|возврат|return|refund/.test(
+    displayOrderStatus(order.status).toLowerCase(),
+  )
+}
+
+const reportOrders = computed(() => orders.value.filter((order) => !isCancelledOrReturned(order)))
+const ordersForToday = computed(() =>
+  reportOrders.value.filter((order) => order.date === todayKey()),
+)
+const ordersForMonth = computed(() => reportOrders.value.filter(isInCurrentMonth))
 const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   return orders.value.filter((order) => {
     const matchesPlatform =
-      platformFilter.value === 'all' || order.platform === platformFilter.value
+      isShowingCancelledAndReturned.value ||
+      platformFilter.value === 'all' ||
+      order.platform === platformFilter.value
+    const matchesOrderState = isShowingCancelledAndReturned.value
+      ? isCancelledOrReturned(order)
+      : !isCancelledOrReturned(order)
     const haystack =
       `${order.id} ${order.displayNumber ?? ''} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
     const matchesTtn =
       ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
-    return matchesPlatform && (!search || haystack.includes(search) || matchesTtn)
+    return (
+      matchesPlatform && matchesOrderState && (!search || haystack.includes(search) || matchesTtn)
+    )
   })
 })
+
+function toggleCancelledAndReturned() {
+  isShowingCancelledAndReturned.value = !isShowingCancelledAndReturned.value
+  if (isShowingCancelledAndReturned.value) platformFilter.value = 'all'
+}
 
 const summary = computed(() => {
   const sum = (items: Order[], getter: (order: Order) => number) =>
@@ -1242,6 +1264,18 @@ function orderDateTime(order: Order) {
               {{ platform }}
             </option>
           </select>
+          <button
+            class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            :class="
+              isShowingCancelledAndReturned
+                ? 'border-rose-500 bg-rose-50 text-rose-700'
+                : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+            "
+            type="button"
+            @click="toggleCancelledAndReturned"
+          >
+            Отмены и возвраты
+          </button>
         </div>
         <div
           class="mt-3 hidden grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
