@@ -13,6 +13,7 @@ const text = (value: unknown) => typeof value === 'string' || typeof value === '
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const promStatusNames: Record<string, string> = {
+  pending: 'Новий',
   received: 'Принято',
   delivered: 'Виконано',
 }
@@ -129,7 +130,10 @@ function orderLevelCommission(value: unknown, depth = 0): number {
 
 function dateParts(value: unknown) {
   const source = text(value)
-  const match = source.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
+  // Prom sometimes returns a UTC timestamp such as `2026-08-11T18:56:00+00:00`.
+  // Preserve a plain local timestamp, but convert every timestamp carrying a
+  // timezone suffix to Kyiv before saving it in the CRM.
+  const match = source.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/)
   if (match) return { date: `${match[3]}.${match[2]}.${match[1]}`, time: `${match[4]}:${match[5]}` }
   const parsed = new Date(source)
   if (!Number.isNaN(parsed.getTime())) {

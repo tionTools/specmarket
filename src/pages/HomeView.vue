@@ -152,6 +152,7 @@ const currentMonth = () => {
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
+const getOrderPreviewImage = (order: Order) => order.products[0]?.imageUrl
 const getProductAmount = (product: OrderProduct) => product.price * product.quantity
 const getOrderCost = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.cost * product.quantity, 0)
@@ -1197,6 +1198,7 @@ function platformClass(platform: Platform) {
 
 function displayOrderStatus(status: string) {
   const names: Record<string, string> = {
+    pending: 'Новий',
     completed: 'Завершено',
     cancelled: 'Скасовано',
     received: 'Принято',
@@ -1779,7 +1781,7 @@ function orderDateTime(order: Order) {
           </button>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
@@ -1797,7 +1799,7 @@ function orderDateTime(order: Order) {
           "
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
@@ -1877,17 +1879,24 @@ function orderDateTime(order: Order) {
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ displayOrderStatus(order.status) }}</span
               ></span
-            ><span class="min-w-0"
-              ><span class="block truncate text-sm">{{
-                order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
-              }}</span
-              ><span
-                class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600"
-                >Позиций: {{ order.products.length }}</span
-              ><span
-                v-if="order.delivery.hasWebsiteCommission"
-                class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
-                ><span aria-hidden="true">◎</span> Замовлення з сайту</span
+            ><span class="flex min-w-0 items-center gap-3"
+              ><img
+                v-if="getOrderPreviewImage(order)"
+                :src="getOrderPreviewImage(order)"
+                :alt="order.products[0]?.name ?? 'Товар'"
+                class="size-10 shrink-0 rounded-lg border border-slate-200 bg-white object-contain"
+              /><span class="min-w-0"
+                ><span class="block truncate text-sm">{{
+                  order.products.map((product) => `${product.name} ×${product.quantity}`).join(', ')
+                }}</span
+                ><span
+                  class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600"
+                  >Позиций: {{ order.products.length }}</span
+                ><span
+                  v-if="order.delivery.hasWebsiteCommission"
+                  class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
+                  ><span aria-hidden="true">◎</span> Замовлення з сайту</span
+                ></span
               ></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
             ><span v-if="isPaid(order)"
@@ -2119,6 +2128,10 @@ function orderDateTime(order: Order) {
                       :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)"
                       :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`"
                       class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                      :class="{
+                        'border-orange-300 bg-orange-50':
+                          product.cost === 0 && (product.costUsd ?? 0) === 0,
+                      }"
                       type="text"
                       @input="
                         updateOrderNumber(product, 'cost', `${order.id}-${product.id}-cost`, $event)
