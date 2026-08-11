@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { demoOrders } from '@/features/orders/demoOrders'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
+import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const route = useRoute()
@@ -1175,7 +1176,7 @@ function orderDateTime(order: Order) {
             :key="item.platform"
             class="rounded-xl bg-slate-50 p-4"
           >
-            <p class="font-bold" :class="platformClass(item.platform)">{{ item.platform }}</p>
+            <p class="font-bold"><PlatformLogo :platform="item.platform" /></p>
             <p class="mt-3 text-xs text-slate-500">Заказов: {{ item.count }}</p>
             <p class="text-xs text-slate-500">Оборот: {{ formatMoney(item.turnover) }}</p>
             <p class="text-xs text-slate-500">План: {{ formatMoney(item.planned) }}</p>
@@ -1281,7 +1282,8 @@ function orderDateTime(order: Order) {
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
               ></span
             ><span
-              ><strong :class="platformClass(order.platform)">{{ order.platform }}</strong
+              ><strong :class="platformClass(order.platform)"
+                ><PlatformLogo :platform="order.platform" /></strong
               ><span
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ displayOrderStatus(order.status) }}</span

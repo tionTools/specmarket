@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 import { supabase } from '@/lib/supabase'
+import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
@@ -482,16 +483,16 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                 <th class="sticky left-0 z-30 min-w-[32rem] bg-slate-50 px-3 py-2">Название</th>
                 <th class="px-1 py-3">Цена, $</th>
                 <th class="px-1 py-3">Вход, ₴</th>
-                <th class="px-1 py-3 text-blue-700">Prom</th>
-                <th class="px-1 py-3 text-emerald-700">Эпицентр</th>
+                <th class="px-1 py-3 text-blue-700"><PlatformLogo platform="Пром" /></th>
+                <th class="px-1 py-3 text-emerald-700"><PlatformLogo platform="Эпицентр" /></th>
                 <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <span class="block">Kasta</span><span>обычная</span>
+                  <PlatformLogo platform="Каста" /><span>обычная</span>
                 </th>
                 <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <span class="block">Kasta</span><span>рек.</span>
+                  <PlatformLogo platform="Каста" /><span>рек.</span>
                 </th>
                 <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <span class="block">Kasta</span><span>акция</span>
+                  <PlatformLogo platform="Каста" /><span>акция</span>
                 </th>
                 <th class="w-10 px-1 py-3"><span class="sr-only">Действия</span></th>
               </tr>
