@@ -51,6 +51,7 @@ const promRegistryOriginalFinancials = new Map<
   string | number,
   { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
 >()
+const expandedRegistryOrderIds = ref<Array<string | number>>([])
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -207,6 +208,13 @@ function parsePromRegistryAmount(value: unknown) {
   return Number.isFinite(amount) ? amount : 0
 }
 
+function normalizePromRegistryHeader(value: unknown) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('uk-UA')
+}
+
 function rowsFromPromRegistrySheet(sheet: XLSX.WorkSheet) {
   const rows: unknown[][] = []
   for (const [address, cell] of Object.entries(sheet)) {
@@ -240,6 +248,7 @@ function clearPromRegistry() {
   promRegistryFileName.value = ''
   promRegistryError.value = ''
   isPromRegistryDraft.value = false
+  expandedRegistryOrderIds.value = []
   expandedOrderId.value = null
   if (promRegistryFileInput.value) promRegistryFileInput.value.value = ''
 }
@@ -263,6 +272,13 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
     const amount = getOrderAmount(order)
     order.acquiringPercent = amount === 0 ? 0 : (entry.acquiring / amount) * 100
   }
+  expandedRegistryOrderIds.value = orders.value
+    .filter(
+      (order) =>
+        order.platform === 'Пром' &&
+        entriesByOrder.has(normalizePromRegistryOrderNumber(order.displayNumber ?? order.id)),
+    )
+    .map((order) => order.id)
 }
 
 function isPromRegistryOrderDraft(order: Order) {
@@ -281,14 +297,18 @@ async function handlePromRegistryFile(event: Event) {
     if (!sheet) throw new Error('В файле нет листа с реестром.')
     const rows = rowsFromPromRegistrySheet(sheet)
     const headerIndex = rows.findIndex((row) =>
-      row.some((cell) => String(cell ?? '').trim() === '№ замовлення'),
+      row.some((cell) => normalizePromRegistryHeader(cell) === '№ замовлення'),
     )
     const header = rows[headerIndex]
     if (!header) throw new Error('Не найдена строка заголовков реестра RozetkaPay.')
-    const orderColumn = header.findIndex((cell) => String(cell ?? '').trim() === '№ замовлення')
-    const paymentColumn = header.findIndex((cell) => String(cell ?? '').trim() === 'Сума платежу')
+    const orderColumn = header.findIndex(
+      (cell) => normalizePromRegistryHeader(cell) === '№ замовлення',
+    )
+    const paymentColumn = header.findIndex(
+      (cell) => normalizePromRegistryHeader(cell) === 'сума платежу',
+    )
     const acquiringColumn = header.findIndex(
-      (cell) => String(cell ?? '').trim() === 'Сума комісії з отримувача',
+      (cell) => normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
     )
     if (orderColumn < 0 || paymentColumn < 0 || acquiringColumn < 0) {
       throw new Error(
@@ -941,7 +961,20 @@ function updateOrderStatus(order: Order, status: string) {
 }
 
 function toggleOrder(orderId: string | number) {
+  if (isPromRegistryDraft.value) {
+    expandedRegistryOrderIds.value = expandedRegistryOrderIds.value.includes(orderId)
+      ? expandedRegistryOrderIds.value.filter((id) => id !== orderId)
+      : [...expandedRegistryOrderIds.value, orderId]
+    return
+  }
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
+}
+
+function isOrderExpanded(order: Order) {
+  return (
+    expandedOrderId.value === order.id ||
+    (isPromRegistryDraft.value && expandedRegistryOrderIds.value.includes(order.id))
+  )
 }
 
 function handleOrderWorkspaceClick(order: Order, event: MouseEvent) {
@@ -1445,6 +1478,12 @@ function orderDateTime(order: Order) {
       >
         {{ syncEpicentrMessage }}
       </p>
+      <p
+        v-if="promRegistryError"
+        class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800"
+      >
+        {{ promRegistryError }}
+      </p>
       <section
         v-if="isPromRegistryView"
         class="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm"
@@ -1486,9 +1525,6 @@ function orderDateTime(order: Order) {
         </div>
         <p v-if="isPromRegistryDraft" class="mt-3 text-sm font-medium text-violet-900">
           Это черновик: суммы видны только для проверки и не записаны в CRM до подтверждения.
-        </p>
-        <p v-if="promRegistryError" class="mt-3 text-sm font-medium text-rose-700">
-          {{ promRegistryError }}
         </p>
       </section>
 
@@ -1621,7 +1657,7 @@ function orderDateTime(order: Order) {
           :id="`order-${order.id}`"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
           :class="
-            expandedOrderId === order.id
+            isOrderExpanded(order)
               ? 'border-emerald-600 ring-2 ring-emerald-200 shadow-emerald-100'
               : 'border-slate-300 hover:border-slate-400'
           "
@@ -1629,9 +1665,7 @@ function orderDateTime(order: Order) {
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.75fr_0.9fr_1.6fr_0.95fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             :class="
-              expandedOrderId === order.id
-                ? 'bg-slate-200/80 hover:bg-slate-200'
-                : 'hover:bg-slate-50'
+              isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
             type="button"
             @click="toggleOrder(order.id)"
@@ -1703,9 +1737,7 @@ function orderDateTime(order: Order) {
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ deliveryStatusForOrder(order) }}</span
             ><span class="flex items-center justify-end gap-2"
-              ><span class="text-xl text-slate-400">{{
-                expandedOrderId === order.id ? '⌄' : '›'
-              }}</span
+              ><span class="text-xl text-slate-400">{{ isOrderExpanded(order) ? '⌄' : '›' }}</span
               ><span
                 v-if="!isGuest"
                 class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50"
@@ -1720,7 +1752,7 @@ function orderDateTime(order: Order) {
             >
           </button>
           <div
-            v-if="expandedOrderId === order.id"
+            v-if="isOrderExpanded(order)"
             class="grid gap-5 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
             @click="handleOrderWorkspaceClick(order, $event)"
           >
