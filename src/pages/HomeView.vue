@@ -1897,22 +1897,61 @@ function orderDateTime(order: Order) {
               ><span class="inline-flex items-center gap-1.5 whitespace-nowrap"
                 ><span
                   v-if="order.platform === 'Эпицентр' && order.externalId"
-                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
+                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
                   title="Открыть заказ в Эпицентре"
                   @click.stop="openEpicentrOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
+                  ><svg
+                    class="size-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
+                    />
+                    <path
+                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
+                    /></svg></span
                 ><span
                   v-if="order.platform === 'Пром' && order.externalId"
-                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
+                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
                   title="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
+                  ><svg
+                    class="size-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
+                    />
+                    <path
+                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
+                    /></svg></span
                 ><span
                   v-if="order.platform === 'Каста' && order.externalId"
-                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
+                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
                   title="Открыть заказ в Каста"
                   @click.stop="openKastaOrder(order)"
-                  ><img class="size-6 object-contain" src="/open-order-link-v2.png" alt="" /></span
+                  ><svg
+                    class="size-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
+                    />
+                    <path
+                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
+                    /></svg></span
                 ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
                   class="inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
