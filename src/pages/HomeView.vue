@@ -265,6 +265,10 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   }
 }
 
+function isPromRegistryOrderDraft(order: Order) {
+  return isPromRegistryDraft.value && promRegistryOriginalFinancials.has(order.id)
+}
+
 async function handlePromRegistryFile(event: Event) {
   if (isGuest.value) return
   const file = (event.target as HTMLInputElement).files?.[0]
@@ -280,7 +284,7 @@ async function handlePromRegistryFile(event: Event) {
       row.some((cell) => String(cell ?? '').trim() === '№ замовлення'),
     )
     const header = rows[headerIndex]
-    if (!header) throw new Error('Не найдена строка заголовков реестра Prom.')
+    if (!header) throw new Error('Не найдена строка заголовков реестра RozetkaPay.')
     const orderColumn = header.findIndex((cell) => String(cell ?? '').trim() === '№ замовлення')
     const paymentColumn = header.findIndex((cell) => String(cell ?? '').trim() === 'Сума платежу')
     const acquiringColumn = header.findIndex(
@@ -315,7 +319,7 @@ async function handlePromRegistryFile(event: Event) {
     applyPromRegistryPreview(entries)
   } catch (error) {
     promRegistryError.value =
-      error instanceof Error ? error.message : 'Не удалось прочитать реестр Prom.'
+      error instanceof Error ? error.message : 'Не удалось прочитать реестр RozetkaPay.'
   }
 }
 
@@ -328,7 +332,7 @@ async function confirmPromRegistryDistribution() {
   }
   if (
     !window.confirm(
-      `Разнести оплаты и эквайринг из реестра по ${matchedOrders.length} заказам Prom? Это запишет значения в общую CRM.`,
+      `Разнести оплаты и эквайринг из реестра RozetkaPay по ${matchedOrders.length} заказам Prom? Это запишет значения в общую CRM.`,
     )
   )
     return
@@ -395,6 +399,9 @@ const promRegistryTotals = computed(() =>
     }),
     { paymentAmount: 0, acquiring: 0 },
   ),
+)
+const promRegistryNetTotal = computed(
+  () => promRegistryTotals.value.paymentAmount - promRegistryTotals.value.acquiring,
 )
 const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
@@ -1346,7 +1353,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="openPromRegistryFilePicker"
           >
-            ↑ Загрузить реестр Prom
+            ↑ Загрузить реестр RozetkaPay
           </button>
           <button
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
@@ -1444,15 +1451,18 @@ function orderDateTime(order: Order) {
       >
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p class="font-semibold text-violet-950">Реестр Prom: {{ promRegistryFileName }}</p>
+            <p class="font-semibold text-violet-950">
+              Реестр RozetkaPay: {{ promRegistryFileName }}
+            </p>
             <p class="mt-1 text-sm text-violet-800">
               Заказов в реестре: {{ promRegistryEntries.length }} · найдено в CRM:
               {{ promRegistryOrders.length }} · не найдено:
               {{ unmatchedPromRegistryEntries.length }}
             </p>
             <p class="mt-1 text-sm text-violet-800">
-              Оплаты: {{ formatMoney(promRegistryTotals.paymentAmount) }} · эквайринг:
-              {{ formatMoney(promRegistryTotals.acquiring) }}
+              Сумма реестра: {{ formatMoney(promRegistryTotals.paymentAmount) }} · эквайринг:
+              {{ formatMoney(promRegistryTotals.acquiring) }} · к зачислению:
+              {{ formatMoney(promRegistryNetTotal) }}
             </p>
           </div>
           <div class="flex flex-wrap gap-3">
@@ -2019,7 +2029,12 @@ function orderDateTime(order: Order) {
                   >Сумма оплаты<input
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
                     :readonly="editingOrderCell !== `${order.id}-payment-amount`"
-                    class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                    class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
+                    :class="
+                      isPromRegistryOrderDraft(order)
+                        ? 'border-violet-300 bg-violet-100 text-violet-950'
+                        : 'border-slate-200 text-slate-900'
+                    "
                     inputmode="decimal"
                     type="text"
                     @input="
@@ -2040,7 +2055,12 @@ function orderDateTime(order: Order) {
                         orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)
                       "
                       :readonly="editingOrderCell !== `${order.id}-acquiring-percent`"
-                      class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                      class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
+                      :class="
+                        isPromRegistryOrderDraft(order)
+                          ? 'border-violet-300 bg-violet-100 text-violet-950'
+                          : 'border-slate-200 text-slate-900'
+                      "
                       inputmode="decimal"
                       type="text"
                       @input="
@@ -2065,7 +2085,12 @@ function orderDateTime(order: Order) {
                     >Экв., ₴<input
                       :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)"
                       :readonly="editingOrderCell !== `${order.id}-acquiring`"
-                      class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                      class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
+                      :class="
+                        isPromRegistryOrderDraft(order)
+                          ? 'border-violet-300 bg-violet-100 text-violet-950'
+                          : 'border-slate-200 text-slate-900'
+                      "
                       inputmode="decimal"
                       type="text"
                       @input="
