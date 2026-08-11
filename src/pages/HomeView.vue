@@ -498,6 +498,7 @@ async function confirmPromRegistryDistribution() {
     promRegistryNewFields.value = new Set()
     promRegistryMismatchedFields.value = new Set()
     promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
+    clearPromRegistry()
     showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
     isPromRegistryDraft.value = true
@@ -1823,24 +1824,47 @@ function orderDateTime(order: Order) {
                     <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg></span
                 ><span
                   v-if="order.platform === 'Эпицентр' && order.externalId"
-                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
                   title="Открыть заказ в Эпицентре"
                   @click.stop="openEpicentrOrder(order)"
-                  >↗</span
+                  ><svg
+                    class="size-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.8"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
                 ><span
                   v-if="order.platform === 'Пром' && order.externalId"
-                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
                   title="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
-                  >↗</span
+                  ><svg
+                    class="size-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.8"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
                 ><span
                   v-if="order.platform === 'Каста' && order.externalId"
-                  class="cursor-pointer rounded bg-blue-100 p-1 text-blue-600 hover:bg-blue-200 hover:text-blue-700"
+                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
                   title="Открыть заказ в Каста"
                   @click.stop="openKastaOrder(order)"
-                  >↗</span
-                ></span
-              >
+                  ><svg
+                    class="size-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.8"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
+              ></span>
               ><span class="mt-1 block text-xs text-slate-500"
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
               ></span
@@ -1879,7 +1903,6 @@ function orderDateTime(order: Order) {
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ deliveryStatusForOrder(order) }}</span
             ><span class="flex items-center justify-end gap-2"
-              ><span class="text-xl text-slate-400">{{ isOrderExpanded(order) ? '⌄' : '›' }}</span
               ><span
                 v-if="!isGuest"
                 class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50"
@@ -2453,14 +2476,6 @@ function orderDateTime(order: Order) {
             @click="confirmPromRegistryDistribution"
           >
             {{ isApplyingPromRegistry ? 'Сохраняем…' : 'Подтвердить разнесение реестра' }}
-          </button>
-          <button
-            v-else
-            class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
-            type="button"
-            @click="clearPromRegistry"
-          >
-            Закрыть реестр
           </button>
         </div>
       </section>
