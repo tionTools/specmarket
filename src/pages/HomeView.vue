@@ -297,7 +297,7 @@ async function handlePromRegistryFile(event: Event) {
     if (!sheet) throw new Error('В файле нет листа с реестром.')
     const rows = rowsFromPromRegistrySheet(sheet)
     const headerIndex = rows.findIndex((row) =>
-      row.some((cell) => normalizePromRegistryHeader(cell) === '№ замовлення'),
+      row?.some((cell) => normalizePromRegistryHeader(cell) === '№ замовлення'),
     )
     const header = rows[headerIndex]
     if (!header) throw new Error('Не найдена строка заголовков реестра RozetkaPay.')
@@ -317,6 +317,7 @@ async function handlePromRegistryFile(event: Event) {
     }
     const entriesByOrder = new Map<string, PromRegistryEntry>()
     for (const row of rows.slice(headerIndex + 1)) {
+      if (!row) continue
       const orderNumber = normalizePromRegistryOrderNumber(row[orderColumn])
       if (!orderNumber) continue
       const entry = entriesByOrder.get(orderNumber) ?? {
