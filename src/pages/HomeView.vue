@@ -51,6 +51,9 @@ const promRegistryOriginalFinancials = new Map<
   string | number,
   { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
 >()
+const promRegistryNewFields = ref(new Set<string>())
+const promRegistryMismatchedFields = ref(new Set<string>())
+const promRegistryExistingFinancials = ref({ complete: 0, partial: 0 })
 const expandedRegistryOrderIds = ref<Array<string | number>>([])
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -240,6 +243,9 @@ function restorePromRegistryFinancials() {
     order.acquiringPercent = original.acquiringPercent
   }
   promRegistryOriginalFinancials.clear()
+  promRegistryNewFields.value = new Set()
+  promRegistryMismatchedFields.value = new Set()
+  promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
 }
 
 function clearPromRegistry() {
@@ -256,6 +262,10 @@ function clearPromRegistry() {
 function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   restorePromRegistryFinancials()
   const entriesByOrder = new Map(entries.map((entry) => [entry.orderNumber, entry]))
+  const newFields = new Set<string>()
+  const mismatchedFields = new Set<string>()
+  let complete = 0
+  let partial = 0
   for (const order of orders.value) {
     if (order.platform !== 'Пром') continue
     const entry = entriesByOrder.get(
@@ -267,11 +277,31 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
       acquiring: order.acquiring,
       acquiringPercent: order.acquiringPercent,
     })
-    order.paymentAmount = entry.paymentAmount
-    order.acquiring = entry.acquiring
-    const amount = getOrderAmount(order)
-    order.acquiringPercent = amount === 0 ? 0 : (entry.acquiring / amount) * 100
+    const hasPayment = (order.paymentAmount ?? 0) > 0
+    const hasAcquiring = order.acquiring > 0
+    if (hasPayment && hasAcquiring) complete += 1
+    else if (hasPayment || hasAcquiring) partial += 1
+
+    if (!hasPayment && entry.paymentAmount > 0) {
+      order.paymentAmount = entry.paymentAmount
+      newFields.add(`${order.id}-paymentAmount`)
+    }
+    if (hasPayment && Math.abs((order.paymentAmount ?? 0) - entry.paymentAmount) > 0.01) {
+      mismatchedFields.add(`${order.id}-paymentAmount`)
+    }
+    if (!hasAcquiring && entry.acquiring > 0) {
+      order.acquiring = entry.acquiring
+      const amount = getOrderAmount(order)
+      order.acquiringPercent = amount === 0 ? 0 : (entry.acquiring / amount) * 100
+      newFields.add(`${order.id}-acquiring`)
+    }
+    if (hasAcquiring && Math.abs(order.acquiring - entry.acquiring) > 0.01) {
+      mismatchedFields.add(`${order.id}-acquiring`)
+    }
   }
+  promRegistryNewFields.value = newFields
+  promRegistryMismatchedFields.value = mismatchedFields
+  promRegistryExistingFinancials.value = { complete, partial }
   expandedRegistryOrderIds.value = orders.value
     .filter(
       (order) =>
@@ -281,8 +311,19 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
     .map((order) => order.id)
 }
 
-function isPromRegistryOrderDraft(order: Order) {
-  return isPromRegistryDraft.value && promRegistryOriginalFinancials.has(order.id)
+function isPromRegistryNewField(order: Order, field: 'paymentAmount' | 'acquiring') {
+  return isPromRegistryDraft.value && promRegistryNewFields.value.has(`${order.id}-${field}`)
+}
+
+function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquiring') {
+  const key = `${order.id}-${field}`
+  if (isPromRegistryDraft.value && promRegistryMismatchedFields.value.has(key)) {
+    return 'border-amber-400 bg-amber-100 text-amber-950'
+  }
+  if (isPromRegistryNewField(order, field)) {
+    return 'border-violet-300 bg-violet-100 text-violet-950'
+  }
+  return 'border-slate-200 text-slate-900'
 }
 
 async function handlePromRegistryFile(event: Event) {
@@ -1489,43 +1530,40 @@ function orderDateTime(order: Order) {
         v-if="isPromRegistryView"
         class="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm"
       >
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p class="font-semibold text-violet-950">
-              Реестр RozetkaPay: {{ promRegistryFileName }}
-            </p>
-            <p class="mt-1 text-sm text-violet-800">
-              Заказов в реестре: {{ promRegistryEntries.length }} · найдено в CRM:
-              {{ promRegistryOrders.length }} · не найдено:
-              {{ unmatchedPromRegistryEntries.length }}
-            </p>
-            <p class="mt-1 text-sm text-violet-800">
-              Сумма реестра: {{ formatMoney(promRegistryTotals.paymentAmount) }} · эквайринг:
-              {{ formatMoney(promRegistryTotals.acquiring) }} · к зачислению:
-              {{ formatMoney(promRegistryNetTotal) }}
-            </p>
-          </div>
-          <div class="flex flex-wrap gap-3">
-            <button
-              class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
-              type="button"
-              @click="clearPromRegistry"
-            >
-              Отменить черновик
-            </button>
-            <button
-              v-if="isPromRegistryDraft"
-              class="rounded-xl bg-violet-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60"
-              :disabled="isApplyingPromRegistry || promRegistryOrders.length === 0"
-              type="button"
-              @click="confirmPromRegistryDistribution"
-            >
-              {{ isApplyingPromRegistry ? 'Сохраняем…' : 'Подтвердить разнесение реестра' }}
-            </button>
-          </div>
+        <div>
+          <p class="font-semibold text-violet-950">Реестр RozetkaPay: {{ promRegistryFileName }}</p>
+          <p class="mt-1 text-sm text-violet-800">
+            Заказов в реестре: {{ promRegistryEntries.length }} · найдено в CRM:
+            {{ promRegistryOrders.length }} · не найдено:
+            {{ unmatchedPromRegistryEntries.length }}
+          </p>
+          <p class="mt-1 text-sm text-violet-800">
+            Сумма реестра: {{ formatMoney(promRegistryTotals.paymentAmount) }} · эквайринг:
+            {{ formatMoney(promRegistryTotals.acquiring) }} · к зачислению:
+            {{ formatMoney(promRegistryNetTotal) }}
+          </p>
         </div>
         <p v-if="isPromRegistryDraft" class="mt-3 text-sm font-medium text-violet-900">
           Это черновик: суммы видны только для проверки и не записаны в CRM до подтверждения.
+        </p>
+        <p
+          v-if="
+            isPromRegistryDraft &&
+            (promRegistryExistingFinancials.complete || promRegistryExistingFinancials.partial)
+          "
+          class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900"
+        >
+          Уже было заполнено: {{ promRegistryExistingFinancials.complete }} из
+          {{ promRegistryOrders.length }} полностью · {{ promRegistryExistingFinancials.partial }}
+          частично. Эти значения оставлены белыми; сиреневым отмечены только поля, которые
+          дозаполнил этот черновик.
+        </p>
+        <p
+          v-if="isPromRegistryDraft && promRegistryMismatchedFields.size"
+          class="mt-3 rounded-xl border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-950"
+        >
+          Расхождений с RozetkaPay: {{ promRegistryMismatchedFields.size }}. Такие поля отмечены
+          янтарным и не будут заменены автоматически.
         </p>
       </section>
 
@@ -2063,11 +2101,7 @@ function orderDateTime(order: Order) {
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
                     :readonly="editingOrderCell !== `${order.id}-payment-amount`"
                     class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
-                    :class="
-                      isPromRegistryOrderDraft(order)
-                        ? 'border-violet-300 bg-violet-100 text-violet-950'
-                        : 'border-slate-200 text-slate-900'
-                    "
+                    :class="promRegistryFieldClass(order, 'paymentAmount')"
                     inputmode="decimal"
                     type="text"
                     @input="
@@ -2089,11 +2123,7 @@ function orderDateTime(order: Order) {
                       "
                       :readonly="editingOrderCell !== `${order.id}-acquiring-percent`"
                       class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
-                      :class="
-                        isPromRegistryOrderDraft(order)
-                          ? 'border-violet-300 bg-violet-100 text-violet-950'
-                          : 'border-slate-200 text-slate-900'
-                      "
+                      :class="promRegistryFieldClass(order, 'acquiring')"
                       inputmode="decimal"
                       type="text"
                       @input="
@@ -2119,11 +2149,7 @@ function orderDateTime(order: Order) {
                       :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)"
                       :readonly="editingOrderCell !== `${order.id}-acquiring`"
                       class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
-                      :class="
-                        isPromRegistryOrderDraft(order)
-                          ? 'border-violet-300 bg-violet-100 text-violet-950'
-                          : 'border-slate-200 text-slate-900'
-                      "
+                      :class="promRegistryFieldClass(order, 'acquiring')"
                       inputmode="decimal"
                       type="text"
                       @input="
@@ -2294,6 +2320,36 @@ function orderDateTime(order: Order) {
         <p v-if="visibleOrders.length === 0" class="p-8 text-center text-sm text-slate-500">
           Заказы не найдены.
         </p>
+        <div
+          v-if="isPromRegistryView"
+          class="sticky bottom-4 z-10 mt-5 flex flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"
+        >
+          <button
+            v-if="isPromRegistryDraft"
+            class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+            type="button"
+            @click="clearPromRegistry"
+          >
+            Отменить черновик
+          </button>
+          <button
+            v-if="isPromRegistryDraft"
+            class="rounded-xl bg-violet-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isApplyingPromRegistry || promRegistryOrders.length === 0"
+            type="button"
+            @click="confirmPromRegistryDistribution"
+          >
+            {{ isApplyingPromRegistry ? 'Сохраняем…' : 'Подтвердить разнесение реестра' }}
+          </button>
+          <button
+            v-else
+            class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+            type="button"
+            @click="clearPromRegistry"
+          >
+            Закрыть реестр
+          </button>
+        </div>
       </section>
     </div>
 
