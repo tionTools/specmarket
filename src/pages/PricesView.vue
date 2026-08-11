@@ -489,7 +489,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   <PlatformLogo platform="Каста" /><span>обычная</span>
                 </th>
                 <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <PlatformLogo platform="Каста" /><span>рек.</span>
+                  <div class="flex flex-col items-center gap-0.5 leading-none">
+                    <PlatformLogo platform="Каста" /><span>Рек</span>
+                  </div>
                 </th>
                 <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
                   <PlatformLogo platform="Каста" /><span>акция</span>

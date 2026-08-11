@@ -149,6 +149,73 @@ function customerName(order: RecordValue) {
     .filter(Boolean).join(' ') || text(order.name) || 'Покупатель Prom'
 }
 
+function recipientName(value: unknown): string {
+  const record = asRecord(value)
+  const fullName = [
+    text(pick(record, 'last_name', 'lastName', 'surname')),
+    text(pick(record, 'first_name', 'firstName', 'name_first')),
+    text(pick(record, 'middle_name', 'middleName', 'second_name', 'patronymic')),
+  ].filter(Boolean).join(' ')
+  return fullName || readable(pick(record, 'full_name', 'fullName', 'name', 'title', 'value')) || text(value)
+}
+
+function recipientPhone(value: unknown): string {
+  const record = asRecord(value)
+  return text(pick(record, 'phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'))
+}
+
+function deliveryRecipientName(...sources: RecordValue[]): string {
+  for (const source of sources) {
+    const direct = readable(pick(
+      source,
+      'delivery_recipient_name',
+      'recipient_name',
+      'recipientName',
+      'receiver_name',
+      'receiverName',
+    ))
+    if (direct) return direct
+    const nested = recipientName(pick(
+      source,
+      'delivery_recipient',
+      'recipient',
+      'receiver',
+      'recipient_data',
+      'recipientData',
+      'receiver_data',
+      'receiverData',
+    ))
+    if (nested) return nested
+  }
+  return ''
+}
+
+function deliveryRecipientPhone(...sources: RecordValue[]): string {
+  for (const source of sources) {
+    const direct = text(pick(
+      source,
+      'delivery_recipient_phone',
+      'recipient_phone',
+      'recipientPhone',
+      'receiver_phone',
+      'receiverPhone',
+    ))
+    if (direct) return direct
+    const nested = recipientPhone(pick(
+      source,
+      'delivery_recipient',
+      'recipient',
+      'receiver',
+      'recipient_data',
+      'recipientData',
+      'receiver_data',
+      'receiverData',
+    ))
+    if (nested) return nested
+  }
+  return ''
+}
+
 function sourceItems(order: RecordValue) {
   const items = order.products ?? order.items
   return Array.isArray(items) ? items.map(asRecord) : []
@@ -403,7 +470,8 @@ Deno.serve(async (request) => {
       delivery: {
         carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
         ttn: trackingNumber,
-        recipient: customerName(order), recipientPhone: text(order.phone) || text(order.client_phone),
+        recipient: deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
+        recipientPhone: deliveryRecipientPhone(order, rawDelivery, deliveryProvider) || text(order.phone) || text(order.client_phone),
         city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
         status: deliveryStatus, payer,
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,

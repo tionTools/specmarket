@@ -548,6 +548,9 @@ const unmatchedPromRegistryEntries = computed(() =>
     (entry) => !orders.value.some((order) => registryKeyForOrder(order) === entry.orderNumber),
   ),
 )
+const unmatchedPromRegistryOrderNumbers = computed(() =>
+  unmatchedPromRegistryEntries.value.map((entry) => entry.orderNumber).join(', '),
+)
 const promRegistryTotals = computed(() => ({
   paymentAmount:
     registrySource.value === 'Kasta'
@@ -664,11 +667,28 @@ function createOrderDraft(): Order {
   }
 }
 
+function orderWithRegistryFinancialsRestored(order: Order): Order {
+  if (!isPromRegistryDraft.value) return order
+  const original = promRegistryOriginalFinancials.get(order.id)
+  if (!original) return order
+  return {
+    ...order,
+    paymentAmount: original.paymentAmount,
+    acquiring: original.acquiring,
+    acquiringPercent: original.acquiringPercent,
+    delivery: { ...order.delivery, paymentAmount: original.paymentAmount },
+  }
+}
+
 function persistOrders(order?: Order) {
-  if (isGuest.value || (isPromRegistryDraft.value && order)) return Promise.resolve()
+  if (isGuest.value) return Promise.resolve()
+  const savedOrders = order
+    ? [orderWithRegistryFinancialsRestored(order)]
+    : orders.value.map(orderWithRegistryFinancialsRestored)
+  const localOrders = orders.value.map(orderWithRegistryFinancialsRestored)
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
-    .then(() => persistOrdersNow(order ? [order] : orders.value))
+    .then(() => persistOrdersNow(savedOrders, localOrders))
   return persistenceQueue
 }
 
@@ -704,9 +724,9 @@ function serializeOrder(order: Order) {
   }
 }
 
-async function persistOrdersNow(savedOrders: Order[]) {
+async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value) {
   if (isGuest.value) return
-  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  window.localStorage.setItem(storageKey, JSON.stringify(localOrders))
   if (!supabase) return
   const { data, error } = await supabase.functions.invoke('save-crm-orders', {
     method: 'POST',
@@ -1640,8 +1660,15 @@ function orderDateTime(order: Order) {
             {{ formatMoney(promRegistryNetTotal) }}
           </p>
         </div>
+        <p
+          v-if="unmatchedPromRegistryEntries.length"
+          class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800"
+        >
+          Не найдены в CRM: {{ unmatchedPromRegistryOrderNumbers }}
+        </p>
         <p v-if="isPromRegistryDraft" class="mt-3 text-sm font-medium text-violet-900">
-          Это черновик: суммы видны только для проверки и не записаны в CRM до подтверждения.
+          Это черновик: сумма оплаты и эквайринг попадут в CRM только после подтверждения. Остальные
+          поля заказа сохраняются сразу.
         </p>
         <p
           v-if="
