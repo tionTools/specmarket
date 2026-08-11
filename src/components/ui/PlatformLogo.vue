@@ -13,7 +13,7 @@ const logoSources: Record<string, string> = {
     v-if="logoSources[props.platform]"
     :src="logoSources[props.platform]"
     :alt="props.platform"
-    class="inline-block h-[1.1em] w-auto max-w-20 object-contain align-[-0.14em]"
+    class="inline-block h-[1.65em] w-auto max-w-32 object-contain align-[-0.14em]"
   />
   <span v-else>{{ props.platform }}</span>
 </template>
