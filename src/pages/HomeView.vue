@@ -1306,7 +1306,7 @@ function orderDateTime(order: Order) {
             @click="toggleOrder(order.id)"
           >
             <span
-              ><strong>№ {{ order.displayNumber ?? order.id }}</strong
+              ><strong>{{ order.displayNumber ?? order.id }}</strong
               ><span
                 class="ml-2 inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
                 ><span
