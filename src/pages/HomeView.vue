@@ -1896,46 +1896,22 @@ function orderDateTime(order: Order) {
               ><span class="inline-flex items-center gap-1.5 whitespace-nowrap"
                 ><span
                   v-if="order.platform === 'Эпицентр' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Эпицентре"
                   @click.stop="openEpicentrOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
+                  ><img class="size-5 object-contain" src="/open-order-link.png" alt="" /></span
                 ><span
                   v-if="order.platform === 'Пром' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
+                  ><img class="size-5 object-contain" src="/open-order-link.png" alt="" /></span
                 ><span
                   v-if="order.platform === 'Каста' && order.externalId"
-                  class="cursor-pointer rounded-md bg-blue-600 p-1 text-white shadow-sm ring-1 ring-blue-700 transition hover:bg-blue-700"
+                  class="cursor-pointer rounded-md p-0.5 transition hover:bg-indigo-50"
                   title="Открыть заказ в Каста"
                   @click.stop="openKastaOrder(order)"
-                  ><svg
-                    class="size-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.8"
-                    aria-hidden="true"
-                  >
-                    <path d="M7 17 17 7M9 7h8v8" /></svg></span
+                  ><img class="size-5 object-contain" src="/open-order-link.png" alt="" /></span
                 ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
                   class="inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
