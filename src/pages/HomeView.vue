@@ -2271,7 +2271,8 @@ function orderDateTime(order: Order) {
                           /></label>
                           <div class="grid grid-cols-2 gap-1.5">
                             <label class="text-xs font-medium text-slate-500"
-                              >Роялти,<br />%<input
+                              ><span class="whitespace-nowrap">Роялти, %</span
+                              ><input
                                 :value="
                                   orderCellValue(
                                     `${order.id}-${product.id}-royalty-percent`,
@@ -2309,7 +2310,8 @@ function orderDateTime(order: Order) {
                                   )
                                 " /></label
                             ><label class="text-xs font-medium text-slate-500"
-                              >Роялти,<br />₴<input
+                              ><span class="whitespace-nowrap">Роялти, ₴</span
+                              ><input
                                 :value="
                                   orderCellValue(
                                     `${order.id}-${product.id}-royalty-amount`,
