@@ -2261,6 +2261,10 @@ function orderDateTime(order: Order) {
                         "
                         :readonly="editingOrderCell !== `${order.id}-${product.id}-royalty-percent`"
                         class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                        :class="{
+                          'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
+                            order.platform === 'Эпицентр' && product.royaltyPercent === undefined,
+                        }"
                         inputmode="decimal"
                         type="text"
                         @input="
