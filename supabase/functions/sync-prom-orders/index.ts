@@ -524,7 +524,7 @@ Deno.serve(async (request) => {
       const size = apiSize || text(previous?.size) || ''
       const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
       const imageUrl = feedProducts.get(rzid)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
-      return { order_id: orderId, position, product_name: name, size, image_url: imageUrl || null, quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royaltyPercent ?? royaltyPercent, royalty_amount: previous?.royaltyAmount ?? royaltyAmount }
+      return { order_id: orderId, position, product_name: name, size, image_url: imageUrl || null, quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royalty_percent ?? royaltyPercent, royalty_amount: previous?.royalty_amount ?? royaltyAmount }
       }))
       await admin.from('crm_order_items').insert(itemRows)
     }
