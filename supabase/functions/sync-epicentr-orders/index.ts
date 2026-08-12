@@ -111,7 +111,7 @@ function isSizeAttribute(attribute: Record<string, unknown>) {
   if (/(?:^|[_-])(size|rozmir|razmer)(?:$|[_-])/.test(code)) return true
 
   const translations = Array.isArray(attribute.translations) ? attribute.translations : []
-  return translations.some((translation) => /\b(розмір|размер)\b/i.test(readableText(asRecord(translation).title)))
+  return translations.some((translation) => /(розмір|размер)/i.test(readableText(asRecord(translation).title)))
 }
 
 function attributeValueText(attribute: Record<string, unknown>) {
