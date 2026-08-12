@@ -15,6 +15,7 @@ const products = ref<Product[]>([])
 const effectiveFrom = ref(new Date().toISOString().slice(0, 10))
 const rateDrafts = ref<Record<string, string>>({})
 const newCategory = ref('')
+const productSearch = ref('')
 const isGuest = ref(false)
 const notice = ref('')
 
@@ -29,6 +30,14 @@ const latestRateByCategory = computed(() => {
 })
 
 const unmappedProducts = computed(() => products.value.filter((product) => !product.category_id))
+const mappedProducts = computed(() => {
+  const search = productSearch.value.trim().toLowerCase()
+  return products.value.filter(
+    (product) =>
+      product.category_id &&
+      (!search || `${product.product_title} ${product.offer_id}`.toLowerCase().includes(search)),
+  )
+})
 
 async function load() {
   if (!supabase) return
@@ -193,6 +202,49 @@ onMounted(load)
               @change="assignProductCategory(product, $event)"
             >
               <option value="">Выбрать категорию</option>
+              <option v-for="category in categories" :key="category.id" :value="category.id">
+                {{ category.title }}
+              </option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold">Уже сопоставленные товары</h2>
+            <p class="mt-1 text-sm text-slate-500">
+              Здесь можно исправить ошибочно выбранную категорию.
+            </p>
+          </div>
+          <label class="text-sm text-slate-600"
+            >Поиск<input
+              v-model="productSearch"
+              class="mt-1 block rounded-lg border border-slate-300 px-3 py-2"
+              placeholder="Название или offerId"
+          /></label>
+        </div>
+        <p v-if="!mappedProducts.length" class="mt-4 text-sm text-slate-500">
+          Сопоставленных товаров пока нет.
+        </p>
+        <div v-else class="mt-4 divide-y divide-slate-200">
+          <div
+            v-for="product in mappedProducts"
+            :key="product.offer_id"
+            class="flex flex-wrap items-center justify-between gap-3 py-3"
+          >
+            <div>
+              <strong>{{ product.product_title }}</strong
+              ><span class="ml-2 text-xs text-slate-500">{{ product.offer_id }}</span>
+            </div>
+            <select
+              :value="product.category_id ?? ''"
+              :disabled="isGuest"
+              class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2"
+              @change="assignProductCategory(product, $event)"
+            >
+              <option value="">Без категории</option>
               <option v-for="category in categories" :key="category.id" :value="category.id">
                 {{ category.title }}
               </option>
