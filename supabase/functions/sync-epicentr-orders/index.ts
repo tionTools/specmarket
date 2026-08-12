@@ -145,6 +145,10 @@ function categoryRoyaltyPercent(item: Record<string, unknown>) {
 
 type NormalizedItem = { title: string; quantity: number; price: number; raw: Record<string, unknown> }
 
+function epicentrOfferId(item: Record<string, unknown>) {
+  return readableText(item.offerId ?? item.offer_id ?? item.productId ?? item.product_id)
+}
+
 function normalizeItems(order: unknown): NormalizedItem[] {
   const source = asRecord(order)
   const nestedOrder = asRecord(source.order)
@@ -280,6 +284,40 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const offerRows = orders.flatMap((order) => normalizeItems(order).map((item) => ({
+    offer_id: epicentrOfferId(item.raw),
+    product_title: item.title,
+  }))).filter((item) => item.offer_id)
+  if (offerRows.length) {
+    await admin.from('crm_epicentr_product_categories').upsert(offerRows, {
+      onConflict: 'offer_id',
+      ignoreDuplicates: true,
+    })
+  }
+  const offerIds = [...new Set(offerRows.map((item) => item.offer_id))]
+  const { data: mappedProducts } = offerIds.length
+    ? await admin.from('crm_epicentr_product_categories').select('offer_id, category_id').in('offer_id', offerIds)
+    : { data: [] }
+  const categoryIds = [...new Set((mappedProducts ?? []).map((item) => item.category_id).filter(Boolean))]
+  const { data: mappedRates } = categoryIds.length
+    ? await admin.from('crm_epicentr_royalty_rates').select('category_id, effective_from, royalty_percent').in('category_id', categoryIds)
+    : { data: [] }
+  const categoryByOffer = new Map((mappedProducts ?? []).map((item) => [item.offer_id, item.category_id]))
+  const ratesByCategory = new Map<string, Array<{ effective_from: string; royalty_percent: number }>>()
+  for (const rate of mappedRates ?? []) {
+    if (!rate.category_id) continue
+    const existingRates = ratesByCategory.get(rate.category_id) ?? []
+    existingRates.push({ effective_from: String(rate.effective_from), royalty_percent: Number(rate.royalty_percent) })
+    ratesByCategory.set(rate.category_id, existingRates)
+  }
+  const mappedRoyaltyPercent = (item: Record<string, unknown>, orderDate: string) => {
+    const categoryId = categoryByOffer.get(epicentrOfferId(item))
+    if (!categoryId) return undefined
+    const orderDay = orderDate.slice(0, 10)
+    return (ratesByCategory.get(categoryId) ?? [])
+      .filter((rate) => rate.effective_from <= orderDay)
+      .sort((first, second) => second.effective_from.localeCompare(first.effective_from))[0]?.royalty_percent
+  }
   const knownExternalIds = new Set<string>()
   if (!requestedExternalId && orders.length) {
     const externalIds = orders.map((order) => order.id).filter(Boolean)
@@ -432,7 +470,7 @@ Deno.serve(async (request) => {
           price: item.price,
           cost: Number(currentItem?.cost ?? 0),
           cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
-          royalty_percent: savedRoyaltyPercent ?? categoryRoyaltyPercent(item.raw) ?? null,
+          royalty_percent: savedRoyaltyPercent ?? mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw) ?? null,
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
         }
       }))
