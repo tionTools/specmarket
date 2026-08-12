@@ -106,6 +106,39 @@ function itemSize(item: Record<string, unknown>) {
   return title.match(/(?:розмір|размер|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?)/i)?.[1]?.replace(/\s/g, '') ?? ''
 }
 
+function isSizeAttribute(attribute: Record<string, unknown>) {
+  const code = readableText(attribute.code).toLowerCase()
+  if (/(?:^|[_-])(size|rozmir|razmer)(?:$|[_-])/.test(code)) return true
+
+  const translations = Array.isArray(attribute.translations) ? attribute.translations : []
+  return translations.some((translation) => /\b(розмір|размер)\b/i.test(readableText(asRecord(translation).title)))
+}
+
+function attributeValueText(attribute: Record<string, unknown>) {
+  const value = attribute.value
+  if (typeof value === 'string' || typeof value === 'number') {
+    const options = Array.isArray(attribute.options) ? attribute.options : []
+    const selected = options.map(asRecord).find((option) => readableText(option.code) === String(value))
+    if (selected) {
+      const title = (Array.isArray(selected.translations) ? selected.translations : [])
+        .map((translation) => readableText(asRecord(translation).title))
+        .find(Boolean)
+      if (title) return title
+    }
+    return String(value)
+  }
+  if (Array.isArray(value)) return value.map(readableText).filter(Boolean).join(', ')
+  return readableText(value)
+}
+
+function productSize(item: Record<string, unknown>) {
+  const product = asRecord(item.product)
+  const attributeValues = [item.attributeValues, product.attributeValues]
+    .find(Array.isArray) as unknown[] | undefined
+  const sizeAttribute = (attributeValues ?? []).map(asRecord).find(isSizeAttribute)
+  return sizeAttribute ? attributeValueText(sizeAttribute) : ''
+}
+
 function apiNumber(value: unknown) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
   if (typeof value !== 'string') return 0
@@ -354,7 +387,7 @@ Deno.serve(async (request) => {
 
     const { data: currentItems } = await admin
       .from('crm_order_items')
-      .select('position, product_name, cost, cost_usd, royalty_percent, royalty_amount')
+      .select('position, product_name, size, cost, cost_usd, royalty_percent, royalty_amount')
       .eq('order_id', orderId)
     const itemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
@@ -382,7 +415,9 @@ Deno.serve(async (request) => {
           order_id: orderId,
           position,
           product_name: item.title,
-          size: itemSize(item.raw),
+          // Размер хранится в документированном product.attributeValues. Если API
+          // его временно не вернул, не стираем уже сохранённый размер.
+          size: productSize(item.raw) || itemSize(item.raw) || readableText(currentItem?.size),
           image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
