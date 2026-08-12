@@ -2132,7 +2132,7 @@ function orderDateTime(order: Order) {
                 <div
                   v-for="product in order.products"
                   :key="product.id"
-                  class="order-edit grid gap-2 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_3rem_3.5rem_4rem_3.3rem_4rem_10rem] sm:items-end"
+                  class="order-edit grid gap-2 border-b-2 border-slate-300 p-4 last:border-b-0 sm:grid-cols-[minmax(19rem,1fr)_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:items-end"
                 >
                   <div class="flex min-w-0 gap-3">
                     <div v-if="product.imageUrl" class="group relative z-20 shrink-0">
