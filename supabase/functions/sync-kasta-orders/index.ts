@@ -111,8 +111,9 @@ function orderDateKey(value: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, isReceived: boolean): number | undefined {
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, isReceived: boolean): number | undefined {
   if (!isReceived) return 0
+  if (!blackUsed) return 0
   const tariff = [...TARIF_SCHEDULE]
     .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
     .find((candidate) => orderDate >= candidate.effective_date)
@@ -128,8 +129,10 @@ function orderAmount(order: RecordValue, items: RecordValue[]): number {
 }
 
 function customerDeliveryFee(order: RecordValue, delivery: RecordValue): number {
-  return number(pick(order, 'delivery_cost', 'shipping_fee', 'delivery_fee'))
-    || number(pick(delivery, 'delivery_cost', 'shipping_fee', 'delivery_fee', 'cost'))
+  // Kasta documents paid_price as the amount paid by the buyer after bonuses.
+  // cost is the carrier tariff and must not be treated as the buyer's payment.
+  return number(pick(delivery, 'paid_price'))
+    || number(pick(order, 'delivery_cost', 'shipping_fee', 'delivery_fee'))
 }
 
 function itemBarcode(item: RecordValue) {
@@ -290,7 +293,8 @@ Deno.serve(async (request) => {
     const items = itemRows(order)
     const deliveryFee = customerDeliveryFee(order, delivery)
     const receivedDate = receivedAt(order)
-    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(receivedDate), deliveryFee, orderAmount(order, items), Boolean(receivedDate))
+    const blackUsed = delivery.black_used === true
+    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(receivedDate), deliveryFee, orderAmount(order, items), blackUsed, Boolean(receivedDate))
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
@@ -318,7 +322,9 @@ Deno.serve(async (request) => {
 		city: text(asRecord(address.city).name),
 		address: deliveryAddress,
 		status: deliveryStatus,
-		payer: order.kasta_pays_for_shipping === true ? 'Каста' : text(currentDelivery.payer) || 'Не указано',
+		payer: blackUsed || order.kasta_pays_for_shipping === true ? 'Каста' : text(currentDelivery.payer) || 'Не указано',
+		blackUsed,
+		customerDeliveryFee: deliveryFee,
 		paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
 		paymentMethod: text(order.requested_payment_method),
 		paymentStatus: text(order.card_payment_state)
