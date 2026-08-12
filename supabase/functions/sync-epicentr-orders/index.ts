@@ -103,88 +103,12 @@ function itemSize(item: Record<string, unknown>) {
   const explicitSize = readableText(item.size) || readableText(item.variation) || readableText(item.option) || readableText(item.characteristics)
   if (explicitSize) return explicitSize
   const title = readableText(item.title)
-  return title.match(/(?:розмір|размер|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?)/i)?.[1]?.replace(/\s/g, '') ?? ''
-}
-
-function isSizeAttribute(attribute: Record<string, unknown>) {
-  const code = readableText(attribute.code).toLowerCase()
-  if (/(?:^|[_-])(size|rozmir|razmer)(?:$|[_-])/.test(code)) return true
-
-  const translations = Array.isArray(attribute.translations) ? attribute.translations : []
-  return translations.some((translation) => /(розмір|размер)/i.test(readableText(asRecord(translation).title)))
-}
-
-function attributeValueText(attribute: Record<string, unknown>) {
-  const value = attribute.value
-  if (typeof value === 'string' || typeof value === 'number') {
-    const options = Array.isArray(attribute.options) ? attribute.options : []
-    const selected = options.map(asRecord).find((option) => readableText(option.code) === String(value))
-    if (selected) {
-      const title = (Array.isArray(selected.translations) ? selected.translations : [])
-        .map((translation) => readableText(asRecord(translation).title))
-        .find(Boolean)
-      if (title) return title
-    }
-    return String(value)
-  }
-  if (Array.isArray(value)) {
-    const values = value.map((entry) => {
-      if (typeof entry === 'string' || typeof entry === 'number') return String(entry)
-      const record = asRecord(entry)
-      return readableText(record.value) || readableText(record.title) || readableText(record.name) || readableText(record.label)
-    }).filter(Boolean)
-    return [...new Set(values)].join(', ')
-  }
-  return readableText(value)
-}
-
-function titleIncludesValue(title: string, value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) return false
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(title)
-}
-
-const sizeAttributeCodesBySet = new Map<string, string[]>()
-
-function attributeSetsFromPayload(payload: unknown) {
-  const root = asRecord(payload)
-  const data = asRecord(root.data)
-  const candidates = [root.items, root.attributeSets, data.items, data.attributeSets, data]
-  return (candidates.find(Array.isArray) as unknown[] | undefined) ?? []
-}
-
-async function productSizeFromEpicentr(item: Record<string, unknown>, token: string) {
-  const product = asRecord(item.product)
-  const attributeSetCode = readableText(product.attributeSetCode) || readableText(asRecord(product.attributeSet).code)
-  const attributeValues = [item.attributeValues, product.attributeValues]
-    .find(Array.isArray) as unknown[] | undefined
-  const values = (attributeValues ?? []).map(asRecord)
-  if (!values.length) return ''
-
-  let sizeAttributeCodes = attributeSetCode ? sizeAttributeCodesBySet.get(attributeSetCode) : undefined
-  if (attributeSetCode && sizeAttributeCodes === undefined) {
-    const url = new URL('https://merchant-api.epicentrm.com.ua/v2/pim/attribute-sets')
-    url.searchParams.append('filter[codes][]', attributeSetCode)
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-    if (response.ok) {
-      const sets = attributeSetsFromPayload(await response.json()).map(asRecord)
-      const attributes = sets.flatMap((set) => Array.isArray(set.attributes) ? set.attributes : []).map(asRecord)
-      sizeAttributeCodes = attributes.filter(isSizeAttribute).map((attribute) => readableText(attribute.code)).filter(Boolean)
-    } else {
-      sizeAttributeCodes = []
-    }
-    sizeAttributeCodesBySet.set(attributeSetCode, sizeAttributeCodes)
-  }
-
-  const candidates = values
-    .filter((attribute) => isSizeAttribute(attribute) || sizeAttributeCodes?.includes(readableText(attribute.code)))
-    .map(attributeValueText)
-    .filter(Boolean)
-  const title = readableText(item.title)
-  return candidates.find((value) => titleIncludesValue(title, value)) ?? candidates[0] ?? ''
+  const labelled = title.match(/(?:розмір|размер|р\.)\s*([\d]+(?:\s*[-/]\s*[\d]+)?)/i)?.[1]?.replace(/\s/g, '')
+  if (labelled) return labelled
+  // In the order API the chosen clothing variation is appended to the item title,
+  // e.g. "Reis Foreco-TS L (717-720-L)". Catalogue attributes are deliberately
+  // not used here because they may describe the parent product rather than the order line.
+  return title.match(/(?:^|[\s,])((?:XXS|XS|S|M|L|XL|XXL|XXXL|4XL|5XL|\d{1,3})(?=\s*(?:\(|$)))/i)?.[1] ?? ''
 }
 
 function apiNumber(value: unknown) {
@@ -450,7 +374,6 @@ Deno.serve(async (request) => {
       Boolean(item.title.trim()) && Number.isFinite(item.price) && Number.isFinite(item.quantity),
     )
     if (validItems.length) {
-      const apiSizes = await Promise.all(validItems.map((item) => productSizeFromEpicentr(item.raw, epicentrToken)))
       const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
       if (deleteError) {
         return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
@@ -464,9 +387,7 @@ Deno.serve(async (request) => {
           order_id: orderId,
           position,
           product_name: item.title,
-          // Размер хранится в документированном product.attributeValues. Если API
-          // его временно не вернул, не стираем уже сохранённый размер.
-          size: apiSizes[position] || itemSize(item.raw) || readableText(currentItem?.size),
+          size: itemSize(item.raw) || readableText(currentItem?.size),
           image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
