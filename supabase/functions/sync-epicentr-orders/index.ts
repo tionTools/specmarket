@@ -139,6 +139,48 @@ function productSize(item: Record<string, unknown>) {
   return sizeAttribute ? attributeValueText(sizeAttribute) : ''
 }
 
+const sizeAttributeCodeBySet = new Map<string, string | null>()
+
+function attributeSetsFromPayload(payload: unknown) {
+  const root = asRecord(payload)
+  const data = asRecord(root.data)
+  const candidates = [root.items, root.attributeSets, data.items, data.attributeSets, data]
+  return (candidates.find(Array.isArray) as unknown[] | undefined) ?? []
+}
+
+async function productSizeFromEpicentr(item: Record<string, unknown>, token: string) {
+  const directSize = productSize(item)
+  if (directSize) return directSize
+
+  const product = asRecord(item.product)
+  const attributeSetCode = readableText(product.attributeSetCode) || readableText(asRecord(product.attributeSet).code)
+  const attributeValues = [item.attributeValues, product.attributeValues]
+    .find(Array.isArray) as unknown[] | undefined
+  if (!attributeSetCode || !attributeValues?.length) return ''
+
+  let sizeAttributeCode = sizeAttributeCodeBySet.get(attributeSetCode)
+  if (sizeAttributeCode === undefined) {
+    const url = new URL('https://merchant-api.epicentrm.com.ua/v2/pim/attribute-sets')
+    url.searchParams.append('filter[codes][]', attributeSetCode)
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+    if (response.ok) {
+      const sets = attributeSetsFromPayload(await response.json()).map(asRecord)
+      const attributes = sets.flatMap((set) => Array.isArray(set.attributes) ? set.attributes : []).map(asRecord)
+      const sizeAttribute = attributes.find(isSizeAttribute)
+      sizeAttributeCode = sizeAttribute ? readableText(sizeAttribute.code) : null
+    } else {
+      sizeAttributeCode = null
+    }
+    sizeAttributeCodeBySet.set(attributeSetCode, sizeAttributeCode)
+  }
+
+  const sizeAttribute = (attributeValues ?? []).map(asRecord)
+    .find((attribute) => readableText(attribute.code) === sizeAttributeCode)
+  return sizeAttribute ? attributeValueText(sizeAttribute) : ''
+}
+
 function apiNumber(value: unknown) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
   if (typeof value !== 'string') return 0
@@ -402,6 +444,7 @@ Deno.serve(async (request) => {
       Boolean(item.title.trim()) && Number.isFinite(item.price) && Number.isFinite(item.quantity),
     )
     if (validItems.length) {
+      const apiSizes = await Promise.all(validItems.map((item) => productSizeFromEpicentr(item.raw, epicentrToken)))
       const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
       if (deleteError) {
         return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
@@ -417,7 +460,7 @@ Deno.serve(async (request) => {
           product_name: item.title,
           // Размер хранится в документированном product.attributeValues. Если API
           // его временно не вернул, не стираем уже сохранённый размер.
-          size: productSize(item.raw) || itemSize(item.raw) || readableText(currentItem?.size),
+          size: apiSizes[position] || itemSize(item.raw) || readableText(currentItem?.size),
           image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
