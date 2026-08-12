@@ -1337,10 +1337,7 @@ function carrierLogoKind(order: Order) {
   const isEpicentrCollectionPoint =
     isEpicentrDelivery && (carrier.includes('cvz') || /центр видачі|центр выдачи/.test(address))
   if (isEpicentrCollectionPoint) return 'meest-epicentr-cvz'
-  if (
-    isEpicentrDelivery &&
-    (kind === 'meest' || carrier.includes('parcel_box') || address.includes('поштомат'))
-  )
+  if (isEpicentrDelivery && (kind === 'meest' || carrier.includes('parcel_box')))
     return 'meest-pachtmate'
   return kind
 }
