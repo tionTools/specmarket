@@ -163,7 +163,7 @@ async function deliveryReference(url: string, token: string) {
 
 function deliveryPointLabel(provider: string | undefined, number: string) {
   if (!number) return ''
-  if (provider === 'parcel_box_epicentr') return `Поштомат №${number}`
+  if (provider === 'parcel_box_epicentr') return `Поштомат Епіцентр №${number}`
   if (provider === 'nova_poshta') {
     return number.length === 5 && !number.startsWith('0') ? `Поштомат №${number}` : `Відділення №${number}`
   }
@@ -172,6 +172,17 @@ function deliveryPointLabel(provider: string | undefined, number: string) {
 
 function formatDeliveryPointAddress(provider: string | undefined, officeId: string, address: string) {
   if (!address) return deliveryPointLabel(provider, officeId)
+  if (provider === 'parcel_box_epicentr') {
+    const officeNumber = /^\d{1,5}$/.test(officeId) ? officeId : ''
+    const addressNumber = address.match(/(?:поштомат(?:\s+Епіцентр)?\s*(?:№\s*)?)(\d{1,5})/i)?.[1]
+    const number = officeNumber || addressNumber || ''
+    if (number) {
+      const plainAddress = address
+        .replace(/поштомат(?:\s+Епіцентр)?\s*(?:№\s*)?\d{1,5}\s*,?\s*/i, '')
+        .trim()
+      return `${deliveryPointLabel(provider, number)}${plainAddress ? `, ${plainAddress}` : ''}`
+    }
+  }
   if (/(?:відділення|поштомат)[^,]*№/i.test(address)) return address.replace(/№\s+(\d)/g, '№$1')
 
   // В Новой почте: 1–3 цифры — отделение, 5 цифр — почтомат.
