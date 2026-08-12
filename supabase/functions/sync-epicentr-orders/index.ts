@@ -118,6 +118,31 @@ function apiNumber(value: unknown) {
   return normalized ? Number(normalized) : 0
 }
 
+const epicentrRoyaltyRates: Array<{ category: string; percent: number }> = [
+  { category: 'наколінники будівельні', percent: 13 },
+  { category: 'рукавиці робочі', percent: 13 },
+  { category: 'спецвзуття', percent: 13 },
+  { category: 'спецодяг', percent: 13 },
+  { category: 'світловідбиваючі жилети', percent: 12 },
+  { category: 'гумові чоботи', percent: 15 },
+  { category: 'рукавички зимові', percent: 15 },
+  { category: 'дощовики і пончо туристичні', percent: 15 },
+  { category: 'сабо', percent: 15 },
+]
+
+function categoryRoyaltyPercent(item: Record<string, unknown>) {
+  const product = asRecord(item.product)
+  const category = readableText(
+    item.category ?? item.categoryName ?? item.category_name ?? item.productCategory ??
+      product.category ?? product.categoryName ?? product.category_name ?? product.productCategory,
+  )
+    .toLocaleLowerCase('uk-UA')
+    .replace(/[’'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return epicentrRoyaltyRates.find((rate) => category.includes(rate.category))?.percent
+}
+
 type NormalizedItem = { title: string; quantity: number; price: number; raw: Record<string, unknown> }
 
 function normalizeItems(order: unknown): NormalizedItem[] {
@@ -396,6 +421,7 @@ Deno.serve(async (request) => {
         // В ручной синхронизации снимок позиции приоритетнее: API иногда
         // меняет написание товара, но это не повод терять введённые финансы.
         const currentItem = snapshotItem ?? itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        const savedRoyaltyPercent = currentItem?.royalty_percent ?? currentItem?.royaltyPercent
         return {
           order_id: orderId,
           position,
@@ -406,7 +432,7 @@ Deno.serve(async (request) => {
           price: item.price,
           cost: Number(currentItem?.cost ?? 0),
           cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
-          royalty_percent: currentItem?.royalty_percent ?? currentItem?.royaltyPercent ?? null,
+          royalty_percent: savedRoyaltyPercent ?? categoryRoyaltyPercent(item.raw) ?? null,
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
         }
       }))
