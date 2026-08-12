@@ -1218,6 +1218,13 @@ function internalCommentValue(order: Order) {
     : (order.internalComment ?? '')
 }
 
+function internalCommentRows(order: Order) {
+  const lines = internalCommentValue(order)
+    .split('\n')
+    .filter((line) => line.trim()).length
+  return Math.max(1, lines)
+}
+
 function updateInternalCommentDraft(order: Order, event: Event) {
   editingInternalCommentValue.value[internalCommentKey(order)] = (
     event.target as HTMLTextAreaElement
@@ -2090,9 +2097,6 @@ function orderDateTime(order: Order) {
                       ><span class="text-slate-500">Покупатель: </span
                       ><strong>{{ order.customer }}</strong></span
                     >
-                    <span v-if="order.platform === 'Эпицентр'" class="text-slate-500">{{
-                      order.delivery.isAlternateRecipient ? 'Другой получатель' : 'Клиент'
-                    }}</span>
                     <span
                       ><span class="text-slate-500">Телефон: </span
                       ><strong>{{
@@ -2460,8 +2464,9 @@ function orderDateTime(order: Order) {
                 class="mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
                 >Комментарий к заказу<textarea
                   :value="internalCommentValue(order)"
+                  :rows="internalCommentRows(order)"
                   :readonly="isGuest || editingInternalCommentOrderId !== order.id"
-                  class="mt-2 block min-h-20 w-full resize-y rounded-lg border px-3 py-2 text-sm text-slate-900 outline-none transition"
+                  class="mt-2 block min-h-0 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition"
                   :class="
                     editingInternalCommentOrderId === order.id
                       ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100'
