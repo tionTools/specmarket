@@ -2448,8 +2448,8 @@ function orderDateTime(order: Order) {
               </div>
               <dl class="mt-4 text-sm">
                 <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div class="space-y-2.5">
-                    <dd class="flex min-w-0 items-center gap-2 font-semibold">
+                  <div class="space-y-2 text-center">
+                    <dd class="flex min-w-0 items-center justify-center gap-2 font-semibold">
                       <CarrierLogo
                         v-if="carrierLogoKind(order) !== 'generic'"
                         :kind="carrierLogoKind(order)"
@@ -2517,12 +2517,12 @@ function orderDateTime(order: Order) {
                           />
                         </svg>
                       </template>
-                      <span class="min-w-0 truncate">{{
-                        displayCarrier(order.delivery.carrier)
-                      }}</span>
+                      <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
                     </dd>
-                    <dd class="flex min-w-0 items-center gap-1 font-semibold text-blue-700">
-                      <span class="min-w-0 truncate">{{ order.delivery.ttn || '—' }}</span>
+                    <dd
+                      class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
+                    >
+                      <span>{{ order.delivery.ttn || '—' }}</span>
                       <button
                         v-if="order.delivery.ttn"
                         class="grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
