@@ -2448,111 +2448,101 @@ function orderDateTime(order: Order) {
               </div>
               <dl class="mt-4 text-sm">
                 <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-                    <div class="min-w-0">
-                      <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        Перевозчик
-                      </dt>
-                      <dd class="mt-1 flex min-w-0 items-center gap-2 font-semibold">
-                        <CarrierLogo
-                          v-if="carrierLogoKind(order) !== 'generic'"
-                          :kind="carrierLogoKind(order)"
-                        />
-                        <template v-else>
-                          <svg
-                            v-if="carrierIcon(order.delivery.carrier) === 'nova'"
-                            aria-label="Новая почта"
-                            class="size-5 shrink-0 text-red-500"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.8"
-                          >
-                            <path
-                              d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"
-                            />
-                          </svg>
-                          <svg
-                            v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'"
-                            aria-label="Укрпочта"
-                            class="size-5 shrink-0 text-yellow-500"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.4"
-                          >
-                            <path d="M3 7h18v11H3zM3 8l9 6 9-6" />
-                          </svg>
-                          <svg
-                            v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'"
-                            aria-label="RozetkaDelivery"
-                            class="size-5 shrink-0 text-emerald-600"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                          >
-                            <path
-                              d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
-                            />
-                          </svg>
-                          <svg
-                            v-else-if="carrierIcon(order.delivery.carrier) === 'meest'"
-                            aria-label="Meest"
-                            class="size-5 shrink-0 text-sky-600"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                          >
-                            <path d="M3 17V7l4 6 5-8 5 8 4-6v10" />
-                          </svg>
-                          <svg
-                            v-else
-                            aria-hidden="true"
-                            class="size-5 shrink-0 text-slate-500"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                          >
-                            <path
-                              d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
-                            />
-                          </svg>
-                        </template>
-                        <span class="min-w-0 truncate">{{
-                          displayCarrier(order.delivery.carrier)
-                        }}</span>
-                      </dd>
-                    </div>
-                    <div class="min-w-0">
-                      <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        ТТН
-                      </dt>
-                      <dd class="mt-1 flex min-w-0 items-center gap-1 font-semibold text-blue-700">
-                        <span class="min-w-0 truncate">{{ order.delivery.ttn || '—' }}</span>
-                        <button
-                          v-if="order.delivery.ttn"
-                          class="grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
-                          title="Скопировать номер ТТН"
-                          type="button"
-                          @click="copyTtn(order.delivery.ttn)"
+                  <div class="space-y-2.5">
+                    <dd class="flex min-w-0 items-center gap-2 font-semibold">
+                      <CarrierLogo
+                        v-if="carrierLogoKind(order) !== 'generic'"
+                        :kind="carrierLogoKind(order)"
+                      />
+                      <template v-else>
+                        <svg
+                          v-if="carrierIcon(order.delivery.carrier) === 'nova'"
+                          aria-label="Новая почта"
+                          class="size-5 shrink-0 text-red-500"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.8"
                         >
-                          <svg
-                            class="size-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.25"
-                            aria-hidden="true"
-                          >
-                            <rect x="9" y="9" width="11" height="11" rx="2" />
-                            <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
-                          </svg>
-                        </button>
-                      </dd>
-                    </div>
+                          <path
+                            d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"
+                          />
+                        </svg>
+                        <svg
+                          v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'"
+                          aria-label="Укрпочта"
+                          class="size-5 shrink-0 text-yellow-500"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.4"
+                        >
+                          <path d="M3 7h18v11H3zM3 8l9 6 9-6" />
+                        </svg>
+                        <svg
+                          v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'"
+                          aria-label="RozetkaDelivery"
+                          class="size-5 shrink-0 text-emerald-600"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.2"
+                        >
+                          <path
+                            d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
+                          />
+                        </svg>
+                        <svg
+                          v-else-if="carrierIcon(order.delivery.carrier) === 'meest'"
+                          aria-label="Meest"
+                          class="size-5 shrink-0 text-sky-600"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                        >
+                          <path d="M3 17V7l4 6 5-8 5 8 4-6v10" />
+                        </svg>
+                        <svg
+                          v-else
+                          aria-hidden="true"
+                          class="size-5 shrink-0 text-slate-500"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
+                          />
+                        </svg>
+                      </template>
+                      <span class="min-w-0 truncate">{{
+                        displayCarrier(order.delivery.carrier)
+                      }}</span>
+                    </dd>
+                    <dd class="flex min-w-0 items-center gap-1 font-semibold text-blue-700">
+                      <span class="min-w-0 truncate">{{ order.delivery.ttn || '—' }}</span>
+                      <button
+                        v-if="order.delivery.ttn"
+                        class="grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                        title="Скопировать номер ТТН"
+                        type="button"
+                        @click="copyTtn(order.delivery.ttn)"
+                      >
+                        <svg
+                          class="size-4"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.25"
+                          aria-hidden="true"
+                        >
+                          <rect x="9" y="9" width="11" height="11" rx="2" />
+                          <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+                        </svg>
+                      </button>
+                    </dd>
                   </div>
                 </div>
                 <div class="my-3 border-t border-slate-200"></div>
