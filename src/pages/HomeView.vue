@@ -2572,7 +2572,7 @@ function orderDateTime(order: Order) {
                   </dd>
                 </div>
                 <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4">
+                  <div class="grid grid-cols-3 gap-3">
                     <div class="min-w-0">
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                         Способ оплаты
@@ -2581,27 +2581,21 @@ function orderDateTime(order: Order) {
                         {{ displayPaymentMethod(order.delivery.paymentMethod) }}
                       </dd>
                     </div>
-                    <div class="grid grid-cols-2 gap-3 text-right">
-                      <div>
-                        <dt
-                          class="whitespace-nowrap text-[11px] font-semibold tracking-wide text-slate-500 uppercase"
-                        >
-                          Оценочная
-                        </dt>
-                        <dd class="mt-1 whitespace-nowrap font-semibold">
-                          {{ formatMoney(getOrderAmount(order)) }}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt
-                          class="whitespace-nowrap text-[11px] font-semibold tracking-wide text-slate-500 uppercase"
-                        >
-                          Доставка
-                        </dt>
-                        <dd class="mt-1 whitespace-nowrap font-semibold">
-                          {{ formatMoney(order.shipping) }}
-                        </dd>
-                      </div>
+                    <div class="min-w-0">
+                      <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Оценочная стоимость
+                      </dt>
+                      <dd class="mt-1 whitespace-nowrap font-semibold">
+                        {{ formatMoney(getOrderAmount(order)) }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                        Доставка
+                      </dt>
+                      <dd class="mt-1 whitespace-nowrap font-semibold">
+                        {{ formatMoney(order.shipping) }}
+                      </dd>
                     </div>
                   </div>
                 </div>
