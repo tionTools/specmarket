@@ -127,19 +127,25 @@ function attributeValueText(attribute: Record<string, unknown>) {
     }
     return String(value)
   }
-  if (Array.isArray(value)) return value.map(readableText).filter(Boolean).join(', ')
+  if (Array.isArray(value)) {
+    const values = value.map((entry) => {
+      if (typeof entry === 'string' || typeof entry === 'number') return String(entry)
+      const record = asRecord(entry)
+      return readableText(record.value) || readableText(record.title) || readableText(record.name) || readableText(record.label)
+    }).filter(Boolean)
+    return [...new Set(values)].join(', ')
+  }
   return readableText(value)
 }
 
-function productSize(item: Record<string, unknown>) {
-  const product = asRecord(item.product)
-  const attributeValues = [item.attributeValues, product.attributeValues]
-    .find(Array.isArray) as unknown[] | undefined
-  const sizeAttribute = (attributeValues ?? []).map(asRecord).find(isSizeAttribute)
-  return sizeAttribute ? attributeValueText(sizeAttribute) : ''
+function titleIncludesValue(title: string, value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(title)
 }
 
-const sizeAttributeCodeBySet = new Map<string, string | null>()
+const sizeAttributeCodesBySet = new Map<string, string[]>()
 
 function attributeSetsFromPayload(payload: unknown) {
   const root = asRecord(payload)
@@ -149,17 +155,15 @@ function attributeSetsFromPayload(payload: unknown) {
 }
 
 async function productSizeFromEpicentr(item: Record<string, unknown>, token: string) {
-  const directSize = productSize(item)
-  if (directSize) return directSize
-
   const product = asRecord(item.product)
   const attributeSetCode = readableText(product.attributeSetCode) || readableText(asRecord(product.attributeSet).code)
   const attributeValues = [item.attributeValues, product.attributeValues]
     .find(Array.isArray) as unknown[] | undefined
-  if (!attributeSetCode || !attributeValues?.length) return ''
+  const values = (attributeValues ?? []).map(asRecord)
+  if (!values.length) return ''
 
-  let sizeAttributeCode = sizeAttributeCodeBySet.get(attributeSetCode)
-  if (sizeAttributeCode === undefined) {
+  let sizeAttributeCodes = attributeSetCode ? sizeAttributeCodesBySet.get(attributeSetCode) : undefined
+  if (attributeSetCode && sizeAttributeCodes === undefined) {
     const url = new URL('https://merchant-api.epicentrm.com.ua/v2/pim/attribute-sets')
     url.searchParams.append('filter[codes][]', attributeSetCode)
     const response = await fetch(url, {
@@ -168,17 +172,19 @@ async function productSizeFromEpicentr(item: Record<string, unknown>, token: str
     if (response.ok) {
       const sets = attributeSetsFromPayload(await response.json()).map(asRecord)
       const attributes = sets.flatMap((set) => Array.isArray(set.attributes) ? set.attributes : []).map(asRecord)
-      const sizeAttribute = attributes.find(isSizeAttribute)
-      sizeAttributeCode = sizeAttribute ? readableText(sizeAttribute.code) : null
+      sizeAttributeCodes = attributes.filter(isSizeAttribute).map((attribute) => readableText(attribute.code)).filter(Boolean)
     } else {
-      sizeAttributeCode = null
+      sizeAttributeCodes = []
     }
-    sizeAttributeCodeBySet.set(attributeSetCode, sizeAttributeCode)
+    sizeAttributeCodesBySet.set(attributeSetCode, sizeAttributeCodes)
   }
 
-  const sizeAttribute = (attributeValues ?? []).map(asRecord)
-    .find((attribute) => readableText(attribute.code) === sizeAttributeCode)
-  return sizeAttribute ? attributeValueText(sizeAttribute) : ''
+  const candidates = values
+    .filter((attribute) => isSizeAttribute(attribute) || sizeAttributeCodes?.includes(readableText(attribute.code)))
+    .map(attributeValueText)
+    .filter(Boolean)
+  const title = readableText(item.title)
+  return candidates.find((value) => titleIncludesValue(title, value)) ?? candidates[0] ?? ''
 }
 
 function apiNumber(value: unknown) {
