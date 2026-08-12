@@ -33,6 +33,16 @@ const orderStatuses: Record<string, string> = {
 
 function latestStatus(order: RecordValue) {
   const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
+  // After a cancellation Kasta may add a technical money-refund transaction.
+  // It does not turn the cancelled order into a goods return.
+  const cancellations = statuses.filter((status) => text(status.type) === 'Cancelled')
+  if (cancellations.length) {
+    return cancellations.reduce((latest, status) => {
+      const latestDate = new Date(text(latest.created_at)).getTime()
+      const currentDate = new Date(text(status.created_at)).getTime()
+      return currentDate >= latestDate ? status : latest
+    }, asRecord(cancellations[0]))
+  }
   return statuses.reduce((latest, status) => {
     const latestDate = new Date(text(latest.created_at)).getTime()
     const currentDate = new Date(text(status.created_at)).getTime()
@@ -50,16 +60,26 @@ function receivedAt(order: RecordValue): string {
 
 function itemRows(order: RecordValue) {
   const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
+  const isCancelled = statuses.some((status) => text(status.type) === 'Cancelled')
   const isReturn = statuses.some((status) => /^(?:Return|Refund)/.test(text(status.type)))
   const returnedItems = Array.isArray(order.returned_items) ? order.returned_items : []
   const orderedItems = Array.isArray(order.ordered_items) ? order.ordered_items : Array.isArray(order.items) ? order.items : []
   const cancelledItems = Array.isArray(order.cancelled_items) ? order.cancelled_items : []
-  const items = isReturn && returnedItems.length ? returnedItems : orderedItems.length ? orderedItems : returnedItems.length ? returnedItems : cancelledItems
+  const items = isCancelled && cancelledItems.length
+    ? cancelledItems
+    : isReturn && returnedItems.length
+      ? returnedItems
+      : orderedItems.length
+        ? orderedItems
+        : returnedItems.length
+          ? returnedItems
+          : cancelledItems
   return items.map(asRecord).filter((item) => text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')))
 }
 
 function itemQuantity(item: RecordValue) {
-  return number(pick(item, 'quantity', 'returned_quantity', 'cancelled_quantity', 'original_quantity')) || 1
+  const quantity = pick(item, 'quantity', 'returned_quantity', 'cancelled_quantity', 'original_quantity')
+  return quantity === undefined ? 1 : number(quantity)
 }
 
 function itemImage(item: RecordValue) {
