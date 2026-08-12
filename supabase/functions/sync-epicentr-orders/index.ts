@@ -174,11 +174,13 @@ function formatDeliveryPointAddress(provider: string | undefined, officeId: stri
   if (!address) return deliveryPointLabel(provider, officeId)
   if (provider === 'parcel_box_epicentr') {
     const officeNumber = /^\d{1,5}$/.test(officeId) ? officeId : ''
-    const addressNumber = address.match(/(?:поштомат(?:\s+Епіцентр)?\s*(?:№\s*)?)(\d{1,5})/i)?.[1]
-    const number = officeNumber || addressNumber || ''
+    const labelledNumber = address.match(/(?:поштомат(?:\s+Епіцентр)?\s*(?:№\s*)?)(\d{1,5})/i)?.[1]
+    const trailingNumber = address.match(/,\s*(\d{1,5})$/)?.[1]
+    const number = officeNumber || labelledNumber || trailingNumber || ''
     if (number) {
       const plainAddress = address
         .replace(/поштомат(?:\s+Епіцентр)?\s*(?:№\s*)?\d{1,5}\s*,?\s*/i, '')
+        .replace(/,\s*\d{1,5}$/, '')
         .trim()
       return `${deliveryPointLabel(provider, number)}${plainAddress ? `, ${plainAddress}` : ''}`
     }
