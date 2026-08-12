@@ -2447,8 +2447,8 @@ function orderDateTime(order: Order) {
                 >
               </div>
               <dl class="mt-4 text-sm">
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div class="space-y-2 text-center">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2">
+                  <div class="space-y-1.5 text-center">
                     <dd class="flex min-w-0 items-center justify-center gap-2 font-semibold">
                       <CarrierLogo
                         v-if="carrierLogoKind(order) !== 'generic'"
