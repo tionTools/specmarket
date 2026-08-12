@@ -2545,7 +2545,6 @@ function orderDateTime(order: Order) {
                     </dd>
                   </div>
                 </div>
-                <div class="my-3 border-t border-slate-200"></div>
                 <div class="grid grid-cols-2 gap-x-4 gap-y-3">
                   <div class="min-w-0">
                     <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
@@ -2553,17 +2552,11 @@ function orderDateTime(order: Order) {
                     </dt>
                     <dd class="mt-1 break-words font-semibold">{{ order.delivery.recipient }}</dd>
                   </div>
-                  <div class="min-w-0">
-                    <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                      Телефон
-                    </dt>
-                    <dd class="mt-1 break-all font-semibold">
-                      {{ order.delivery.recipientPhone }}
-                    </dd>
-                  </div>
+                  <dd class="self-end break-all font-semibold">
+                    {{ order.delivery.recipientPhone }}
+                  </dd>
                 </div>
-                <div class="my-3 border-t border-slate-200"></div>
-                <div>
+                <div class="mt-3">
                   <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                     Адрес
                   </dt>
@@ -2572,16 +2565,17 @@ function orderDateTime(order: Order) {
                   </dd>
                 </div>
                 <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div class="grid grid-cols-3 gap-3">
-                    <div class="min-w-0">
-                      <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        Способ оплаты
-                      </dt>
-                      <dd class="mt-1 break-words font-semibold">
-                        {{ displayPaymentMethod(order.delivery.paymentMethod) }}
-                      </dd>
-                    </div>
-                    <div class="min-w-0">
+                  <div class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4">
+                    <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                      Способ оплаты
+                    </dt>
+                    <dd class="min-w-0 break-words text-right font-semibold">
+                      {{ displayPaymentMethod(order.delivery.paymentMethod) }}
+                    </dd>
+                  </div>
+                  <div class="my-3 border-t border-slate-200"></div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                         Оценочная стоимость
                       </dt>
@@ -2589,7 +2583,7 @@ function orderDateTime(order: Order) {
                         {{ formatMoney(getOrderAmount(order)) }}
                       </dd>
                     </div>
-                    <div class="min-w-0">
+                    <div class="text-right">
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                         Доставка
                       </dt>
