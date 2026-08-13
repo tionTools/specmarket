@@ -2056,13 +2056,14 @@ function orderDateTime(order: Order) {
             Заказы · Оборот · План · Факт
           </p>
         </div>
-        <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.25fr_1.2fr_1.1fr_0.68fr_0.68fr]">
           <article
             v-for="item in platformSummary"
             :key="item.platform"
             class="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+            :class="{ 'lg:border-l-2 lg:border-l-slate-400': item.platform === 'Р/С' }"
           >
-            <div class="min-w-0 text-[11px] leading-4 text-slate-500">
+            <div class="min-w-0 whitespace-nowrap text-[11px] leading-4 text-slate-500">
               <p>
                 Заказы: <b class="text-slate-800">{{ item.count }}</b>
               </p>
