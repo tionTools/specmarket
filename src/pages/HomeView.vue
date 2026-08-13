@@ -612,7 +612,11 @@ function isCancelledOrReturned(order: Order) {
   )
 }
 
-const reportOrders = computed(() => orders.value.filter((order) => !isCancelledOrReturned(order)))
+const reportOrders = computed(() =>
+  orders.value.filter(
+    (order) => !isCancelledOrReturned(order) && order.delivery.ttn.trim().length > 0,
+  ),
+)
 const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
     return orders.value.filter((order) => Boolean(order.delivery.printedAt))
