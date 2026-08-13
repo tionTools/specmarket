@@ -24,6 +24,9 @@ type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
 const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
 const platformSummaryFrom = ref('')
 const platformSummaryTo = ref('')
+const orderListPeriod = ref<PlatformSummaryPeriod>('month')
+const orderListFrom = ref('')
+const orderListTo = ref('')
 const isShowingCancelledAndReturned = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
@@ -203,6 +206,8 @@ platformSummaryFrom.value = inputDate(
   new Date(defaultPlatformSummaryDate.getFullYear(), defaultPlatformSummaryDate.getMonth(), 1),
 )
 platformSummaryTo.value = inputDate(defaultPlatformSummaryDate)
+orderListFrom.value = platformSummaryFrom.value
+orderListTo.value = platformSummaryTo.value
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
@@ -667,6 +672,27 @@ const ordersForPlatformSummary = computed(() => {
     return date !== null && date >= from && date <= to
   })
 })
+const orderListRange = computed(() => {
+  const today = startOfLocalDay(new Date())
+  if (orderListPeriod.value === 'week') {
+    const from = new Date(today)
+    from.setDate(today.getDate() - ((today.getDay() + 6) % 7))
+    return { from, to: today }
+  }
+  if (orderListPeriod.value === 'decade') {
+    const startDay = today.getDate() <= 10 ? 1 : today.getDate() <= 20 ? 11 : 21
+    return { from: new Date(today.getFullYear(), today.getMonth(), startDay), to: today }
+  }
+  if (orderListPeriod.value === 'custom') {
+    const first = parseInputDate(orderListFrom.value) ?? today
+    const second = parseInputDate(orderListTo.value) ?? first
+    return first <= second ? { from: first, to: second } : { from: second, to: first }
+  }
+  return {
+    from: new Date(today.getFullYear(), today.getMonth(), 1),
+    to: today,
+  }
+})
 const promRegistryEntriesByOrder = computed(
   () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
 )
@@ -705,6 +731,7 @@ const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   const isTtnSearch = /^[\d\s-]+$/.test(search)
+  const { from, to } = orderListRange.value
   return orders.value.filter((order) => {
     const matchesPlatform =
       isShowingCancelledAndReturned.value ||
@@ -715,6 +742,9 @@ const visibleOrders = computed(() => {
       : isShowingCancelledAndReturned.value
         ? isCancelledOrReturned(order)
         : !isCancelledOrReturned(order)
+    const orderDate = parseOrderDate(order.date)
+    const matchesPeriod =
+      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
     const haystack = JSON.stringify(order).toLowerCase()
     const matchesTtn =
       isTtnSearch &&
@@ -723,6 +753,7 @@ const visibleOrders = computed(() => {
     return (
       matchesPlatform &&
       matchesOrderState &&
+      matchesPeriod &&
       (!isPromRegistryView.value || promRegistryOrders.value.includes(order)) &&
       (!search || haystack.includes(search) || matchesTtn)
     )
@@ -2182,7 +2213,7 @@ function orderDateTime(order: Order) {
 
       <section class="mt-3 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
         <div
-          class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row"
+          class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row sm:flex-wrap"
         >
           <div class="relative w-full sm:max-w-md">
             <svg
@@ -2232,6 +2263,33 @@ function orderDateTime(order: Order) {
           >
             Отмены и возвраты
           </button>
+          <div class="flex items-center gap-2 sm:ml-auto">
+            <select
+              v-model="orderListPeriod"
+              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              aria-label="Период списка заказов"
+            >
+              <option value="week">Неделя</option>
+              <option value="decade">Декада</option>
+              <option value="month">Месяц</option>
+              <option value="custom">Произвольный период</option>
+            </select>
+            <template v-if="orderListPeriod === 'custom'">
+              <input
+                v-model="orderListFrom"
+                class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
+                type="date"
+                aria-label="Начало периода списка заказов"
+              />
+              <span class="text-sm text-slate-400">—</span>
+              <input
+                v-model="orderListTo"
+                class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
+                type="date"
+                aria-label="Конец периода списка заказов"
+              />
+            </template>
+          </div>
         </div>
         <div
           class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
