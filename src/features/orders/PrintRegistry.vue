@@ -55,6 +55,30 @@ function formatMoney(value: number) {
   return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(value)} ₴`
 }
 
+function displayOrderStatus(status: string) {
+  const names: Record<string, string> = {
+    pending: 'Новий',
+    new: 'Новий',
+    received: 'Прийнято',
+    delivered: 'Виконано',
+    completed: 'Завершено',
+    confirmed_by_seller: 'Підтверджено продавцем',
+    confirmed_by_merchant: 'Підтверджено продавцем',
+    confirmed: 'Підтверджено',
+    sent: 'Відправлено',
+    ready_for_pickup: 'Готово до видачі',
+    finished: 'Завершено',
+    closed: 'Закрито',
+    canceled: 'Скасовано',
+    cancelled: 'Скасовано',
+    returned: 'Повернено',
+    return_request: 'Запит на повернення',
+    canceled_by_seller: 'Скасовано продавцем',
+    canceled_by_merchant: 'Скасовано продавцем',
+  }
+  return names[status.toLowerCase()] ?? status
+}
+
 function handleCheckedChange(order: Order, event: Event) {
   emit('checkedChange', order, (event.target as HTMLInputElement).checked)
 }
@@ -200,7 +224,9 @@ onUnmounted(() => {
           </div>
           <div>
             <PlatformLogo :platform="order.platform" />
-            <p class="mt-1 text-xs font-semibold text-slate-600">{{ order.status }}</p>
+            <p class="mt-1 text-xs font-semibold text-slate-600">
+              {{ displayOrderStatus(order.status) }}
+            </p>
           </div>
           <div class="min-w-0">
             <div

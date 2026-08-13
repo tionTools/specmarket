@@ -772,14 +772,21 @@ async function openPrintRegistry() {
   }
   if (ordersWithoutTtn.length) await loadRemoteOrders()
 
-  printRegistryOrderIds.value = orders.value
-    .filter(
-      (order) =>
-        !order.delivery.printedAt &&
-        isOpenForPrintRegistry(order) &&
-        order.delivery.ttn.trim().length > 0,
-    )
-    .map((order) => order.id)
+  const registryOrders = orders.value.filter(
+    (order) =>
+      !order.delivery.printedAt &&
+      isOpenForPrintRegistry(order) &&
+      order.delivery.ttn.trim().length > 0,
+  )
+  printRegistryOrderIds.value = registryOrders.map((order) => order.id)
+  const uncheckedOrders = registryOrders.filter((order) => !order.delivery.printCheckedAt)
+  if (uncheckedOrders.length) {
+    const printCheckedAt = new Date().toISOString()
+    if (await savePrintState(uncheckedOrders.map((order) => ({ order, printCheckedAt })))) {
+      for (const order of uncheckedOrders) order.delivery.printCheckedAt = printCheckedAt
+      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+    }
+  }
   isPreparingPrintRegistry.value = false
   printRegistryMode.value = 'draft'
   if (syncErrors)
