@@ -2008,17 +2008,12 @@ function orderDateTime(order: Order) {
       ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink
     >
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <header class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div class="shrink-0">
           <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
           <h1 class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Заказы</h1>
-          <p
-            class="mt-2 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800"
-          >
-            Общие данные: цены и заказы синхронизируются через Supabase
-          </p>
         </div>
-        <div class="flex flex-wrap gap-3">
+        <div class="flex flex-wrap items-center justify-end gap-2 xl:flex-nowrap">
           <input
             ref="promRegistryFileInput"
             class="hidden"
@@ -2028,7 +2023,7 @@ function orderDateTime(order: Order) {
           />
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-violet-200 bg-white px-4 py-3 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
+            class="whitespace-nowrap rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
             type="button"
             @click="openPromRegistryFilePicker"
           >
@@ -2036,29 +2031,22 @@ function orderDateTime(order: Order) {
           </button>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+            class="whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
             :disabled="isPreparingPrintRegistry"
             type="button"
             @click="openPrintRegistry"
           >
             {{ isPreparingPrintRegistry ? 'Проверяем ТТН…' : 'Реестр печати' }}
           </button>
-          <button
-            class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
-            type="button"
-            @click="signOut"
-          >
-            Выйти
-          </button>
           <RouterLink
-            class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+            class="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
             to="/prices"
           >
             Цены
           </RouterLink>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-800 shadow-sm transition hover:bg-sky-100 disabled:cursor-wait disabled:opacity-60"
+            class="whitespace-nowrap rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm transition hover:bg-sky-100 disabled:cursor-wait disabled:opacity-60"
             :disabled="isMarketplaceSyncBusy"
             type="button"
             @click="syncNewAllPlatforms"
@@ -2067,7 +2055,7 @@ function orderDateTime(order: Order) {
           </button>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+            class="whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
             :disabled="isMarketplaceSyncBusy"
             type="button"
             @click="syncFullAllPlatforms"
@@ -2076,11 +2064,18 @@ function orderDateTime(order: Order) {
           </button>
           <button
             v-if="!isGuest"
-            class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+            class="whitespace-nowrap rounded-xl bg-emerald-700 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
             type="button"
             @click="openNewOrderDialog"
           >
             + Новый заказ
+          </button>
+          <button
+            class="ml-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
+            type="button"
+            @click="signOut"
+          >
+            Выйти
           </button>
         </div>
       </header>
