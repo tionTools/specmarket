@@ -9,6 +9,7 @@ import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/
 import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
+import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
@@ -67,6 +68,9 @@ const promRegistryNewFields = ref(new Set<string>())
 const promRegistryMismatchedFields = ref(new Set<string>())
 const promRegistryExistingFinancials = ref({ complete: 0, partial: 0 })
 const expandedRegistryOrderIds = ref<Array<string | number>>([])
+const printRegistryMode = ref<'draft' | 'history' | null>(null)
+const printRegistryOrderIds = ref<Array<string | number>>([])
+const isUpdatingPrintRegistry = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -567,6 +571,12 @@ function isCancelledOrReturned(order: Order) {
 }
 
 const reportOrders = computed(() => orders.value.filter((order) => !isCancelledOrReturned(order)))
+const printRegistryOrders = computed(() => {
+  if (printRegistryMode.value === 'history')
+    return orders.value.filter((order) => Boolean(order.delivery.printedAt))
+  const orderIds = new Set(printRegistryOrderIds.value.map(String))
+  return orders.value.filter((order) => orderIds.has(String(order.id)))
+})
 const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
 )
@@ -629,6 +639,104 @@ const visibleOrders = computed(() => {
     )
   })
 })
+
+function isOpenForPrintRegistry(order: Order) {
+  const status = displayOrderStatus(order.status).toLowerCase()
+  return (
+    !isCancelledOrReturned(order) &&
+    !/заверш|закрит|закрыт|виконан|выполнен|completed|finished|closed|delivered/.test(status)
+  )
+}
+
+async function openPrintRegistry() {
+  if (!(await waitForPendingSaves())) return
+  printRegistryOrderIds.value = orders.value
+    .filter((order) => !order.delivery.printedAt && isOpenForPrintRegistry(order))
+    .map((order) => order.id)
+  printRegistryMode.value = 'draft'
+}
+
+function closePrintRegistry() {
+  printRegistryMode.value = null
+  printRegistryOrderIds.value = []
+}
+
+function showPrintRegistryHistory() {
+  printRegistryMode.value = 'history'
+}
+
+function showCurrentPrintRegistry() {
+  printRegistryMode.value = 'draft'
+}
+
+async function savePrintState(
+  updates: Array<{
+    order: Order
+    printCheckedAt?: string | null
+    printedAt?: string | null
+  }>,
+) {
+  if (!supabase || isGuest.value || isUpdatingPrintRegistry.value) return false
+  const missingRemoteOrder = updates.find((update) => !update.order.remoteId)
+  if (missingRemoteOrder) {
+    await persistOrders(missingRemoteOrder.order)
+    await waitForPendingSaves()
+  }
+  if (updates.some((update) => !update.order.remoteId)) {
+    showSyncError('Не удалось сохранить отметку: один из заказов ещё не записан в базе.')
+    return false
+  }
+
+  isUpdatingPrintRegistry.value = true
+  const { data, error } = await supabase.functions.invoke('update-order-print-state', {
+    method: 'POST',
+    body: {
+      updates: updates.map((update) => ({
+        orderId: update.order.remoteId,
+        ...('printCheckedAt' in update ? { printCheckedAt: update.printCheckedAt } : {}),
+        ...('printedAt' in update ? { printedAt: update.printedAt } : {}),
+      })),
+    },
+  })
+  isUpdatingPrintRegistry.value = false
+  if (error || !data?.ok) {
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось сохранить отметки печати.')
+    return false
+  }
+  return true
+}
+
+async function handlePrintCheckedChange(order: Order, checked: boolean) {
+  const printCheckedAt = checked ? new Date().toISOString() : null
+  if (!(await savePrintState([{ order, printCheckedAt }]))) return
+  order.delivery.printCheckedAt = printCheckedAt ?? undefined
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+}
+
+function printCurrentRegistry() {
+  window.print()
+}
+
+async function markPrintRegistryPrinted() {
+  const registryOrders = printRegistryOrders.value
+  if (!registryOrders.length || registryOrders.some((order) => !order.delivery.printCheckedAt))
+    return
+  if (!window.confirm(`Отметить распечатанными ${registryOrders.length} заказов?`)) return
+  const printedAt = new Date().toISOString()
+  if (!(await savePrintState(registryOrders.map((order) => ({ order, printedAt }))))) return
+  for (const order of registryOrders) order.delivery.printedAt = printedAt
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  closePrintRegistry()
+  showSyncMessage(`Распечатанными отмечено заказов: ${registryOrders.length}.`)
+}
+
+async function restorePrintedOrder(order: Order) {
+  if (!window.confirm(`Вернуть заказ ${order.displayNumber ?? order.id} в нераспечатанные?`)) return
+  if (!(await savePrintState([{ order, printCheckedAt: null, printedAt: null }]))) return
+  order.delivery.printCheckedAt = undefined
+  order.delivery.printedAt = undefined
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+}
 
 function toggleCancelledAndReturned() {
   isShowingCancelledAndReturned.value = !isShowingCancelledAndReturned.value
@@ -1636,6 +1744,14 @@ function orderDateTime(order: Order) {
             @click="openPromRegistryFilePicker"
           >
             ↑ Импортировать реестр
+          </button>
+          <button
+            v-if="!isGuest"
+            class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-800 shadow-sm transition hover:bg-blue-50"
+            type="button"
+            @click="openPrintRegistry"
+          >
+            Реестр печати
           </button>
           <button
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
@@ -2881,6 +2997,19 @@ function orderDateTime(order: Order) {
         </button>
       </form>
     </dialog>
+    <PrintRegistry
+      v-if="printRegistryMode"
+      :orders="printRegistryOrders"
+      :mode="printRegistryMode"
+      :busy="isUpdatingPrintRegistry"
+      @close="closePrintRegistry"
+      @print="printCurrentRegistry"
+      @markPrinted="markPrintRegistryPrinted"
+      @showHistory="showPrintRegistryHistory"
+      @showDraft="showCurrentPrintRegistry"
+      @checkedChange="handlePrintCheckedChange"
+      @restore="restorePrintedOrder"
+    />
   </div>
 </template>
 

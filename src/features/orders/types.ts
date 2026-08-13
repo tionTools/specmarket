@@ -28,6 +28,8 @@ export interface Delivery {
   paymentStatus?: string
   hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
+  printCheckedAt?: string
+  printedAt?: string
 }
 
 export interface Order {

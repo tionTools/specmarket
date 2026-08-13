@@ -347,7 +347,9 @@ Deno.serve(async (request) => {
 		customerDeliveryFee: deliveryFee,
 		paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
 		paymentMethod: text(order.requested_payment_method),
-		paymentStatus: text(order.card_payment_state)
+		paymentStatus: text(order.card_payment_state),
+		printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
+		printedAt: text(currentDelivery.printedAt) || undefined
 	}
 })
     let orderId = existing?.id

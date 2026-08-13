@@ -485,6 +485,8 @@ Deno.serve(async (request) => {
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
         hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
+        printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
+        printedAt: text(previousDelivery.printedAt) || undefined,
       },
     }
     let orderId = existing?.id

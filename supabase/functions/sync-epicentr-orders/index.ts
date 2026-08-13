@@ -428,6 +428,8 @@ Deno.serve(async (request) => {
         paymentAmount,
         paymentMethod: shipment?.paymentProvider ?? '',
         paymentStatus: shipment?.paymentStatus ?? '',
+        printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
+        printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
       },
     }
 
