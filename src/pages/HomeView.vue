@@ -1980,70 +1980,108 @@ function orderDateTime(order: Order) {
         </p>
       </section>
 
-      <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-sm text-slate-500">Заказы</p>
-          <p class="mt-2 text-3xl font-semibold">{{ summary.today.orders }}</p>
-          <p class="mt-2 text-xs text-slate-500">
-            За месяц: <span class="font-semibold text-slate-800">{{ summary.month.orders }}</span>
-          </p>
+      <section class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <article
+          class="grid grid-cols-[minmax(5rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="text-sm font-medium text-slate-600">Заказы</p>
+          <div class="text-right">
+            <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
+            <p class="text-xl font-semibold leading-none">{{ summary.today.orders }}</p>
+          </div>
+          <div class="border-l border-slate-200 pl-3 text-right">
+            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="text-xl font-semibold leading-none">{{ summary.month.orders }}</p>
+          </div>
         </article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-sm text-slate-500">Оборот</p>
-          <p class="mt-2 text-3xl font-semibold">{{ formatMoney(summary.today.turnover) }}</p>
-          <p class="mt-2 text-xs text-slate-500">
-            За месяц:
-            <span class="font-semibold text-slate-800">{{
-              formatMoney(summary.month.turnover)
-            }}</span>
-          </p>
+        <article
+          class="grid grid-cols-[minmax(5rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="text-sm font-medium text-slate-600">Оборот</p>
+          <div class="text-right">
+            <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.today.turnover) }}
+            </p>
+          </div>
+          <div class="border-l border-slate-200 pl-3 text-right">
+            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.month.turnover) }}
+            </p>
+          </div>
         </article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-sm text-slate-500">Плановая прибыль</p>
-          <p class="mt-2 text-3xl font-semibold">{{ formatMoney(summary.today.planned) }}</p>
-          <p class="mt-2 text-xs text-slate-500">
-            За месяц:
-            <span class="font-semibold text-slate-800">{{
-              formatMoney(summary.month.planned)
-            }}</span>
-          </p>
+        <article
+          class="grid grid-cols-[minmax(7rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="text-sm font-medium leading-tight text-slate-600">Плановая прибыль</p>
+          <div class="text-right">
+            <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.today.planned) }}
+            </p>
+          </div>
+          <div class="border-l border-slate-200 pl-3 text-right">
+            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.month.planned) }}
+            </p>
+          </div>
         </article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-sm text-slate-500">Фактическая прибыль</p>
-          <p class="mt-2 text-3xl font-semibold">{{ formatMoney(summary.today.actual) }}</p>
-          <p class="mt-2 text-xs text-slate-500">
-            За месяц:
-            <span class="font-semibold text-slate-800">{{
-              formatMoney(summary.month.actual)
-            }}</span>
-          </p>
+        <article
+          class="grid grid-cols-[minmax(7rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="text-sm font-medium leading-tight text-slate-600">Фактическая прибыль</p>
+          <div class="text-right">
+            <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.today.actual) }}
+            </p>
+          </div>
+          <div class="border-l border-slate-200 pl-3 text-right">
+            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.month.actual) }}
+            </p>
+          </div>
         </article>
       </section>
 
-      <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p class="text-xs font-bold tracking-[0.16em] text-emerald-700">ТЕКУЩИЙ МЕСЯЦ</p>
-            <h2 class="mt-1 text-xl font-semibold">По площадкам</h2>
-          </div>
-          <p class="text-xs text-slate-500">Оборот · План · Факт</p>
+      <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-sm font-semibold text-slate-700">По площадкам · текущий месяц</h2>
+          <p class="text-[10px] uppercase tracking-wide text-slate-400">
+            Заказы · Оборот · План · Факт
+          </p>
         </div>
-        <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <article
             v-for="item in platformSummary"
             :key="item.platform"
-            class="rounded-xl bg-slate-50 p-4"
+            class="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
           >
-            <p class="font-bold"><PlatformLogo :platform="item.platform" /></p>
-            <p class="mt-3 text-xs text-slate-500">Заказов: {{ item.count }}</p>
-            <p class="text-xs text-slate-500">Оборот: {{ formatMoney(item.turnover) }}</p>
-            <p class="text-xs text-slate-500">План: {{ formatMoney(item.planned) }}</p>
-            <p class="text-xs text-slate-500">Факт: {{ formatMoney(item.actual) }}</p>
+            <div class="min-w-0 text-[11px] leading-4 text-slate-500">
+              <p>
+                Заказы: <b class="text-slate-800">{{ item.count }}</b>
+              </p>
+              <p>
+                Оборот: <b class="text-slate-800">{{ formatMoney(item.turnover) }}</b>
+              </p>
+              <p>
+                План: <b class="text-slate-800">{{ formatMoney(item.planned) }}</b>
+              </p>
+              <p>
+                Факт: <b class="text-slate-800">{{ formatMoney(item.actual) }}</b>
+              </p>
+            </div>
+            <div class="flex min-w-20 justify-end font-bold">
+              <PlatformLogo :platform="item.platform" />
+            </div>
           </article>
         </div>
       </section>
 
-      <section class="mt-6 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
+      <section class="mt-3 rounded-2xl border-2 border-slate-300 bg-slate-100 p-3 shadow-sm">
         <div
           class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row"
         >
@@ -2117,13 +2155,7 @@ function orderDateTime(order: Order) {
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             :class="
-              isOrderUnprinted(order)
-                ? isOrderExpanded(order)
-                  ? 'bg-amber-100/80 hover:bg-amber-100'
-                  : 'bg-amber-50 hover:bg-amber-100/70'
-                : isOrderExpanded(order)
-                  ? 'bg-slate-200/80 hover:bg-slate-200'
-                  : 'hover:bg-slate-50'
+              isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
             type="button"
             @click="toggleOrder(order.id)"
