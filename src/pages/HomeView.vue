@@ -1584,6 +1584,20 @@ function displayDeliveryStatus(status: string) {
   return names[status.toLowerCase()] ?? status
 }
 
+function promPaymentState(order: Order): 'paid' | 'unpaid' | null {
+  if (order.platform !== 'Пром') return null
+  const status = order.delivery.paymentStatus?.trim().toLowerCase() ?? ''
+  if (status === 'paid' || status === 'оплачено') return 'paid'
+  if (
+    /^(?:unpaid|not_paid|payment_error|failed|declined|pending|waiting_for_payment|wait_for_payment)$/.test(
+      status,
+    ) ||
+    /(?:не оплач|ошиб|очіку|ожида)/i.test(status)
+  )
+    return 'unpaid'
+  return null
+}
+
 function trackingUrl(delivery: Delivery) {
   const ttn = delivery.ttn.trim()
   if (!ttn) return ''
@@ -2381,7 +2395,24 @@ function orderDateTime(order: Order) {
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-between gap-3">
-                <h3 class="text-base font-semibold">Состав заказа</h3>
+                <div class="flex items-center gap-3">
+                  <h3 class="text-base font-semibold">Состав заказа</h3>
+                  <span
+                    v-if="promPaymentState(order) === 'paid'"
+                    class="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-sm font-medium text-violet-700"
+                  >
+                    <span
+                      class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
+                      >О</span
+                    >
+                    Оплачено
+                  </span>
+                  <span
+                    v-else-if="promPaymentState(order) === 'unpaid'"
+                    class="text-sm font-medium text-slate-500"
+                    >Не оплачено</span
+                  >
+                </div>
                 <div class="flex flex-wrap items-center gap-3">
                   <button
                     v-if="order.platform === 'Эпицентр' && order.externalId"
