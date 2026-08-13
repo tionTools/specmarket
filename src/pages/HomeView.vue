@@ -1619,15 +1619,48 @@ function displayOrderStatus(status: string) {
 }
 
 function displayDeliveryStatus(status: string) {
+  const normalized = status
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
   const names: Record<string, string> = {
     initial: 'Заплановано',
+    created: 'Запланировано',
+    registered: 'Запланировано',
+    planned: 'Запланировано',
+    scheduled: 'Запланировано',
+    pending: 'Запланировано',
+    accepted: 'Готовится к отправке',
+    confirmed: 'Готовится к отправке',
+    processing: 'Готовится к отправке',
+    ready_to_ship: 'Готовится к отправке',
+    ready_for_shipment: 'Готовится к отправке',
+    accepted_by_carrier: 'Отправлено',
+    dispatched: 'Отправлено',
+    sent: 'Отправлено',
     received: 'Получено',
     delivered: 'Получено',
+    completed: 'Получено',
     in_transit: 'В дороге',
+    in_delivery: 'В дороге',
     on_the_way: 'На шляху до одержувача',
     shipped: 'Отправлено',
+    arrived: 'Готово к выдаче',
+    arrived_at_branch: 'Готово к выдаче',
+    at_pickup_point: 'Готово к выдаче',
+    ready_for_delivery: 'Готово к выдаче',
+    ready_for_pickup: 'Готово к выдаче',
+    returning: 'Возвращается отправителю',
+    return_to_sender: 'Возвращается отправителю',
+    returned: 'Возвращено',
+    canceled: 'Отменено',
+    cancelled: 'Отменено',
+    delivery_failed: 'Не доставлено',
+    failed: 'Не доставлено',
+    undelivered: 'Не доставлено',
+    expired: 'Срок хранения истёк',
   }
-  return names[status.toLowerCase()] ?? status
+  return (names[normalized] ?? status) || '—'
 }
 
 function promPaymentState(order: Order): 'paid' | 'unpaid' | null {
@@ -1705,14 +1738,25 @@ function carrierLogoKind(order: Order) {
 
 function displayPaymentMethod(method?: string) {
   if (!method) return '—'
+  const normalized = method
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
   const names: Record<string, string> = {
     monobank: 'Оплата через Монобанк',
-    postpayment: 'Післяплата',
-    cash_on_delivery: 'Післяплата',
-    cod: 'Післяплата',
-    invoice: 'Оплата по рахунку',
+    pay_on_delivery: 'Наложенный платёж',
+    postpayment: 'Наложенный платёж',
+    cash_on_delivery: 'Наложенный платёж',
+    cod: 'Наложенный платёж',
+    prepayment: 'Предоплата',
+    online: 'Онлайн-оплата',
+    online_payment: 'Онлайн-оплата',
+    card: 'Оплата картой',
+    card_payment: 'Оплата картой',
+    cash: 'Наличными',
+    invoice: 'Оплата по счёту',
   }
-  return names[method.toLowerCase()] ?? method
+  return names[normalized] ?? method
 }
 
 function displayDeliveryAddress(delivery: Delivery) {
