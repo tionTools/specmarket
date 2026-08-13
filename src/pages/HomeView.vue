@@ -3089,9 +3089,9 @@ function orderDateTime(order: Order) {
                   >{{ deliveryStatusForOrder(order) }}</span
                 >
               </div>
-              <dl class="mt-4 text-sm">
-                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2">
-                  <div class="space-y-1.5 text-center">
+              <dl class="mt-2 text-sm">
+                <div class="pb-1">
+                  <div class="space-y-0.5 text-center">
                     <dd class="flex min-w-0 items-center justify-center gap-2 font-semibold">
                       <CarrierLogo
                         v-if="carrierLogoKind(order) !== 'generic'"
