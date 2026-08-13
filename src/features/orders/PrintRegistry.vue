@@ -12,7 +12,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  print: []
   markPrinted: []
   showHistory: []
   showDraft: []
@@ -41,10 +40,6 @@ const totalAmount = computed(() =>
     0,
   ),
 )
-const allChecked = computed(
-  () => props.orders.length > 0 && checkedCount.value === props.orders.length,
-)
-
 function formatMoney(value: number) {
   return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(value)} ₴`
 }
@@ -197,53 +192,14 @@ function handleCheckedChange(order: Order, event: Event) {
         class="print-registry-actions sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-slate-300 bg-white/95 p-5 backdrop-blur"
       >
         <button
-          class="rounded-xl border border-blue-300 bg-white px-5 py-3 font-semibold text-blue-800 hover:bg-blue-50"
-          type="button"
-          @click="emit('print')"
-        >
-          Распечатать реестр
-        </button>
-        <button
           class="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
-          :disabled="busy || !allChecked"
+          :disabled="busy"
           @click="emit('markPrinted')"
         >
-          {{ busy ? 'Сохраняем…' : 'Отметить распечатанными' }}
+          {{ busy ? 'Сохраняем…' : 'Уже распечатал' }}
         </button>
       </footer>
     </section>
   </div>
 </template>
-
-<style>
-@media print {
-  body * {
-    visibility: hidden !important;
-  }
-
-  .print-registry,
-  .print-registry * {
-    visibility: visible !important;
-  }
-
-  .print-registry-overlay {
-    position: absolute !important;
-    inset: 0 !important;
-    overflow: visible !important;
-    padding: 0 !important;
-    background: white !important;
-  }
-
-  .print-registry {
-    width: 100% !important;
-    max-width: none !important;
-    border: 0 !important;
-    box-shadow: none !important;
-  }
-
-  .print-registry-actions {
-    display: none !important;
-  }
-}
-</style>

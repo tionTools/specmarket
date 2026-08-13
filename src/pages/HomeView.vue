@@ -713,14 +713,9 @@ async function handlePrintCheckedChange(order: Order, checked: boolean) {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
 }
 
-function printCurrentRegistry() {
-  window.print()
-}
-
 async function markPrintRegistryPrinted() {
   const registryOrders = printRegistryOrders.value
-  if (!registryOrders.length || registryOrders.some((order) => !order.delivery.printCheckedAt))
-    return
+  if (!registryOrders.length) return
   if (!window.confirm(`Отметить распечатанными ${registryOrders.length} заказов?`)) return
   const printedAt = new Date().toISOString()
   if (!(await savePrintState(registryOrders.map((order) => ({ order, printedAt }))))) return
@@ -3003,7 +2998,6 @@ function orderDateTime(order: Order) {
       :mode="printRegistryMode"
       :busy="isUpdatingPrintRegistry"
       @close="closePrintRegistry"
-      @print="printCurrentRegistry"
       @markPrinted="markPrintRegistryPrinted"
       @showHistory="showPrintRegistryHistory"
       @showDraft="showCurrentPrintRegistry"
