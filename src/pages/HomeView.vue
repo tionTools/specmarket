@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
+import { displayCarrier } from '@/features/orders/display'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
@@ -1637,16 +1638,6 @@ function statusOptionsForOrder(order: Order) {
   const options = statusOptions[order.platform] ?? []
   const currentStatus = displayOrderStatus(order.status)
   return options.includes(currentStatus) ? options : [currentStatus, ...options]
-}
-
-function displayCarrier(carrier: string) {
-  const names: Record<string, string> = {
-    nova_poshta: 'Нова пошта',
-    ukrposhta: 'Укрпошта',
-    cvz_epicentr: 'ЦВЗ Епіцентр',
-    parcel_box_epicentr: 'Поштомат Епіцентр',
-  }
-  return names[carrier.toLowerCase()] ?? carrier
 }
 
 function carrierIcon(carrier: string): 'nova' | 'ukr' | 'rozetka' | 'meest' | 'generic' {

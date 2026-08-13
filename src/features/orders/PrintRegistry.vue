@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from 'vue'
 
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
+import { displayCarrier } from '@/features/orders/display'
 import type { Order } from '@/features/orders/types'
 
 const props = defineProps<{
@@ -273,7 +274,7 @@ onUnmounted(() => {
               {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
             </p>
             <p class="flex items-center gap-1 text-sm text-slate-600">
-              <span>{{ order.delivery.carrier }} ·</span>
+              <span>{{ displayCarrier(order.delivery.carrier) }} ·</span>
               <CarrierLogo v-if="carrierLogoKind(order)" :kind="carrierLogoKind(order)" />
               <span class="font-bold text-blue-600">{{ order.delivery.ttn }}</span>
             </p>
