@@ -2373,7 +2373,7 @@ function orderDateTime(order: Order) {
             </svg>
             <input
               v-model="searchQuery"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
+              class="w-full rounded-xl border-2 border-emerald-400 bg-white py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
               placeholder="Поиск: заказ, ТТН, покупатель, товар"
             />
             <button
