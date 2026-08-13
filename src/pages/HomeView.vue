@@ -1286,6 +1286,19 @@ function displayOrderStatus(status: string) {
     cancelled: 'Скасовано',
     received: 'Принято',
     delivered: 'Виконано',
+    new: 'Новий',
+    confirmed_by_seller: 'Підтверджено продавцем',
+    confirmed_by_merchant: 'Підтверджено продавцем',
+    confirmed: 'Підтверджено',
+    sent: 'Відправлено',
+    ready_for_pickup: 'Готово до видачі',
+    finished: 'Завершено',
+    closed: 'Закрито',
+    canceled: 'Скасовано',
+    returned: 'Повернено',
+    return_request: 'Запит на повернення',
+    canceled_by_seller: 'Скасовано продавцем',
+    canceled_by_merchant: 'Скасовано продавцем',
   }
   return names[status.toLowerCase()] ?? status
 }

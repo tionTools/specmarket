@@ -53,6 +53,7 @@ type EpicentrOrder = {
 const statusNames: Record<string, string> = {
   new: 'Новий',
   confirmed_by_seller: 'Підтверджено продавцем',
+  confirmed_by_merchant: 'Підтверджено продавцем',
   confirmed: 'Підтверджено',
   sent: 'Відправлено',
   ready_for_pickup: 'Готово до видачі',
@@ -132,10 +133,18 @@ const epicentrRoyaltyRates: Array<{ category: string; percent: number }> = [
 
 function categoryRoyaltyPercent(item: Record<string, unknown>) {
   const product = asRecord(item.product)
-  const category = readableText(
+  const categorySources = [
     item.category ?? item.categoryName ?? item.category_name ?? item.productCategory ??
       product.category ?? product.categoryName ?? product.category_name ?? product.productCategory,
-  )
+    ...(Array.isArray(product.categories) ? product.categories : []),
+  ]
+  const category = categorySources
+    .map((source) => {
+      const record = asRecord(source)
+      const translations = Array.isArray(record.translations) ? record.translations : []
+      return translations.map((translation) => readableText(asRecord(translation).title)).join(' ') || readableText(source)
+    })
+    .join(' ')
     .toLocaleLowerCase('uk-UA')
     .replace(/[’'`]/g, '')
     .replace(/\s+/g, ' ')
@@ -470,7 +479,7 @@ Deno.serve(async (request) => {
           price: item.price,
           cost: Number(currentItem?.cost ?? 0),
           cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
-          royalty_percent: savedRoyaltyPercent ?? mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw) ?? null,
+          royalty_percent: savedRoyaltyPercent ?? categoryRoyaltyPercent(item.raw) ?? mappedRoyaltyPercent(item.raw, source.createdAt) ?? null,
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
         }
       }))
