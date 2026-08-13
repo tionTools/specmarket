@@ -648,6 +648,10 @@ function isOpenForPrintRegistry(order: Order) {
   )
 }
 
+function isOrderUnprinted(order: Order) {
+  return !order.delivery.printedAt && isOpenForPrintRegistry(order)
+}
+
 async function openPrintRegistry() {
   if (!(await waitForPendingSaves())) return
   printRegistryOrderIds.value = orders.value
@@ -2032,7 +2036,13 @@ function orderDateTime(order: Order) {
           <button
             class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
             :class="
-              isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
+              isOrderUnprinted(order)
+                ? isOrderExpanded(order)
+                  ? 'bg-amber-100/80 hover:bg-amber-100'
+                  : 'bg-amber-50 hover:bg-amber-100/70'
+                : isOrderExpanded(order)
+                  ? 'bg-slate-200/80 hover:bg-slate-200'
+                  : 'hover:bg-slate-50'
             "
             type="button"
             @click="toggleOrder(order.id)"
@@ -2117,6 +2127,10 @@ function orderDateTime(order: Order) {
                       /></svg></span></span></span
               ><span class="mt-1 block text-xs text-slate-500"
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
+              ><span
+                v-if="isOrderUnprinted(order)"
+                class="mt-1 inline-flex rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900"
+                >Не распечатан</span
               ></span
             ><span
               ><strong :class="platformClass(order.platform)"
