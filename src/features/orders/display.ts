@@ -4,7 +4,7 @@ export function displayCarrier(carrier: string) {
     .toLowerCase()
     .replace(/[\s-]+/g, '_')
   if (/^(?:cvz|pickup_point|collection_point)_epicent(?:e)?r$/.test(normalized))
-    return 'Центр выдачи заказов — Эпицентр'
+    return 'ЦВЗ Эпицентр'
   if (
     normalized === 'parcel_box_epicentr' ||
     normalized === 'meest_epicentr_postomat' ||
