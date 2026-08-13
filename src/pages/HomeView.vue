@@ -3189,7 +3189,7 @@ function orderDateTime(order: Order) {
         </p>
         <div
           v-if="isPromRegistryView"
-          class="sticky bottom-4 z-10 mt-5 flex flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"
+          class="sticky bottom-4 z-10 ml-auto mt-5 flex w-fit max-w-full flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"
         >
           <button
             v-if="isPromRegistryDraft"
