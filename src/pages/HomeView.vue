@@ -1686,18 +1686,39 @@ function displayDeliveryStatus(status: string) {
   return (names[normalized] ?? status) || '—'
 }
 
-function promPaymentState(order: Order): 'paid' | 'unpaid' | null {
+function promPaymentState(order: Order): 'paid' | 'unpaid' | 'error' | null {
   if (order.platform !== 'Пром') return null
-  const status = order.delivery.paymentStatus?.trim().toLowerCase() ?? ''
-  if (status === 'paid' || status === 'оплачено') return 'paid'
+  const status = normalizePaymentStatus(order.delivery.paymentStatus)
   if (
-    /^(?:unpaid|not_paid|payment_error|failed|declined|pending|waiting_for_payment|wait_for_payment)$/.test(
-      status,
-    ) ||
-    /(?:не оплач|ошиб|очіку|ожида)/i.test(status)
+    isPaidPaymentStatus(status) ||
+    (isPromPaymentMethod(order.delivery.paymentMethod) && isPaid(order))
+  ) {
+    return 'paid'
+  }
+  if (/^(?:payment_error|failed|declined)$/.test(status) || /(?:помил|ошиб)/i.test(status)) {
+    return 'error'
+  }
+  if (
+    /^(?:unpaid|not_paid|pending|waiting_for_payment|wait_for_payment)$/.test(status) ||
+    /(?:не оплач|очіку|ожида)/i.test(status)
   )
     return 'unpaid'
   return null
+}
+
+function normalizePaymentStatus(status?: string) {
+  return (
+    status
+      ?.trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_') ?? ''
+  )
+}
+
+function isPaidPaymentStatus(status: string) {
+  return /^(?:paid|paid_out|complete|completed|success|successful|settled|approved|оплачено)$/.test(
+    status,
+  )
 }
 
 function trackingUrl(delivery: Delivery) {
@@ -1800,24 +1821,21 @@ function isPromPaymentMethod(method?: string) {
 }
 
 function isDeliveryPaymentPaid(order: Order) {
-  const status =
-    order.delivery.paymentStatus
-      ?.trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, '_') ?? ''
+  const status = normalizePaymentStatus(order.delivery.paymentStatus)
   if (
     /^(?:unpaid|not_paid|payment_error|failed|declined|pending|waiting_for_payment|wait_for_payment)$/.test(
       status,
     )
   )
     return false
-  if (/^(?:paid|paid_out|completed|success|successful|settled|approved)$/.test(status)) return true
+  if (isPaidPaymentStatus(status)) return true
   const method =
     order.delivery.paymentMethod
       ?.trim()
       .toLowerCase()
       .replace(/[\s-]+/g, '_') ?? ''
   if (/^(?:pay_on_delivery|postpayment|cash_on_delivery|cod)$/.test(method)) return false
+  if (isPromPaymentMethod(order.delivery.paymentMethod)) return isPaid(order)
   return /^(?:monobank|prepayment|online|online_payment|card|card_payment)$/.test(method)
 }
 
@@ -2562,6 +2580,10 @@ function orderDateTime(order: Order) {
                     >О</span
                   >Оплачено</span
                 ><span
+                  v-else-if="promPaymentState(order) === 'error'"
+                  class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-600"
+                  ><span class="text-sm font-bold text-emerald-500">О</span>Помилка оплати</span
+                ><span
                   v-if="order.delivery.hasWebsiteCommission"
                   class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
                   ><span aria-hidden="true">◎</span> Замовлення з сайту</span
@@ -2619,6 +2641,13 @@ function orderDateTime(order: Order) {
                       >О</span
                     >
                     Оплачено
+                  </span>
+                  <span
+                    v-else-if="promPaymentState(order) === 'error'"
+                    class="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-sm font-medium text-rose-600"
+                  >
+                    <span class="font-bold text-emerald-500">О</span>
+                    Помилка оплати
                   </span>
                   <span
                     v-else-if="promPaymentState(order) === 'unpaid'"
@@ -3242,7 +3271,9 @@ function orderDateTime(order: Order) {
                       class="min-w-0 justify-self-end break-words text-right font-semibold"
                       :class="{
                         'text-emerald-600': isDeliveryPaymentPaid(order),
-                        'text-slate-950': !isDeliveryPaymentPaid(order),
+                        'text-rose-600': promPaymentState(order) === 'error',
+                        'text-slate-950':
+                          !isDeliveryPaymentPaid(order) && promPaymentState(order) !== 'error',
                         'rounded-lg border border-slate-200 bg-white px-3 py-1 shadow-sm':
                           isPromPaymentMethod(order.delivery.paymentMethod) ||
                           isDeliveryPaymentPaid(order),
