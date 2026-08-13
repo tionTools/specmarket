@@ -2555,6 +2555,13 @@ function orderDateTime(order: Order) {
                   class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600"
                   >Позиций: {{ order.products.length }}</span
                 ><span
+                  v-if="promPaymentState(order) === 'paid'"
+                  class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
+                  ><span
+                    class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
+                    >О</span
+                  >Оплачено</span
+                ><span
                   v-if="order.delivery.hasWebsiteCommission"
                   class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
                   ><span aria-hidden="true">◎</span> Замовлення з сайту</span
