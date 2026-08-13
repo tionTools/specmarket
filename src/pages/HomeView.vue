@@ -655,7 +655,12 @@ function isOrderUnprinted(order: Order) {
 async function openPrintRegistry() {
   if (!(await waitForPendingSaves())) return
   printRegistryOrderIds.value = orders.value
-    .filter((order) => !order.delivery.printedAt && isOpenForPrintRegistry(order))
+    .filter(
+      (order) =>
+        !order.delivery.printedAt &&
+        isOpenForPrintRegistry(order) &&
+        order.delivery.ttn.trim().length > 0,
+    )
     .map((order) => order.id)
   printRegistryMode.value = 'draft'
 }

@@ -161,7 +161,7 @@ onUnmounted(() => {
         <article
           v-for="order in orders"
           :key="order.id"
-          class="grid gap-3 p-4 sm:grid-cols-[2.5rem_9rem_9rem_minmax(18rem,1fr)_10rem] sm:items-start"
+          class="grid gap-3 p-4 sm:grid-cols-[2.5rem_8rem_8rem_minmax(30rem,1fr)_8rem] sm:items-start"
         >
           <label v-if="mode === 'draft'" class="print-registry-actions pt-1">
             <input
@@ -183,20 +183,52 @@ onUnmounted(() => {
             <p class="mt-1 text-xs font-semibold text-slate-600">{{ order.status }}</p>
           </div>
           <div class="min-w-0">
-            <div v-for="product in order.products" :key="product.id" class="mb-2 last:mb-0">
-              <p class="font-semibold">
-                {{ product.name }}<span v-if="product.size"> · размер {{ product.size }}</span>
-              </p>
-              <p class="text-sm text-slate-600">
-                {{ product.quantity }} × {{ formatMoney(product.price) }} =
-                {{ formatMoney(product.quantity * product.price) }}
-              </p>
+            <div
+              v-for="product in order.products"
+              :key="product.id"
+              class="mb-3 grid min-w-0 grid-cols-[3.5rem_minmax(10rem,1fr)_3.5rem_5.5rem_5.5rem_6rem] items-center gap-2 border-b border-slate-200 pb-3 last:mb-0 last:border-0 last:pb-0"
+            >
+              <div
+                class="flex size-14 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+              >
+                <img
+                  v-if="product.imageUrl"
+                  :src="product.imageUrl"
+                  :alt="product.name"
+                  class="size-full object-contain"
+                  loading="lazy"
+                />
+                <span v-else class="text-[10px] font-semibold text-slate-400">Нет фото</span>
+              </div>
+              <div class="min-w-0">
+                <p class="font-semibold leading-snug">{{ product.name }}</p>
+                <p v-if="product.size" class="mt-1 text-xs text-slate-500">
+                  Размер: {{ product.size }}
+                </p>
+              </div>
+              <div>
+                <p class="text-[10px] font-semibold uppercase text-slate-500">Кол.</p>
+                <p class="mt-1 font-semibold">{{ product.quantity }}</p>
+              </div>
+              <div>
+                <p class="text-[10px] font-semibold uppercase text-slate-500">Цена, ₴</p>
+                <p class="mt-1 font-semibold">{{ formatMoney(product.price) }}</p>
+              </div>
+              <div>
+                <p class="text-[10px] font-semibold uppercase text-emerald-700">С/С $</p>
+                <p class="mt-1 font-semibold">{{ product.costUsd ?? 0 }}</p>
+              </div>
+              <div>
+                <p class="text-[10px] font-semibold uppercase text-rose-700">С/С ₴</p>
+                <p class="mt-1 font-semibold">{{ formatMoney(product.cost) }}</p>
+              </div>
             </div>
             <p class="mt-2 text-sm text-slate-600">
               {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
             </p>
             <p class="text-sm text-slate-600">
-              {{ order.delivery.carrier }} · {{ order.delivery.ttn || 'ТТН нет' }}
+              {{ order.delivery.carrier }} ·
+              <span class="font-bold text-blue-600">{{ order.delivery.ttn }}</span>
             </p>
             <p v-if="order.internalComment" class="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-sm">
               {{ order.internalComment }}
