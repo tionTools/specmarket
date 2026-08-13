@@ -1980,31 +1980,31 @@ function orderDateTime(order: Order) {
         </p>
       </section>
 
-      <section class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <section class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[0.58fr_1.04fr_1.19fr_1.19fr]">
         <article
-          class="grid grid-cols-[minmax(5rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
           <p class="text-sm font-medium text-slate-600">Заказы</p>
-          <div class="text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
             <p class="text-xl font-semibold leading-none">{{ summary.today.orders }}</p>
           </div>
-          <div class="border-l border-slate-200 pl-3 text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Месяц</p>
             <p class="text-xl font-semibold leading-none">{{ summary.month.orders }}</p>
           </div>
         </article>
         <article
-          class="grid grid-cols-[minmax(5rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
           <p class="text-sm font-medium text-slate-600">Оборот</p>
-          <div class="text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.today.turnover) }}
             </p>
           </div>
-          <div class="border-l border-slate-200 pl-3 text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Месяц</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.month.turnover) }}
@@ -2012,16 +2012,16 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid grid-cols-[minmax(7rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="text-sm font-medium leading-tight text-slate-600">Плановая прибыль</p>
-          <div class="text-right">
+          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">Плановая прибыль</p>
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.today.planned) }}
             </p>
           </div>
-          <div class="border-l border-slate-200 pl-3 text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Месяц</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.month.planned) }}
@@ -2029,16 +2029,18 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid grid-cols-[minmax(7rem,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="text-sm font-medium leading-tight text-slate-600">Фактическая прибыль</p>
-          <div class="text-right">
+          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">
+            Фактическая прибыль
+          </p>
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.today.actual) }}
             </p>
           </div>
-          <div class="border-l border-slate-200 pl-3 text-right">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Месяц</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.month.actual) }}
