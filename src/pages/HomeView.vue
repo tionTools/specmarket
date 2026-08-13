@@ -1615,6 +1615,12 @@ function trackingUrl(delivery: Delivery) {
   if (!ttn) return ''
   const carrier = delivery.carrier.toLowerCase()
   const encodedTtn = encodeURIComponent(ttn)
+  if (
+    /^722-\d+$/.test(ttn.replace(/\s/g, '')) ||
+    carrier.includes('cvz_epicentr') ||
+    carrier.includes('parcel_box_epicentr')
+  )
+    return `https://ua.meest.com/parcel-track?parcel_number=${encodedTtn}`
   if (carrier.includes('нова') || carrier.includes('nova_poshta'))
     return `https://novaposhta.ua/tracking/${encodeURIComponent(ttn.replace(/\s/g, ''))}/`
   if (carrier.includes('rozetka'))
