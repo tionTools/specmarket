@@ -41,6 +41,14 @@ const usdRate = ref(45.2)
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
+const isSyncingAllPlatforms = ref(false)
+const isMarketplaceSyncBusy = computed(
+  () =>
+    isSyncingAllPlatforms.value ||
+    isSyncingEpicentr.value ||
+    isSyncingProm.value ||
+    isSyncingKasta.value,
+)
 const isApplyingPromRegistry = ref(false)
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
@@ -1100,10 +1108,6 @@ async function syncEpicentrOrders(full = false) {
   await loadRemoteOrders()
 }
 
-async function syncNewEpicentrOrders() {
-  await syncEpicentrOrders()
-}
-
 async function syncPromOrders(full = false) {
   if (!supabase || isGuest.value || isSyncingProm.value) return
   isSyncingProm.value = true
@@ -1127,21 +1131,6 @@ async function syncPromOrders(full = false) {
       : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
   )
   await loadRemoteOrders()
-}
-
-async function syncNewPromOrders() {
-  await syncPromOrders()
-}
-
-async function syncFullEpicentrOrders() {
-  if (!window.confirm('Полная синхронизация обновит все доступные заказы Эпицентра. Продолжить?'))
-    return
-  await syncEpicentrOrders(true)
-}
-
-async function syncFullPromOrders() {
-  if (!window.confirm('Полная синхронизация обновит все доступные заказы Prom. Продолжить?')) return
-  await syncPromOrders(true)
 }
 
 async function syncKastaOrders(full = false, latest = false) {
@@ -1177,24 +1166,41 @@ async function syncKastaOrders(full = false, latest = false) {
   await loadRemoteOrders()
 }
 
-async function syncNewKastaOrders() {
-  await syncKastaOrders()
+async function syncNewAllPlatforms() {
+  if (isMarketplaceSyncBusy.value) return
+  isSyncingAllPlatforms.value = true
+  try {
+    await syncEpicentrOrders()
+    await syncPromOrders()
+    await syncKastaOrders()
+  } finally {
+    isSyncingAllPlatforms.value = false
+  }
 }
 
-async function syncFullKastaOrders() {
+async function syncFullAllPlatforms() {
+  if (isMarketplaceSyncBusy.value) return
   if (
     !window.confirm(
-      'Загрузить последние 100 заказов Касты и перевести обычную синхронизацию на актуальный курсор?',
+      'Полная синхронизация обновит доступные заказы Prom и Эпицентра, а также последние 100 заказов Kasta. Продолжить?',
     )
   )
     return
-  await syncKastaOrders(true, true)
+  isSyncingAllPlatforms.value = true
+  try {
+    await syncEpicentrOrders(true)
+    await syncPromOrders(true)
+    await syncKastaOrders(true, true)
+  } finally {
+    isSyncingAllPlatforms.value = false
+  }
 }
 
 async function syncKastaOrder(order: Order) {
   if (
     !supabase ||
     isGuest.value ||
+    isSyncingAllPlatforms.value ||
     isSyncingKasta.value ||
     order.platform !== 'Каста' ||
     !order.externalId
@@ -1223,6 +1229,7 @@ async function syncPromOrder(order: Order) {
   if (
     !supabase ||
     isGuest.value ||
+    isSyncingAllPlatforms.value ||
     isSyncingProm.value ||
     order.platform !== 'Пром' ||
     !order.externalId
@@ -1254,6 +1261,7 @@ async function syncEpicentrOrder(order: Order) {
   if (
     !supabase ||
     isGuest.value ||
+    isSyncingAllPlatforms.value ||
     isSyncingEpicentr.value ||
     order.platform !== 'Эпицентр' ||
     !order.externalId
@@ -1900,7 +1908,7 @@ function orderDateTime(order: Order) {
           </button>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-800 shadow-sm transition hover:bg-blue-50"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
             :disabled="isPreparingPrintRegistry"
             type="button"
             @click="openPrintRegistry"
@@ -1922,57 +1930,21 @@ function orderDateTime(order: Order) {
           </RouterLink>
           <button
             v-if="!isGuest"
-            class="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingEpicentr"
+            class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-800 shadow-sm transition hover:bg-sky-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isMarketplaceSyncBusy"
             type="button"
-            @click="syncNewEpicentrOrders"
+            @click="syncNewAllPlatforms"
           >
-            {{ isSyncingEpicentr ? 'Ищем новые в Эпицентре…' : '↻ Загрузить новые Эпицентр' }}
-          </button>
-          <button
-            v-if="!isGuest"
-            class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingProm"
-            type="button"
-            @click="syncNewPromOrders"
-          >
-            {{ isSyncingProm ? 'Ищем новые в Prom…' : '↻ Загрузить новые Prom' }}
+            {{ isSyncingAllPlatforms ? 'Синхронизация площадок…' : '↻ Новые со всех площадок' }}
           </button>
           <button
             v-if="!isGuest"
             class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingEpicentr"
+            :disabled="isMarketplaceSyncBusy"
             type="button"
-            @click="syncFullEpicentrOrders"
+            @click="syncFullAllPlatforms"
           >
-            {{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Полная Эпицентр' }}
-          </button>
-          <button
-            v-if="!isGuest"
-            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingProm"
-            type="button"
-            @click="syncFullPromOrders"
-          >
-            {{ isSyncingProm ? 'Синхронизация…' : '↻ Полная Prom' }}
-          </button>
-          <button
-            v-if="!isGuest"
-            class="rounded-xl border border-orange-200 bg-white px-4 py-3 text-sm font-semibold text-orange-700 shadow-sm transition hover:bg-orange-50 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingKasta"
-            type="button"
-            @click="syncNewKastaOrders"
-          >
-            {{ isSyncingKasta ? 'Ищем новые в Касте…' : '↻ Загрузить новые Каста' }}
-          </button>
-          <button
-            v-if="!isGuest"
-            class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingKasta"
-            type="button"
-            @click="syncFullKastaOrders"
-          >
-            {{ isSyncingKasta ? 'Синхронизация…' : '↻ Последние 100 Каста' }}
+            {{ isSyncingAllPlatforms ? 'Синхронизация площадок…' : '↻ Полная синхронизация всех' }}
           </button>
           <button
             v-if="!isGuest"
