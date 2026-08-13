@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-type Item = { product_name: string; size?: string; image_url?: string | null; quantity: number; price: number; cost: number; cost_usd?: number; royalty_percent?: number | null; royalty_amount?: number | null }
+type Item = { product_name: string; size?: string; image_url?: string | null; quantity: number; price: number; cost: number; cost_usd?: number; royalty_percent?: number | null; royalty_amount?: number | null; royalty_manual?: boolean }
 type SavedOrder = {
   remoteId?: string; order_number: number; order_label?: string | null; order_date: string; order_time?: string | null; customer: string; phone: string
   customer_email?: string | null; customer_comment?: string | null; internal_comment?: string | null; platform: string; status: string; shipping: number; acquiring: number
@@ -45,13 +45,25 @@ Deno.serve(async (request) => {
       if (error || !inserted) return Response.json({ ok: false, message: error?.message ?? 'Не удалось создать заказ.' }, { status: 500, headers: corsHeaders })
       remoteId = inserted.id
     }
+    const { data: currentItems } = await admin
+      .from('crm_order_items')
+      .select('position, product_name, royalty_manual')
+      .eq('order_id', remoteId)
+    const currentItemsByPositionAndName = new Map(
+      (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
+    )
     const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', remoteId)
     if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
     if (order.items.length) {
-      const { error: insertError } = await admin.from('crm_order_items').insert(order.items.map((item, position) => ({
-        order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
-        price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0, royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
-      })))
+      const { error: insertError } = await admin.from('crm_order_items').insert(order.items.map((item, position) => {
+        const currentItem = currentItemsByPositionAndName.get(`${position}:${item.product_name}`)
+        return {
+          order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
+          price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
+          royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
+          royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
+        }
+      }))
       if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
     }
     saved.push({ orderNumber: order.order_number, remoteId })

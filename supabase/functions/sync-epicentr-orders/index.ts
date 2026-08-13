@@ -131,7 +131,15 @@ const epicentrRoyaltyRates: Array<{ category: string; percent: number }> = [
   { category: 'сабо', percent: 15 },
 ]
 
-function categoryRoyaltyPercent(item: Record<string, unknown>) {
+function normalizeCategoryTitle(value: string) {
+  return value
+    .toLocaleLowerCase('uk-UA')
+    .replace(/[’'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function detectedRoyaltyCategory(item: Record<string, unknown>) {
   const product = asRecord(item.product)
   const categorySources = [
     item.category ?? item.categoryName ?? item.category_name ?? item.productCategory ??
@@ -145,11 +153,12 @@ function categoryRoyaltyPercent(item: Record<string, unknown>) {
       return translations.map((translation) => readableText(asRecord(translation).title)).join(' ') || readableText(source)
     })
     .join(' ')
-    .toLocaleLowerCase('uk-UA')
-    .replace(/[’'`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return epicentrRoyaltyRates.find((rate) => category.includes(rate.category))?.percent
+  const normalizedCategory = normalizeCategoryTitle(category)
+  return epicentrRoyaltyRates.find((rate) => normalizedCategory.includes(rate.category))
+}
+
+function categoryRoyaltyPercent(item: Record<string, unknown>) {
+  return detectedRoyaltyCategory(item)?.percent
 }
 
 type NormalizedItem = { title: string; quantity: number; price: number; raw: Record<string, unknown> }
@@ -304,14 +313,17 @@ Deno.serve(async (request) => {
     })
   }
   const offerIds = [...new Set(offerRows.map((item) => item.offer_id))]
-  const { data: mappedProducts } = offerIds.length
-    ? await admin.from('crm_epicentr_product_categories').select('offer_id, category_id').in('offer_id', offerIds)
-    : { data: [] }
-  const categoryIds = [...new Set((mappedProducts ?? []).map((item) => item.category_id).filter(Boolean))]
-  const { data: mappedRates } = categoryIds.length
-    ? await admin.from('crm_epicentr_royalty_rates').select('category_id, effective_from, royalty_percent').in('category_id', categoryIds)
-    : { data: [] }
+  const [{ data: mappedProducts }, { data: royaltyCategories }, { data: mappedRates }] = await Promise.all([
+    offerIds.length
+      ? admin.from('crm_epicentr_product_categories').select('offer_id, category_id').in('offer_id', offerIds)
+      : Promise.resolve({ data: [] }),
+    admin.from('crm_epicentr_royalty_categories').select('id, title'),
+    admin.from('crm_epicentr_royalty_rates').select('category_id, effective_from, royalty_percent'),
+  ])
   const categoryByOffer = new Map((mappedProducts ?? []).map((item) => [item.offer_id, item.category_id]))
+  const categoryIdByTitle = new Map(
+    (royaltyCategories ?? []).map((category) => [normalizeCategoryTitle(String(category.title)), category.id]),
+  )
   const ratesByCategory = new Map<string, Array<{ effective_from: string; royalty_percent: number }>>()
   for (const rate of mappedRates ?? []) {
     if (!rate.category_id) continue
@@ -326,6 +338,30 @@ Deno.serve(async (request) => {
     return (ratesByCategory.get(categoryId) ?? [])
       .filter((rate) => rate.effective_from <= orderDay)
       .sort((first, second) => second.effective_from.localeCompare(first.effective_from))[0]?.royalty_percent
+  }
+  const ensureDetectedCategory = async (item: Record<string, unknown>) => {
+    const offerId = epicentrOfferId(item)
+    if (!offerId || categoryByOffer.get(offerId)) return
+    const detectedCategory = detectedRoyaltyCategory(item)
+    const categoryId = detectedCategory ? categoryIdByTitle.get(detectedCategory.category) : undefined
+    if (!categoryId) return
+    const { data: updatedMapping } = await admin
+      .from('crm_epicentr_product_categories')
+      .update({ category_id: categoryId, updated_at: new Date().toISOString() })
+      .eq('offer_id', offerId)
+      .is('category_id', null)
+      .select('category_id')
+      .maybeSingle()
+    if (updatedMapping?.category_id) {
+      categoryByOffer.set(offerId, updatedMapping.category_id)
+      return
+    }
+    const { data: currentMapping } = await admin
+      .from('crm_epicentr_product_categories')
+      .select('category_id')
+      .eq('offer_id', offerId)
+      .maybeSingle()
+    if (currentMapping?.category_id) categoryByOffer.set(offerId, currentMapping.category_id)
   }
   const knownExternalIds = new Set<string>()
   if (!requestedExternalId && orders.length) {
@@ -446,7 +482,7 @@ Deno.serve(async (request) => {
 
     const { data: currentItems } = await admin
       .from('crm_order_items')
-      .select('position, product_name, size, cost, cost_usd, royalty_percent, royalty_amount')
+      .select('position, product_name, size, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual')
       .eq('order_id', orderId)
     const itemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
@@ -461,6 +497,7 @@ Deno.serve(async (request) => {
       Boolean(item.title.trim()) && Number.isFinite(item.price) && Number.isFinite(item.quantity),
     )
     if (validItems.length) {
+      for (const item of validItems) await ensureDetectedCategory(item.raw)
       const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
       if (deleteError) {
         return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
@@ -469,8 +506,11 @@ Deno.serve(async (request) => {
         const snapshotItem = manualItems[position]
         // В ручной синхронизации снимок позиции приоритетнее: API иногда
         // меняет написание товара, но это не повод терять введённые финансы.
-        const currentItem = snapshotItem ?? itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        const storedItem = itemsByPositionAndName.get(`${position}:${item.title}`) ?? itemsByName.get(item.title)
+        const currentItem = snapshotItem ?? storedItem
         const savedRoyaltyPercent = currentItem?.royalty_percent ?? currentItem?.royaltyPercent
+        const royaltyManual = currentItem?.royalty_manual === true || currentItem?.royaltyManual === true || storedItem?.royalty_manual === true
+        const automaticRoyaltyPercent = mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw)
         return {
           order_id: orderId,
           position,
@@ -481,8 +521,9 @@ Deno.serve(async (request) => {
           price: item.price,
           cost: Number(currentItem?.cost ?? 0),
           cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
-          royalty_percent: savedRoyaltyPercent ?? categoryRoyaltyPercent(item.raw) ?? mappedRoyaltyPercent(item.raw, source.createdAt) ?? null,
+          royalty_percent: royaltyManual ? savedRoyaltyPercent ?? null : automaticRoyaltyPercent ?? null,
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
+          royalty_manual: royaltyManual,
         }
       }))
       if (insertError) {

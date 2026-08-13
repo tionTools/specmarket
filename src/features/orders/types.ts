@@ -11,6 +11,7 @@ export interface OrderProduct {
   costUsd?: number
   royaltyPercent?: number
   royaltyAmount?: number
+  royaltyManual?: boolean
 }
 
 export interface Delivery {

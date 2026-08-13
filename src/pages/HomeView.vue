@@ -1098,6 +1098,7 @@ function serializeOrder(order: Order) {
       cost_usd: product.costUsd ?? 0,
       royalty_percent: product.royaltyPercent ?? null,
       royalty_amount: product.royaltyAmount ?? null,
+      royalty_manual: product.royaltyManual ?? false,
     })),
   }
 }
@@ -1368,6 +1369,7 @@ function orderSyncSnapshot(order: Order) {
       costUsd: product.costUsd ?? 0,
       royaltyPercent: product.royaltyPercent ?? null,
       royaltyAmount: product.royaltyAmount ?? null,
+      royaltyManual: product.royaltyManual ?? false,
     })),
   }
 }
@@ -1430,6 +1432,7 @@ async function loadRemoteOrders() {
           cost_usd: number
           royalty_percent: number | null
           royalty_amount: number | null
+          royalty_manual: boolean | null
         }>
       )
         .sort((a, b) => a.position - b.position)
@@ -1444,6 +1447,7 @@ async function loadRemoteOrders() {
           costUsd: Number(item.cost_usd ?? 0),
           royaltyPercent: item.royalty_percent === null ? undefined : Number(item.royalty_percent),
           royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
+          royaltyManual: item.royalty_manual === true,
         })),
     }))
     .sort(
@@ -1880,11 +1884,13 @@ function openKastaOrder(order: Order) {
 }
 
 function syncProductRoyaltyAmount(order: Order, product: OrderProduct) {
+  product.royaltyManual = true
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
   persistOrders(order)
 }
 
 function syncProductRoyaltyPercent(order: Order, product: OrderProduct) {
+  product.royaltyManual = true
   const amount = product.price * product.quantity
   product.royaltyPercent = amount === 0 ? 0 : ((product.royaltyAmount ?? 0) / amount) * 100
   persistOrders(order)
@@ -1910,6 +1916,7 @@ function updateProductRoyaltyPercent(product: OrderProduct, key: string, event: 
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   product.royaltyPercent = parseOrderNumber(event)
+  product.royaltyManual = true
   product.royaltyAmount = product.price * product.quantity * ((product.royaltyPercent ?? 0) / 100)
 }
 
@@ -1917,6 +1924,7 @@ function updateProductRoyaltyAmount(product: OrderProduct, key: string, event: E
   const raw = (event.target as HTMLInputElement).value
   editingOrderValue.value[key] = raw
   product.royaltyAmount = parseOrderNumber(event)
+  product.royaltyManual = true
   const amount = product.price * product.quantity
   product.royaltyPercent = amount === 0 ? 0 : ((product.royaltyAmount ?? 0) / amount) * 100
 }
