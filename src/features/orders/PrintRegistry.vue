@@ -249,8 +249,12 @@ onUnmounted(() => {
               </div>
               <div class="min-w-0">
                 <p class="font-semibold leading-snug">{{ product.name }}</p>
-                <p v-if="product.size" class="mt-1 text-xs text-slate-500">
-                  Размер: {{ product.size }}
+                <p
+                  v-if="product.size"
+                  class="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700"
+                >
+                  <span class="text-xs uppercase tracking-wide">Размер</span>
+                  <strong class="text-base leading-none text-violet-950">{{ product.size }}</strong>
                 </p>
               </div>
               <div>
