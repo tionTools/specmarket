@@ -1326,6 +1326,8 @@ function trackingUrl(delivery: Delivery) {
     return `https://rozetka.delivery/tracking/parcel?parcel_id=${encodedTtn}`
   if (carrier.includes('укр') || carrier.includes('ukrposhta'))
     return `https://track.ukrposhta.ua/?barcode=${encodeURIComponent(ttn.replace(/\s/g, ''))}`
+  if (carrier.includes('meest') || carrier.includes('міст'))
+    return `https://ua.meest.com/parcel-track?parcel_number=${encodedTtn}`
   return ''
 }
 
