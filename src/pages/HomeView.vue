@@ -27,6 +27,7 @@ const platformSummaryTo = ref('')
 const orderListPeriod = ref<PlatformSummaryPeriod>('month')
 const orderListFrom = ref('')
 const orderListTo = ref('')
+const isPlatformSummaryExpanded = ref(false)
 const isShowingCancelledAndReturned = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
@@ -2224,8 +2225,26 @@ function orderDateTime(order: Order) {
 
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex items-center justify-between gap-3">
-          <h2 class="shrink-0 text-sm font-semibold text-slate-700">По площадкам</h2>
-          <div class="flex min-w-0 items-center justify-end gap-2">
+          <button
+            class="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-950"
+            type="button"
+            :aria-expanded="isPlatformSummaryExpanded"
+            @click="isPlatformSummaryExpanded = !isPlatformSummaryExpanded"
+          >
+            <span>По площадкам</span>
+            <svg
+              class="size-4 transition-transform"
+              :class="{ 'rotate-180': isPlatformSummaryExpanded }"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <div v-if="isPlatformSummaryExpanded" class="flex min-w-0 items-center justify-end gap-2">
             <select
               v-model="platformSummaryPeriod"
               class="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
@@ -2254,7 +2273,10 @@ function orderDateTime(order: Order) {
             </template>
           </div>
         </div>
-        <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.25fr_1.2fr_1.1fr_0.68fr_0.68fr]">
+        <div
+          v-if="isPlatformSummaryExpanded"
+          class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.25fr_1.2fr_1.1fr_0.68fr_0.68fr]"
+        >
           <article
             v-for="item in platformSummary"
             :key="item.platform"
