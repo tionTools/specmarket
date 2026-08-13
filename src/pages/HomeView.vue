@@ -1778,8 +1778,25 @@ function displayPaymentMethod(method?: string) {
     card_payment: 'Оплата картой',
     cash: 'Наличными',
     invoice: 'Оплата по счёту',
+    prom_payment: 'Пром-оплата',
+    prom_oplata: 'Пром-оплата',
+    prompayment: 'Пром-оплата',
+    promoplata: 'Пром-оплата',
   }
   return names[normalized] ?? method
+}
+
+function isPromPaymentMethod(method?: string) {
+  const normalized =
+    method
+      ?.trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '') ?? ''
+  return (
+    normalized.includes('промоплат') ||
+    normalized.includes('promoplat') ||
+    normalized === 'prompayment'
+  )
 }
 
 function isDeliveryPaymentPaid(order: Order) {
@@ -3215,10 +3232,12 @@ function orderDateTime(order: Order) {
                       Способ оплаты
                     </dt>
                     <dd
-                      class="min-w-0 break-words text-right font-semibold"
+                      class="min-w-0 justify-self-end break-words text-right font-semibold"
                       :class="{
                         'text-emerald-600': isDeliveryPaymentPaid(order),
                         'text-slate-950': !isDeliveryPaymentPaid(order),
+                        'rounded-lg border border-slate-200 bg-white px-3 py-1 shadow-sm':
+                          isPromPaymentMethod(order.delivery.paymentMethod),
                       }"
                     >
                       {{ displayPaymentMethod(order.delivery.paymentMethod) }}
