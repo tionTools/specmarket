@@ -618,8 +618,7 @@ const visibleOrders = computed(() => {
       : isShowingCancelledAndReturned.value
         ? isCancelledOrReturned(order)
         : !isCancelledOrReturned(order)
-    const haystack =
-      `${order.id} ${order.displayNumber ?? ''} ${order.customer} ${order.phone} ${order.delivery.ttn} ${order.delivery.recipient} ${order.delivery.recipientPhone} ${order.products.map((product) => product.name).join(' ')}`.toLowerCase()
+    const haystack = JSON.stringify(order).toLowerCase()
     const matchesTtn =
       ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
     return (
