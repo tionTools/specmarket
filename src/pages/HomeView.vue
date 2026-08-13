@@ -704,6 +704,7 @@ const promRegistryNetTotal = computed(
 const visibleOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
+  const isTtnSearch = /^[\d\s-]+$/.test(search)
   return orders.value.filter((order) => {
     const matchesPlatform =
       isShowingCancelledAndReturned.value ||
@@ -716,7 +717,9 @@ const visibleOrders = computed(() => {
         : !isCancelledOrReturned(order)
     const haystack = JSON.stringify(order).toLowerCase()
     const matchesTtn =
-      ttnSearch.length >= 4 && order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
+      isTtnSearch &&
+      ttnSearch.length >= 4 &&
+      order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
     return (
       matchesPlatform &&
       matchesOrderState &&
