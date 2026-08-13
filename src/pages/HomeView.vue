@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, useTemplateRef } from 'vue'
 import type { User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
@@ -57,6 +57,20 @@ const isMarketplaceSyncBusy = computed(
 const isApplyingPromRegistry = ref(false)
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
+const inlineActionNotice = ref<{ key: string; text: string } | null>(null)
+let inlineActionNoticeTimer: ReturnType<typeof setTimeout> | undefined
+
+function showInlineActionNotice(key: string, text: string) {
+  inlineActionNotice.value = { key, text }
+  if (inlineActionNoticeTimer) window.clearTimeout(inlineActionNoticeTimer)
+  inlineActionNoticeTimer = window.setTimeout(() => {
+    if (inlineActionNotice.value?.key === key) inlineActionNotice.value = null
+  }, 1800)
+}
+
+onScopeDispose(() => {
+  if (inlineActionNoticeTimer) window.clearTimeout(inlineActionNoticeTimer)
+})
 type PromRegistryEntry = {
   orderNumber: string
   paymentAmount: number
@@ -1275,6 +1289,7 @@ async function syncKastaOrder(order: Order) {
   }
   showSyncMessage(`Заказ № ${order.displayNumber ?? order.id} обновлён из Каста.`)
   await reloadOrdersAfterManualSync()
+  showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
 async function syncPromOrder(order: Order) {
@@ -1307,6 +1322,7 @@ async function syncPromOrder(order: Order) {
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
   await reloadOrdersAfterManualSync()
+  showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
 async function syncEpicentrOrder(order: Order) {
@@ -1339,6 +1355,7 @@ async function syncEpicentrOrder(order: Order) {
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
   await reloadOrdersAfterManualSync()
+  showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
 function orderSyncSnapshot(order: Order) {
@@ -1793,11 +1810,13 @@ function displayDeliveryAddress(delivery: Delivery) {
 
 async function copyOrderNumber(order: Order) {
   await navigator.clipboard.writeText(order.displayNumber ?? String(order.id))
+  showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
 }
 
-async function copyTtn(ttn: string) {
+async function copyTtn(ttn: string, orderId: Order['id']) {
   if (!ttn) return
   await navigator.clipboard.writeText(ttn)
+  showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
 }
 
 function openEpicentrOrder(order: Order) {
@@ -2468,7 +2487,7 @@ function orderDateTime(order: Order) {
                     /></svg></span
                 ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
-                  class="inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
+                  class="relative inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
                   ><span
                     class="cursor-pointer rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
                     title="Скопировать номер"
@@ -2484,7 +2503,13 @@ function orderDateTime(order: Order) {
                       <rect x="9" y="9" width="11" height="11" rx="2" />
                       <path
                         d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"
-                      /></svg></span></span></span
+                      /></svg></span
+                  ><span
+                    v-if="inlineActionNotice?.key === `copy-order:${order.id}`"
+                    class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                    >Скопировано</span
+                  ></span
+                ></span
               ><span class="mt-1 block text-xs text-slate-500"
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
               ><span
@@ -2580,30 +2605,45 @@ function orderDateTime(order: Order) {
                 <div class="flex flex-wrap items-center gap-3">
                   <button
                     v-if="order.platform === 'Эпицентр' && order.externalId"
-                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    class="relative rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
                     type="button"
                     :disabled="isSyncingEpicentr"
                     @click="syncEpicentrOrder(order)"
                   >
                     {{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <span
+                      v-if="inlineActionNotice?.key === `sync:${order.id}`"
+                      class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                      >Синхронизировано</span
+                    >
                   </button>
                   <button
                     v-if="order.platform === 'Пром' && order.externalId"
-                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    class="relative rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
                     type="button"
                     :disabled="isSyncingProm"
                     @click="syncPromOrder(order)"
                   >
                     {{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <span
+                      v-if="inlineActionNotice?.key === `sync:${order.id}`"
+                      class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                      >Синхронизировано</span
+                    >
                   </button>
                   <button
                     v-if="order.platform === 'Каста' && order.externalId"
-                    class="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                    class="relative rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
                     type="button"
                     :disabled="isSyncingKasta"
                     @click="syncKastaOrder(order)"
                   >
                     {{ isSyncingKasta ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <span
+                      v-if="inlineActionNotice?.key === `sync:${order.id}`"
+                      class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                      >Синхронизировано</span
+                    >
                   </button>
                   <label class="flex items-center gap-2 text-sm text-slate-500"
                     >Статус<select
@@ -3125,10 +3165,10 @@ function orderDateTime(order: Order) {
                       <span>{{ order.delivery.ttn || '—' }}</span>
                       <button
                         v-if="order.delivery.ttn"
-                        class="grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                        class="relative grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
                         title="Скопировать номер ТТН"
                         type="button"
-                        @click="copyTtn(order.delivery.ttn)"
+                        @click="copyTtn(order.delivery.ttn, order.id)"
                       >
                         <svg
                           class="size-4"
@@ -3141,6 +3181,11 @@ function orderDateTime(order: Order) {
                           <rect x="9" y="9" width="11" height="11" rx="2" />
                           <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
                         </svg>
+                        <span
+                          v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
+                          class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                          >Скопировано</span
+                        >
                       </button>
                     </dd>
                   </div>
