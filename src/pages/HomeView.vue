@@ -3244,7 +3244,8 @@ function orderDateTime(order: Order) {
                         'text-emerald-600': isDeliveryPaymentPaid(order),
                         'text-slate-950': !isDeliveryPaymentPaid(order),
                         'rounded-lg border border-slate-200 bg-white px-3 py-1 shadow-sm':
-                          isPromPaymentMethod(order.delivery.paymentMethod),
+                          isPromPaymentMethod(order.delivery.paymentMethod) ||
+                          isDeliveryPaymentPaid(order),
                       }"
                     >
                       {{ displayPaymentMethod(order.delivery.paymentMethod) }}
