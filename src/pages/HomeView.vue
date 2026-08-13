@@ -173,10 +173,6 @@ const currentTime = () =>
     new Date(),
   )
 const orderDraft = ref(createOrderDraft())
-const currentMonth = () => {
-  const now = new Date()
-  return { month: now.getMonth() + 1, year: now.getFullYear() }
-}
 
 function startOfLocalDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate())
@@ -606,12 +602,6 @@ async function confirmPromRegistryDistribution() {
   }
 }
 
-const isInCurrentMonth = (order: Order) => {
-  const [day, month, year] = order.date.split('.').map(Number)
-  const current = currentMonth()
-  return day !== undefined && month === current.month && year === current.year
-}
-
 function isCancelledOrReturned(order: Order) {
   return /скас|отмен|cancel|повер|возврат|return|refund/.test(
     displayOrderStatus(order.status).toLowerCase(),
@@ -632,7 +622,6 @@ const printRegistryOrders = computed(() => {
 const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
 )
-const ordersForMonth = computed(() => reportOrders.value.filter(isInCurrentMonth))
 const platformSummaryRange = computed(() => {
   const today = startOfLocalDay(new Date())
   if (platformSummaryPeriod.value === 'week') {
@@ -693,6 +682,22 @@ const orderListRange = computed(() => {
     to: today,
   }
 })
+const ordersForSelectedPeriod = computed(() => {
+  const { from, to } = orderListRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
+const orderListPeriodLabel = computed(
+  () =>
+    ({
+      week: 'Неделя',
+      decade: 'Декада',
+      month: 'Месяц',
+      custom: 'Период',
+    })[orderListPeriod.value],
+)
 const promRegistryEntriesByOrder = computed(
   () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
 )
@@ -958,11 +963,11 @@ const summary = computed(() => {
       planned: sum(ordersForToday.value, getPlannedProfit),
       actual: sum(ordersForToday.value.filter(isPaid), getActualProfit),
     },
-    month: {
-      orders: ordersForMonth.value.length,
-      turnover: sum(ordersForMonth.value, getOrderAmount),
-      planned: sum(ordersForMonth.value, getPlannedProfit),
-      actual: sum(ordersForMonth.value.filter(isPaid), getActualProfit),
+    period: {
+      orders: ordersForSelectedPeriod.value.length,
+      turnover: sum(ordersForSelectedPeriod.value, getOrderAmount),
+      planned: sum(ordersForSelectedPeriod.value, getPlannedProfit),
+      actual: sum(ordersForSelectedPeriod.value.filter(isPaid), getActualProfit),
     },
   }
 })
@@ -1759,6 +1764,28 @@ function displayPaymentMethod(method?: string) {
   return names[normalized] ?? method
 }
 
+function isDeliveryPaymentPaid(order: Order) {
+  const status =
+    order.delivery.paymentStatus
+      ?.trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_') ?? ''
+  if (
+    /^(?:unpaid|not_paid|payment_error|failed|declined|pending|waiting_for_payment|wait_for_payment)$/.test(
+      status,
+    )
+  )
+    return false
+  if (/^(?:paid|paid_out|completed|success|successful|settled|approved)$/.test(status)) return true
+  const method =
+    order.delivery.paymentMethod
+      ?.trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_') ?? ''
+  if (/^(?:pay_on_delivery|postpayment|cash_on_delivery|cod)$/.test(method)) return false
+  return /^(?:monobank|prepayment|online|online_payment|card|card_payment)$/.test(method)
+}
+
 function displayDeliveryAddress(delivery: Delivery) {
   return [delivery.city, delivery.address].filter(Boolean).join(', ') || '—'
 }
@@ -2136,8 +2163,8 @@ function orderDateTime(order: Order) {
             <p class="text-xl font-semibold leading-none">{{ summary.today.orders }}</p>
           </div>
           <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
-            <p class="text-xl font-semibold leading-none">{{ summary.month.orders }}</p>
+            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
+            <p class="text-xl font-semibold leading-none">{{ summary.period.orders }}</p>
           </div>
         </article>
         <article
@@ -2151,9 +2178,9 @@ function orderDateTime(order: Order) {
             </p>
           </div>
           <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(summary.month.turnover) }}
+              {{ formatMoney(summary.period.turnover) }}
             </p>
           </div>
         </article>
@@ -2168,9 +2195,9 @@ function orderDateTime(order: Order) {
             </p>
           </div>
           <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(summary.month.planned) }}
+              {{ formatMoney(summary.period.planned) }}
             </p>
           </div>
         </article>
@@ -2187,9 +2214,9 @@ function orderDateTime(order: Order) {
             </p>
           </div>
           <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">Месяц</p>
+            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(summary.month.actual) }}
+              {{ formatMoney(summary.period.actual) }}
             </p>
           </div>
         </article>
@@ -3123,7 +3150,13 @@ function orderDateTime(order: Order) {
                     <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                       Способ оплаты
                     </dt>
-                    <dd class="min-w-0 break-words text-right font-semibold">
+                    <dd
+                      class="min-w-0 break-words text-right font-semibold"
+                      :class="{
+                        'text-emerald-600': isDeliveryPaymentPaid(order),
+                        'text-slate-950': !isDeliveryPaymentPaid(order),
+                      }"
+                    >
                       {{ displayPaymentMethod(order.delivery.paymentMethod) }}
                     </dd>
                   </div>
