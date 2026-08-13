@@ -1305,6 +1305,7 @@ function displayOrderStatus(status: string) {
 
 function displayDeliveryStatus(status: string) {
   const names: Record<string, string> = {
+    initial: 'Заплановано',
     received: 'Получено',
     delivered: 'Получено',
     in_transit: 'В дороге',
@@ -1312,6 +1313,20 @@ function displayDeliveryStatus(status: string) {
     shipped: 'Отправлено',
   }
   return names[status.toLowerCase()] ?? status
+}
+
+function trackingUrl(delivery: Delivery) {
+  const ttn = delivery.ttn.trim()
+  if (!ttn) return ''
+  const carrier = delivery.carrier.toLowerCase()
+  const encodedTtn = encodeURIComponent(ttn)
+  if (carrier.includes('нова') || carrier.includes('nova_poshta'))
+    return `https://novaposhta.ua/tracking/${encodeURIComponent(ttn.replace(/\s/g, ''))}/`
+  if (carrier.includes('rozetka'))
+    return `https://rozetka.delivery/tracking/parcel?parcel_id=${encodedTtn}`
+  if (carrier.includes('укр') || carrier.includes('ukrposhta'))
+    return `https://track.ukrposhta.ua/?barcode=${encodeURIComponent(ttn.replace(/\s/g, ''))}`
+  return ''
 }
 
 function deliveryStatusForOrder(order: Order) {
@@ -2577,6 +2592,27 @@ function orderDateTime(order: Order) {
                     <dd
                       class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
                     >
+                      <a
+                        v-if="trackingUrl(order.delivery)"
+                        :href="trackingUrl(order.delivery)"
+                        class="grid size-6 shrink-0 place-items-center rounded text-blue-600 hover:bg-blue-100 hover:text-blue-800"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Відкрити відстеження"
+                        @click.stop
+                      >
+                        <svg
+                          class="size-4"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.25"
+                          aria-hidden="true"
+                        >
+                          <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15" />
+                          <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15" />
+                        </svg>
+                      </a>
                       <span>{{ order.delivery.ttn || '—' }}</span>
                       <button
                         v-if="order.delivery.ttn"

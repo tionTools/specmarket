@@ -30,6 +30,13 @@ function readable(value: unknown): string {
   return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
 }
 
+function displayDeliveryStatus(status: string) {
+  const names: Record<string, string> = {
+    initial: 'Заплановано',
+  }
+  return names[status.toLowerCase()] ?? status
+}
+
 function deliveryPayer(value: unknown): string {
   const payer = readable(value)
   const normalized = payer.toLowerCase()
@@ -429,7 +436,7 @@ Deno.serve(async (request) => {
       readable(pick(deliveryProvider, 'status_name', 'statusName', 'unified_status', 'unifiedStatus')) ||
       readable(pick(rawDelivery, 'status', 'shipment_status', 'delivery_status', 'status_name')) ||
       text(pick(order, 'shipment_status', 'delivery_status'))
-    const deliveryStatus = apiDeliveryStatus ||
+    const deliveryStatus = displayDeliveryStatus(apiDeliveryStatus) ||
       (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
     const isPromFreeDelivery = order.has_order_promo_free_delivery === true
     const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
