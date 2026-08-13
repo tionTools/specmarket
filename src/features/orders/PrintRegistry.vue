@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 
+import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import type { Order } from '@/features/orders/types'
 
@@ -60,6 +61,25 @@ function handleCheckedChange(order: Order, event: Event) {
 
 function handleCheckAllChange(event: Event) {
   emit('checkAll', (event.target as HTMLInputElement).checked)
+}
+
+function carrierLogoKind(order: Order) {
+  const carrier = order.delivery.carrier.toLowerCase()
+  const address = order.delivery.address.toLowerCase()
+  const isEpicentrDelivery = order.platform === 'Эпицентр'
+  if (isEpicentrDelivery && (carrier.includes('cvz') || /центр видачі|центр выдачи/.test(address)))
+    return 'meest-epicentr-cvz'
+  if (
+    isEpicentrDelivery &&
+    (carrier.includes('meest') || carrier.includes('міст') || carrier.includes('parcel_box'))
+  )
+    return 'meest-pachtmate'
+  if (carrier.includes('nova') || carrier.includes('новая') || carrier.includes('нова пошта'))
+    return 'nova'
+  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukr'
+  if (carrier.includes('rozetka')) return 'rozetka'
+  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
+  return ''
 }
 
 let previousBodyOverflow = ''
@@ -226,8 +246,9 @@ onUnmounted(() => {
             <p class="mt-2 text-sm text-slate-600">
               {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
             </p>
-            <p class="text-sm text-slate-600">
-              {{ order.delivery.carrier }} ·
+            <p class="flex items-center gap-1 text-sm text-slate-600">
+              <span>{{ order.delivery.carrier }} ·</span>
+              <CarrierLogo v-if="carrierLogoKind(order)" :kind="carrierLogoKind(order)" />
               <span class="font-bold text-blue-600">{{ order.delivery.ttn }}</span>
             </p>
             <p v-if="order.internalComment" class="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-sm">

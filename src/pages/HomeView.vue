@@ -19,6 +19,10 @@ const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
 const promRegistryFileInput = useTemplateRef<HTMLInputElement>('promRegistryFileInput')
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
+type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
+const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
+const platformSummaryFrom = ref('')
+const platformSummaryTo = ref('')
 const isShowingCancelledAndReturned = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
@@ -161,6 +165,35 @@ const currentMonth = () => {
   const now = new Date()
   return { month: now.getMonth() + 1, year: now.getFullYear() }
 }
+
+function startOfLocalDay(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate())
+}
+
+function inputDate(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseInputDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+function parseOrderDate(value: string) {
+  const [day, month, year] = value.split('.').map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+const defaultPlatformSummaryDate = startOfLocalDay(new Date())
+platformSummaryFrom.value = inputDate(
+  new Date(defaultPlatformSummaryDate.getFullYear(), defaultPlatformSummaryDate.getMonth(), 1),
+)
+platformSummaryTo.value = inputDate(defaultPlatformSummaryDate)
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
@@ -582,6 +615,45 @@ const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
 )
 const ordersForMonth = computed(() => reportOrders.value.filter(isInCurrentMonth))
+const platformSummaryRange = computed(() => {
+  const today = startOfLocalDay(new Date())
+  if (platformSummaryPeriod.value === 'week') {
+    const dayFromMonday = (today.getDay() + 6) % 7
+    const from = new Date(today)
+    from.setDate(today.getDate() - dayFromMonday)
+    const to = new Date(from)
+    to.setDate(from.getDate() + 6)
+    return { from, to }
+  }
+  if (platformSummaryPeriod.value === 'decade') {
+    const startDay = today.getDate() <= 10 ? 1 : today.getDate() <= 20 ? 11 : 21
+    const from = new Date(today.getFullYear(), today.getMonth(), startDay)
+    const to = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      startDay === 21
+        ? new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+        : startDay + 9,
+    )
+    return { from, to }
+  }
+  if (platformSummaryPeriod.value === 'custom') {
+    const first = parseInputDate(platformSummaryFrom.value) ?? today
+    const second = parseInputDate(platformSummaryTo.value) ?? first
+    return first <= second ? { from: first, to: second } : { from: second, to: first }
+  }
+  return {
+    from: new Date(today.getFullYear(), today.getMonth(), 1),
+    to: new Date(today.getFullYear(), today.getMonth() + 1, 0),
+  }
+})
+const ordersForPlatformSummary = computed(() => {
+  const { from, to } = platformSummaryRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
 const promRegistryEntriesByOrder = computed(
   () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
 )
@@ -843,7 +915,9 @@ const summary = computed(() => {
 
 const platformSummary = computed(() =>
   platformOptions.map((platform) => {
-    const platformOrders = ordersForMonth.value.filter((order) => order.platform === platform)
+    const platformOrders = ordersForPlatformSummary.value.filter(
+      (order) => order.platform === platform,
+    )
     return {
       platform,
       count: platformOrders.length,
@@ -2051,10 +2125,35 @@ function orderDateTime(order: Order) {
 
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex items-center justify-between gap-3">
-          <h2 class="text-sm font-semibold text-slate-700">По площадкам · текущий месяц</h2>
-          <p class="text-[10px] uppercase tracking-wide text-slate-400">
-            Заказы · Оборот · План · Факт
-          </p>
+          <h2 class="shrink-0 text-sm font-semibold text-slate-700">По площадкам</h2>
+          <div class="flex min-w-0 items-center justify-end gap-2">
+            <select
+              v-model="platformSummaryPeriod"
+              class="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+              aria-label="Период статистики по площадкам"
+            >
+              <option value="week">Неделя</option>
+              <option value="decade">Декада</option>
+              <option value="month">Месяц</option>
+              <option value="custom">Произвольный период</option>
+            </select>
+            <template v-if="platformSummaryPeriod === 'custom'">
+              <span class="text-xs text-slate-400">с</span>
+              <input
+                v-model="platformSummaryFrom"
+                class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
+                type="date"
+                aria-label="Начало периода"
+              />
+              <span class="text-xs text-slate-400">по</span>
+              <input
+                v-model="platformSummaryTo"
+                class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
+                type="date"
+                aria-label="Конец периода"
+              />
+            </template>
+          </div>
         </div>
         <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.25fr_1.2fr_1.1fr_0.68fr_0.68fr]">
           <article
