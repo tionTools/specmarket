@@ -71,6 +71,7 @@ const expandedRegistryOrderIds = ref<Array<string | number>>([])
 const printRegistryMode = ref<'draft' | 'history' | null>(null)
 const printRegistryOrderIds = ref<Array<string | number>>([])
 const isUpdatingPrintRegistry = ref(false)
+const isPreparingPrintRegistry = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -653,7 +654,44 @@ function isOrderUnprinted(order: Order) {
 }
 
 async function openPrintRegistry() {
-  if (!(await waitForPendingSaves())) return
+  if (!supabase || isGuest.value || isPreparingPrintRegistry.value) return
+  isPreparingPrintRegistry.value = true
+  if (!(await waitForPendingSaves())) {
+    isPreparingPrintRegistry.value = false
+    return
+  }
+
+  const ordersWithoutTtn = orders.value.filter(
+    (order) =>
+      !order.delivery.printedAt &&
+      isOpenForPrintRegistry(order) &&
+      !order.delivery.ttn.trim() &&
+      Boolean(order.externalId) &&
+      ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
+  )
+  let syncErrors = 0
+  for (const order of ordersWithoutTtn) {
+    const functionName =
+      order.platform === 'Пром'
+        ? 'sync-prom-orders'
+        : order.platform === 'Эпицентр'
+          ? 'sync-epicentr-orders'
+          : 'sync-kasta-orders'
+    const body =
+      order.platform === 'Каста'
+        ? { externalId: order.externalId }
+        : {
+            externalId: order.externalId,
+            manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+          }
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      method: 'POST',
+      body,
+    })
+    if (error || !data?.ok) syncErrors += 1
+  }
+  if (ordersWithoutTtn.length) await loadRemoteOrders()
+
   printRegistryOrderIds.value = orders.value
     .filter(
       (order) =>
@@ -662,7 +700,10 @@ async function openPrintRegistry() {
         order.delivery.ttn.trim().length > 0,
     )
     .map((order) => order.id)
+  isPreparingPrintRegistry.value = false
   printRegistryMode.value = 'draft'
+  if (syncErrors)
+    showSyncError(`Не удалось проверить заказов без ТТН: ${syncErrors}. Они не добавлены в реестр.`)
 }
 
 function closePrintRegistry() {
@@ -1786,10 +1827,11 @@ function orderDateTime(order: Order) {
           <button
             v-if="!isGuest"
             class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-blue-800 shadow-sm transition hover:bg-blue-50"
+            :disabled="isPreparingPrintRegistry"
             type="button"
             @click="openPrintRegistry"
           >
-            Реестр печати
+            {{ isPreparingPrintRegistry ? 'Проверяем ТТН…' : 'Реестр печати' }}
           </button>
           <button
             class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm hover:border-rose-200 hover:text-rose-700"
