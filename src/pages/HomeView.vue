@@ -717,8 +717,17 @@ async function handlePrintCheckedChange(order: Order, checked: boolean) {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
 }
 
-async function markPrintRegistryPrinted() {
+async function handlePrintCheckAll(checked: boolean) {
   const registryOrders = printRegistryOrders.value
+  if (!registryOrders.length) return
+  const printCheckedAt = checked ? new Date().toISOString() : null
+  if (!(await savePrintState(registryOrders.map((order) => ({ order, printCheckedAt }))))) return
+  for (const order of registryOrders) order.delivery.printCheckedAt = printCheckedAt ?? undefined
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+}
+
+async function markPrintRegistryPrinted() {
+  const registryOrders = printRegistryOrders.value.filter((order) => order.delivery.printCheckedAt)
   if (!registryOrders.length) return
   if (!window.confirm(`Отметить распечатанными ${registryOrders.length} заказов?`)) return
   const printedAt = new Date().toISOString()
@@ -727,6 +736,31 @@ async function markPrintRegistryPrinted() {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   closePrintRegistry()
   showSyncMessage(`Распечатанными отмечено заказов: ${registryOrders.length}.`)
+}
+
+async function restoreUncheckedPrintedOrders() {
+  const uncheckedOrders = printRegistryOrders.value.filter(
+    (order) => order.delivery.printedAt && !order.delivery.printCheckedAt,
+  )
+  if (!uncheckedOrders.length) return
+  if (
+    !window.confirm(
+      `Вернуть в нераспечатанные ${uncheckedOrders.length} заказов, перенесённых без галочки?`,
+    )
+  )
+    return
+  if (
+    !(await savePrintState(
+      uncheckedOrders.map((order) => ({ order, printCheckedAt: null, printedAt: null })),
+    ))
+  )
+    return
+  for (const order of uncheckedOrders) {
+    order.delivery.printCheckedAt = undefined
+    order.delivery.printedAt = undefined
+  }
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  showSyncMessage(`Возвращено в нераспечатанные: ${uncheckedOrders.length}.`)
 }
 
 async function restorePrintedOrder(order: Order) {
@@ -3016,7 +3050,9 @@ function orderDateTime(order: Order) {
       @showHistory="showPrintRegistryHistory"
       @showDraft="showCurrentPrintRegistry"
       @checkedChange="handlePrintCheckedChange"
+      @checkAll="handlePrintCheckAll"
       @restore="restorePrintedOrder"
+      @restoreUnchecked="restoreUncheckedPrintedOrders"
     />
   </div>
 </template>

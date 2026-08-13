@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import type { Order } from '@/features/orders/types'
@@ -16,11 +16,21 @@ const emit = defineEmits<{
   showHistory: []
   showDraft: []
   checkedChange: [order: Order, checked: boolean]
+  checkAll: [checked: boolean]
   restore: [order: Order]
+  restoreUnchecked: []
 }>()
 
 const checkedCount = computed(
   () => props.orders.filter((order) => Boolean(order.delivery.printCheckedAt)).length,
+)
+const allChecked = computed(
+  () => props.orders.length > 0 && checkedCount.value === props.orders.length,
+)
+const uncheckedPrintedCount = computed(
+  () =>
+    props.orders.filter((order) => order.delivery.printedAt && !order.delivery.printCheckedAt)
+      .length,
 )
 const positionsCount = computed(() =>
   props.orders.reduce(
@@ -47,6 +57,19 @@ function formatMoney(value: number) {
 function handleCheckedChange(order: Order, event: Event) {
   emit('checkedChange', order, (event.target as HTMLInputElement).checked)
 }
+
+function handleCheckAllChange(event: Event) {
+  emit('checkAll', (event.target as HTMLInputElement).checked)
+}
+
+let previousBodyOverflow = ''
+onMounted(() => {
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+})
+onUnmounted(() => {
+  document.body.style.overflow = previousBodyOverflow
+})
 </script>
 
 <template>
@@ -84,6 +107,15 @@ function handleCheckedChange(order: Order, event: Event) {
               Текущий реестр
             </button>
             <button
+              v-if="mode === 'history' && uncheckedPrintedCount"
+              class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+              type="button"
+              :disabled="busy"
+              @click="emit('restoreUnchecked')"
+            >
+              Вернуть без галочки ({{ uncheckedPrintedCount }})
+            </button>
+            <button
               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
               type="button"
               @click="emit('close')"
@@ -108,6 +140,19 @@ function handleCheckedChange(order: Order, event: Event) {
           <div class="rounded-xl bg-slate-100 px-4 py-3">
             <p class="text-xs text-slate-500">Проверено в 1С</p>
             <p class="mt-1 text-xl font-bold">{{ checkedCount }} / {{ orders.length }}</p>
+            <label
+              v-if="mode === 'draft' && orders.length"
+              class="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-emerald-800"
+            >
+              <input
+                class="size-4 accent-emerald-700"
+                type="checkbox"
+                :checked="allChecked"
+                :disabled="busy"
+                @change="handleCheckAllChange"
+              />
+              {{ allChecked ? 'Снять все' : 'Отметить все' }}
+            </label>
           </div>
         </div>
       </header>
@@ -194,10 +239,10 @@ function handleCheckedChange(order: Order, event: Event) {
         <button
           class="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
-          :disabled="busy"
+          :disabled="busy || checkedCount === 0"
           @click="emit('markPrinted')"
         >
-          {{ busy ? 'Сохраняем…' : 'Уже распечатал' }}
+          {{ busy ? 'Сохраняем…' : `Уже распечатал выбранные (${checkedCount})` }}
         </button>
       </footer>
     </section>
