@@ -2383,7 +2383,12 @@ function orderDateTime(order: Order) {
               class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
               >{{ deliveryStatusForOrder(order) }}</span
             ><span class="flex items-center justify-end gap-2"
-              ><span
+              ><CarrierLogo
+                v-if="carrierLogoKind(order) !== 'generic'"
+                :kind="carrierLogoKind(order)"
+                :title="displayCarrier(order.delivery.carrier)"
+              />
+              <span
                 v-if="!isGuest"
                 class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50"
                 role="button"
