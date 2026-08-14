@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, useTemplateRef } from 'vue'
-import type { User } from '@supabase/supabase-js'
+import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 
@@ -14,6 +14,8 @@ import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
+const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
+const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -87,6 +89,11 @@ type RegistryDraftNavigation = {
   source: RegistrySource
   keyType: RegistryKeyType
 }
+type UnopenedNewOrder = {
+  remoteId: string
+  orderId: string
+  platform: Platform
+}
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
 const promRegistryError = ref('')
@@ -108,6 +115,12 @@ const isPreparingPrintRegistry = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
 let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
+let ordersRealtimeChannel: RealtimeChannel | undefined
+let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
+let newOrdersCheckTimer: ReturnType<typeof window.setInterval> | undefined
+let fullOrdersRefreshTimer: ReturnType<typeof window.setInterval> | undefined
+let knownRemoteOrderCount: number | null = null
+let isAutomaticRefreshRunning = false
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 function showSyncMessage(message: string) {
@@ -144,6 +157,92 @@ async function waitForPendingSaves(): Promise<boolean> {
 }
 
 const platformOptions: Platform[] = ['Пром', 'Эпицентр', 'Каста', 'Р/С', 'Сайт']
+const newOrderNotificationPlatforms: Platform[] = ['Пром', 'Эпицентр', 'Каста']
+
+function readStoredStringArray(key: string) {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? '[]')
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+function readStoredUnopenedOrders() {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(unopenedNewOrdersStorageKey) ?? '[]',
+    )
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is UnopenedNewOrder => {
+      if (!item || typeof item !== 'object') return false
+      const entry = item as Partial<UnopenedNewOrder>
+      return (
+        typeof entry.remoteId === 'string' &&
+        typeof entry.orderId === 'string' &&
+        platformOptions.includes(entry.platform as Platform)
+      )
+    })
+  } catch {
+    return []
+  }
+}
+
+let hasRemoteOrderBaseline = window.localStorage.getItem(knownRemoteOrderIdsStorageKey) !== null
+let knownRemoteOrderIds = new Set(readStoredStringArray(knownRemoteOrderIdsStorageKey))
+const unopenedNewOrders = ref<UnopenedNewOrder[]>(readStoredUnopenedOrders())
+const unopenedNewOrderRemoteIds = computed(
+  () => new Set(unopenedNewOrders.value.map((order) => order.remoteId)),
+)
+
+function persistNewOrderTracking() {
+  window.localStorage.setItem(
+    knownRemoteOrderIdsStorageKey,
+    JSON.stringify([...knownRemoteOrderIds]),
+  )
+  window.localStorage.setItem(unopenedNewOrdersStorageKey, JSON.stringify(unopenedNewOrders.value))
+}
+
+function registerRemoteOrders(
+  remoteOrders: Array<{ remoteId: string; orderId: string; platform: Platform }>,
+) {
+  const currentRemoteIds = new Set(remoteOrders.map((order) => order.remoteId))
+  const pendingByRemoteId = new Map(
+    unopenedNewOrders.value.map((order) => [order.remoteId, order] as const),
+  )
+  if (hasRemoteOrderBaseline) {
+    for (const order of remoteOrders) {
+      if (
+        !knownRemoteOrderIds.has(order.remoteId) &&
+        newOrderNotificationPlatforms.includes(order.platform)
+      )
+        pendingByRemoteId.set(order.remoteId, order)
+    }
+  }
+  unopenedNewOrders.value = [...pendingByRemoteId.values()].filter(
+    (order) =>
+      currentRemoteIds.has(order.remoteId) &&
+      newOrderNotificationPlatforms.includes(order.platform),
+  )
+  knownRemoteOrderIds = currentRemoteIds
+  hasRemoteOrderBaseline = true
+  persistNewOrderTracking()
+}
+
+function markNewOrderOpened(orderId: string | number) {
+  const order = orders.value.find((item) => String(item.id) === String(orderId))
+  if (!order?.remoteId) return
+  const remaining = unopenedNewOrders.value.filter((item) => item.remoteId !== order.remoteId)
+  if (remaining.length === unopenedNewOrders.value.length) return
+  unopenedNewOrders.value = remaining
+  persistNewOrderTracking()
+}
+
+function isUnopenedNewOrder(order: Order) {
+  return Boolean(order.remoteId && unopenedNewOrderRemoteIds.value.has(order.remoteId))
+}
 const carrierOptions: Delivery['carrier'][] = [
   'Новая почта',
   'Укрпочта',
@@ -1428,6 +1527,82 @@ async function reloadOrdersAfterManualSync() {
   if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
+function canRefreshOrdersAutomatically() {
+  return (
+    !document.hidden &&
+    !isMarketplaceSyncBusy.value &&
+    !isApplyingPromRegistry.value &&
+    !isPreparingPrintRegistry.value &&
+    !isUpdatingPrintRegistry.value &&
+    !isPromRegistryDraft.value &&
+    printRegistryMode.value === null &&
+    deletingOrderId.value === null &&
+    editingOrderCell.value === null &&
+    editingInternalCommentOrderId.value === null &&
+    !orderDialog.value?.open
+  )
+}
+
+async function refreshOrdersAutomatically() {
+  if (!supabase || isAutomaticRefreshRunning || !canRefreshOrdersAutomatically()) return
+  isAutomaticRefreshRunning = true
+  try {
+    await persistenceQueue
+    if (!canRefreshOrdersAutomatically()) return
+    await loadRemoteOrders()
+  } catch (error) {
+    console.error('Не удалось автоматически обновить данные CRM:', error)
+  } finally {
+    isAutomaticRefreshRunning = false
+  }
+}
+
+function scheduleOrdersRefresh(delay = 900) {
+  if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
+  realtimeRefreshTimer = window.setTimeout(() => {
+    realtimeRefreshTimer = undefined
+    void refreshOrdersAutomatically()
+  }, delay)
+}
+
+async function checkForNewRemoteOrders() {
+  if (!supabase || document.hidden || isAutomaticRefreshRunning) return
+  const { count, error } = await supabase
+    .from('crm_orders')
+    .select('id', { count: 'exact', head: true })
+  if (error || count === null) return
+  if (knownRemoteOrderCount !== null && count !== knownRemoteOrderCount) {
+    scheduleOrdersRefresh(0)
+    return
+  }
+  knownRemoteOrderCount = count
+}
+
+function handleOrdersVisibilityChange() {
+  if (!document.hidden) scheduleOrdersRefresh(0)
+}
+
+function handleOrdersWindowFocus() {
+  scheduleOrdersRefresh(0)
+}
+
+function startAutomaticOrdersRefresh() {
+  if (!supabase) return
+  ordersRealtimeChannel = supabase
+    .channel('crm-orders-interface')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_orders' }, () =>
+      scheduleOrdersRefresh(),
+    )
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_order_items' }, () =>
+      scheduleOrdersRefresh(),
+    )
+    .subscribe()
+  newOrdersCheckTimer = window.setInterval(() => void checkForNewRemoteOrders(), 30_000)
+  fullOrdersRefreshTimer = window.setInterval(() => void refreshOrdersAutomatically(), 300_000)
+  document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
+  window.addEventListener('focus', handleOrdersWindowFocus)
+}
+
 async function loadRemoteOrders() {
   if (!supabase) return
   const { data: session } = await supabase.auth.getSession()
@@ -1443,6 +1618,16 @@ async function loadRemoteOrders() {
     .from('crm_orders')
     .select('*, crm_order_items(*)')
     .order('created_at', { ascending: false })
+  if (remoteOrders) {
+    registerRemoteOrders(
+      remoteOrders.map((row) => ({
+        remoteId: String(row.id),
+        orderId: row.order_label ?? String(row.order_number),
+        platform: row.platform as Platform,
+      })),
+    )
+  }
+  knownRemoteOrderCount = remoteOrders?.length ?? 0
   if (!remoteOrders?.length) {
     await persistOrders()
     return
@@ -1520,6 +1705,16 @@ onMounted(async () => {
   // This is a one-time return from the price list, not a permanent open-order state.
   if (route.query.returnOrder || route.query.returnSearch || route.query.returnRegistry)
     await router.replace({ query: {} })
+  startAutomaticOrdersRefresh()
+})
+
+onScopeDispose(() => {
+  if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
+  if (newOrdersCheckTimer) window.clearInterval(newOrdersCheckTimer)
+  if (fullOrdersRefreshTimer) window.clearInterval(fullOrdersRefreshTimer)
+  document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
+  window.removeEventListener('focus', handleOrdersWindowFocus)
+  if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
 })
 
 function openNewOrderDialog() {
@@ -1564,11 +1759,14 @@ function updateOrderStatus(order: Order, status: string) {
 
 function toggleOrder(orderId: string | number) {
   if (isPromRegistryDraft.value) {
-    expandedRegistryOrderIds.value = expandedRegistryOrderIds.value.includes(orderId)
-      ? expandedRegistryOrderIds.value.filter((id) => id !== orderId)
-      : [...expandedRegistryOrderIds.value, orderId]
+    const isOpening = !expandedRegistryOrderIds.value.includes(orderId)
+    if (isOpening) markNewOrderOpened(orderId)
+    expandedRegistryOrderIds.value = isOpening
+      ? [...expandedRegistryOrderIds.value, orderId]
+      : expandedRegistryOrderIds.value.filter((id) => id !== orderId)
     return
   }
+  if (expandedOrderId.value !== orderId) markNewOrderOpened(orderId)
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
 }
 
@@ -2708,9 +2906,15 @@ function orderDateTime(order: Order) {
               <span class="text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
               ></span
-            ><span
-              class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
-              >{{ deliveryStatusForOrder(order) }}</span
+            ><span class="flex w-fit flex-col items-start gap-1.5"
+              ><span
+                v-if="isUnopenedNewOrder(order)"
+                class="whitespace-nowrap rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black tracking-wide text-white shadow-md ring-2 ring-fuchsia-200"
+                >НОВЫЙ ЗАКАЗ</span
+              ><span
+                class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                >{{ deliveryStatusForOrder(order) }}</span
+              ></span
             ><span class="flex items-center justify-end gap-2"
               ><CarrierLogo
                 v-if="carrierLogoKind(order) !== 'generic'"
