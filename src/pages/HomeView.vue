@@ -2906,7 +2906,7 @@ function orderDateTime(order: Order) {
                           }}</strong>
                         </p>
                         <div
-                          class="mt-1 grid grid-cols-2 gap-2 sm:mt-0 sm:grid-cols-[2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem]"
+                          class="mt-1 grid grid-cols-2 gap-2 sm:col-start-2 sm:mt-0 sm:grid-cols-[2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem]"
                         >
                           <label class="text-xs font-medium text-slate-500"
                             >Кол.<input
@@ -3102,15 +3102,15 @@ function orderDateTime(order: Order) {
                 class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-6"
               >
                 <div>
-                  <span class="text-slate-500">Итого продажа</span
-                  ><strong class="mt-1 block text-base">{{
-                    formatMoney(getOrderAmount(order))
-                  }}</strong>
-                </div>
-                <div>
                   <span class="text-slate-500">Итого с/с</span
                   ><strong class="mt-1 block text-base">{{
                     formatMoney(getOrderCost(order))
+                  }}</strong>
+                </div>
+                <div>
+                  <span class="text-slate-500">Итого продажа</span
+                  ><strong class="mt-1 block text-base">{{
+                    formatMoney(getOrderAmount(order))
                   }}</strong>
                 </div>
                 <div>
