@@ -288,24 +288,14 @@ onUnmounted(() => {
                 <p class="text-[10px] font-semibold uppercase text-rose-700">С/С ₴</p>
                 <p class="mt-1 font-semibold">{{ formatMoney(product.cost) }}</p>
               </div>
-              <p class="col-span-full text-xs font-medium text-slate-600">
-                Итого себест.:
-                <span v-if="product.costUsd" class="text-emerald-800">
-                  {{ formatUsd(product.costUsd * product.quantity) }} ·
-                </span>
-                <span class="text-rose-800">{{
-                  formatMoney(product.cost * product.quantity)
-                }}</span>
+              <p class="col-start-4 text-right text-xs font-semibold text-slate-500">Итого</p>
+              <p v-if="product.costUsd" class="text-base font-bold text-emerald-800">
+                {{ formatUsd(product.costUsd * product.quantity) }}
               </p>
-            </div>
-            <div
-              class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 pt-3 text-sm font-semibold"
-            >
-              <span>Итого по заказу, себест.:</span>
-              <span v-if="orderCostUsd(order)" class="text-emerald-800">
-                {{ formatUsd(orderCostUsd(order)) }}
-              </span>
-              <span class="text-rose-800">{{ formatMoney(orderCostUah(order)) }}</span>
+              <span v-else />
+              <p class="text-base font-bold text-rose-800">
+                {{ formatMoney(product.cost * product.quantity) }}
+              </p>
             </div>
             <p class="mt-2 text-sm text-slate-600">
               {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
@@ -329,6 +319,13 @@ onUnmounted(() => {
                   ),
                 )
               }}
+            </p>
+            <p class="mt-3 text-xs font-semibold text-slate-500">Итого себест.</p>
+            <p v-if="orderCostUsd(order)" class="mt-1 text-lg font-bold text-emerald-800">
+              {{ formatUsd(orderCostUsd(order)) }}
+            </p>
+            <p class="mt-1 text-lg font-bold text-rose-800">
+              {{ formatMoney(orderCostUah(order)) }}
             </p>
             <p v-if="order.delivery.printedAt" class="mt-1 text-xs text-slate-500">
               {{ new Date(order.delivery.printedAt).toLocaleString('uk-UA') }}
