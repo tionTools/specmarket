@@ -2905,7 +2905,10 @@ function orderDateTime(order: Order) {
                   >Позиций: {{ order.products.length }}</span
                 ><span
                   v-if="orderHeaderPaymentLabel(order)"
-                  class="ml-2 mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm"
+                  class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
+                  ><span
+                    class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
+                    >О</span
                   >{{ orderHeaderPaymentLabel(order) }}</span
                 ><span
                   v-if="promPaymentState(order) === 'paid'"
@@ -2970,32 +2973,7 @@ function orderDateTime(order: Order) {
             @click="handleOrderWorkspaceClick(order, $event)"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-3">
-                  <h3 class="text-base font-semibold">Состав заказа</h3>
-                  <span
-                    v-if="promPaymentState(order) === 'paid'"
-                    class="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-sm font-medium text-violet-700"
-                  >
-                    <span
-                      class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
-                      >О</span
-                    >
-                    Оплачено
-                  </span>
-                  <span
-                    v-else-if="promPaymentState(order) === 'error'"
-                    class="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-sm font-medium text-rose-600"
-                  >
-                    <span class="font-bold text-emerald-500">О</span>
-                    Помилка оплати
-                  </span>
-                  <span
-                    v-else-if="promPaymentState(order) === 'unpaid'"
-                    class="text-sm font-medium text-slate-500"
-                    >Не оплачено</span
-                  >
-                </div>
+              <div class="flex flex-wrap items-center justify-end gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                   <button
                     v-if="order.platform === 'Эпицентр' && order.externalId"
@@ -3128,20 +3106,17 @@ function orderDateTime(order: Order) {
                     <div class="min-w-0">
                       <strong class="block">{{ product.name }}</strong>
                       <div
-                        class="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-[4.5rem_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:justify-end"
+                        class="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-[5.75rem_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:justify-end"
                       >
-                        <div class="text-xs font-medium text-slate-500">
-                          <span>Размер</span>
-                          <span
-                            class="mt-1 flex h-8 items-center justify-center rounded-lg border px-2 text-base font-bold"
-                            :class="
-                              product.size
-                                ? 'border-violet-200 bg-violet-50 text-violet-950'
-                                : 'border-slate-100 bg-slate-50 text-slate-300'
-                            "
-                            >{{ product.size || '—' }}</span
-                          >
-                        </div>
+                        <p
+                          class="mt-5 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2 text-sm font-semibold text-violet-700"
+                          :class="{ invisible: !product.size }"
+                        >
+                          <span class="text-xs uppercase tracking-wide">Размер</span>
+                          <strong class="text-base leading-none text-violet-950">{{
+                            product.size
+                          }}</strong>
+                        </p>
                         <label class="text-xs font-medium text-slate-500"
                           >Кол.<input
                             :value="
