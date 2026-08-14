@@ -934,7 +934,9 @@ function isOpenForPrintRegistry(order: Order) {
 }
 
 function isOrderUnprinted(order: Order) {
-  return !order.delivery.printedAt && isOpenForPrintRegistry(order)
+  return (
+    Boolean(order.delivery.ttn.trim()) && !order.delivery.printedAt && isOpenForPrintRegistry(order)
+  )
 }
 
 async function openPrintRegistry() {
