@@ -2797,9 +2797,15 @@ function orderDateTime(order: Order) {
                       <div
                         class="mt-1 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-3"
                       >
-                        <span class="block shrink-0 pt-0.5 text-sm text-slate-500"
-                          >Размер: {{ product.size }}</span
+                        <p
+                          v-if="product.size"
+                          class="inline-flex w-fit items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700"
                         >
+                          <span class="text-xs uppercase tracking-wide">Размер</span>
+                          <strong class="text-base leading-none text-violet-950">{{
+                            product.size
+                          }}</strong>
+                        </p>
                         <div
                           class="mt-1 grid grid-cols-2 gap-2 sm:mt-0 sm:grid-cols-[2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem]"
                         >

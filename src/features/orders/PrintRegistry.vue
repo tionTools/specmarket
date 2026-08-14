@@ -56,6 +56,21 @@ function formatMoney(value: number) {
   return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(value)} ₴`
 }
 
+function formatUsd(value: number) {
+  return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(value)} $`
+}
+
+function orderCostUsd(order: Order) {
+  return order.products.reduce(
+    (total, product) => total + (product.costUsd ?? 0) * product.quantity,
+    0,
+  )
+}
+
+function orderCostUah(order: Order) {
+  return order.products.reduce((total, product) => total + product.cost * product.quantity, 0)
+}
+
 function displayOrderStatus(status: string) {
   const names: Record<string, string> = {
     pending: 'Новий',
@@ -273,6 +288,24 @@ onUnmounted(() => {
                 <p class="text-[10px] font-semibold uppercase text-rose-700">С/С ₴</p>
                 <p class="mt-1 font-semibold">{{ formatMoney(product.cost) }}</p>
               </div>
+              <p class="col-span-full text-xs font-medium text-slate-600">
+                Итого себест.:
+                <span v-if="product.costUsd" class="text-emerald-800">
+                  {{ formatUsd(product.costUsd * product.quantity) }} ·
+                </span>
+                <span class="text-rose-800">{{
+                  formatMoney(product.cost * product.quantity)
+                }}</span>
+              </p>
+            </div>
+            <div
+              class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 pt-3 text-sm font-semibold"
+            >
+              <span>Итого по заказу, себест.:</span>
+              <span v-if="orderCostUsd(order)" class="text-emerald-800">
+                {{ formatUsd(orderCostUsd(order)) }}
+              </span>
+              <span class="text-rose-800">{{ formatMoney(orderCostUah(order)) }}</span>
             </div>
             <p class="mt-2 text-sm text-slate-600">
               {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
@@ -318,16 +351,20 @@ onUnmounted(() => {
 
       <footer
         v-if="mode === 'draft' && orders.length"
-        class="print-registry-actions sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-slate-300 bg-white/95 p-5 backdrop-blur"
+        class="print-registry-actions pointer-events-none sticky bottom-3 z-10 flex justify-end p-3"
       >
-        <button
-          class="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
-          type="button"
-          :disabled="busy || checkedCount === 0"
-          @click="emit('markPrinted')"
+        <div
+          class="pointer-events-auto rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-lg backdrop-blur"
         >
-          {{ busy ? 'Сохраняем…' : `Уже распечатал выбранные (${checkedCount})` }}
-        </button>
+          <button
+            class="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            :disabled="busy || checkedCount === 0"
+            @click="emit('markPrinted')"
+          >
+            {{ busy ? 'Сохраняем…' : `Уже распечатал выбранные (${checkedCount})` }}
+          </button>
+        </div>
       </footer>
     </section>
   </div>
