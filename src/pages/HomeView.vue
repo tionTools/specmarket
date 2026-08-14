@@ -27,8 +27,10 @@ const platformSummaryTo = ref('')
 const orderListPeriod = ref<PlatformSummaryPeriod>('month')
 const orderListFrom = ref('')
 const orderListTo = ref('')
+const isComparingPreviousPeriod = ref(false)
 const isPlatformSummaryExpanded = ref(false)
 const isShowingCancelledAndReturned = ref(false)
+const isShowingUnpaidOnly = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
 const user = ref<User | null>(null)
@@ -210,6 +212,16 @@ function parseOrderDate(value: string) {
   const [day, month, year] = value.split('.').map(Number)
   if (!year || !month || !day) return null
   return new Date(year, month - 1, day)
+}
+
+function shiftDateByMonths(value: Date, months: number) {
+  const targetMonth = value.getMonth() + months
+  const lastTargetDay = new Date(value.getFullYear(), targetMonth + 1, 0).getDate()
+  return new Date(value.getFullYear(), targetMonth, Math.min(value.getDate(), lastTargetDay))
+}
+
+function formatShortDate(value: Date) {
+  return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit' }).format(value)
 }
 
 const defaultPlatformSummaryDate = startOfLocalDay(new Date())
@@ -704,6 +716,21 @@ const ordersForSelectedPeriod = computed(() => {
     return date !== null && date >= from && date <= to
   })
 })
+const previousOrderListRange = computed(() => ({
+  from: shiftDateByMonths(orderListRange.value.from, -1),
+  to: shiftDateByMonths(orderListRange.value.to, -1),
+}))
+const previousOrderListRangeLabel = computed(
+  () =>
+    `${formatShortDate(previousOrderListRange.value.from)}–${formatShortDate(previousOrderListRange.value.to)}`,
+)
+const ordersForPreviousPeriod = computed(() => {
+  const { from, to } = previousOrderListRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
 const orderListPeriodLabel = computed(
   () =>
     ({
@@ -747,7 +774,7 @@ const promRegistryTotals = computed(() => ({
 const promRegistryNetTotal = computed(
   () => promRegistryTotals.value.paymentAmount - promRegistryTotals.value.acquiring,
 )
-const visibleOrders = computed(() => {
+const matchingOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   const isTtnSearch = /^[\d\s-]+$/.test(search)
@@ -779,6 +806,14 @@ const visibleOrders = computed(() => {
     )
   })
 })
+const unpaidOrdersCount = computed(
+  () => matchingOrders.value.filter((order) => !isPaid(order)).length,
+)
+const visibleOrders = computed(() =>
+  isShowingUnpaidOnly.value
+    ? matchingOrders.value.filter((order) => !isPaid(order))
+    : matchingOrders.value,
+)
 
 function isOpenForPrintRegistry(order: Order) {
   const status = displayOrderStatus(order.status).toLowerCase()
@@ -965,7 +1000,15 @@ async function restorePrintedOrder(order: Order) {
 
 function toggleCancelledAndReturned() {
   isShowingCancelledAndReturned.value = !isShowingCancelledAndReturned.value
-  if (isShowingCancelledAndReturned.value) platformFilter.value = 'all'
+  if (isShowingCancelledAndReturned.value) {
+    platformFilter.value = 'all'
+    isShowingUnpaidOnly.value = false
+  }
+}
+
+function toggleUnpaidOrders() {
+  isShowingUnpaidOnly.value = !isShowingUnpaidOnly.value
+  if (isShowingUnpaidOnly.value) isShowingCancelledAndReturned.value = false
 }
 
 const summary = computed(() => {
@@ -983,6 +1026,12 @@ const summary = computed(() => {
       turnover: sum(ordersForSelectedPeriod.value, getOrderAmount),
       planned: sum(ordersForSelectedPeriod.value, getPlannedProfit),
       actual: sum(ordersForSelectedPeriod.value.filter(isPaid), getActualProfit),
+    },
+    previous: {
+      orders: ordersForPreviousPeriod.value.length,
+      turnover: sum(ordersForPreviousPeriod.value, getOrderAmount),
+      planned: sum(ordersForPreviousPeriod.value, getPlannedProfit),
+      actual: sum(ordersForPreviousPeriod.value.filter(isPaid), getActualProfit),
     },
   }
 })
@@ -2226,6 +2275,13 @@ function orderDateTime(order: Order) {
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="text-xl font-semibold leading-none">{{ summary.period.orders }}</p>
           </div>
+          <div
+            v-if="isComparingPreviousPeriod"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+          >
+            <span>{{ previousOrderListRangeLabel }}</span>
+            <strong>{{ summary.previous.orders }}</strong>
+          </div>
         </article>
         <article
           class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
@@ -2243,6 +2299,13 @@ function orderDateTime(order: Order) {
               {{ formatMoney(summary.period.turnover) }}
             </p>
           </div>
+          <div
+            v-if="isComparingPreviousPeriod"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+          >
+            <span>{{ previousOrderListRangeLabel }}</span>
+            <strong>{{ formatMoney(summary.previous.turnover) }}</strong>
+          </div>
         </article>
         <article
           class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
@@ -2259,6 +2322,13 @@ function orderDateTime(order: Order) {
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.planned) }}
             </p>
+          </div>
+          <div
+            v-if="isComparingPreviousPeriod"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+          >
+            <span>{{ previousOrderListRangeLabel }}</span>
+            <strong>{{ formatMoney(summary.previous.planned) }}</strong>
           </div>
         </article>
         <article
@@ -2278,6 +2348,13 @@ function orderDateTime(order: Order) {
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.actual) }}
             </p>
+          </div>
+          <div
+            v-if="isComparingPreviousPeriod"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+          >
+            <span>{{ previousOrderListRangeLabel }}</span>
+            <strong>{{ formatMoney(summary.previous.actual) }}</strong>
           </div>
         </article>
       </section>
@@ -2416,6 +2493,16 @@ function orderDateTime(order: Order) {
             Отмены и возвраты
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
+            <label
+              class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
+            >
+              <input
+                v-model="isComparingPreviousPeriod"
+                class="size-3.5 accent-indigo-600"
+                type="checkbox"
+              />
+              Сравнить
+            </label>
             <select
               v-model="orderListPeriod"
               class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
@@ -2444,11 +2531,23 @@ function orderDateTime(order: Order) {
           </div>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_7.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
-          ><span>Состояние отгрузки</span><span />
+          ><span>Состояние отгрузки</span
+          ><button
+            class="flex items-center justify-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold normal-case tracking-normal transition"
+            :class="
+              isShowingUnpaidOnly
+                ? 'border-rose-400 bg-rose-100 text-rose-700'
+                : 'border-slate-300 bg-white text-slate-600 hover:border-rose-300 hover:text-rose-700'
+            "
+            type="button"
+            @click="toggleUnpaidOrders"
+          >
+            Неоплаченные <span class="tabular-nums">{{ unpaidOrdersCount }}</span>
+          </button>
         </div>
         <article
           v-for="order in visibleOrders"
@@ -2462,7 +2561,7 @@ function orderDateTime(order: Order) {
           "
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_4.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_7.5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
