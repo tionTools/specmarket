@@ -891,7 +891,15 @@ const matchingOrders = computed(() => {
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
       isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
-    const haystack = JSON.stringify(order).toLowerCase()
+    const haystack = [
+      JSON.stringify(order),
+      displayPaymentMethod(order.delivery.paymentMethod),
+      orderHeaderPaymentLabel(order),
+      promPaymentState(order) === 'paid' ? 'Оплачено' : '',
+      promPaymentState(order) === 'error' ? 'Ошибка оплаты' : '',
+    ]
+      .join(' ')
+      .toLowerCase()
     const matchesTtn =
       isTtnSearch &&
       ttnSearch.length >= 4 &&
@@ -2685,7 +2693,7 @@ function orderDateTime(order: Order) {
             <input
               v-model="searchQuery"
               class="w-full rounded-xl border-2 border-emerald-400 bg-white py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-              placeholder="Поиск: заказ, ТТН, покупатель, товар"
+              placeholder="Поиск: заказ, ТТН, покупатель, товар, оплата"
             />
             <button
               v-if="searchQuery"
@@ -2907,10 +2915,7 @@ function orderDateTime(order: Order) {
                   >Позиций: {{ order.products.length }}</span
                 ><span
                   v-if="orderHeaderPaymentLabel(order)"
-                  class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
-                  ><span
-                    class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
-                    >О</span
+                  class="ml-2 mt-1 inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
                   >{{ orderHeaderPaymentLabel(order) }}</span
                 ><span
                   v-if="promPaymentState(order) === 'paid'"
