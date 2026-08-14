@@ -3302,7 +3302,7 @@ function orderDateTime(order: Order) {
               </div>
               <div
                 data-order-card
-                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_8rem_9rem]"
+                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_9rem]"
               >
                 <div>
                   <span class="text-slate-500">Итого с/с</span
