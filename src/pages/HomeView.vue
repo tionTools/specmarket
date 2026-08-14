@@ -193,9 +193,6 @@ function readStoredUnopenedOrders() {
 let hasRemoteOrderBaseline = window.localStorage.getItem(knownRemoteOrderIdsStorageKey) !== null
 let knownRemoteOrderIds = new Set(readStoredStringArray(knownRemoteOrderIdsStorageKey))
 const unopenedNewOrders = ref<UnopenedNewOrder[]>(readStoredUnopenedOrders())
-const unopenedNewOrderRemoteIds = computed(
-  () => new Set(unopenedNewOrders.value.map((order) => order.remoteId)),
-)
 
 function persistNewOrderTracking() {
   window.localStorage.setItem(
@@ -231,17 +228,12 @@ function registerRemoteOrders(
   persistNewOrderTracking()
 }
 
-function markNewOrderOpened(orderId: string | number) {
-  const order = orders.value.find((item) => String(item.id) === String(orderId))
-  if (!order?.remoteId) return
-  const remaining = unopenedNewOrders.value.filter((item) => item.remoteId !== order.remoteId)
-  if (remaining.length === unopenedNewOrders.value.length) return
-  unopenedNewOrders.value = remaining
-  persistNewOrderTracking()
-}
-
 function isUnopenedNewOrder(order: Order) {
-  return Boolean(order.remoteId && unopenedNewOrderRemoteIds.value.has(order.remoteId))
+  return (
+    newOrderNotificationPlatforms.includes(order.platform) &&
+    !(order.delivery.ttn ?? '').trim() &&
+    !isCancelledOrReturned(order)
+  )
 }
 const carrierOptions: Delivery['carrier'][] = [
   'Новая почта',
@@ -1768,13 +1760,11 @@ function updateOrderStatus(order: Order, status: string) {
 function toggleOrder(orderId: string | number) {
   if (isPromRegistryDraft.value) {
     const isOpening = !expandedRegistryOrderIds.value.includes(orderId)
-    if (isOpening) markNewOrderOpened(orderId)
     expandedRegistryOrderIds.value = isOpening
       ? [...expandedRegistryOrderIds.value, orderId]
       : expandedRegistryOrderIds.value.filter((id) => id !== orderId)
     return
   }
-  if (expandedOrderId.value !== orderId) markNewOrderOpened(orderId)
   expandedOrderId.value = expandedOrderId.value === orderId ? null : orderId
 }
 
