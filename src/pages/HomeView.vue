@@ -2048,6 +2048,7 @@ function displayPaymentMethod(method?: string) {
     online_payment: 'Онлайн-оплата',
     card: 'Оплата картой',
     card_payment: 'Оплата картой',
+    bnpl: 'Рассрочка',
     оплата_картой: 'Оплата картой',
     оплата_через_monobank: 'Оплата через Монобанк',
     оплата_через_монобанк: 'Оплата через Монобанк',
@@ -2068,6 +2069,7 @@ function orderHeaderPaymentLabel(order: Order) {
       ?.trim()
       .toLowerCase()
       .replace(/[\s-]+/g, '_') ?? ''
+  if (order.platform === 'Каста' && method === 'bnpl') return 'Рассрочка'
   if (
     order.platform === 'Каста' &&
     /^(?:card|card_payment|online|online_payment|оплата_картой)$/.test(method)
@@ -2111,7 +2113,7 @@ function isDeliveryPaymentPaid(order: Order) {
       .replace(/[\s-]+/g, '_') ?? ''
   if (/^(?:pay_on_delivery|postpayment|cash_on_delivery|cod)$/.test(method)) return false
   if (isPromPaymentMethod(order.delivery.paymentMethod)) return isPaid(order)
-  return /^(?:monobank|prepayment|online|online_payment|card|card_payment|оплата_картой|оплата_через_monobank|оплата_через_монобанк)$/.test(
+  return /^(?:monobank|prepayment|online|online_payment|card|card_payment|bnpl|оплата_картой|оплата_через_monobank|оплата_через_монобанк)$/.test(
     method,
   )
 }
