@@ -2048,6 +2048,9 @@ function displayPaymentMethod(method?: string) {
     online_payment: 'Онлайн-оплата',
     card: 'Оплата картой',
     card_payment: 'Оплата картой',
+    оплата_картой: 'Оплата картой',
+    оплата_через_monobank: 'Оплата через Монобанк',
+    оплата_через_монобанк: 'Оплата через Монобанк',
     cash: 'Наличными',
     invoice: 'Оплата по счёту',
     prom_payment: 'Пром-оплата',
@@ -2056,6 +2059,27 @@ function displayPaymentMethod(method?: string) {
     promoplata: 'Пром-оплата',
   }
   return names[normalized] ?? method
+}
+
+function orderHeaderPaymentLabel(order: Order) {
+  if (!isDeliveryPaymentPaid(order)) return ''
+  const method =
+    order.delivery.paymentMethod
+      ?.trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_') ?? ''
+  if (
+    order.platform === 'Каста' &&
+    /^(?:card|card_payment|online|online_payment|оплата_картой)$/.test(method)
+  ) {
+    return 'Оплата картой'
+  }
+  if (
+    order.platform === 'Эпицентр' &&
+    /^(?:monobank|оплата_через_monobank|оплата_через_монобанк)$/.test(method)
+  )
+    return 'Оплата Monobank'
+  return ''
 }
 
 function isPromPaymentMethod(method?: string) {
@@ -2087,7 +2111,9 @@ function isDeliveryPaymentPaid(order: Order) {
       .replace(/[\s-]+/g, '_') ?? ''
   if (/^(?:pay_on_delivery|postpayment|cash_on_delivery|cod)$/.test(method)) return false
   if (isPromPaymentMethod(order.delivery.paymentMethod)) return isPaid(order)
-  return /^(?:monobank|prepayment|online|online_payment|card|card_payment)$/.test(method)
+  return /^(?:monobank|prepayment|online|online_payment|card|card_payment|оплата_картой|оплата_через_monobank|оплата_через_монобанк)$/.test(
+    method,
+  )
 }
 
 function displayDeliveryAddress(delivery: Delivery) {
@@ -2878,6 +2904,10 @@ function orderDateTime(order: Order) {
                   class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600"
                   >Позиций: {{ order.products.length }}</span
                 ><span
+                  v-if="orderHeaderPaymentLabel(order)"
+                  class="ml-2 mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm"
+                  >{{ orderHeaderPaymentLabel(order) }}</span
+                ><span
                   v-if="promPaymentState(order) === 'paid'"
                   class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
                   ><span
@@ -3098,203 +3128,197 @@ function orderDateTime(order: Order) {
                     <div class="min-w-0">
                       <strong class="block">{{ product.name }}</strong>
                       <div
-                        class="mt-1 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-3"
+                        class="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-[4.5rem_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:justify-end"
                       >
-                        <p
-                          v-if="product.size"
-                          class="inline-flex w-fit items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700"
-                        >
-                          <span class="text-xs uppercase tracking-wide">Размер</span>
-                          <strong class="text-base leading-none text-violet-950">{{
-                            product.size
-                          }}</strong>
-                        </p>
-                        <div
-                          class="mt-1 grid grid-cols-2 gap-2 sm:col-start-2 sm:mt-0 sm:grid-cols-[2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem]"
-                        >
+                        <div class="text-xs font-medium text-slate-500">
+                          <span>Размер</span>
+                          <span
+                            class="mt-1 flex h-8 items-center justify-center rounded-lg border px-2 text-base font-bold"
+                            :class="
+                              product.size
+                                ? 'border-violet-200 bg-violet-50 text-violet-950'
+                                : 'border-slate-100 bg-slate-50 text-slate-300'
+                            "
+                            >{{ product.size || '—' }}</span
+                          >
+                        </div>
+                        <label class="text-xs font-medium text-slate-500"
+                          >Кол.<input
+                            :value="
+                              orderCellValue(`${order.id}-${product.id}-quantity`, product.quantity)
+                            "
+                            :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`"
+                            class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                            type="text"
+                            @input="
+                              updateOrderNumber(
+                                product,
+                                'quantity',
+                                `${order.id}-${product.id}-quantity`,
+                                $event,
+                              )
+                            "
+                            @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)"
+                            @keydown.enter.prevent="
+                              toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)
+                            "
+                        /></label>
+                        <label class="text-xs font-medium text-slate-500"
+                          >Цена, ₴<input
+                            :value="
+                              orderCellValue(`${order.id}-${product.id}-price`, product.price)
+                            "
+                            :readonly="editingOrderCell !== `${order.id}-${product.id}-price`"
+                            class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                            type="text"
+                            @input="
+                              updateOrderNumber(
+                                product,
+                                'price',
+                                `${order.id}-${product.id}-price`,
+                                $event,
+                              )
+                            "
+                            @blur="finishOrderCell(`${order.id}-${product.id}-price`)"
+                            @keydown.enter.prevent="
+                              toggleOrderCell(`${order.id}-${product.id}-price`, $event)
+                            "
+                        /></label>
+                        <div class="text-xs font-medium text-slate-500">
+                          Итого<strong
+                            class="mt-1 block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-900"
+                            >{{ formatNumber(getProductAmount(product)) }}</strong
+                          >
+                        </div>
+                        <label class="text-xs font-medium text-slate-500"
+                          ><span
+                            class="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800"
+                            >С/С $</span
+                          ><input
+                            :value="
+                              orderCellValue(
+                                `${order.id}-${product.id}-cost-usd`,
+                                product.costUsd ?? 0,
+                              )
+                            "
+                            :readonly="editingOrderCell !== `${order.id}-${product.id}-cost-usd`"
+                            class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                            inputmode="decimal"
+                            type="text"
+                            @input="
+                              updateOrderNumber(
+                                product,
+                                'costUsd',
+                                `${order.id}-${product.id}-cost-usd`,
+                                $event,
+                              )
+                            "
+                            @blur="finishOrderCell(`${order.id}-${product.id}-cost-usd`)"
+                            @keydown.enter.prevent="
+                              toggleOrderCell(`${order.id}-${product.id}-cost-usd`, $event)
+                            "
+                        /></label>
+                        <label class="text-xs font-medium text-slate-500"
+                          ><span
+                            class="inline-flex whitespace-nowrap rounded-full bg-[#f7e2df] px-2 py-0.5 font-bold text-[#8d4d58]"
+                            >С/С ₴</span
+                          ><input
+                            :value="orderCellValue(`${order.id}-${product.id}-cost`, product.cost)"
+                            :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`"
+                            class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                            :class="{
+                              'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
+                                product.cost === 0 && (product.costUsd ?? 0) === 0,
+                            }"
+                            type="text"
+                            @input="
+                              updateOrderNumber(
+                                product,
+                                'cost',
+                                `${order.id}-${product.id}-cost`,
+                                $event,
+                              )
+                            "
+                            @blur="finishOrderCell(`${order.id}-${product.id}-cost`)"
+                            @keydown.enter.prevent="
+                              toggleOrderCell(`${order.id}-${product.id}-cost`, $event)
+                            "
+                        /></label>
+                        <div class="grid grid-cols-2 gap-1.5">
                           <label class="text-xs font-medium text-slate-500"
-                            >Кол.<input
-                              :value="
-                                orderCellValue(
-                                  `${order.id}-${product.id}-quantity`,
-                                  product.quantity,
-                                )
-                              "
-                              :readonly="editingOrderCell !== `${order.id}-${product.id}-quantity`"
-                              class="order-cell-edit mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold text-slate-900"
-                              type="text"
-                              @input="
-                                updateOrderNumber(
-                                  product,
-                                  'quantity',
-                                  `${order.id}-${product.id}-quantity`,
-                                  $event,
-                                )
-                              "
-                              @blur="finishOrderCell(`${order.id}-${product.id}-quantity`)"
-                              @keydown.enter.prevent="
-                                toggleOrderCell(`${order.id}-${product.id}-quantity`, $event)
-                              "
-                          /></label>
-                          <label class="text-xs font-medium text-slate-500"
-                            >Цена, ₴<input
-                              :value="
-                                orderCellValue(`${order.id}-${product.id}-price`, product.price)
-                              "
-                              :readonly="editingOrderCell !== `${order.id}-${product.id}-price`"
-                              class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
-                              type="text"
-                              @input="
-                                updateOrderNumber(
-                                  product,
-                                  'price',
-                                  `${order.id}-${product.id}-price`,
-                                  $event,
-                                )
-                              "
-                              @blur="finishOrderCell(`${order.id}-${product.id}-price`)"
-                              @keydown.enter.prevent="
-                                toggleOrderCell(`${order.id}-${product.id}-price`, $event)
-                              "
-                          /></label>
-                          <div class="text-xs font-medium text-slate-500">
-                            Итого<strong
-                              class="mt-1 block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-900"
-                              >{{ formatNumber(getProductAmount(product)) }}</strong
-                            >
-                          </div>
-                          <label class="text-xs font-medium text-slate-500"
-                            ><span
-                              class="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800"
-                              >С/С $</span
+                            ><span class="whitespace-nowrap">Роялти, %</span
                             ><input
                               :value="
                                 orderCellValue(
-                                  `${order.id}-${product.id}-cost-usd`,
-                                  product.costUsd ?? 0,
+                                  `${order.id}-${product.id}-royalty-percent`,
+                                  product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0),
                                 )
                               "
-                              :readonly="editingOrderCell !== `${order.id}-${product.id}-cost-usd`"
-                              class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                              :readonly="
+                                editingOrderCell !== `${order.id}-${product.id}-royalty-percent`
+                              "
+                              class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                              :class="{
+                                'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
+                                  order.platform === 'Эпицентр' &&
+                                  product.royaltyPercent === undefined,
+                              }"
                               inputmode="decimal"
                               type="text"
                               @input="
-                                updateOrderNumber(
+                                updateProductRoyaltyPercent(
                                   product,
-                                  'costUsd',
-                                  `${order.id}-${product.id}-cost-usd`,
+                                  `${order.id}-${product.id}-royalty-percent`,
                                   $event,
                                 )
                               "
-                              @blur="finishOrderCell(`${order.id}-${product.id}-cost-usd`)"
-                              @keydown.enter.prevent="
-                                toggleOrderCell(`${order.id}-${product.id}-cost-usd`, $event)
+                              @blur="
+                                finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () =>
+                                  syncProductRoyaltyAmount(order, product),
+                                )
                               "
-                          /></label>
-                          <label class="text-xs font-medium text-slate-500"
-                            ><span
-                              class="inline-flex whitespace-nowrap rounded-full bg-[#f7e2df] px-2 py-0.5 font-bold text-[#8d4d58]"
-                              >С/С ₴</span
+                              @keydown.enter.prevent="
+                                toggleOrderCell(
+                                  `${order.id}-${product.id}-royalty-percent`,
+                                  $event,
+                                  () => syncProductRoyaltyAmount(order, product),
+                                )
+                              " /></label
+                          ><label class="text-xs font-medium text-slate-500"
+                            ><span class="whitespace-nowrap">Роялти, ₴</span
                             ><input
                               :value="
-                                orderCellValue(`${order.id}-${product.id}-cost`, product.cost)
+                                orderCellValue(
+                                  `${order.id}-${product.id}-royalty-amount`,
+                                  getProductRoyalty(order, product),
+                                )
                               "
-                              :readonly="editingOrderCell !== `${order.id}-${product.id}-cost`"
-                              class="order-cell-edit mt-1 w-full rounded-lg border border-emerald-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
-                              :class="{
-                                'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
-                                  product.cost === 0 && (product.costUsd ?? 0) === 0,
-                              }"
+                              :readonly="
+                                editingOrderCell !== `${order.id}-${product.id}-royalty-amount`
+                              "
+                              class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                              inputmode="decimal"
                               type="text"
                               @input="
-                                updateOrderNumber(
+                                updateProductRoyaltyAmount(
                                   product,
-                                  'cost',
-                                  `${order.id}-${product.id}-cost`,
+                                  `${order.id}-${product.id}-royalty-amount`,
                                   $event,
                                 )
                               "
-                              @blur="finishOrderCell(`${order.id}-${product.id}-cost`)"
+                              @blur="
+                                finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () =>
+                                  syncProductRoyaltyPercent(order, product),
+                                )
+                              "
                               @keydown.enter.prevent="
-                                toggleOrderCell(`${order.id}-${product.id}-cost`, $event)
+                                toggleOrderCell(
+                                  `${order.id}-${product.id}-royalty-amount`,
+                                  $event,
+                                  () => syncProductRoyaltyPercent(order, product),
+                                )
                               "
                           /></label>
-                          <div class="grid grid-cols-2 gap-1.5">
-                            <label class="text-xs font-medium text-slate-500"
-                              ><span class="whitespace-nowrap">Роялти, %</span
-                              ><input
-                                :value="
-                                  orderCellValue(
-                                    `${order.id}-${product.id}-royalty-percent`,
-                                    product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0),
-                                  )
-                                "
-                                :readonly="
-                                  editingOrderCell !== `${order.id}-${product.id}-royalty-percent`
-                                "
-                                class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
-                                :class="{
-                                  'border-orange-500 bg-orange-200 ring-1 ring-orange-300':
-                                    order.platform === 'Эпицентр' &&
-                                    product.royaltyPercent === undefined,
-                                }"
-                                inputmode="decimal"
-                                type="text"
-                                @input="
-                                  updateProductRoyaltyPercent(
-                                    product,
-                                    `${order.id}-${product.id}-royalty-percent`,
-                                    $event,
-                                  )
-                                "
-                                @blur="
-                                  finishOrderCell(`${order.id}-${product.id}-royalty-percent`, () =>
-                                    syncProductRoyaltyAmount(order, product),
-                                  )
-                                "
-                                @keydown.enter.prevent="
-                                  toggleOrderCell(
-                                    `${order.id}-${product.id}-royalty-percent`,
-                                    $event,
-                                    () => syncProductRoyaltyAmount(order, product),
-                                  )
-                                " /></label
-                            ><label class="text-xs font-medium text-slate-500"
-                              ><span class="whitespace-nowrap">Роялти, ₴</span
-                              ><input
-                                :value="
-                                  orderCellValue(
-                                    `${order.id}-${product.id}-royalty-amount`,
-                                    getProductRoyalty(order, product),
-                                  )
-                                "
-                                :readonly="
-                                  editingOrderCell !== `${order.id}-${product.id}-royalty-amount`
-                                "
-                                class="order-cell-edit mt-1 w-full rounded-lg border border-orange-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
-                                inputmode="decimal"
-                                type="text"
-                                @input="
-                                  updateProductRoyaltyAmount(
-                                    product,
-                                    `${order.id}-${product.id}-royalty-amount`,
-                                    $event,
-                                  )
-                                "
-                                @blur="
-                                  finishOrderCell(`${order.id}-${product.id}-royalty-amount`, () =>
-                                    syncProductRoyaltyPercent(order, product),
-                                  )
-                                "
-                                @keydown.enter.prevent="
-                                  toggleOrderCell(
-                                    `${order.id}-${product.id}-royalty-amount`,
-                                    $event,
-                                    () => syncProductRoyaltyPercent(order, product),
-                                  )
-                                "
-                            /></label>
-                          </div>
                         </div>
                       </div>
                     </div>
