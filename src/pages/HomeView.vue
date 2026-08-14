@@ -500,6 +500,15 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   for (const order of orders.value) {
     const entry = entriesByOrder.get(registryKeyForOrder(order))
     if (!entry) continue
+    const financialEditKeys = [
+      `${order.id}-payment-amount`,
+      `${order.id}-acquiring-percent`,
+      `${order.id}-acquiring`,
+    ]
+    for (const key of financialEditKeys) delete editingOrderValue.value[key]
+    if (editingOrderCell.value && financialEditKeys.includes(editingOrderCell.value)) {
+      editingOrderCell.value = null
+    }
     promRegistryOriginalFinancials.set(order.id, {
       paymentAmount: order.paymentAmount ?? 0,
       acquiring: order.acquiring,
@@ -680,6 +689,8 @@ async function handlePromRegistryFile(event: Event) {
     isPromRegistryDraft.value = true
     platformFilter.value = 'all'
     isShowingCancelledAndReturned.value = false
+    await persistenceQueue
+    await loadRemoteOrders()
     applyPromRegistryPreview(entries)
     saveRegistryDraftNavigation()
   } catch (error) {
