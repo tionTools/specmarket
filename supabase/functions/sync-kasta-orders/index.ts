@@ -348,6 +348,10 @@ Deno.serve(async (request) => {
 		paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
 		paymentMethod: text(order.requested_payment_method),
 		paymentStatus: text(order.card_payment_state),
+		trackingStatus: text(currentDelivery.trackingStatus) || undefined,
+		trackingLastCheckedAt: text(currentDelivery.trackingLastCheckedAt) || undefined,
+		trackingStatusChangedAt: text(currentDelivery.trackingStatusChangedAt) || undefined,
+		trackingLastError: text(currentDelivery.trackingLastError) || undefined,
 		printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
 		printedAt: text(currentDelivery.printedAt) || undefined
 	}

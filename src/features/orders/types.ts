@@ -29,6 +29,11 @@ export interface Delivery {
   paymentStatus?: string
   hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
+  /** Последний статус, полученный из публичной tracking-ссылки перевозчика. */
+  trackingStatus?: string
+  trackingLastCheckedAt?: string
+  trackingStatusChangedAt?: string
+  trackingLastError?: string
   printCheckedAt?: string
   printedAt?: string
 }

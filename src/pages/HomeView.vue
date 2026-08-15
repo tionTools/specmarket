@@ -1706,6 +1706,10 @@ async function loadRemoteOrders() {
 
 onMounted(async () => {
   await loadRemoteOrders()
+  // Функция сама проверяет киевское расписание и обрабатывает только просроченные доставки.
+  // Запуск при открытии CRM нужен, чтобы не ждать ближайшего cron-цикла после простоя вкладки.
+  if (supabase && !isGuest.value)
+    void supabase.functions.invoke('sync-delivery-tracking', { method: 'POST' })
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
@@ -2006,6 +2010,8 @@ function trackingUrl(delivery: Delivery) {
 }
 
 function deliveryStatusForOrder(order: Order) {
+  if (order.delivery.trackingStatus?.trim())
+    return displayDeliveryStatus(order.delivery.trackingStatus)
   // У Эпицентра «Завершено» означает, что отправление получено покупателем.
   // Это правило площадки, поэтому не показываем устаревшее «Запланировано».
   if (order.platform === 'Эпицентр' && displayOrderStatus(order.status) === 'Завершено')
