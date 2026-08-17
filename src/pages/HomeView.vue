@@ -2152,6 +2152,7 @@ async function copyTtn(ttn: string, orderId: Order['id']) {
 
 function openEpicentrOrder(order: Order) {
   if (!order.externalId) return
+  closePrintRegistry()
   window.open(
     `https://admin.epicentrm.com.ua/oms/orders/${order.externalId}`,
     '_blank',
@@ -2162,12 +2163,14 @@ function openEpicentrOrder(order: Order) {
 function openPromOrder(order: Order) {
   const promId = String(order.externalId ?? order.id).replace(/^prom:/, '')
   if (!promId) return
+  closePrintRegistry()
   window.open(`https://my.prom.ua/cms/order/edit/${promId}`, '_blank', 'noopener,noreferrer')
 }
 
 function openKastaOrder(order: Order) {
   const kastaId = String(order.externalId ?? order.id).replace(/^kasta:/, '')
   if (!kastaId) return
+  closePrintRegistry()
   window.open(
     `https://hub.kasta.ua/customer-orders/all?order=${encodeURIComponent(kastaId)}`,
     '_blank',
@@ -2349,7 +2352,7 @@ function orderDateTime(order: Order) {
   </div>
   <div v-else class="min-h-screen bg-slate-50 text-slate-900">
     <RouterLink
-      class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
+      class="fixed right-0 top-1/2 z-[80] flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
       :to="{
         path: '/prices',
         query: {
