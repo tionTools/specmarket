@@ -276,22 +276,21 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { full?: unknown; latest?: unknown; externalId?: unknown }
+  const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
   const fullSync = body.full === true
-  const latestOnly = body.latest === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
-  const { data: cursorRow } = await admin.from('crm_sync_cursors').select('cursor').eq('source', 'kasta').maybeSingle()
-  const query = new URLSearchParams({ limit: '100' })
-  if (targetOrderId) query.append('order_id', targetOrderId)
-  else if (!fullSync && cursorRow?.cursor) query.set('cursor', cursorRow.cursor)
   let payload: RecordValue
   try {
-    payload = latestOnly ? await latestKastaPage(kastaToken) : await fetchKastaOrders(kastaToken, query)
+    // Kasta cursors continue through the entire history. Bulk CRM syncs must
+    // always stay in the current 100-order window; only a direct order refresh
+    // is allowed to request a specific historical order.
+    payload = targetOrderId
+      ? await fetchKastaOrders(kastaToken, new URLSearchParams({ limit: '100', order_id: targetOrderId }))
+      : await latestKastaPage(kastaToken)
   } catch (error) {
     return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status: 502, headers: corsHeaders })
   }
   const orders = Array.isArray(payload.items) ? payload.items.map(asRecord) : []
-  const nextCursor = text(payload.cursor)
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   const royaltyCache = new Map<string, number>()
   let created = 0
@@ -390,6 +389,5 @@ Deno.serve(async (request) => {
     }
     await admin.from('crm_order_items').insert(savedItems)
   }
-  if (!targetOrderId && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta', cursor: nextCursor, updated_at: new Date().toISOString() })
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, remains: number(payload.remains) }, { headers: corsHeaders })
 })
