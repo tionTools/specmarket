@@ -216,8 +216,13 @@ async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
   const events = (Array.isArray(data) ? data : []).map(record)
   const latest = latestEvent(events, 'date')
   if (!latest) throw new Error('Укрпочта API не вернула статусы')
+  const eventCode = text(latest.event)
+  const eventReason = text(latest.eventReason_id)
   const source = text(latest.eventName) || text(latest.status) || text(latest.name)
-  const base = ukrposhtaReadableStatus(source, text(latest.event), text(latest.eventReason_id))
+  const base = ukrposhtaReadableStatus(source, eventCode, eventReason)
+  const deliveredAt = (eventCode === '48000' || (eventCode === '41000' && eventReason !== '10'))
+    ? text(latest.date)
+    : ''
   return {
     ...base,
     provider: 'ukrposhta_status_api',
@@ -226,7 +231,8 @@ async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
       trackingLocation: text(latest.name),
       trackingLocationCode: text(latest.index),
       trackingLocationCountry: text(latest.country),
-      trackingStatusCode: text(latest.event),
+      trackingStatusCode: eventCode,
+      trackingDeliveredAt: deliveredAt,
       trackingEvents: compactEvents(events.map((event) => ({
         at: text(event.date),
         status: text(event.eventName),
@@ -265,7 +271,6 @@ Deno.serve(async (request) => {
   const { data: { user } } = await auth.auth.getUser()
   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-
   const minutes = intervalMinutes()
   if (!minutes) return Response.json({ ok: true, skipped: 'night', checked: 0, updated: 0 }, { headers: corsHeaders })
 
