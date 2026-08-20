@@ -5,6 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
+
 type JsonRecord = Record<string, unknown>
 type TrackingEvent = {
   at?: string
@@ -275,14 +277,18 @@ Deno.serve(async (request) => {
   if (!minutes) return Response.json({ ok: true, skipped: 'night', checked: 0, updated: 0 }, { headers: corsHeaders })
 
   const now = new Date()
-  const { data: rows, error } = await admin.from('crm_orders').select('id, delivery').limit(1000)
+  const { data: rows, error } = await admin.from('crm_orders')
+    .select('id, delivery')
+    .not('status', 'in', finalOrderStatuses)
+    .not('delivery->>ttn', 'is', null)
   if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
   let checked = 0
   let updated = 0
   let failed = 0
   for (const row of rows ?? []) {
     const delivery = record(row.delivery)
-    if (!carrierKind(delivery) || !isDue(delivery, minutes, now.getTime())) continue
+    const carrier = carrierKind(delivery)
+    if (!carrier || carrier === 'rozetka' || !isDue(delivery, minutes, now.getTime())) continue
     try {
       const result = await getTrackingStatus(delivery)
       const changed = result.status !== text(delivery.trackingStatus)
@@ -308,7 +314,13 @@ Deno.serve(async (request) => {
     } catch (error) {
       failed += 1
       console.error(`Tracking ${text(delivery.ttn)}:`, error)
-      await admin.from('crm_orders').update({ delivery: { ...delivery, trackingLastError: error instanceof Error ? error.message : 'Ошибка tracking' } }).eq('id', row.id)
+      await admin.from('crm_orders').update({
+        delivery: {
+          ...delivery,
+          trackingLastCheckedAt: now.toISOString(),
+          trackingLastError: error instanceof Error ? error.message : 'Ошибка tracking',
+        },
+      }).eq('id', row.id)
     }
   }
   return Response.json({ ok: true, checked, updated, failed, intervalMinutes: minutes }, { headers: corsHeaders })
