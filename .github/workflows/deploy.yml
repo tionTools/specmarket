@@ -30,6 +30,8 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+          export VITE_BUILD_SHA="$GITHUB_SHA"
+          export VITE_BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           # pnpm lint
           # pnpm prettier
           # pnpm test
