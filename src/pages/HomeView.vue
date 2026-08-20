@@ -1314,7 +1314,7 @@ async function signOut() {
   window.location.reload()
 }
 
-async function syncEpicentrOrders(full = false) {
+async function syncEpicentrOrders(full = false, fullSyncResults?: string[]) {
   if (!supabase || isGuest.value || isSyncingEpicentr.value) return
   isSyncingEpicentr.value = true
   if (!(await waitForPendingSaves())) {
@@ -1328,18 +1328,20 @@ async function syncEpicentrOrders(full = false) {
   })
   isSyncingEpicentr.value = false
   if (error || !data?.ok) {
-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
+    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.'
+    if (fullSyncResults) fullSyncResults.push(`Эпицентр: ошибка — ${errorMessage}`)
+    else showSyncError(errorMessage)
     return
   }
-  showSyncMessage(
-    full
-      ? `Эпицентр: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
-      : `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
-  )
+  const message = full
+    ? `Эпицентр: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+    : `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
+  if (fullSyncResults) fullSyncResults.push(message)
+  else showSyncMessage(message)
   await loadRemoteOrders()
 }
 
-async function syncPromOrders(full = false) {
+async function syncPromOrders(full = false, fullSyncResults?: string[]) {
   if (!supabase || isGuest.value || isSyncingProm.value) return
   isSyncingProm.value = true
   if (!(await waitForPendingSaves())) {
@@ -1353,18 +1355,20 @@ async function syncPromOrders(full = false) {
   })
   isSyncingProm.value = false
   if (error || !data?.ok) {
-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
+    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.'
+    if (fullSyncResults) fullSyncResults.push(`Prom: ошибка — ${errorMessage}`)
+    else showSyncError(errorMessage)
     return
   }
-  showSyncMessage(
-    full
-      ? `Prom: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
-      : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
-  )
+  const message = full
+    ? `Prom: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+    : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
+  if (fullSyncResults) fullSyncResults.push(message)
+  else showSyncMessage(message)
   await loadRemoteOrders()
 }
 
-async function syncKastaOrders(full = false, latest = false) {
+async function syncKastaOrders(full = false, latest = false, fullSyncResults?: string[]) {
   if (!supabase || isGuest.value || isSyncingKasta.value) return
   isSyncingKasta.value = true
   if (!(await waitForPendingSaves())) {
@@ -1384,16 +1388,18 @@ async function syncKastaOrders(full = false, latest = false) {
   })
   isSyncingKasta.value = false
   if (error || !data?.ok) {
-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.')
+    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.'
+    if (fullSyncResults) fullSyncResults.push(`Каста: ошибка — ${errorMessage}`)
+    else showSyncError(errorMessage)
     return
   }
-  showSyncMessage(
-    full
-      ? `Каста: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
-      : latest
-        ? `Каста: последние заказы — найдено ${data.received}, добавлено ${data.created}, уже есть ${data.skipped ?? 0}.`
-        : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`,
-  )
+  const message = full
+    ? `Каста: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
+    : latest
+      ? `Каста: последние заказы — найдено ${data.received}, добавлено ${data.created}, уже есть ${data.skipped ?? 0}.`
+      : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
+  if (fullSyncResults) fullSyncResults.push(message)
+  else showSyncMessage(message)
   await loadRemoteOrders()
 }
 
@@ -1418,10 +1424,12 @@ async function syncFullAllPlatforms() {
   )
     return
   isSyncingAllPlatforms.value = true
+  const fullSyncResults: string[] = []
   try {
-    await syncEpicentrOrders(true)
-    await syncPromOrders(true)
-    await syncKastaOrders(true, true)
+    await syncEpicentrOrders(true, fullSyncResults)
+    await syncPromOrders(true, fullSyncResults)
+    await syncKastaOrders(true, true, fullSyncResults)
+    showSyncMessage(fullSyncResults.join('\n'))
   } finally {
     isSyncingAllPlatforms.value = false
   }
@@ -2534,7 +2542,7 @@ function orderDateTime(order: Order) {
       </p>
       <p
         v-else-if="syncEpicentrMessage"
-        class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 transition-opacity duration-500"
+        class="mt-5 whitespace-pre-line rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 transition-opacity duration-500"
         :class="syncNoticeVisible ? 'opacity-100' : 'opacity-0'"
       >
         {{ syncEpicentrMessage }}
