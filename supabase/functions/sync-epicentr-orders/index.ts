@@ -96,8 +96,22 @@ function readableText(value: unknown): string {
     .join(', ')
 }
 
+function firstNonEmptyText(...values: unknown[]) {
+  for (const value of values) {
+    const candidate = readableText(value).trim()
+    if (candidate) return candidate
+  }
+  return ''
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function preserveTracking(delivery: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
+  )
 }
 
 function itemSize(item: Record<string, unknown>) {
@@ -389,11 +403,12 @@ Deno.serve(async (request) => {
     const externalId = source.id
     const existing = requestedExternalId || fullSync
       ? await admin.from('crm_orders')
-        .select('id, shipping, acquiring, acquiring_percent, delivery')
+        .select('id, customer, phone, customer_email, shipping, acquiring, acquiring_percent, delivery')
         .eq('external_id', externalId).maybeSingle()
       : { data: null }
     // Массовая кнопка добавляет только отсутствующие заказы. Обновление
     // существующего заказа остаётся отдельным действием в его карточке.
+    const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
     let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)
@@ -418,12 +433,28 @@ Deno.serve(async (request) => {
     }
     const officeNumber = String(shipment?.officeId ?? '')
     address = formatDeliveryPointAddress(shipment?.provider, officeNumber, address)
-    const customer = fullName(source.address) || fullName(recipient) || 'Покупатель Эпицентра'
-    const recipientName = fullName(recipient) || customer
+    // После отмены Epicentr может вернуть пустой address. Пустой ответ API
+    // не должен уничтожать уже полученные контактные данные покупателя.
+    const apiCustomer = firstNonEmptyText(fullName(source.address), fullName(recipient))
+    const customer = firstNonEmptyText(apiCustomer, existing.data?.customer)
+    const apiPhone = firstNonEmptyText(source.address?.phone, recipient?.phone)
+    const phone = firstNonEmptyText(apiPhone, existing.data?.phone)
+    const customerEmail = firstNonEmptyText(source.address?.email, existing.data?.customer_email)
+    const recipientName = firstNonEmptyText(
+      fullName(recipient),
+      previousDelivery.recipient,
+      apiCustomer,
+      existing.data?.customer,
+    )
+    const recipientPhone = firstNonEmptyText(
+      recipient?.phone,
+      source.address?.phone,
+      previousDelivery.recipientPhone,
+      existing.data?.phone,
+    )
     const statusCode = readableText(source.statusCode ?? (source as unknown as Record<string, unknown>).status)
     const status = (statusNames[statusCode.toLowerCase()] ?? statusCode) || 'Не указан'
     const orderNumber = Number(source.number)
-    const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const apiDeliveryStatus = readableText(shipment?.status) || readableText(shipment?.statusCode) || readableText(shipment?.shipmentStatus)
     // Для Эпицентра статус finished означает, что покупатель уже получил
     // отправление. Если отдельный статус перевозчика отсутствует, это более
@@ -440,8 +471,8 @@ Deno.serve(async (request) => {
       order_date: formatOrderDate(source.createdAt),
       order_time: formatOrderTime(source.createdAt),
       customer,
-      phone: source.address?.phone ?? recipient?.phone ?? '',
-      customer_email: source.address?.email ?? null,
+      phone,
+      customer_email: customerEmail || null,
       customer_comment: source.comment ?? null,
       platform: 'Эпицентр',
       status,
@@ -455,7 +486,7 @@ Deno.serve(async (request) => {
         carrier: shipment?.provider || 'Эпицентр',
         ttn: shipment?.number ?? '',
         recipient: recipientName,
-        recipientPhone: recipient?.phone || source.address?.phone || '',
+        recipientPhone,
         city,
         address,
         status: deliveryStatus,
@@ -464,10 +495,7 @@ Deno.serve(async (request) => {
         paymentAmount,
         paymentMethod: shipment?.paymentProvider ?? '',
         paymentStatus: shipment?.paymentStatus ?? '',
-        trackingStatus: typeof previousDelivery.trackingStatus === 'string' ? previousDelivery.trackingStatus : undefined,
-        trackingLastCheckedAt: typeof previousDelivery.trackingLastCheckedAt === 'string' ? previousDelivery.trackingLastCheckedAt : undefined,
-        trackingStatusChangedAt: typeof previousDelivery.trackingStatusChangedAt === 'string' ? previousDelivery.trackingStatusChangedAt : undefined,
-        trackingLastError: typeof previousDelivery.trackingLastError === 'string' ? previousDelivery.trackingLastError : undefined,
+        ...preserveTracking(previousDelivery),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
       },

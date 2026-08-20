@@ -12,6 +12,9 @@ const asRecord = (value: unknown): RecordValue =>
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const preserveTracking = (delivery: RecordValue): RecordValue => Object.fromEntries(
+  Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
+)
 const promStatusNames: Record<string, string> = {
   pending: 'Новий',
   received: 'Принято',
@@ -546,10 +549,7 @@ Deno.serve(async (request) => {
           text(previousDelivery.paymentStatus),
         hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
-        trackingStatus: text(previousDelivery.trackingStatus) || undefined,
-        trackingLastCheckedAt: text(previousDelivery.trackingLastCheckedAt) || undefined,
-        trackingStatusChangedAt: text(previousDelivery.trackingStatusChangedAt) || undefined,
-        trackingLastError: text(previousDelivery.trackingLastError) || undefined,
+        ...preserveTracking(previousDelivery),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
       },

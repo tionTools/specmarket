@@ -12,6 +12,9 @@ const asRecord = (value: unknown): RecordValue =>
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const preserveTracking = (delivery: RecordValue): RecordValue => Object.fromEntries(
+  Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
+)
 
 function nameOf(person: RecordValue) {
   return [text(person.last_name), text(person.first_name), text(person.middle_name)].filter(Boolean).join(' ')
@@ -359,10 +362,7 @@ Deno.serve(async (request) => {
 		paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
 		paymentMethod: text(order.requested_payment_method),
 		paymentStatus: text(order.card_payment_state),
-		trackingStatus: text(currentDelivery.trackingStatus) || undefined,
-		trackingLastCheckedAt: text(currentDelivery.trackingLastCheckedAt) || undefined,
-		trackingStatusChangedAt: text(currentDelivery.trackingStatusChangedAt) || undefined,
-		trackingLastError: text(currentDelivery.trackingLastError) || undefined,
+        ...preserveTracking(currentDelivery),
 		printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
 		printedAt: text(currentDelivery.printedAt) || undefined
 	}
