@@ -96,6 +96,14 @@ function fullDeliveryAddress(city: string, address: string): string {
   return [city, address].filter(Boolean).join(', ')
 }
 
+function promRecipientAddress(value: unknown): string {
+  const address = asRecord(value)
+  const street = readable(pick(address, 'address', 'full_address', 'street_name', 'street'))
+  const building = text(pick(address, 'building_number', 'house_number', 'building'))
+  const apartment = text(pick(address, 'apartment_number', 'apartment', 'flat'))
+  return [street, building && `буд. ${building}`, apartment && `кв. ${apartment}`].filter(Boolean).join(', ')
+}
+
 function findDeliveryPayer(value: unknown, depth = 0): string {
   if (depth > 5) return ''
   const record = asRecord(value)
@@ -447,6 +455,7 @@ Deno.serve(async (request) => {
     const previousDelivery = asRecord(existing?.delivery)
     const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
     const deliveryProvider = asRecord(order.delivery_provider_data)
+    const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
     const paymentData = asRecord(order.payment_data)
     const trackingNumber =
       text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) ||
@@ -475,8 +484,15 @@ Deno.serve(async (request) => {
       // В части заказов API Prom вообще не возвращает плательщика. Обычная
       // доставка Prom оплачивается получателем; промо-доставка — продавцом.
       (isPromFreeDelivery ? 'Отправитель' : 'Получатель')
-    const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
-    const deliveryCity = readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city) || text(previousDelivery.city)
+    const deliveryText =
+      readable(pick(order, 'delivery_address', 'address')) ||
+      readable(pick(rawDelivery, 'address', 'full_address')) ||
+      promRecipientAddress(providerRecipientAddress)
+    const deliveryCity =
+      readable(pick(order, 'delivery_city', 'city')) ||
+      readable(rawDelivery.city) ||
+      readable(pick(providerRecipientAddress, 'city_name', 'city')) ||
+      text(previousDelivery.city)
     const deliveryAddress = deliveryText || text(previousDelivery.address)
     const currentAddressHistory = uniqueHistory([
       ...historyValues(previousDelivery.addressHistory),
