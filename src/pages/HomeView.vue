@@ -894,7 +894,7 @@ const matchingOrders = computed(() => {
     const matchesTtn =
       isTtnSearch &&
       ttnSearch.length >= 4 &&
-      order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
+      deliveryTtns(order.delivery).some((ttn) => ttn.replace(/\D/g, '').includes(ttnSearch))
 
     if (search) return haystack.includes(search) || matchesTtn
 
@@ -2011,6 +2011,16 @@ function trackingUrl(delivery: Delivery) {
   return ''
 }
 
+function deliveryTtns(delivery: Delivery): string[] {
+  const seen = new Set<string>()
+  return [...(delivery.ttnHistory ?? []), delivery.ttn].filter((ttn) => {
+    const normalized = ttn.replace(/\s/g, '')
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
+
 function deliveryStatusForOrder(order: Order) {
   if (order.delivery.trackingStatus?.trim())
     return displayDeliveryStatus(order.delivery.trackingStatus)
@@ -2138,7 +2148,15 @@ function isDeliveryPaymentPaid(order: Order) {
 }
 
 function displayDeliveryAddress(delivery: Delivery) {
-  return [delivery.city, delivery.address].filter(Boolean).join(', ') || '—'
+  const current = [delivery.city, delivery.address].filter(Boolean).join(', ')
+  const seen = new Set<string>()
+  const values = [...(delivery.addressHistory ?? []), current].filter((address) => {
+    const normalized = address.trim().replace(/\s+/g, ' ').toLowerCase()
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+  return values.join(' — ') || '—'
 }
 
 async function copyOrderNumber(order: Order) {
@@ -3552,7 +3570,9 @@ function orderDateTime(order: Order) {
                           <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15" />
                         </svg>
                       </a>
-                      <span>{{ order.delivery.ttn || '—' }}</span>
+                      <span class="whitespace-pre-line">{{
+                        deliveryTtns(order.delivery).join('\n') || '—'
+                      }}</span>
                       <button
                         v-if="order.delivery.ttn"
                         class="relative grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"

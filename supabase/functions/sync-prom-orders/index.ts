@@ -74,6 +74,28 @@ function findDeliveryTracking(value: unknown, depth = 0): string {
   return ''
 }
 
+function historyValues(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(text).filter(Boolean) : []
+}
+
+function historyKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function uniqueHistory(values: string[]): string[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const normalized = historyKey(value)
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
+
+function fullDeliveryAddress(city: string, address: string): string {
+  return [city, address].filter(Boolean).join(', ')
+}
+
 function findDeliveryPayer(value: unknown, depth = 0): string {
   if (depth > 5) return ''
   const record = asRecord(value)
@@ -431,6 +453,12 @@ Deno.serve(async (request) => {
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order) ||
       text(previousDelivery.ttn)
+    const currentTtnHistory = uniqueHistory([
+      ...historyValues(previousDelivery.ttnHistory),
+      text(previousDelivery.ttn),
+      trackingNumber,
+    ])
+    const ttnHistory = currentTtnHistory.filter((ttn) => historyKey(ttn) !== historyKey(trackingNumber))
     const rawOrderStatus = text(order.status)
     const orderStatus = (promStatusNames[rawOrderStatus.toLowerCase()] ?? rawOrderStatus) || 'Новий'
     const apiDeliveryStatus =
@@ -448,6 +476,16 @@ Deno.serve(async (request) => {
       // доставка Prom оплачивается получателем; промо-доставка — продавцом.
       (isPromFreeDelivery ? 'Отправитель' : 'Получатель')
     const deliveryText = readable(pick(order, 'delivery_address', 'address')) || readable(pick(rawDelivery, 'address', 'full_address'))
+    const deliveryCity = readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city) || text(previousDelivery.city)
+    const deliveryAddress = deliveryText || text(previousDelivery.address)
+    const currentAddressHistory = uniqueHistory([
+      ...historyValues(previousDelivery.addressHistory),
+      fullDeliveryAddress(text(previousDelivery.city), text(previousDelivery.address)),
+      fullDeliveryAddress(deliveryCity, deliveryAddress),
+    ])
+    const addressHistory = currentAddressHistory.filter(
+      (address) => historyKey(address) !== historyKey(fullDeliveryAddress(deliveryCity, deliveryAddress)),
+    )
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
@@ -480,7 +518,9 @@ Deno.serve(async (request) => {
         ttn: trackingNumber,
         recipient: deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
         recipientPhone: deliveryRecipientPhone(order, rawDelivery, deliveryProvider) || text(order.phone) || text(order.client_phone),
-        city: readable(pick(order, 'delivery_city', 'city')) || readable(rawDelivery.city), address: deliveryText,
+        city: deliveryCity, address: deliveryAddress,
+        ttnHistory: ttnHistory.length ? ttnHistory : undefined,
+        addressHistory: addressHistory.length ? addressHistory : undefined,
         status: deliveryStatus, payer,
         paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
         paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),

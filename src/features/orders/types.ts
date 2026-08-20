@@ -17,10 +17,14 @@ export interface OrderProduct {
 export interface Delivery {
   carrier: 'Новая почта' | 'Укрпочта' | 'RozetkaDelivery' | 'Meest'
   ttn: string
+  /** Предыдущие ТТН при переадресациях Prom. */
+  ttnHistory?: string[]
   recipient: string
   recipientPhone: string
   city: string
   address: string
+  /** Полные предыдущие адреса при переадресациях Prom. */
+  addressHistory?: string[]
   status: string
   payer: string
   isAlternateRecipient?: boolean
