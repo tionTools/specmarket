@@ -260,6 +260,7 @@ async function getTrackingStatus(delivery: JsonRecord) {
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const body = record(await request.json().catch(() => ({})))
   const url = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -273,8 +274,9 @@ Deno.serve(async (request) => {
   const { data: { user } } = await auth.auth.getUser()
   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  const forced = body.force === true && !scheduled && Boolean(user)
   const minutes = intervalMinutes()
-  if (!minutes) return Response.json({ ok: true, skipped: 'night', checked: 0, updated: 0 }, { headers: corsHeaders })
+  if (!forced && !minutes) return Response.json({ ok: true, skipped: 'night', checked: 0, updated: 0 }, { headers: corsHeaders })
 
   const now = new Date()
   const { data: rows, error } = await admin.from('crm_orders')
@@ -288,7 +290,8 @@ Deno.serve(async (request) => {
   for (const row of rows ?? []) {
     const delivery = record(row.delivery)
     const carrier = carrierKind(delivery)
-    if (!carrier || carrier === 'rozetka' || !isDue(delivery, minutes, now.getTime())) continue
+    const trackable = Boolean(text(delivery.ttn)) && !isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))
+    if (!carrier || carrier === 'rozetka' || (!forced && !isDue(delivery, minutes, now.getTime())) || (forced && !trackable)) continue
     try {
       const result = await getTrackingStatus(delivery)
       const changed = result.status !== text(delivery.trackingStatus)
@@ -323,5 +326,5 @@ Deno.serve(async (request) => {
       }).eq('id', row.id)
     }
   }
-  return Response.json({ ok: true, checked, updated, failed, intervalMinutes: minutes }, { headers: corsHeaders })
+  return Response.json({ ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed }, { headers: corsHeaders })
 })

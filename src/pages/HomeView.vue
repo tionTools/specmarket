@@ -51,6 +51,7 @@ const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
 const isSyncingAllPlatforms = ref(false)
+const isSyncingDelivery = ref(false)
 const isMarketplaceSyncBusy = computed(
   () =>
     isSyncingAllPlatforms.value ||
@@ -1426,6 +1427,29 @@ async function syncFullAllPlatforms() {
   }
 }
 
+async function syncDeliveryTracking() {
+  if (!supabase || isGuest.value || isSyncingDelivery.value) return
+  isSyncingDelivery.value = true
+  const { data, error } = await supabase.functions.invoke<{
+    ok?: boolean
+    message?: string
+    checked?: number
+    updated?: number
+    failed?: number
+  }>('sync-delivery-tracking', {
+    method: 'POST',
+    body: { force: true },
+  })
+  isSyncingDelivery.value = false
+  if (error || !data?.ok) {
+    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить статусы доставок.')
+    return
+  }
+  showSyncMessage(
+    `Доставки: проверено ${data.checked ?? 0}, обновлено ${data.updated ?? 0}, ошибок ${data.failed ?? 0}.`,
+  )
+}
+
 async function syncKastaOrder(order: Order) {
   if (
     !supabase ||
@@ -1716,7 +1740,10 @@ async function runDeliveryTrackingOnLoad() {
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
     session = refreshed.session
     if (refreshError || !session) {
-      console.warn('Не удалось авторизовать запуск tracking доставки:', refreshError?.message ?? sessionError?.message ?? 'сессия отсутствует')
+      console.warn(
+        'Не удалось авторизовать запуск tracking доставки:',
+        refreshError?.message ?? sessionError?.message ?? 'сессия отсутствует',
+      )
       return
     }
   }
@@ -1732,7 +1759,10 @@ async function runDeliveryTrackingOnLoad() {
     { method: 'POST' },
   )
   if (error || !data?.ok) {
-    console.warn('Не удалось запустить tracking доставки:', error?.message ?? data?.message ?? 'неизвестная ошибка')
+    console.warn(
+      'Не удалось запустить tracking доставки:',
+      error?.message ?? data?.message ?? 'неизвестная ошибка',
+    )
   }
 }
 
@@ -2458,6 +2488,15 @@ function orderDateTime(order: Order) {
             @click="syncNewAllPlatforms"
           >
             {{ isSyncingAllPlatforms ? 'Синхронизация…' : '↻ Новые заказы' }}
+          </button>
+          <button
+            v-if="!isGuest"
+            class="whitespace-nowrap rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isSyncingDelivery"
+            type="button"
+            @click="syncDeliveryTracking"
+          >
+            {{ isSyncingDelivery ? '↻ Обновление…' : '↻ Доставки' }}
           </button>
           <button
             v-if="!isGuest"
