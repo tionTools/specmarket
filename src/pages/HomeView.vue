@@ -1721,6 +1721,11 @@ async function runDeliveryTrackingOnLoad() {
     }
   }
 
+  if (!session) {
+    console.warn('Не удалось авторизовать запуск tracking доставки: сессия отсутствует')
+    return
+  }
+
   user.value = session.user
   const { data, error } = await supabase.functions.invoke<{ ok?: boolean; message?: string }>(
     'sync-delivery-tracking',
