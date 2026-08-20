@@ -81,7 +81,6 @@ type PromRegistryEntry = {
   paymentAmount: number
   acquiring: number
   hasAcquiring: boolean
-  usePaymentAmount?: boolean
 }
 type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта' | 'Meest Express'
 type RegistryKeyType = 'orderNumber' | 'ttn'
@@ -399,9 +398,7 @@ function registryKeyForOrder(order: Order) {
 }
 
 function getRegistryPaymentAmount(order: Order, entry: PromRegistryEntry) {
-  return registrySource.value === 'Kasta' && !entry.usePaymentAmount
-    ? getOrderAmount(order)
-    : entry.paymentAmount
+  return registrySource.value === 'Kasta' ? getOrderAmount(order) : entry.paymentAmount
 }
 
 function parsePromRegistryAmount(value: unknown) {
@@ -614,7 +611,6 @@ async function handlePromRegistryFile(event: Event) {
     const isKasta = header.some((cell) => normalizePromRegistryHeader(cell) === 'замовлення')
     const isKastaFactoring =
       isKasta &&
-      header.some((cell) => normalizePromRegistryHeader(cell) === 'сума (довідково)') &&
       header.some(
         (cell) => normalizePromRegistryHeader(cell) === 'комісія за факторинг (довідково)',
       )
@@ -641,22 +637,19 @@ async function handlePromRegistryFile(event: Event) {
               ? normalizePromRegistryHeader(cell) === 'номер посилки'
               : normalizePromRegistryHeader(cell) === '№ замовлення',
     )
-    const paymentColumn =
-      isKasta && !isKastaFactoring
-        ? -1
-        : header.findIndex((cell) =>
-            isNovaPay
-              ? ['сума прийнятих коштів', 'сума принятих коштів'].includes(
-                  normalizePromRegistryHeader(cell),
-                )
-              : isKastaFactoring
-                ? normalizePromRegistryHeader(cell) === 'сума (довідково)'
-                : isUkrposhta
-                  ? normalizePromRegistryHeader(cell) === 'сума, грн.'
-                  : isMeest
-                    ? normalizePromRegistryHeader(cell) === 'cod оплачено'
-                    : normalizePromRegistryHeader(cell) === 'сума платежу',
-          )
+    const paymentColumn = isKasta
+      ? -1
+      : header.findIndex((cell) =>
+          isNovaPay
+            ? ['сума прийнятих коштів', 'сума принятих коштів'].includes(
+                normalizePromRegistryHeader(cell),
+              )
+            : isUkrposhta
+              ? normalizePromRegistryHeader(cell) === 'сума, грн.'
+              : isMeest
+                ? normalizePromRegistryHeader(cell) === 'cod оплачено'
+                : normalizePromRegistryHeader(cell) === 'сума платежу',
+        )
     const acquiringColumn =
       isUkrposhta || isMeest
         ? -1
@@ -671,7 +664,7 @@ async function handlePromRegistryFile(event: Event) {
     if (
       keyColumn < 0 ||
       (!isUkrposhta && !isMeest && acquiringColumn < 0) ||
-      ((!isKasta || isKastaFactoring) && paymentColumn < 0)
+      (!isKasta && paymentColumn < 0)
     ) {
       throw new Error(`В реестре ${source} не найдены нужные колонки.`)
     }
@@ -686,10 +679,8 @@ async function handlePromRegistryFile(event: Event) {
         paymentAmount: 0,
         acquiring: 0,
         hasAcquiring: !isUkrposhta && !isMeest,
-        usePaymentAmount: isKastaFactoring,
       }
-      if (!isKasta || isKastaFactoring)
-        entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
+      if (!isKasta) entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
       if (!isUkrposhta && !isMeest) {
         entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
       }
