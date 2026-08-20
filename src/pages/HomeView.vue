@@ -1706,12 +1706,36 @@ async function loadRemoteOrders() {
     )
 }
 
+async function runDeliveryTrackingOnLoad() {
+  if (!supabase || isGuest.value) return
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+  let session = sessionData.session
+  const expiresSoon = !session?.expires_at || session.expires_at * 1000 - Date.now() < 60_000
+  if (sessionError || expiresSoon) {
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+    session = refreshed.session
+    if (refreshError || !session) {
+      console.warn('Не удалось авторизовать запуск tracking доставки:', refreshError?.message ?? sessionError?.message ?? 'сессия отсутствует')
+      return
+    }
+  }
+
+  user.value = session.user
+  const { data, error } = await supabase.functions.invoke<{ ok?: boolean; message?: string }>(
+    'sync-delivery-tracking',
+    { method: 'POST' },
+  )
+  if (error || !data?.ok) {
+    console.warn('Не удалось запустить tracking доставки:', error?.message ?? data?.message ?? 'неизвестная ошибка')
+  }
+}
+
 onMounted(async () => {
   await loadRemoteOrders()
   // Функция сама проверяет киевское расписание и обрабатывает только просроченные доставки.
   // Запуск при открытии CRM нужен, чтобы не ждать ближайшего cron-цикла после простоя вкладки.
-  if (supabase && !isGuest.value)
-    void supabase.functions.invoke('sync-delivery-tracking', { method: 'POST' })
+  await runDeliveryTrackingOnLoad()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
