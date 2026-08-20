@@ -131,8 +131,8 @@ function orderDateKey(value: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, isReceived: boolean): number | undefined {
-  if (!isReceived) return 0
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, isCancelledOrReturned: boolean): number | undefined {
+  if (isCancelledOrReturned) return 0
   if (!blackUsed) return 0
   const tariff = [...TARIF_SCHEDULE]
     .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
@@ -140,6 +140,14 @@ function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: numb
   if (!tariff) return undefined
   if (customerDeliveryFee > 0) return 0
   return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost ?? 0
+}
+
+function isCancelledOrReturned(order: RecordValue): boolean {
+  const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
+  return statuses.some((status) => {
+    const type = text(status.type)
+    return type === 'Cancelled' || /^(?:Return|Refund)/.test(type)
+  })
 }
 
 function orderAmount(order: RecordValue, items: RecordValue[]): number {
@@ -313,7 +321,11 @@ Deno.serve(async (request) => {
     const deliveryFee = customerDeliveryFee(order, delivery)
     const receivedDate = receivedAt(order)
     const blackUsed = delivery.black_used === true
-    const calculatedShipping = calculateKastaDeliveryCost(orderDateKey(receivedDate), deliveryFee, orderAmount(order, items), blackUsed, Boolean(receivedDate))
+    // Show the expected co-finance as soon as the order is created. Once Kasta
+    // records receipt, its date becomes the tariff date; cancelled/returned
+    // orders are always cleared automatically.
+    const tariffDate = orderDateKey(receivedDate || createdAt)
+    const calculatedShipping = calculateKastaDeliveryCost(tariffDate, deliveryFee, orderAmount(order, items), blackUsed, isCancelledOrReturned(order))
     const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
