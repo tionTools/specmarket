@@ -882,18 +882,6 @@ const matchingOrders = computed(() => {
   const isTtnSearch = /^[\d\s-]+$/.test(search)
   const { from, to } = orderListRange.value
   return orders.value.filter((order) => {
-    const matchesPlatform =
-      isShowingCancelledAndReturned.value ||
-      platformFilter.value === 'all' ||
-      order.platform === platformFilter.value
-    const matchesOrderState = isPromRegistryView.value
-      ? true
-      : isShowingCancelledAndReturned.value
-        ? isCancelledOrReturned(order)
-        : !isCancelledOrReturned(order)
-    const orderDate = parseOrderDate(order.date)
-    const matchesPeriod =
-      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
     const haystack = [
       JSON.stringify(order),
       displayPaymentMethod(order.delivery.paymentMethod),
@@ -907,12 +895,26 @@ const matchingOrders = computed(() => {
       isTtnSearch &&
       ttnSearch.length >= 4 &&
       order.delivery.ttn.replace(/\D/g, '').includes(ttnSearch)
+
+    if (search) return haystack.includes(search) || matchesTtn
+
+    const matchesPlatform =
+      isShowingCancelledAndReturned.value ||
+      platformFilter.value === 'all' ||
+      order.platform === platformFilter.value
+    const matchesOrderState = isPromRegistryView.value
+      ? true
+      : isShowingCancelledAndReturned.value
+        ? isCancelledOrReturned(order)
+        : !isCancelledOrReturned(order)
+    const orderDate = parseOrderDate(order.date)
+    const matchesPeriod =
+      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
       matchesPlatform &&
       matchesOrderState &&
       matchesPeriod &&
-      (!isPromRegistryView.value || promRegistryOrders.value.includes(order)) &&
-      (!search || haystack.includes(search) || matchesTtn)
+      (!isPromRegistryView.value || promRegistryOrders.value.includes(order))
     )
   })
 })
@@ -920,7 +922,7 @@ const unpaidOrdersCount = computed(
   () => matchingOrders.value.filter((order) => !isPaid(order)).length,
 )
 const visibleOrders = computed(() =>
-  isShowingUnpaidOnly.value
+  isShowingUnpaidOnly.value && !searchQuery.value.trim()
     ? matchingOrders.value.filter((order) => !isPaid(order))
     : matchingOrders.value,
 )
