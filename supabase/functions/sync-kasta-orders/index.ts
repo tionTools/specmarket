@@ -309,16 +309,30 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status: 502, headers: corsHeaders })
   }
   const orders = Array.isArray(payload.items) ? payload.items.map(asRecord) : []
+  const externalIds = [...new Set(orders.map((order) => text(order.id)).filter(Boolean).map((id) => `kasta:${id}`))]
+  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
+    ? await admin
+      .from('crm_deleted_marketplace_orders')
+      .select('external_id')
+      .eq('platform', 'Каста')
+      .in('external_id', externalIds)
+    : { data: [], error: null }
+  if (deletedOrdersError) {
+    return Response.json({ ok: false, message: `Не удалось проверить удалённые Kasta-заказы (${deletedOrdersError.message}).` }, { status: 500, headers: corsHeaders })
+  }
+  const deletedExternalIds = new Set((deletedOrders ?? []).map((order) => text(order.external_id)))
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   const royaltyCache = new Map<string, number>()
   let created = 0
   let updated = 0
   let skipped = 0
+  let deletedSkipped = 0
 
   for (const order of orders) {
     const kastaId = text(order.id)
     if (!kastaId) continue
     const externalId = `kasta:${kastaId}`
+    if (deletedExternalIds.has(externalId)) { deletedSkipped += 1; continue }
     const { data: existing } = await admin.from('crm_orders').select('id, shipping, acquiring, acquiring_percent, delivery').eq('external_id', externalId).maybeSingle()
     if (existing && !fullSync && !targetOrderId) { skipped += 1; continue }
     const client = asRecord(order.client)
@@ -412,5 +426,5 @@ Deno.serve(async (request) => {
     }
     await admin.from('crm_order_items').insert(savedItems)
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped, remains: number(payload.remains) }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped, deletedSkipped, remains: number(payload.remains) }, { headers: corsHeaders })
 })

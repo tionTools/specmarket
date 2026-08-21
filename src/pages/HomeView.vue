@@ -2087,6 +2087,28 @@ async function deleteOrder(order: Order) {
   if (!window.confirm(`Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`)) return
   deletingOrderId.value = order.id
   await persistenceQueue
+  if (order.platform === 'Каста' && order.externalId) {
+    if (!supabase) {
+      window.alert('Не удалось сохранить запрет повторного импорта Kasta-заказа.')
+      deletingOrderId.value = null
+      return
+    }
+    const { error: tombstoneError } = await supabase.from('crm_deleted_marketplace_orders').upsert(
+      {
+        platform: 'Каста',
+        external_id: order.externalId,
+        order_label: order.displayNumber ?? String(order.id),
+      },
+      { onConflict: 'platform,external_id' },
+    )
+    if (tombstoneError) {
+      window.alert(
+        `Не удалось сохранить запрет повторного импорта Kasta-заказа: ${tombstoneError.message}`,
+      )
+      deletingOrderId.value = null
+      return
+    }
+  }
   if (supabase && order.remoteId) {
     const { error: itemsError } = await supabase
       .from('crm_order_items')
