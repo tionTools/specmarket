@@ -98,13 +98,15 @@ const myNumber = computed(() => {
 const accountingTotal = computed(
   () => numberValue(accountingUsd.value) * usdRate.value + numberValue(accountingUah.value),
 )
-const myNumberAfterAdjustment = computed(() => myNumber.value + numberValue(adjustmentUah.value))
-const discrepancy = computed(
-  () => accountingTotal.value - numberValue(reserveUah.value) - myNumberAfterAdjustment.value,
+const accountingForComparison = computed(
+  () => accountingTotal.value - numberValue(reserveUah.value),
 )
+const myNumberAfterAdjustment = computed(() => myNumber.value + numberValue(adjustmentUah.value))
+const discrepancy = computed(() => accountingForComparison.value - myNumberAfterAdjustment.value)
 const history = computed(() =>
   reconciliations.value.filter((item) => item.kind === 'reconciliation'),
 )
+const latestReconciliation = computed(() => history.value.at(0) ?? null)
 
 async function load() {
   if (!supabase) {
@@ -219,6 +221,28 @@ async function deletePayment(payment: SupplierPayment) {
     error.value = deleteError.message
     return
   }
+  await load()
+}
+
+async function deleteLatestReconciliation() {
+  const reconciliation = latestReconciliation.value
+  if (
+    !supabase ||
+    isGuest.value ||
+    !reconciliation ||
+    !window.confirm('Удалить последнюю сверку и вернуться к предыдущей точке отсчёта?')
+  )
+    return
+  const { error: deleteError } = await supabase
+    .from('crm_reconciliations')
+    .delete()
+    .eq('id', reconciliation.id)
+    .eq('kind', 'reconciliation')
+  if (deleteError) {
+    error.value = deleteError.message
+    return
+  }
+  notice.value = 'Последняя сверка удалена. Предыдущая точка снова используется для расчёта.'
   await load()
 }
 
@@ -369,6 +393,12 @@ onMounted(load)
                   placeholder="0,00"
               /></label>
               <label class="text-sm font-medium text-slate-600"
+                >1С для сверки<input
+                  :value="money(accountingForComparison)"
+                  readonly
+                  class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
+              /></label>
+              <label class="text-sm font-medium text-slate-600"
                 >Моя цифра<input
                   :value="money(myNumber)"
                   readonly
@@ -465,6 +495,7 @@ onMounted(load)
                     <th class="pb-2">Итоговое сальдо</th>
                     <th class="pb-2">Сторно</th>
                     <th class="pb-2">Расхождение</th>
+                    <th v-if="!isGuest" class="pb-2"><span class="sr-only">Действия</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -475,6 +506,15 @@ onMounted(load)
                     </td>
                     <td class="py-2">{{ money(Number(item.adjustment_uah)) }}</td>
                     <td class="py-2">{{ money(Number(item.discrepancy_uah)) }}</td>
+                    <td v-if="!isGuest" class="py-2 text-right">
+                      <button
+                        v-if="item.id === latestReconciliation?.id"
+                        class="rounded-lg px-2 py-1 text-rose-700 hover:bg-rose-50"
+                        @click="deleteLatestReconciliation"
+                      >
+                        Удалить последнюю
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
