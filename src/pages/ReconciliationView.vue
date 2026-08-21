@@ -30,6 +30,9 @@ type SupplierPayment = {
   id: string
   paid_at: string
   amount_uah: number
+  supplier_rate: number
+  debt_usd: number
+  debt_uah: number
   note: string | null
   created_at: string
 }
@@ -55,7 +58,10 @@ const initialDate = ref(new Date().toISOString().slice(0, 10))
 const initialDebtUsd = ref('')
 const initialDebtUah = ref('')
 const paymentDate = ref(new Date().toISOString().slice(0, 10))
-const paymentAmount = ref('')
+const paymentTransferredUah = ref('')
+const paymentSupplierRate = ref('')
+const paymentDebtUsd = ref('')
+const paymentDebtUah = ref('')
 const paymentNote = ref('')
 const accountingUsd = ref('')
 const accountingUah = ref('')
@@ -74,6 +80,12 @@ function money(value: number) {
   }).format(value)
 }
 
+function paymentEquivalent(
+  payment: Pick<SupplierPayment, 'supplier_rate' | 'debt_usd' | 'debt_uah'>,
+) {
+  return Number(payment.debt_usd) * Number(payment.supplier_rate) + Number(payment.debt_uah)
+}
+
 function dateTime(value: string) {
   return new Intl.DateTimeFormat('uk-UA', { dateStyle: 'short', timeStyle: 'short' }).format(
     new Date(value),
@@ -87,18 +99,25 @@ function isCancelledOrReturned(status: string) {
 const latestCheckpoint = computed(() => reconciliations.value.at(0) ?? null)
 const paymentsAfterCheckpoint = computed(() => {
   const checkpoint = latestCheckpoint.value
-  if (!checkpoint) return 0
+  if (!checkpoint) return { usd: 0, uah: 0 }
   const checkpointCreatedAt = Date.parse(checkpoint.created_at)
   return payments.value
     .filter((payment) => Date.parse(payment.created_at) > checkpointCreatedAt)
-    .reduce((total, payment) => total + Number(payment.amount_uah), 0)
+    .reduce(
+      (total, payment) => ({
+        usd: total.usd + Number(payment.debt_usd),
+        uah: total.uah + Number(payment.debt_uah),
+      }),
+      { usd: 0, uah: 0 },
+    )
 })
 const myDebtUsd = computed(() => {
   const checkpoint = latestCheckpoint.value
   if (!checkpoint) return 0
   return (
     Number(checkpoint.crm_balance_usd_after_adjustment) +
-    (currentCostUsd.value - Number(checkpoint.cost_snapshot_usd))
+    (currentCostUsd.value - Number(checkpoint.cost_snapshot_usd)) -
+    paymentsAfterCheckpoint.value.usd
   )
 })
 const myDebtUah = computed(() => {
@@ -107,7 +126,7 @@ const myDebtUah = computed(() => {
   return (
     Number(checkpoint.crm_balance_uah_after_adjustment) +
     (currentCostUah.value - Number(checkpoint.cost_snapshot_uah)) -
-    paymentsAfterCheckpoint.value
+    paymentsAfterCheckpoint.value.uah
   )
 })
 const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
@@ -118,11 +137,24 @@ const accountingForComparison = computed(
   () => accountingTotal.value - numberValue(reserveUah.value),
 )
 const myNumberAfterAdjustment = computed(() => myNumber.value + numberValue(adjustmentUah.value))
-const discrepancy = computed(() => accountingForComparison.value - myNumberAfterAdjustment.value)
-const history = computed(() =>
-  reconciliations.value.filter((item) => item.kind === 'reconciliation'),
+const paymentDraftEquivalent = computed(
+  () =>
+    numberValue(paymentDebtUsd.value) * numberValue(paymentSupplierRate.value) +
+    numberValue(paymentDebtUah.value),
 )
-const latestReconciliation = computed(() => history.value.at(0) ?? null)
+const paymentDraftDifference = computed(
+  () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
+)
+const hasAccountingInput = computed(() =>
+  Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
+)
+const discrepancy = computed(() =>
+  hasAccountingInput.value ? accountingForComparison.value - myNumberAfterAdjustment.value : null,
+)
+const history = computed(() => reconciliations.value)
+const latestReconciliation = computed(
+  () => reconciliations.value.find((item) => item.kind === 'reconciliation') ?? null,
+)
 
 async function load() {
   if (!supabase) {
@@ -214,9 +246,20 @@ async function saveInitialBalance() {
 }
 
 async function addPayment() {
-  const amount = numberValue(paymentAmount.value)
-  if (!supabase || isGuest.value || !latestCheckpoint.value || !paymentDate.value || amount <= 0) {
-    error.value = 'Укажите дату и сумму платежа больше нуля.'
+  const amount = numberValue(paymentTransferredUah.value)
+  const supplierRate = numberValue(paymentSupplierRate.value)
+  const debtUsd = numberValue(paymentDebtUsd.value)
+  const debtUah = numberValue(paymentDebtUah.value)
+  if (
+    !supabase ||
+    isGuest.value ||
+    !latestCheckpoint.value ||
+    !paymentDate.value ||
+    amount <= 0 ||
+    supplierRate <= 0 ||
+    (debtUsd <= 0 && debtUah <= 0)
+  ) {
+    error.value = 'Укажите дату, перечисленную сумму, курс поставщика и закрытую часть долга.'
     return
   }
   isSaving.value = true
@@ -224,6 +267,9 @@ async function addPayment() {
   const { error: saveError } = await supabase.from('crm_supplier_payments').insert({
     paid_at: paymentDate.value,
     amount_uah: amount,
+    supplier_rate: supplierRate,
+    debt_usd: debtUsd,
+    debt_uah: debtUah,
     note: paymentNote.value.trim() || null,
   })
   isSaving.value = false
@@ -231,7 +277,10 @@ async function addPayment() {
     error.value = saveError.message
     return
   }
-  paymentAmount.value = ''
+  paymentTransferredUah.value = ''
+  paymentSupplierRate.value = ''
+  paymentDebtUsd.value = ''
+  paymentDebtUah.value = ''
   paymentNote.value = ''
   await load()
 }
@@ -273,6 +322,10 @@ async function deleteLatestReconciliation() {
 
 async function saveReconciliation() {
   if (!supabase || isGuest.value || !latestCheckpoint.value) return
+  if (!hasAccountingInput.value || discrepancy.value === null) {
+    error.value = 'Введите доллары 1С или гривну 1С перед фиксацией сверки.'
+    return
+  }
   isSaving.value = true
   error.value = ''
   const { error: saveError } = await supabase.from('crm_reconciliations').insert({
@@ -421,7 +474,7 @@ onMounted(load)
               /></label>
               <label class="text-sm font-medium text-slate-600"
                 >Всего 1С<input
-                  :value="money(accountingTotal)"
+                  :value="hasAccountingInput ? money(accountingTotal) : '—'"
                   readonly
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
               /></label>
@@ -435,7 +488,7 @@ onMounted(load)
               /></label>
               <label class="text-sm font-medium text-slate-600"
                 >1С для сверки<input
-                  :value="money(accountingForComparison)"
+                  :value="hasAccountingInput ? money(accountingForComparison) : '—'"
                   readonly
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
               /></label>
@@ -475,9 +528,12 @@ onMounted(load)
             <div
               class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4"
             >
-              <strong>Не сходится: {{ money(discrepancy) }} грн</strong>
+              <strong v-if="hasAccountingInput"
+                >Не сходится: {{ money(discrepancy ?? 0) }} грн</strong
+              >
+              <strong v-else class="text-slate-500">Введите данные 1С</strong>
               <button
-                :disabled="isGuest || isSaving"
+                :disabled="isGuest || isSaving || !hasAccountingInput"
                 class="rounded-xl bg-emerald-700 px-4 py-2.5 font-semibold text-white disabled:opacity-50"
                 @click="saveReconciliation"
               >
@@ -488,7 +544,7 @@ onMounted(load)
 
           <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="text-lg font-bold">Платежи поставщику</h2>
-            <div class="mt-4 grid gap-3 sm:grid-cols-[10rem_10rem_minmax(0,1fr)_auto]">
+            <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <input
                 v-model="paymentDate"
                 :disabled="isGuest || isSaving"
@@ -497,11 +553,32 @@ onMounted(load)
                 aria-label="Дата платежа"
               />
               <input
-                v-model="paymentAmount"
+                v-model="paymentTransferredUah"
                 :disabled="isGuest || isSaving"
                 class="rounded-lg border border-slate-300 px-3 py-2"
                 inputmode="decimal"
-                placeholder="Сумма, грн"
+                placeholder="Перечислено, грн"
+              />
+              <input
+                v-model="paymentSupplierRate"
+                :disabled="isGuest || isSaving"
+                class="rounded-lg border border-slate-300 px-3 py-2"
+                inputmode="decimal"
+                placeholder="Курс поставщика"
+              />
+              <input
+                v-model="paymentDebtUsd"
+                :disabled="isGuest || isSaving"
+                class="rounded-lg border border-slate-300 px-3 py-2"
+                inputmode="decimal"
+                placeholder="Закрыто USD"
+              />
+              <input
+                v-model="paymentDebtUah"
+                :disabled="isGuest || isSaving"
+                class="rounded-lg border border-slate-300 px-3 py-2"
+                inputmode="decimal"
+                placeholder="Закрыто грн"
               />
               <input
                 v-model="paymentNote"
@@ -509,6 +586,14 @@ onMounted(load)
                 class="rounded-lg border border-slate-300 px-3 py-2"
                 placeholder="Номер счёта или комментарий"
               />
+            </div>
+            <div
+              class="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600"
+            >
+              <span
+                >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
+                {{ money(paymentDraftDifference) }} грн</span
+              >
               <button
                 :disabled="isGuest || isSaving"
                 class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 font-semibold text-emerald-800 disabled:opacity-50"
@@ -524,7 +609,14 @@ onMounted(load)
                 class="flex flex-wrap items-center justify-between gap-3 py-3"
               >
                 <span>{{ payment.paid_at }}</span
-                ><strong>{{ money(Number(payment.amount_uah)) }} грн</strong
+                ><strong>Перечислено: {{ money(Number(payment.amount_uah)) }} грн</strong
+                ><span class="text-slate-600">Курс: {{ money(Number(payment.supplier_rate)) }}</span
+                ><span class="text-slate-600"
+                  >Закрыто: ${{ money(Number(payment.debt_usd)) }} +
+                  {{ money(Number(payment.debt_uah)) }} грн</span
+                ><span class="text-slate-600"
+                  >Экв.: {{ money(paymentEquivalent(payment)) }} грн · Δ
+                  {{ money(Number(payment.amount_uah) - paymentEquivalent(payment)) }} грн</span
                 ><span class="min-w-0 flex-1 text-slate-500">{{ payment.note || '—' }}</span>
                 <button
                   v-if="!isGuest"
@@ -545,7 +637,10 @@ onMounted(load)
                 <thead class="text-slate-500">
                   <tr>
                     <th class="pb-2">Дата</th>
-                    <th class="pb-2">Итоговое сальдо</th>
+                    <th class="pb-2">Тип</th>
+                    <th class="pb-2">USD</th>
+                    <th class="pb-2">Гривна</th>
+                    <th class="pb-2">Итог в грн</th>
                     <th class="pb-2">Сторно</th>
                     <th class="pb-2">Расхождение</th>
                     <th v-if="!isGuest" class="pb-2"><span class="sr-only">Действия</span></th>
@@ -555,10 +650,23 @@ onMounted(load)
                   <tr v-for="item in history" :key="item.id" class="border-t border-slate-100">
                     <td class="py-2">{{ dateTime(item.reconciled_at) }}</td>
                     <td class="py-2 font-semibold">
+                      {{ item.kind === 'initial' ? 'Начальное сальдо' : 'Сверка' }}
+                    </td>
+                    <td class="py-2">
+                      {{ money(Number(item.crm_balance_usd_after_adjustment)) }}
+                    </td>
+                    <td class="py-2">
+                      {{ money(Number(item.crm_balance_uah_after_adjustment)) }}
+                    </td>
+                    <td class="py-2 font-semibold">
                       {{ money(Number(item.crm_balance_after_adjustment)) }}
                     </td>
-                    <td class="py-2">{{ money(Number(item.adjustment_uah)) }}</td>
-                    <td class="py-2">{{ money(Number(item.discrepancy_uah)) }}</td>
+                    <td class="py-2">
+                      {{ item.kind === 'initial' ? '—' : money(Number(item.adjustment_uah)) }}
+                    </td>
+                    <td class="py-2">
+                      {{ item.kind === 'initial' ? '—' : money(Number(item.discrepancy_uah)) }}
+                    </td>
                     <td v-if="!isGuest" class="py-2 text-right">
                       <button
                         v-if="item.id === latestReconciliation?.id"
