@@ -1102,12 +1102,7 @@ async function restoreUncheckedPrintedOrders() {
     (order) => order.delivery.printedAt && !order.delivery.printCheckedAt,
   )
   if (!uncheckedOrders.length) return
-  if (
-    !window.confirm(
-      `Заказы уже учтены в долге поставщику. Возврат ${uncheckedOrders.length} заказов в нераспечатанные уберёт их себестоимость из текущего долга. Продолжить?`,
-    )
-  )
-    return
+  if (!window.confirm(`Вернуть ${uncheckedOrders.length} заказов в нераспечатанные?`)) return
   if (
     !(await savePrintState(
       uncheckedOrders.map((order) => ({ order, printCheckedAt: null, printedAt: null })),
@@ -1123,12 +1118,7 @@ async function restoreUncheckedPrintedOrders() {
 }
 
 async function restorePrintedOrder(order: Order) {
-  if (
-    !window.confirm(
-      `Заказ уже учтён в долге поставщику. Возврат заказа ${order.displayNumber ?? order.id} в нераспечатанные уберёт его себестоимость из текущего долга. Продолжить?`,
-    )
-  )
-    return
+  if (!window.confirm(`Вернуть заказ ${order.displayNumber ?? order.id} в нераспечатанные?`)) return
   if (!(await savePrintState([{ order, printCheckedAt: null, printedAt: null }]))) return
   order.delivery.printCheckedAt = undefined
   order.delivery.printedAt = undefined

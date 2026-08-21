@@ -40,7 +40,7 @@ type SupplierPayment = {
 type OrderCost = {
   id: string
   status: string
-  delivery: { printedAt?: string | null }
+  delivery: { ttn?: string | null }
   crm_order_items: Array<{
     cost: number
     cost_usd: number
@@ -249,7 +249,7 @@ async function load() {
     ]),
   )
   const currentCosts = ((ordersResult.data as OrderCost[]) ?? [])
-    .filter((order) => Boolean(order.delivery?.printedAt))
+    .filter((order) => Boolean(order.delivery?.ttn?.trim()))
     .reduce(
       (total, order) => {
         for (const item of order.crm_order_items ?? []) {
