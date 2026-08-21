@@ -153,9 +153,11 @@ async function novaStatus(ttn: string): Promise<TrackingResult> {
   if (data.success === false) throw new Error(`Nova Poshta API: ${text((Array.isArray(data.errors) ? data.errors : []).at(0)) || 'неизвестная ошибка'}`)
   const shipment = record((Array.isArray(data.data) ? data.data : []).at(0))
   if (!Object.keys(shipment).length) throw new Error('Nova Poshta API не вернула отправление')
-  const base = readableStatus(text(shipment.Status), text(shipment.StatusCode))
+  const source = text(shipment.Status)
+  const base = readableStatus(source, text(shipment.StatusCode))
   return {
     ...base,
+    status: source || base.status,
     provider: 'nova_poshta_api',
     details: {
       trackingEventAt: text(shipment.DateScan) || text(shipment.RecipientDateTime),
@@ -196,6 +198,7 @@ async function meestStatus(ttn: string): Promise<TrackingResult> {
   })))
   return {
     ...base,
+    status: source,
     final,
     provider: 'meest_api',
     details: {
@@ -242,6 +245,7 @@ async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
   const finalDepartment = record(shipment.final_department)
   return {
     ...base,
+    status: source,
     provider: 'rozetka_delivery_public_api',
     details: {
       trackingEventAt: text(latest.date) || text(shipment.last_status_date),
@@ -279,6 +283,7 @@ async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
     : ''
   return {
     ...base,
+    status: source || base.status,
     provider: 'ukrposhta_status_api',
     details: {
       trackingEventAt: text(latest.date),
