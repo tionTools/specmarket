@@ -132,11 +132,15 @@ function dateTime(value: string) {
 const initialCheckpoint = computed(
   () => reconciliations.value.find((item) => item.kind === 'initial') ?? null,
 )
+const latestReconciliation = computed(
+  () => reconciliations.value.find((item) => item.kind === 'reconciliation') ?? null,
+)
+const financialCheckpoint = computed(() => latestReconciliation.value ?? initialCheckpoint.value)
 const paidDebt = computed(() => {
-  const initial = initialCheckpoint.value
-  if (!initial) return { usd: 0, uah: 0 }
+  const checkpoint = financialCheckpoint.value
+  if (!checkpoint) return { usd: 0, uah: 0 }
   return payments.value
-    .filter((payment) => payment.paid_at >= initial.reconciled_at.slice(0, 10))
+    .filter((payment) => payment.created_at > checkpoint.created_at)
     .reduce(
       (total, payment) => ({
         usd: total.usd + Number(payment.debt_usd),
@@ -145,15 +149,8 @@ const paidDebt = computed(() => {
       { usd: 0, uah: 0 },
     )
 })
-const reconciliationAdjustments = computed(() => {
-  const initial = initialCheckpoint.value
-  if (!initial) return 0
-  return reconciliations.value
-    .filter((item) => item.kind === 'reconciliation' && item.created_at > initial.created_at)
-    .reduce((total, item) => total + Number(item.adjustment_uah), 0)
-})
 const myDebtUsd = computed(() => {
-  const checkpoint = initialCheckpoint.value
+  const checkpoint = financialCheckpoint.value
   if (!checkpoint) return 0
   return (
     Number(checkpoint.crm_balance_usd_after_adjustment) +
@@ -162,13 +159,12 @@ const myDebtUsd = computed(() => {
   )
 })
 const myDebtUah = computed(() => {
-  const checkpoint = initialCheckpoint.value
+  const checkpoint = financialCheckpoint.value
   if (!checkpoint) return 0
   return (
     Number(checkpoint.crm_balance_uah_after_adjustment) +
     (currentCostUah.value - Number(checkpoint.cost_snapshot_uah)) -
-    paidDebt.value.uah +
-    reconciliationAdjustments.value
+    paidDebt.value.uah
   )
 })
 const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
@@ -194,9 +190,6 @@ const discrepancy = computed(() =>
   hasAccountingInput.value ? accountingForComparison.value - myNumberAfterAdjustment.value : null,
 )
 const history = computed(() => reconciliations.value)
-const latestReconciliation = computed(
-  () => reconciliations.value.find((item) => item.kind === 'reconciliation') ?? null,
-)
 
 async function load() {
   if (!supabase) {
