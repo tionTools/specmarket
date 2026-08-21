@@ -235,12 +235,15 @@ async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
   const shipment = Array.isArray(payload.data)
     ? record(payload.data.at(0))
     : record(payload.data)
-  const latest = record(shipment.last_status)
-  const source = text(latest.name) || text(shipment.last_status_name)
-  if (!source) throw new Error('Rozetka Delivery не вернул публичный статус')
-  const code = text(latest.id) || text(shipment.last_status)
+  const fallback = record(shipment.last_status)
   const statusGroups = (Array.isArray(shipment.status_groups) ? shipment.status_groups : []).map(record)
   const events = statusGroups.flatMap((group) => (Array.isArray(group.statuses) ? group.statuses : []).map(record))
+  const latest = events.reduce<JsonRecord>((current, event) =>
+    parseTrackingDate(event.date) >= parseTrackingDate(current.date) ? event : current,
+  record(events[0]))
+  const source = text(latest.name) || text(fallback.name) || text(shipment.last_status_name)
+  if (!source) throw new Error('Rozetka Delivery не вернул публичный статус')
+  const code = text(latest.id) || text(fallback.id) || text(shipment.last_status)
   const base = rozetkaReadableStatus(source, code)
   const finalDepartment = record(shipment.final_department)
   return {
@@ -248,8 +251,8 @@ async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
     status: source,
     provider: 'rozetka_delivery_public_api',
     details: {
-      trackingEventAt: text(latest.date) || text(shipment.last_status_date),
-      trackingLocation: rozetkaLocation(latest) || text(finalDepartment.public_name) || text(finalDepartment.name),
+      trackingEventAt: text(latest.date) || text(fallback.date) || text(shipment.last_status_date),
+      trackingLocation: rozetkaLocation(latest) || rozetkaLocation(fallback) || text(finalDepartment.public_name) || text(finalDepartment.name),
       trackingStatusCode: code,
       trackingEvents: compactEvents(events.map((event) => ({
         at: text(event.date),
