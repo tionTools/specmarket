@@ -2,6 +2,7 @@ export type Platform = 'Пром' | 'Эпицентр' | 'Каста' | 'Р/С' 
 
 export interface OrderProduct {
   id: string
+  position?: number
   name: string
   size: string
   imageUrl?: string
@@ -12,6 +13,8 @@ export interface OrderProduct {
   royaltyPercent?: number
   royaltyAmount?: number
   royaltyManual?: boolean
+  returnedQuantity?: number
+  returnedAt?: string
 }
 
 export interface Delivery {
@@ -35,6 +38,7 @@ export interface Delivery {
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
   /** Последний статус, полученный из публичной tracking-ссылки перевозчика. */
   trackingStatus?: string
+  trackingNormalizedStatus?: string
   trackingLastCheckedAt?: string
   trackingStatusChangedAt?: string
   trackingLastError?: string

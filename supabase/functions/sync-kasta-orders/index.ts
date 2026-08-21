@@ -74,19 +74,16 @@ function receivedAt(order: RecordValue): string {
 function itemRows(order: RecordValue) {
   const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
   const isCancelled = statuses.some((status) => text(status.type) === 'Cancelled')
-  const isReturn = statuses.some((status) => /^(?:Return|Refund)/.test(text(status.type)))
   const returnedItems = Array.isArray(order.returned_items) ? order.returned_items : []
   const orderedItems = Array.isArray(order.ordered_items) ? order.ordered_items : Array.isArray(order.items) ? order.items : []
   const cancelledItems = Array.isArray(order.cancelled_items) ? order.cancelled_items : []
   const items = isCancelled && cancelledItems.length
     ? cancelledItems
-    : isReturn && returnedItems.length
-      ? returnedItems
-      : orderedItems.length
-        ? orderedItems
-        : returnedItems.length
-          ? returnedItems
-          : cancelledItems
+    : orderedItems.length
+      ? orderedItems
+      : returnedItems.length
+        ? returnedItems
+        : cancelledItems
   return items.map(asRecord).filter((item) => text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')))
 }
 

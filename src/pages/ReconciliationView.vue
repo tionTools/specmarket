@@ -38,8 +38,22 @@ type SupplierPayment = {
 }
 
 type OrderCost = {
+  id: string
   status: string
-  crm_order_items: Array<{ cost: number; cost_usd: number; quantity: number }>
+  crm_order_items: Array<{
+    cost: number
+    cost_usd: number
+    quantity: number
+    position: number
+    product_name: string
+  }>
+}
+
+type OrderItemReturn = {
+  order_id: string
+  item_position: number
+  product_name: string
+  returned_quantity: number
 }
 
 const router = useRouter()
@@ -114,8 +128,8 @@ function dateTime(value: string) {
   )
 }
 
-function isCancelledOrReturned(status: string) {
-  return /скас|отмен|cancel|повер|возврат|return|refund/.test(status.toLowerCase())
+function isCancelled(status: string) {
+  return /скас|отмен|cancel/.test(status.toLowerCase())
 }
 
 const initialCheckpoint = computed(
@@ -199,23 +213,31 @@ async function load() {
     return
   }
   isGuest.value = session.session.user.email?.toLowerCase() === 'guest@gmail.com'
-  const [settingsResult, reconciliationsResult, paymentsResult, ordersResult] = await Promise.all([
-    supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
-    supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
-    supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
-    supabase.from('crm_orders').select('status, crm_order_items(cost, cost_usd, quantity)'),
-  ])
+  const [settingsResult, reconciliationsResult, paymentsResult, ordersResult, returnsResult] =
+    await Promise.all([
+      supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
+      supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
+      supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
+      supabase
+        .from('crm_orders')
+        .select('id, status, crm_order_items(cost, cost_usd, quantity, position, product_name)'),
+      supabase
+        .from('crm_order_item_returns')
+        .select('order_id, item_position, product_name, returned_quantity'),
+    ])
   if (
     settingsResult.error ||
     reconciliationsResult.error ||
     paymentsResult.error ||
-    ordersResult.error
+    ordersResult.error ||
+    returnsResult.error
   ) {
     error.value = [
       settingsResult.error,
       reconciliationsResult.error,
       paymentsResult.error,
       ordersResult.error,
+      returnsResult.error,
     ]
       .flatMap((item) => (item ? [item.message] : []))
       .join(' ')
@@ -228,13 +250,23 @@ async function load() {
     kind: item.kind as Reconciliation['kind'],
   })) as Reconciliation[]
   payments.value = paymentsResult.data ?? []
+  const returnedQuantities = new Map(
+    ((returnsResult.data as OrderItemReturn[]) ?? []).map((item) => [
+      `${item.order_id}:${item.item_position}:${item.product_name}`,
+      Number(item.returned_quantity),
+    ]),
+  )
   const currentCosts = ((ordersResult.data as OrderCost[]) ?? [])
-    .filter((order) => !isCancelledOrReturned(order.status))
+    .filter((order) => !isCancelled(order.status))
     .reduce(
       (total, order) => {
         for (const item of order.crm_order_items ?? []) {
-          if (Number(item.cost_usd) > 0) total.usd += Number(item.cost_usd) * Number(item.quantity)
-          else total.uah += Number(item.cost) * Number(item.quantity)
+          const returnedQuantity = returnedQuantities.get(
+            `${order.id}:${item.position}:${item.product_name}`,
+          )
+          const netQuantity = Math.max(0, Number(item.quantity) - (returnedQuantity ?? 0))
+          if (Number(item.cost_usd) > 0) total.usd += Number(item.cost_usd) * netQuantity
+          else total.uah += Number(item.cost) * netQuantity
         }
         return total
       },
