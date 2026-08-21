@@ -13,10 +13,15 @@ type Reconciliation = {
   accounting_uah: number
   accounting_total: number
   reserve_uah: number
+  crm_balance_usd_before_adjustment: number
+  crm_balance_uah_before_adjustment: number
+  crm_balance_usd_after_adjustment: number
+  crm_balance_uah_after_adjustment: number
   crm_balance_before_adjustment: number
   adjustment_uah: number
   crm_balance_after_adjustment: number
   discrepancy_uah: number
+  cost_snapshot_usd: number
   cost_snapshot_uah: number
   created_at: string
 }
@@ -31,14 +36,15 @@ type SupplierPayment = {
 
 type OrderCost = {
   status: string
-  crm_order_items: Array<{ cost: number; quantity: number }>
+  crm_order_items: Array<{ cost: number; cost_usd: number; quantity: number }>
 }
 
 const router = useRouter()
 const reconciliations = ref<Reconciliation[]>([])
 const payments = ref<SupplierPayment[]>([])
 const usdRate = ref(0)
-const currentCost = ref(0)
+const currentCostUsd = ref(0)
+const currentCostUah = ref(0)
 const isGuest = ref(false)
 const isLoading = ref(true)
 const isSaving = ref(false)
@@ -46,7 +52,8 @@ const notice = ref('')
 const error = ref('')
 
 const initialDate = ref(new Date().toISOString().slice(0, 10))
-const initialBalance = ref('')
+const initialDebtUsd = ref('')
+const initialDebtUah = ref('')
 const paymentDate = ref(new Date().toISOString().slice(0, 10))
 const paymentAmount = ref('')
 const paymentNote = ref('')
@@ -86,15 +93,24 @@ const paymentsAfterCheckpoint = computed(() => {
     .filter((payment) => Date.parse(payment.created_at) > checkpointCreatedAt)
     .reduce((total, payment) => total + Number(payment.amount_uah), 0)
 })
-const myNumber = computed(() => {
+const myDebtUsd = computed(() => {
   const checkpoint = latestCheckpoint.value
   if (!checkpoint) return 0
   return (
-    Number(checkpoint.crm_balance_after_adjustment) +
-    (currentCost.value - Number(checkpoint.cost_snapshot_uah)) -
+    Number(checkpoint.crm_balance_usd_after_adjustment) +
+    (currentCostUsd.value - Number(checkpoint.cost_snapshot_usd))
+  )
+})
+const myDebtUah = computed(() => {
+  const checkpoint = latestCheckpoint.value
+  if (!checkpoint) return 0
+  return (
+    Number(checkpoint.crm_balance_uah_after_adjustment) +
+    (currentCostUah.value - Number(checkpoint.cost_snapshot_uah)) -
     paymentsAfterCheckpoint.value
   )
 })
+const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
 const accountingTotal = computed(
   () => numberValue(accountingUsd.value) * usdRate.value + numberValue(accountingUah.value),
 )
@@ -124,7 +140,7 @@ async function load() {
     supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
     supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
     supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
-    supabase.from('crm_orders').select('status, crm_order_items(cost, quantity)'),
+    supabase.from('crm_orders').select('status, crm_order_items(cost, cost_usd, quantity)'),
   ])
   if (
     settingsResult.error ||
@@ -149,25 +165,29 @@ async function load() {
     kind: item.kind as Reconciliation['kind'],
   })) as Reconciliation[]
   payments.value = paymentsResult.data ?? []
-  currentCost.value = ((ordersResult.data as OrderCost[]) ?? [])
+  const currentCosts = ((ordersResult.data as OrderCost[]) ?? [])
     .filter((order) => !isCancelledOrReturned(order.status))
     .reduce(
-      (total, order) =>
-        total +
-        (order.crm_order_items ?? []).reduce(
-          (orderTotal, item) => orderTotal + Number(item.cost) * Number(item.quantity),
-          0,
-        ),
-      0,
+      (total, order) => {
+        for (const item of order.crm_order_items ?? []) {
+          if (Number(item.cost_usd) > 0) total.usd += Number(item.cost_usd) * Number(item.quantity)
+          else total.uah += Number(item.cost) * Number(item.quantity)
+        }
+        return total
+      },
+      { usd: 0, uah: 0 },
     )
+  currentCostUsd.value = currentCosts.usd
+  currentCostUah.value = currentCosts.uah
   isLoading.value = false
 }
 
 async function saveInitialBalance() {
   if (!supabase || isGuest.value || latestCheckpoint.value) return
-  const balance = numberValue(initialBalance.value)
-  if (!initialDate.value || !Number.isFinite(balance)) {
-    error.value = 'Укажите дату и начальное сальдо.'
+  const debtUsd = numberValue(initialDebtUsd.value)
+  const debtUah = numberValue(initialDebtUah.value)
+  if (!initialDate.value || !Number.isFinite(debtUsd) || !Number.isFinite(debtUah)) {
+    error.value = 'Укажите дату и начальный долг в USD и гривне.'
     return
   }
   isSaving.value = true
@@ -175,16 +195,21 @@ async function saveInitialBalance() {
   const { error: saveError } = await supabase.from('crm_reconciliations').insert({
     kind: 'initial',
     reconciled_at: new Date(`${initialDate.value}T12:00:00`).toISOString(),
-    crm_balance_before_adjustment: balance,
-    crm_balance_after_adjustment: balance,
-    cost_snapshot_uah: currentCost.value,
+    crm_balance_usd_before_adjustment: debtUsd,
+    crm_balance_uah_before_adjustment: debtUah,
+    crm_balance_usd_after_adjustment: debtUsd,
+    crm_balance_uah_after_adjustment: debtUah,
+    crm_balance_before_adjustment: debtUsd * usdRate.value + debtUah,
+    crm_balance_after_adjustment: debtUsd * usdRate.value + debtUah,
+    cost_snapshot_usd: currentCostUsd.value,
+    cost_snapshot_uah: currentCostUah.value,
   })
   isSaving.value = false
   if (saveError) {
     error.value = saveError.message
     return
   }
-  notice.value = 'Начальное сальдо и snapshot себестоимости зафиксированы.'
+  notice.value = 'Начальный долг и snapshot себестоимости в двух валютах зафиксированы.'
   await load()
 }
 
@@ -260,14 +285,22 @@ async function saveReconciliation() {
     crm_balance_before_adjustment: myNumber.value,
     adjustment_uah: numberValue(adjustmentUah.value),
     crm_balance_after_adjustment: myNumberAfterAdjustment.value,
+    crm_balance_usd_before_adjustment: myDebtUsd.value,
+    crm_balance_uah_before_adjustment: myDebtUah.value,
+    crm_balance_usd_after_adjustment: myDebtUsd.value,
+    crm_balance_uah_after_adjustment: myDebtUah.value + numberValue(adjustmentUah.value),
     discrepancy_uah: discrepancy.value,
-    cost_snapshot_uah: currentCost.value,
+    cost_snapshot_usd: currentCostUsd.value,
+    cost_snapshot_uah: currentCostUah.value,
   })
   isSaving.value = false
   if (saveError) {
     error.value = saveError.message
     return
   }
+  accountingUsd.value = ''
+  accountingUah.value = ''
+  reserveUah.value = ''
   adjustmentUah.value = ''
   notice.value = 'Сверка зафиксирована. Итоговое сальдо стало новой точкой отсчёта.'
   await load()
@@ -313,7 +346,7 @@ onMounted(load)
         >
           <h2 class="text-lg font-bold text-amber-950">Начальное сальдо</h2>
           <p class="mt-1 text-sm text-amber-900">
-            Это разовая точка отсчёта. Текущая сумма себестоимостей CRM сохранится вместе с ней.
+            Это разовая точка отсчёта. Себестоимости CRM в USD и гривне сохранятся отдельно.
           </p>
           <div class="mt-4 grid gap-3 sm:grid-cols-2">
             <label class="text-sm font-medium"
@@ -324,8 +357,16 @@ onMounted(load)
                 type="date"
             /></label>
             <label class="text-sm font-medium"
-              >Реальное сальдо, грн<input
-                v-model="initialBalance"
+              >Долг поставщику, USD<input
+                v-model="initialDebtUsd"
+                :disabled="isGuest || isSaving"
+                class="mt-1 block w-full rounded-lg border border-amber-200 bg-white px-3 py-2"
+                inputmode="decimal"
+                placeholder="0,00"
+            /></label>
+            <label class="text-sm font-medium"
+              >Долг поставщику, грн<input
+                v-model="initialDebtUah"
                 :disabled="isGuest || isSaving"
                 class="mt-1 block w-full rounded-lg border border-amber-200 bg-white px-3 py-2"
                 inputmode="decimal"
@@ -347,12 +388,12 @@ onMounted(load)
               <div>
                 <h2 class="text-lg font-bold">Текущая сверка</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                  Курс берётся из раздела «Цены». Сумма себестоимостей CRM:
-                  {{ money(currentCost) }} грн.
+                  Курс берётся из раздела «Цены». Snapshot себестоимостей ведётся отдельно в USD и
+                  гривне.
                 </p>
               </div>
               <strong class="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-900"
-                >Моя цифра: {{ money(myNumber) }} грн</strong
+                >Моя сумма: {{ money(myNumber) }} грн</strong
               >
             </div>
             <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -363,7 +404,7 @@ onMounted(load)
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
               /></label>
               <label class="text-sm font-medium text-slate-600"
-                >Доллары<input
+                >Доллары 1С<input
                   v-model="accountingUsd"
                   :disabled="isGuest"
                   class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
@@ -371,7 +412,7 @@ onMounted(load)
                   placeholder="0,00"
               /></label>
               <label class="text-sm font-medium text-slate-600"
-                >Гривна<input
+                >Гривна 1С<input
                   v-model="accountingUah"
                   :disabled="isGuest"
                   class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
@@ -399,7 +440,19 @@ onMounted(load)
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
               /></label>
               <label class="text-sm font-medium text-slate-600"
-                >Моя цифра<input
+                >Мои доллары<input
+                  :value="money(myDebtUsd)"
+                  readonly
+                  class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
+              /></label>
+              <label class="text-sm font-medium text-slate-600"
+                >Моя гривна<input
+                  :value="money(myDebtUah)"
+                  readonly
+                  class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
+              /></label>
+              <label class="text-sm font-medium text-slate-600"
+                >Моя сумма в грн<input
                   :value="money(myNumber)"
                   readonly
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
@@ -413,7 +466,7 @@ onMounted(load)
                   placeholder="+/- 0,00"
               /></label>
               <label class="text-sm font-medium text-slate-600"
-                >Моя цифра после сторно<input
+                >Моя сумма после сторно<input
                   :value="money(myNumberAfterAdjustment)"
                   readonly
                   class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
