@@ -120,8 +120,8 @@ const printRegistryMode = ref<'draft' | 'history' | null>(null)
 const printRegistryOrderIds = ref<Array<string | number>>([])
 const isUpdatingPrintRegistry = ref(false)
 const isPreparingPrintRegistry = ref(false)
-const returnEditorKey = ref<string | null>(null)
-const returnDraftQuantity = ref('')
+const returnEditorOrderId = ref<string | number | null>(null)
+const returnDraftQuantities = ref<Record<string, string>>({})
 const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
 const isSavingReturn = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
@@ -1288,69 +1288,41 @@ function productReturnKey(order: Order, product: OrderProduct) {
   return `${order.remoteId ?? ''}:${product.position ?? -1}:${product.name}`
 }
 
-function isReturnEditorOpen(order: Order, product: OrderProduct) {
-  return returnEditorKey.value === productReturnKey(order, product)
+function hasReturnSignal(order: Order) {
+  return (
+    /повер|возврат|return|refund/i.test(order.status) ||
+    order.delivery.trackingNormalizedStatus === 'returned'
+  )
 }
 
-function openReturnEditor(order: Order, product: OrderProduct) {
-  if (isGuest.value || !order.remoteId || product.position === undefined) return
-  const key = productReturnKey(order, product)
-  if (returnEditorKey.value === key) {
-    returnEditorKey.value = null
-    return
-  }
-  returnEditorKey.value = key
-  returnDraftQuantity.value = String(product.returnedQuantity ?? 0)
-  returnDraftDate.value = product.returnedAt ?? new Date().toISOString().slice(0, 10)
+function isReturnEditorOpen(order: Order) {
+  return returnEditorOrderId.value === order.id
 }
 
-async function saveProductReturn(order: Order, product: OrderProduct) {
-  if (
-    !supabase ||
-    isGuest.value ||
-    isSavingReturn.value ||
-    !order.remoteId ||
-    product.position === undefined
-  )
-    return
-  const returnedQuantity = Number(returnDraftQuantity.value)
-  if (
-    !Number.isInteger(returnedQuantity) ||
-    returnedQuantity < 0 ||
-    returnedQuantity > product.quantity ||
-    !returnDraftDate.value
-  ) {
-    showSyncError(`Укажите целое количество от 0 до ${product.quantity} и дату возврата.`)
+function returnDraftQuantity(order: Order, product: OrderProduct) {
+  return returnDraftQuantities.value[productReturnKey(order, product)] ?? '0'
+}
+
+function openReturnEditor(order: Order) {
+  if (isGuest.value || !order.remoteId) return
+  if (isReturnEditorOpen(order)) {
+    returnEditorOrderId.value = null
     return
   }
-  const previousQuantity = product.returnedQuantity ?? 0
-  if (
-    returnedQuantity < previousQuantity &&
-    !window.confirm(
-      `Уменьшить возврат «${product.name}» с ${previousQuantity} до ${returnedQuantity}?`,
-    )
+  returnEditorOrderId.value = order.id
+  returnDraftQuantities.value = Object.fromEntries(
+    order.products.map((product) => [
+      productReturnKey(order, product),
+      String(product.returnedQuantity ?? 0),
+    ]),
   )
-    return
-  isSavingReturn.value = true
-  const { error } = await supabase.from('crm_order_item_returns').upsert(
-    {
-      order_id: order.remoteId,
-      item_position: product.position,
-      product_name: product.name,
-      returned_quantity: returnedQuantity,
-      returned_at: returnDraftDate.value,
-    },
-    { onConflict: 'order_id,item_position,product_name' },
-  )
-  isSavingReturn.value = false
-  if (error) {
-    showSyncError(`Не удалось сохранить возврат: ${error.message}`)
-    return
+  returnDraftDate.value = new Date().toISOString().slice(0, 10)
+}
+
+function acceptWholeReturnDraft(order: Order) {
+  for (const product of order.products) {
+    returnDraftQuantities.value[productReturnKey(order, product)] = String(product.quantity)
   }
-  product.returnedQuantity = returnedQuantity
-  product.returnedAt = returnDraftDate.value
-  returnEditorKey.value = null
-  showSyncMessage(`Возврат по товару «${product.name}» сохранён.`)
 }
 
 function isOrderFullyReturned(order: Order) {
@@ -1360,14 +1332,14 @@ function isOrderFullyReturned(order: Order) {
   )
 }
 
-async function returnWholeOrder(order: Order) {
+async function saveAcceptedReturns(order: Order) {
   if (
     !supabase ||
     isGuest.value ||
     isSavingReturn.value ||
     !order.remoteId ||
     !order.products.length ||
-    !window.confirm(`Отметить возвратом все позиции заказа № ${order.id}?`)
+    !returnDraftDate.value
   )
     return
   const products = order.products.filter(
@@ -1377,15 +1349,44 @@ async function returnWholeOrder(order: Order) {
     showSyncError('Не удалось определить позиции заказа для возврата.')
     return
   }
-  const returnedAt = new Date().toISOString().slice(0, 10)
+  const returnedProducts = products.map((product) => ({
+    product,
+    returnedQuantity: Number(returnDraftQuantity(order, product)),
+  }))
+  if (
+    returnedProducts.some(
+      ({ product, returnedQuantity }) =>
+        !Number.isInteger(returnedQuantity) ||
+        returnedQuantity < 0 ||
+        returnedQuantity > product.quantity,
+    )
+  ) {
+    showSyncError('Укажите целое количество возврата в пределах количества позиции.')
+    return
+  }
+  if (
+    returnedProducts.every(({ returnedQuantity }) => returnedQuantity === 0) &&
+    products.every((product) => (product.returnedQuantity ?? 0) === 0)
+  ) {
+    showSyncError('Укажите хотя бы одну принятую к возврату позицию.')
+    return
+  }
+  const reductions = returnedProducts.filter(
+    ({ product, returnedQuantity }) => returnedQuantity < (product.returnedQuantity ?? 0),
+  )
+  if (
+    reductions.length &&
+    !window.confirm('Уменьшение принятого возврата вернёт себестоимость в долг. Продолжить?')
+  )
+    return
   isSavingReturn.value = true
   const { error } = await supabase.from('crm_order_item_returns').upsert(
-    products.map((product) => ({
+    returnedProducts.map(({ product, returnedQuantity }) => ({
       order_id: order.remoteId,
       item_position: product.position,
       product_name: product.name,
-      returned_quantity: product.quantity,
-      returned_at: returnedAt,
+      returned_quantity: returnedQuantity,
+      returned_at: returnDraftDate.value,
     })),
     { onConflict: 'order_id,item_position,product_name' },
   )
@@ -1394,12 +1395,12 @@ async function returnWholeOrder(order: Order) {
     showSyncError(`Не удалось сохранить возврат: ${error.message}`)
     return
   }
-  for (const product of order.products) {
-    product.returnedQuantity = product.quantity
-    product.returnedAt = returnedAt
+  for (const { product, returnedQuantity } of returnedProducts) {
+    product.returnedQuantity = returnedQuantity
+    product.returnedAt = returnDraftDate.value
   }
-  returnEditorKey.value = null
-  showSyncMessage(`Все позиции заказа № ${order.id} отмечены как возвращённые.`)
+  returnEditorOrderId.value = null
+  showSyncMessage(`Принятый возврат по заказу № ${order.id} сохранён.`)
 }
 
 async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value) {
@@ -3246,14 +3247,22 @@ function orderDateTime(order: Order) {
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-end gap-3">
                 <div class="flex flex-wrap items-center gap-3">
+                  <span
+                    v-if="hasReturnSignal(order) && !isOrderFullyReturned(order)"
+                    class="rounded-lg bg-rose-100 px-3 py-1.5 text-sm font-bold text-rose-800"
+                  >
+                    Возврат ожидает принятия
+                  </span>
                   <button
-                    v-if="!isGuest"
-                    :disabled="isSavingReturn || isOrderFullyReturned(order)"
+                    v-if="!isGuest && hasReturnSignal(order)"
+                    :disabled="isSavingReturn"
                     class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                     type="button"
-                    @click="returnWholeOrder(order)"
+                    @click="openReturnEditor(order)"
                   >
-                    {{ isOrderFullyReturned(order) ? 'Возврат отмечен' : 'Возврат всего заказа' }}
+                    {{
+                      isOrderFullyReturned(order) ? 'Изменить принятый возврат' : 'Принять возврат'
+                    }}
                   </button>
                   <button
                     v-if="order.platform === 'Эпицентр' && order.externalId"
@@ -3314,6 +3323,67 @@ function orderDateTime(order: Order) {
                   >
                 </div>
               </div>
+              <section
+                v-if="isReturnEditorOpen(order)"
+                data-order-card
+                class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h4 class="font-semibold text-rose-950">Принять возврат</h4>
+                    <p class="mt-1 text-sm text-rose-800">
+                      Финансовый возврат будет учтён только после сохранения.
+                    </p>
+                  </div>
+                  <button
+                    :disabled="isSavingReturn"
+                    class="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700 disabled:opacity-50"
+                    type="button"
+                    @click="acceptWholeReturnDraft(order)"
+                  >
+                    Принять весь возврат
+                  </button>
+                </div>
+                <div class="mt-3 grid gap-2">
+                  <label
+                    v-for="product in order.products"
+                    :key="product.id"
+                    class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm"
+                  >
+                    <span class="min-w-0 font-medium">{{ product.name }}</span>
+                    <span class="flex items-center gap-2"
+                      >Количество возвращено<input
+                        v-model="returnDraftQuantities[productReturnKey(order, product)]"
+                        :disabled="isSavingReturn"
+                        class="w-20 rounded border border-rose-200 px-2 py-1 text-right"
+                        inputmode="numeric"
+                        type="number"
+                        min="0"
+                        :max="product.quantity"
+                        @keydown.enter.prevent
+                      /><span class="text-slate-500">из {{ product.quantity }}</span></span
+                    >
+                  </label>
+                </div>
+                <div class="mt-3 flex flex-wrap items-end justify-between gap-3">
+                  <label class="text-sm font-medium text-slate-600"
+                    >Дата принятия<input
+                      v-model="returnDraftDate"
+                      :disabled="isSavingReturn"
+                      class="mt-1 block rounded border border-rose-200 bg-white px-2 py-1"
+                      type="date"
+                    />
+                  </label>
+                  <button
+                    :disabled="isSavingReturn"
+                    class="rounded-lg bg-rose-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                    type="button"
+                    @click="saveAcceptedReturns(order)"
+                  >
+                    {{ isSavingReturn ? 'Сохраняем…' : 'Подтвердить принятие возврата' }}
+                  </button>
+                </div>
+              </section>
               <section
                 data-order-card
                 class="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-3"
@@ -3577,53 +3647,12 @@ function orderDateTime(order: Order) {
                         </div>
                       </div>
                       <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                        <button
-                          :disabled="isGuest || isSavingReturn"
-                          class="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 font-semibold text-rose-700 disabled:opacity-50"
-                          type="button"
-                          @click="openReturnEditor(order, product)"
-                        >
-                          Возврат
-                        </button>
                         <span
                           v-if="(product.returnedQuantity ?? 0) > 0"
                           class="font-semibold text-rose-700"
                         >
                           Возврат {{ product.returnedQuantity }}/{{ product.quantity }}
                         </span>
-                      </div>
-                      <div
-                        v-if="isReturnEditorOpen(order, product)"
-                        class="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-rose-100 bg-rose-50 p-2"
-                      >
-                        <label class="text-xs font-medium text-slate-600"
-                          >Возвращено из {{ product.quantity
-                          }}<input
-                            v-model="returnDraftQuantity"
-                            :disabled="isSavingReturn"
-                            class="mt-1 block w-20 rounded border border-rose-200 bg-white px-2 py-1 text-sm"
-                            inputmode="numeric"
-                            type="number"
-                            min="0"
-                            :max="product.quantity"
-                          />
-                        </label>
-                        <label class="text-xs font-medium text-slate-600"
-                          >Дата<input
-                            v-model="returnDraftDate"
-                            :disabled="isSavingReturn"
-                            class="mt-1 block rounded border border-rose-200 bg-white px-2 py-1 text-sm"
-                            type="date"
-                          />
-                        </label>
-                        <button
-                          :disabled="isSavingReturn"
-                          class="rounded-lg bg-rose-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-                          type="button"
-                          @click="saveProductReturn(order, product)"
-                        >
-                          {{ isSavingReturn ? 'Сохраняем…' : 'Сохранить' }}
-                        </button>
                       </div>
                     </div>
                   </div>
