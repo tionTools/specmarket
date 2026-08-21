@@ -55,6 +55,14 @@ function hasActiveTracking(delivery: JsonRecord) {
   return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled'].includes(normalizedStatus)
 }
 
+function shipmentValue(value: unknown) {
+  return text(value).replace(/\s/g, '').toLowerCase()
+}
+
+function sameShipment(left: JsonRecord, right: JsonRecord) {
+  return shipmentValue(left.ttn) === shipmentValue(right.ttn) && carrierKind(left) === carrierKind(right)
+}
+
 function isDue(delivery: JsonRecord, minutes: number, now: number) {
   if (
     !minutes ||
@@ -82,10 +90,10 @@ function readableStatus(source: string, code = ''): TrackingResult {
   if (/return|повернен|41010|31200/.test(normalized)) return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
   if (/cancel|скасован|відмінен|10600|10602|102|103/.test(normalized)) return { status: 'Отменено', final: true, normalizedStatus: 'cancelled' }
   if (/receivedwarehouse|received|отриман|получен|вручено|доставлено|41000|\b9\b|\b10\b|\b11\b/.test(normalized)) return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
-  if (/arriv.*recipient|прибул.*відділен|готов.*видач|arrived|21700|\b7\b|\b8\b/.test(normalized)) return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
+  if (/arriv.*recipient|прибул.*відділен|готов.*видач|очіку.*отрим|arrived|21700|\b7\b|\b8\b/.test(normalized)) return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
   if (/createid|оформив|заплан|10100|\b1\b/.test(normalized)) return { status: 'Запланировано', final: false, normalizedStatus: 'created' }
   if (/warehouse|прийнял|принят|accept|registered/.test(normalized)) return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
-  if (/way|route|виїхал|виїхала|руха|пряму|відправлен|deliver|20700|20800|20900|21500|101/.test(normalized)) return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
+  if (/way|route|виїхал|виїхала|руха|дороз|пряму|відправлен|deliver|20700|20800|20900|21500|101/.test(normalized)) return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
   return { status: value || 'Запланировано', final: isFinal(value), normalizedStatus: 'unknown' }
 }
 
@@ -202,17 +210,51 @@ async function meestStatus(ttn: string): Promise<TrackingResult> {
   }
 }
 
+function rozetkaLocation(value: JsonRecord) {
+  const location = value.location
+  if (typeof location === 'string' || typeof location === 'number') return text(location)
+  return text(record(location).name) || text(value.city) || text(value.branch)
+}
+
+function rozetkaReadableStatus(source: string, code: string) {
+  if (/поверта(?:ється|вся)|returning/i.test(source)) {
+    return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
+  }
+  return readableStatus(source, code)
+}
+
 async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
-  // Это публичный XHR самого сайта Rozetka Delivery. Если сервис временно закрывает
-  // ответ, ошибка обрабатывается только для одной доставки и не затрагивает остальные.
-  const url = new URL('https://rz-delivery.rozetka.ua/api/track/status')
-  url.searchParams.set('parcel_id', ttn)
-  const response = await fetch(url, { headers: { Accept: 'application/json' } })
+  const response = await fetch(`https://rz-delivery.rozetka.ua/api/track/public/${encodeURIComponent(ttn.replace(/\s/g, ''))}`, {
+    headers: { Accept: 'application/json' },
+  })
   if (!response.ok) throw new Error(`Rozetka Delivery HTTP ${response.status}`)
-  const data = record(await response.json())
-  const source = text(data.status_name) || text(data.status) || text(data.state) || text(record(data.parcel).status)
+  const payload = record(await response.json())
+  const shipment = Array.isArray(payload.data)
+    ? record(payload.data.at(0))
+    : record(payload.data)
+  const latest = record(shipment.last_status)
+  const source = text(latest.name) || text(shipment.last_status_name)
   if (!source) throw new Error('Rozetka Delivery не вернул публичный статус')
-  return readableStatus(source)
+  const code = text(latest.id) || text(shipment.last_status)
+  const statusGroups = (Array.isArray(shipment.status_groups) ? shipment.status_groups : []).map(record)
+  const events = statusGroups.flatMap((group) => (Array.isArray(group.statuses) ? group.statuses : []).map(record))
+  const base = rozetkaReadableStatus(source, code)
+  const finalDepartment = record(shipment.final_department)
+  return {
+    ...base,
+    provider: 'rozetka_delivery_public_api',
+    details: {
+      trackingEventAt: text(latest.date) || text(shipment.last_status_date),
+      trackingLocation: rozetkaLocation(latest) || text(finalDepartment.public_name) || text(finalDepartment.name),
+      trackingStatusCode: code,
+      trackingEvents: compactEvents(events.map((event) => ({
+        at: text(event.date),
+        status: text(event.name),
+        code: text(event.id),
+        location: rozetkaLocation(event),
+      }))),
+    },
+  }
 }
 
 async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
@@ -226,8 +268,8 @@ async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
   if (!response.ok) throw new Error(`Укрпочта HTTP ${response.status}`)
   const data = await response.json()
   const events = (Array.isArray(data) ? data : []).map(record)
+  if (!events.length) throw new Error('Укрпочта API не вернула статусы')
   const latest = latestEvent(events, 'date')
-  if (!latest) throw new Error('Укрпочта API не вернула статусы')
   const eventCode = text(latest.event)
   const eventReason = text(latest.eventReason_id)
   const source = text(latest.eventName) || text(latest.status) || text(latest.name)
@@ -301,12 +343,16 @@ Deno.serve(async (request) => {
     const delivery = record(row.delivery)
     const carrier = carrierKind(delivery)
     const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
-    if (!carrier || carrier === 'rozetka' || (!forced && !isDue(delivery, minutes, now.getTime())) || (forced && !trackable)) continue
+    if (!carrier || (!forced && !isDue(delivery, minutes, now.getTime())) || (forced && !trackable)) continue
     try {
       const result = await getTrackingStatus(delivery)
-      const changed = result.status !== text(delivery.trackingStatus)
+      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
+      if (currentError) throw currentError
+      const currentDelivery = record(currentRow?.delivery)
+      if (!sameShipment(delivery, currentDelivery)) continue
+      const changed = result.status !== text(currentDelivery.trackingStatus)
       const nextDelivery: JsonRecord = {
-        ...delivery,
+        ...currentDelivery,
         trackingStatus: result.status,
         trackingLastCheckedAt: now.toISOString(),
         trackingLastError: '',
@@ -327,9 +373,16 @@ Deno.serve(async (request) => {
     } catch (error) {
       failed += 1
       console.error(`Tracking ${text(delivery.ttn)}:`, error)
+      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
+      if (currentError) {
+        console.error(`Tracking ${text(delivery.ttn)}:`, currentError)
+        continue
+      }
+      const currentDelivery = record(currentRow?.delivery)
+      if (!sameShipment(delivery, currentDelivery)) continue
       await admin.from('crm_orders').update({
         delivery: {
-          ...delivery,
+          ...currentDelivery,
           trackingLastCheckedAt: now.toISOString(),
           trackingLastError: error instanceof Error ? error.message : 'Ошибка tracking',
         },

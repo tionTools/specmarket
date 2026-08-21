@@ -108,7 +108,21 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-function preserveTracking(delivery: Record<string, unknown>): Record<string, unknown> {
+function shipmentValue(value: unknown) {
+  return readableText(value).replace(/\s/g, '').toLowerCase()
+}
+
+function shipmentCarrier(value: unknown) {
+  const carrier = shipmentValue(value)
+  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
+  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
+  if (carrier.includes('rozetka')) return 'rozetka'
+  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
+  return carrier
+}
+
+function preserveTracking(delivery: Record<string, unknown>, carrier: string, ttn: string): Record<string, unknown> {
+  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
   return Object.fromEntries(
     Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
   )
@@ -465,6 +479,8 @@ Deno.serve(async (request) => {
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
+    const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
+    const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
     const data = {
       external_id: externalId,
       order_number: Number.isFinite(orderNumber) ? orderNumber : 0,
@@ -483,8 +499,8 @@ Deno.serve(async (request) => {
       acquiring: manual.acquiring !== undefined ? Number(manual.acquiring) : Number(existing.data?.acquiring ?? 0),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : Number(manual.acquiringPercent)) : existing.data?.acquiring_percent ?? null,
       delivery: {
-        carrier: shipment?.provider || 'Эпицентр',
-        ttn: shipment?.number ?? '',
+        carrier: deliveryCarrier,
+        ttn: deliveryTtn,
         recipient: recipientName,
         recipientPhone,
         city,
@@ -495,7 +511,7 @@ Deno.serve(async (request) => {
         paymentAmount,
         paymentMethod: shipment?.paymentProvider ?? '',
         paymentStatus: shipment?.paymentStatus ?? '',
-        ...preserveTracking(previousDelivery),
+        ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
       },

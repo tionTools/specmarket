@@ -12,9 +12,19 @@ const asRecord = (value: unknown): RecordValue =>
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
-const preserveTracking = (delivery: RecordValue): RecordValue => Object.fromEntries(
-  Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
-)
+const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
+function shipmentCarrier(value: unknown) {
+  const carrier = shipmentValue(value)
+  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
+  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
+  if (carrier.includes('rozetka')) return 'rozetka'
+  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
+  return carrier
+}
+function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
+  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
+  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
+}
 
 function nameOf(person: RecordValue) {
   return [text(person.last_name), text(person.first_name), text(person.middle_name)].filter(Boolean).join(' ')
@@ -333,6 +343,10 @@ Deno.serve(async (request) => {
     const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
     const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
     const currentDelivery = asRecord(existing?.delivery)
+    const deliveryCarrier = text(delivery.type) === 'novaposhta'
+      ? 'Новая почта'
+      : text(delivery.type) || text(currentDelivery.carrier) || 'Каста'
+    const deliveryTtn = text(delivery.declaration_number) || text(currentDelivery.ttn)
     const data = ({
 	external_id: externalId,
 	order_number: Number(kastaId.replace(/\D/g, '')) || 0,
@@ -349,8 +363,8 @@ Deno.serve(async (request) => {
 	acquiring: Number(existing?.acquiring ?? 0),
 	acquiring_percent: existing?.acquiring_percent ?? null,
 	delivery: {
-		carrier: text(delivery.type) === 'novaposhta' ? 'Новая почта' : text(delivery.type) || 'Каста',
-		ttn: text(delivery.declaration_number),
+		carrier: deliveryCarrier,
+		ttn: deliveryTtn,
 		recipient: nameOf(address) || customer,
 		recipientPhone: text(address.phone) || text(client.phone),
 		city: text(asRecord(address.city).name),
@@ -362,7 +376,7 @@ Deno.serve(async (request) => {
 		paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
 		paymentMethod: text(order.requested_payment_method),
 		paymentStatus: text(order.card_payment_state),
-        ...preserveTracking(currentDelivery),
+        ...preserveTracking(currentDelivery, deliveryCarrier, deliveryTtn),
 		printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
 		printedAt: text(currentDelivery.printedAt) || undefined
 	}

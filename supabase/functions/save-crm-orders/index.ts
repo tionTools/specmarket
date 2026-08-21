@@ -12,6 +12,28 @@ type SavedOrder = {
   acquiring_percent?: number | null; delivery: Record<string, unknown>; items: Item[]
 }
 
+const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
+function shipmentCarrier(value: unknown) {
+  const carrier = shipmentValue(value)
+  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
+  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
+  if (carrier.includes('rozetka')) return 'rozetka'
+  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
+  return carrier
+}
+function sameShipment(left: Record<string, unknown>, right: Record<string, unknown>) {
+  return shipmentValue(left.ttn) === shipmentValue(right.ttn) && shipmentCarrier(left.carrier) === shipmentCarrier(right.carrier)
+}
+function trackingFields(delivery: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
+}
+function withoutTracking(delivery: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(delivery).filter(([key]) => !key.startsWith('tracking')))
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const url = Deno.env.get('SUPABASE_URL')
@@ -30,13 +52,22 @@ Deno.serve(async (request) => {
   const saved: Array<{ orderNumber: number; remoteId: string }> = []
 
   for (const order of orders) {
+    let remoteId = order.remoteId
+    let delivery = order.delivery
+    if (remoteId) {
+      const { data: current, error } = await admin.from('crm_orders').select('delivery').eq('id', remoteId).maybeSingle()
+      if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
+      const currentDelivery = asRecord(current?.delivery)
+      delivery = sameShipment(currentDelivery, order.delivery)
+        ? { ...order.delivery, ...trackingFields(currentDelivery) }
+        : withoutTracking(order.delivery)
+    }
     const data = {
       order_number: order.order_number, order_label: order.order_label ?? null, order_date: order.order_date, order_time: order.order_time ?? null,
       customer: order.customer, phone: order.phone, customer_email: order.customer_email ?? null,
       customer_comment: order.customer_comment ?? null, internal_comment: order.internal_comment ?? null, platform: order.platform, status: order.status,
-      shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiring_percent ?? null, delivery: order.delivery,
+      shipping: order.shipping, acquiring: order.acquiring, acquiring_percent: order.acquiring_percent ?? null, delivery,
     }
-    let remoteId = order.remoteId
     if (remoteId) {
       const { error } = await admin.from('crm_orders').update(data).eq('id', remoteId)
       if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })

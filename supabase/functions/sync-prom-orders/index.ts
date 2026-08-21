@@ -12,9 +12,19 @@ const asRecord = (value: unknown): RecordValue =>
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
-const preserveTracking = (delivery: RecordValue): RecordValue => Object.fromEntries(
-  Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
-)
+const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
+function shipmentCarrier(value: unknown) {
+  const carrier = shipmentValue(value)
+  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
+  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
+  if (carrier.includes('rozetka')) return 'rozetka'
+  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
+  return carrier
+}
+function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
+  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
+  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
+}
 const promStatusNames: Record<string, string> = {
   pending: 'Новий',
   received: 'Принято',
@@ -465,6 +475,10 @@ Deno.serve(async (request) => {
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order) ||
       text(previousDelivery.ttn)
+    const deliveryCarrier = readable(pick(order, 'delivery_option', 'delivery_service')) ||
+      readable(pick(rawDelivery, 'service', 'provider', 'option')) ||
+      text(previousDelivery.carrier) ||
+      'Prom'
     const currentTtnHistory = uniqueHistory([
       ...historyValues(previousDelivery.ttnHistory),
       text(previousDelivery.ttn),
@@ -533,7 +547,7 @@ Deno.serve(async (request) => {
       acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
       delivery: {
-        carrier: readable(pick(order, 'delivery_option', 'delivery_service')) || readable(pick(rawDelivery, 'service', 'provider', 'option')) || 'Prom',
+        carrier: deliveryCarrier,
         ttn: trackingNumber,
         recipient: deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
         recipientPhone: deliveryRecipientPhone(order, rawDelivery, deliveryProvider) || text(order.phone) || text(order.client_phone),
@@ -549,7 +563,7 @@ Deno.serve(async (request) => {
           text(previousDelivery.paymentStatus),
         hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
-        ...preserveTracking(previousDelivery),
+        ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
       },
