@@ -50,8 +50,18 @@ function isFinal(status: string) {
   return /(отримано|получено|доставлено|вручено|завершено|повернено|возвращено|скасовано|отменено|відмінен|cancel|return|received|delivered)/i.test(status)
 }
 
+function hasActiveTracking(delivery: JsonRecord) {
+  const normalizedStatus = text(delivery.trackingNormalizedStatus)
+  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled'].includes(normalizedStatus)
+}
+
 function isDue(delivery: JsonRecord, minutes: number, now: number) {
-  if (!minutes || !text(delivery.ttn) || isFinal(text(delivery.trackingStatus)) || isFinal(text(delivery.status))) return false
+  if (
+    !minutes ||
+    !text(delivery.ttn) ||
+    (!hasActiveTracking(delivery) && (isFinal(text(delivery.trackingStatus)) || isFinal(text(delivery.status))))
+  )
+    return false
   const checked = Date.parse(text(delivery.trackingLastCheckedAt))
   return !Number.isFinite(checked) || now - checked >= minutes * 60_000
 }
@@ -281,7 +291,7 @@ Deno.serve(async (request) => {
   const now = new Date()
   const { data: rows, error } = await admin.from('crm_orders')
     .select('id, delivery')
-    .not('status', 'in', finalOrderStatuses)
+    .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
     .not('delivery->>ttn', 'is', null)
   if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
   let checked = 0
@@ -290,7 +300,7 @@ Deno.serve(async (request) => {
   for (const row of rows ?? []) {
     const delivery = record(row.delivery)
     const carrier = carrierKind(delivery)
-    const trackable = Boolean(text(delivery.ttn)) && !isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))
+    const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
     if (!carrier || carrier === 'rozetka' || (!forced && !isDue(delivery, minutes, now.getTime())) || (forced && !trackable)) continue
     try {
       const result = await getTrackingStatus(delivery)
