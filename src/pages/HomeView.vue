@@ -3748,6 +3748,14 @@ function orderDateTime(order: Order) {
         <p v-if="visibleOrders.length === 0" class="p-8 text-center text-sm text-slate-500">
           Заказы не найдены.
         </p>
+        <div class="mt-5">
+          <RouterLink
+            class="inline-flex rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+            to="/reconciliation"
+          >
+            Сверка расчётов
+          </RouterLink>
+        </div>
         <div
           v-if="isPromRegistryView"
           class="sticky bottom-4 z-10 ml-auto mt-5 flex w-fit max-w-full flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"
