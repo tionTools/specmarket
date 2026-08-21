@@ -753,7 +753,7 @@ const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
     return orders.value.filter((order) => Boolean(order.delivery.printedAt))
   const orderIds = new Set(printRegistryOrderIds.value.map(String))
-  return orders.value.filter((order) => orderIds.has(String(order.id)))
+  return orders.value.filter((order) => orderIds.has(String(order.id))).reverse()
 })
 const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
