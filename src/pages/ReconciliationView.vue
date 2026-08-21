@@ -40,6 +40,7 @@ type SupplierPayment = {
 type OrderCost = {
   id: string
   status: string
+  delivery: { printedAt?: string | null }
   crm_order_items: Array<{
     cost: number
     cost_usd: number
@@ -126,10 +127,6 @@ function dateTime(value: string) {
   return new Intl.DateTimeFormat('uk-UA', { dateStyle: 'short', timeStyle: 'short' }).format(
     new Date(value),
   )
-}
-
-function isCancelled(status: string) {
-  return /скас|отмен|cancel/.test(status.toLowerCase())
 }
 
 const initialCheckpoint = computed(
@@ -220,7 +217,9 @@ async function load() {
       supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
       supabase
         .from('crm_orders')
-        .select('id, status, crm_order_items(cost, cost_usd, quantity, position, product_name)'),
+        .select(
+          'id, status, delivery, crm_order_items(cost, cost_usd, quantity, position, product_name)',
+        ),
       supabase
         .from('crm_order_item_returns')
         .select('order_id, item_position, product_name, returned_quantity'),
@@ -252,18 +251,16 @@ async function load() {
   payments.value = paymentsResult.data ?? []
   const returnedQuantities = new Map(
     ((returnsResult.data as OrderItemReturn[]) ?? []).map((item) => [
-      `${item.order_id}:${item.item_position}:${item.product_name}`,
+      `${item.order_id}:${item.item_position}`,
       Number(item.returned_quantity),
     ]),
   )
   const currentCosts = ((ordersResult.data as OrderCost[]) ?? [])
-    .filter((order) => !isCancelled(order.status))
+    .filter((order) => Boolean(order.delivery?.printedAt))
     .reduce(
       (total, order) => {
         for (const item of order.crm_order_items ?? []) {
-          const returnedQuantity = returnedQuantities.get(
-            `${order.id}:${item.position}:${item.product_name}`,
-          )
+          const returnedQuantity = returnedQuantities.get(`${order.id}:${item.position}`)
           const netQuantity = Math.max(0, Number(item.quantity) - (returnedQuantity ?? 0))
           if (Number(item.cost_usd) > 0) total.usd += Number(item.cost_usd) * netQuantity
           else total.uah += Number(item.cost) * netQuantity

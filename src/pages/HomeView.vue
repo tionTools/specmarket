@@ -1104,7 +1104,7 @@ async function restoreUncheckedPrintedOrders() {
   if (!uncheckedOrders.length) return
   if (
     !window.confirm(
-      `Вернуть в нераспечатанные ${uncheckedOrders.length} заказов, перенесённых без галочки?`,
+      `Заказы уже учтены в долге поставщику. Возврат ${uncheckedOrders.length} заказов в нераспечатанные уберёт их себестоимость из текущего долга. Продолжить?`,
     )
   )
     return
@@ -1123,7 +1123,12 @@ async function restoreUncheckedPrintedOrders() {
 }
 
 async function restorePrintedOrder(order: Order) {
-  if (!window.confirm(`Вернуть заказ ${order.displayNumber ?? order.id} в нераспечатанные?`)) return
+  if (
+    !window.confirm(
+      `Заказ уже учтён в долге поставщику. Возврат заказа ${order.displayNumber ?? order.id} в нераспечатанные уберёт его себестоимость из текущего долга. Продолжить?`,
+    )
+  )
+    return
   if (!(await savePrintState([{ order, printCheckedAt: null, printedAt: null }]))) return
   order.delivery.printCheckedAt = undefined
   order.delivery.printedAt = undefined
@@ -1285,14 +1290,16 @@ function serializeOrder(order: Order) {
 }
 
 function productReturnKey(order: Order, product: OrderProduct) {
-  return `${order.remoteId ?? ''}:${product.position ?? -1}:${product.name}`
+  return `${order.remoteId ?? ''}:${product.position ?? -1}`
 }
 
-function hasReturnSignal(order: Order) {
-  return (
-    /повер|возврат|return|refund/i.test(order.status) ||
-    order.delivery.trackingNormalizedStatus === 'returned'
-  )
+function returnSignalLabel(order: Order) {
+  if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
+  if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
+  if (/повер|возврат|return|refund/i.test(order.status)) return 'Возврат заявлен'
+  if (order.delivery.printedAt && /скас|отмен|cancel/i.test(order.status))
+    return 'Отменён после сборки — возможен возврат'
+  return null
 }
 
 function isReturnEditorOpen(order: Order) {
@@ -1304,7 +1311,7 @@ function returnDraftQuantity(order: Order, product: OrderProduct) {
 }
 
 function openReturnEditor(order: Order) {
-  if (isGuest.value || !order.remoteId) return
+  if (isGuest.value || !order.remoteId || !order.delivery.printedAt) return
   if (isReturnEditorOpen(order)) {
     returnEditorOrderId.value = null
     return
@@ -1338,6 +1345,7 @@ async function saveAcceptedReturns(order: Order) {
     isGuest.value ||
     isSavingReturn.value ||
     !order.remoteId ||
+    !order.delivery.printedAt ||
     !order.products.length ||
     !returnDraftDate.value
   )
@@ -1388,7 +1396,7 @@ async function saveAcceptedReturns(order: Order) {
       returned_quantity: returnedQuantity,
       returned_at: returnDraftDate.value,
     })),
-    { onConflict: 'order_id,item_position,product_name' },
+    { onConflict: 'order_id,item_position' },
   )
   isSavingReturn.value = false
   if (error) {
@@ -1823,7 +1831,7 @@ async function loadRemoteOrders() {
   }
   const returnedItemsByKey = new Map(
     ((orderItemReturns as OrderItemReturn[] | null) ?? []).map((item) => [
-      `${item.order_id}:${item.item_position}:${item.product_name}`,
+      `${item.order_id}:${item.item_position}`,
       item,
     ]),
   )
@@ -1866,9 +1874,7 @@ async function loadRemoteOrders() {
       )
         .sort((a, b) => a.position - b.position)
         .map((item) => {
-          const returnedItem = returnedItemsByKey.get(
-            `${row.id}:${item.position}:${item.product_name}`,
-          )
+          const returnedItem = returnedItemsByKey.get(`${row.id}:${item.position}`)
           return {
             id: item.id,
             position: Number(item.position),
@@ -3248,15 +3254,20 @@ function orderDateTime(order: Order) {
               <div class="flex flex-wrap items-center justify-end gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                   <span
-                    v-if="hasReturnSignal(order) && !isOrderFullyReturned(order)"
+                    v-if="returnSignalLabel(order) && !isOrderFullyReturned(order)"
                     class="rounded-lg bg-rose-100 px-3 py-1.5 text-sm font-bold text-rose-800"
                   >
-                    Возврат ожидает принятия
+                    {{ returnSignalLabel(order) }} · возврат ожидает принятия
                   </span>
                   <button
-                    v-if="!isGuest && hasReturnSignal(order)"
+                    v-if="!isGuest && order.delivery.printedAt"
                     :disabled="isSavingReturn"
-                    class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    class="rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                    :class="
+                      returnSignalLabel(order)
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    "
                     type="button"
                     @click="openReturnEditor(order)"
                   >
