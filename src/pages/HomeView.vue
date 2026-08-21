@@ -2879,7 +2879,7 @@ function orderDateTime(order: Order) {
           </div>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_7.5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_minmax(7.5rem,2fr)_5rem] gap-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span>Сумма заказа</span><span>Факт. прибыль</span><span>План. прибыль</span
@@ -2909,7 +2909,7 @@ function orderDateTime(order: Order) {
           "
         >
           <button
-            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_1.1fr_7.5rem] lg:items-center"
+            class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_minmax(7.5rem,2fr)_5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
@@ -3060,13 +3060,13 @@ function orderDateTime(order: Order) {
               <span class="text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
               ></span
-            ><span class="flex w-fit flex-col items-start gap-1.5"
+            ><span class="flex w-fit flex-col items-start gap-1.5 lg:w-full"
               ><span
                 v-if="isUnopenedNewOrder(order)"
                 class="whitespace-nowrap rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black tracking-wide text-white shadow-md ring-2 ring-fuchsia-200"
                 >НОВЫЙ ЗАКАЗ</span
               ><span
-                class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 lg:w-full lg:line-clamp-2 lg:leading-5"
                 >{{ deliveryStatusForOrder(order) }}</span
               ></span
             ><span class="flex items-center justify-end gap-2"
