@@ -66,5 +66,6 @@ export interface Order {
   paymentAmount?: number
   acquiring: number
   acquiringPercent?: number
+  extraExpenses?: number
   delivery: Delivery
 }

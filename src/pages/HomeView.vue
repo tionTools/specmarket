@@ -376,7 +376,11 @@ const getProductRoyalty = (order: Order, product: OrderProduct) => {
 const getRoyalty = (order: Order) =>
   order.products.reduce((sum, product) => sum + getProductRoyalty(order, product), 0)
 const getPlannedProfit = (order: Order) =>
-  getOrderAmount(order) * 0.983 - getOrderCost(order) - getRoyalty(order) - order.shipping
+  getOrderAmount(order) * 0.983 -
+  getOrderCost(order) -
+  getRoyalty(order) -
+  order.shipping -
+  (order.extraExpenses ?? 0)
 // Фактическая прибыль появляется только после ручного внесения полученной
 // суммы. Статус площадки сам по себе не означает, что деньги уже получены.
 const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
@@ -385,7 +389,8 @@ const getActualProfit = (order: Order) =>
   getOrderCost(order) -
   getRoyalty(order) -
   order.shipping -
-  order.acquiring
+  order.acquiring -
+  (order.extraExpenses ?? 0)
 const formatMoney = (value: number) => {
   const fractionDigits = Number.isInteger(value) ? 0 : 2
   return (
@@ -1236,6 +1241,7 @@ function createOrderDraft(): Order {
     shipping: 0,
     paymentAmount: 0,
     acquiring: 0,
+    extraExpenses: 0,
     delivery: {
       carrier: 'Новая почта',
       ttn: '',
@@ -1291,6 +1297,7 @@ function serializeOrder(order: Order) {
     shipping: order.shipping,
     acquiring: order.acquiring,
     acquiring_percent: order.acquiringPercent ?? null,
+    extra_expenses: order.extraExpenses ?? 0,
     delivery: { ...order.delivery, paymentAmount: order.paymentAmount },
     items: order.products.map((product) => ({
       product_name: product.name,
@@ -1836,6 +1843,7 @@ function mapRemoteOrders(
         acquiring: Number(row.acquiring),
         acquiringPercent:
           row.acquiring_percent === null ? undefined : Number(row.acquiring_percent),
+        extraExpenses: Number(row.extra_expenses ?? 0),
         delivery: row.delivery as Delivery,
         products: items
           .sort((a, b) => Number(a.position) - Number(b.position))
@@ -2565,7 +2573,7 @@ function orderCellValue(key: string, value: number | undefined) {
 
 function updateOrderFinancial(
   order: Order,
-  field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent',
+  field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent' | 'extraExpenses',
   key: string,
   event: Event,
 ) {
@@ -3756,7 +3764,7 @@ function orderDateTime(order: Order) {
               </div>
               <div
                 data-order-card
-                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_9rem]"
+                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_5rem_5rem]"
               >
                 <div>
                   <span class="text-slate-500">Итого с/с</span
@@ -3806,9 +3814,10 @@ function orderDateTime(order: Order) {
                     @blur="finishOrderCell(`${order.id}-payment-amount`)"
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-payment-amount`, $event)"
                 /></label>
-                <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <span class="text-slate-500">Экв.</span>
                   <label class="text-slate-500"
-                    >Экв., %<input
+                    ><input
                       :value="
                         orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)
                       "
@@ -3835,8 +3844,8 @@ function orderDateTime(order: Order) {
                           syncAcquiringAmount(order),
                         )
                       " /></label
-                  ><label class="text-slate-500"
-                    >Экв., ₴<input
+                  ><label class="mt-1 block text-slate-500"
+                    ><input
                       :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)"
                       :readonly="editingOrderCell !== `${order.id}-acquiring`"
                       class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
@@ -3856,6 +3865,24 @@ function orderDateTime(order: Order) {
                       "
                   /></label>
                 </div>
+                <label class="text-slate-500"
+                  >Прочее<input
+                    :value="orderCellValue(`${order.id}-extra-expenses`, order.extraExpenses ?? 0)"
+                    :readonly="editingOrderCell !== `${order.id}-extra-expenses`"
+                    class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                    inputmode="decimal"
+                    type="text"
+                    @input="
+                      updateOrderFinancial(
+                        order,
+                        'extraExpenses',
+                        `${order.id}-extra-expenses`,
+                        $event,
+                      )
+                    "
+                    @blur="finishOrderCell(`${order.id}-extra-expenses`)"
+                    @keydown.enter.prevent="toggleOrderCell(`${order.id}-extra-expenses`, $event)"
+                /></label>
               </div>
               <label
                 v-if="isInternalCommentVisible(order)"
