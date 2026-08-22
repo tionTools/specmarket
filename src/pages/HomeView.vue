@@ -2571,6 +2571,10 @@ function orderCellValue(key: string, value: number | undefined) {
   return editingOrderValue.value[key] ?? formatOrderNumber(value)
 }
 
+function financialOrderCellValue(key: string, value: number | undefined) {
+  return editingOrderValue.value[key] ?? (value ?? 0).toFixed(2).replace('.', ',')
+}
+
 function updateOrderFinancial(
   order: Order,
   field: 'shipping' | 'paymentAmount' | 'acquiring' | 'acquiringPercent' | 'extraExpenses',
@@ -3764,7 +3768,7 @@ function orderDateTime(order: Order) {
               </div>
               <div
                 data-order-card
-                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_5rem_5rem]"
+                class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_6.5rem_6.5rem]"
               >
                 <div>
                   <span class="text-slate-500">Итого с/с</span
@@ -3816,13 +3820,16 @@ function orderDateTime(order: Order) {
                 /></label>
                 <div>
                   <span class="text-slate-500">Экв.</span>
-                  <label class="text-slate-500"
+                  <label class="mt-1 flex items-center gap-1 text-slate-500"
                     ><input
                       :value="
-                        orderCellValue(`${order.id}-acquiring-percent`, order.acquiringPercent ?? 0)
+                        financialOrderCellValue(
+                          `${order.id}-acquiring-percent`,
+                          order.acquiringPercent,
+                        )
                       "
                       :readonly="editingOrderCell !== `${order.id}-acquiring-percent`"
-                      class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
+                      class="order-cell-edit block w-20 rounded-lg border px-2 py-1 text-sm font-semibold"
                       :class="promRegistryFieldClass(order, 'acquiring')"
                       inputmode="decimal"
                       type="text"
@@ -3843,12 +3850,13 @@ function orderDateTime(order: Order) {
                         toggleOrderCell(`${order.id}-acquiring-percent`, $event, () =>
                           syncAcquiringAmount(order),
                         )
-                      " /></label
-                  ><label class="mt-1 block text-slate-500"
+                      "
+                    /><span>%</span></label
+                  ><label class="mt-1 flex items-center gap-1 text-slate-500"
                     ><input
-                      :value="orderCellValue(`${order.id}-acquiring`, order.acquiring)"
+                      :value="financialOrderCellValue(`${order.id}-acquiring`, order.acquiring)"
                       :readonly="editingOrderCell !== `${order.id}-acquiring`"
-                      class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
+                      class="order-cell-edit block w-20 rounded-lg border px-2 py-1 text-sm font-semibold"
                       :class="promRegistryFieldClass(order, 'acquiring')"
                       inputmode="decimal"
                       type="text"
@@ -3863,13 +3871,16 @@ function orderDateTime(order: Order) {
                           syncAcquiringPercent(order),
                         )
                       "
-                  /></label>
+                    /><span>₴</span></label
+                  >
                 </div>
                 <label class="text-slate-500"
                   >Прочее<input
-                    :value="orderCellValue(`${order.id}-extra-expenses`, order.extraExpenses ?? 0)"
+                    :value="
+                      financialOrderCellValue(`${order.id}-extra-expenses`, order.extraExpenses)
+                    "
                     :readonly="editingOrderCell !== `${order.id}-extra-expenses`"
-                    class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
+                    class="order-cell-edit mt-1 inline-block w-20 rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
                     inputmode="decimal"
                     type="text"
                     @input="
@@ -3882,7 +3893,8 @@ function orderDateTime(order: Order) {
                     "
                     @blur="finishOrderCell(`${order.id}-extra-expenses`)"
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-extra-expenses`, $event)"
-                /></label>
+                  /><span class="ml-1">₴</span></label
+                >
               </div>
               <label
                 v-if="isInternalCommentVisible(order)"
