@@ -129,10 +129,12 @@ let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
 let ordersRealtimeChannel: RealtimeChannel | undefined
 let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
-let newOrdersCheckTimer: ReturnType<typeof window.setInterval> | undefined
-let fullOrdersRefreshTimer: ReturnType<typeof window.setInterval> | undefined
-let knownRemoteOrderCount: number | null = null
-let isAutomaticRefreshRunning = false
+let reconciliationTimer: ReturnType<typeof window.setTimeout> | undefined
+let reconciliationInterval: ReturnType<typeof window.setInterval> | undefined
+let isReconciliationRunning = false
+let lastReconciliationAt = 0
+const pendingRemoteOrderIds = new Set<string>()
+const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 function showSyncMessage(message: string) {
@@ -237,6 +239,32 @@ function registerRemoteOrders(
   )
   knownRemoteOrderIds = currentRemoteIds
   hasRemoteOrderBaseline = true
+  persistNewOrderTracking()
+}
+
+function registerRefreshedRemoteOrders(
+  remoteOrders: Array<{ remoteId: string; orderId: string; platform: Platform }>,
+) {
+  const pendingByRemoteId = new Map(
+    unopenedNewOrders.value.map((order) => [order.remoteId, order] as const),
+  )
+  for (const order of remoteOrders) {
+    if (
+      hasRemoteOrderBaseline &&
+      !knownRemoteOrderIds.has(order.remoteId) &&
+      newOrderNotificationPlatforms.includes(order.platform)
+    )
+      pendingByRemoteId.set(order.remoteId, order)
+    knownRemoteOrderIds.add(order.remoteId)
+  }
+  unopenedNewOrders.value = [...pendingByRemoteId.values()]
+  persistNewOrderTracking()
+}
+
+function unregisterRemoteOrder(remoteId: string) {
+  knownRemoteOrderIds.delete(remoteId)
+  unopenedNewOrders.value = unopenedNewOrders.value.filter((order) => order.remoteId !== remoteId)
+  remoteOrderVersions.delete(remoteId)
   persistNewOrderTracking()
 }
 
@@ -708,7 +736,7 @@ async function handlePromRegistryFile(event: Event) {
     platformFilter.value = 'all'
     isShowingCancelledAndReturned.value = false
     await persistenceQueue
-    await loadRemoteOrders()
+    await reconcileRemoteOrders(true)
     applyPromRegistryPreview(entries)
     saveRegistryDraftNavigation()
   } catch (error) {
@@ -996,7 +1024,7 @@ async function openPrintRegistry() {
     })
     if (error || !data?.ok) syncErrors += 1
   }
-  if (ordersWithoutTtn.length) await loadRemoteOrders()
+  if (ordersWithoutTtn.length) await reconcileRemoteOrders(true)
 
   const registryOrders = orders.value.filter(
     (order) =>
@@ -1472,7 +1500,7 @@ async function syncEpicentrOrders(full = false, fullSyncResults?: string[]) {
     : `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await loadRemoteOrders()
+  await reconcileRemoteOrders(true)
 }
 
 async function syncPromOrders(full = false, fullSyncResults?: string[]) {
@@ -1499,7 +1527,7 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
     : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await loadRemoteOrders()
+  await reconcileRemoteOrders(true)
 }
 
 async function syncKastaOrders(full = false, latest = false, fullSyncResults?: string[]) {
@@ -1534,7 +1562,7 @@ async function syncKastaOrders(full = false, latest = false, fullSyncResults?: s
       : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await loadRemoteOrders()
+  await reconcileRemoteOrders(true)
 }
 
 async function syncNewAllPlatforms() {
@@ -1704,87 +1732,202 @@ function orderSyncSnapshot(order: Order) {
 }
 
 async function reloadOrdersAfterManualSync() {
-  await loadRemoteOrders()
+  await reconcileRemoteOrders(true)
   if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
-function canRefreshOrdersAutomatically() {
-  return (
-    !document.hidden &&
-    !isMarketplaceSyncBusy.value &&
-    !isApplyingPromRegistry.value &&
-    !isPreparingPrintRegistry.value &&
-    !isUpdatingPrintRegistry.value &&
-    !isPromRegistryDraft.value &&
-    printRegistryMode.value === null &&
-    deletingOrderId.value === null &&
-    editingOrderCell.value === null &&
-    editingInternalCommentOrderId.value === null &&
-    !orderDialog.value?.open
-  )
-}
-
-async function refreshOrdersAutomatically() {
-  if (!supabase || isAutomaticRefreshRunning || !canRefreshOrdersAutomatically()) return
-  isAutomaticRefreshRunning = true
-  try {
-    await persistenceQueue
-    if (!canRefreshOrdersAutomatically()) return
-    await loadRemoteOrders()
-  } catch (error) {
-    console.error('Не удалось автоматически обновить данные CRM:', error)
-  } finally {
-    isAutomaticRefreshRunning = false
-  }
-}
-
-function scheduleOrdersRefresh(delay = 900) {
+function scheduleTargetedOrdersRefresh(delay = 750) {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   realtimeRefreshTimer = window.setTimeout(() => {
     realtimeRefreshTimer = undefined
-    void refreshOrdersAutomatically()
+    const ids = [...pendingRemoteOrderIds]
+    pendingRemoteOrderIds.clear()
+    void refreshRemoteOrders(ids)
   }, delay)
 }
 
-async function checkForNewRemoteOrders() {
-  if (!supabase || document.hidden || isAutomaticRefreshRunning) return
-  const { count, error } = await supabase
-    .from('crm_orders')
-    .select('id', { count: 'exact', head: true })
-  if (error || count === null) return
-  if (knownRemoteOrderCount !== null && count !== knownRemoteOrderCount) {
-    scheduleOrdersRefresh(0)
-    return
-  }
-  knownRemoteOrderCount = count
+function queueRemoteOrderRefresh(remoteId: string | undefined) {
+  if (!remoteId) return
+  pendingRemoteOrderIds.add(remoteId)
+  scheduleTargetedOrdersRefresh()
+}
+
+function removeRemoteOrder(remoteId: string | undefined) {
+  if (!remoteId) return
+  orders.value = orders.value.filter((order) => order.remoteId !== remoteId)
+  unregisterRemoteOrder(remoteId)
+}
+
+function scheduleReconciliation(delay = 750, force = false) {
+  if (!force && Date.now() - lastReconciliationAt < 60_000) return
+  if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
+  reconciliationTimer = window.setTimeout(() => {
+    reconciliationTimer = undefined
+    void reconcileRemoteOrders(force)
+  }, delay)
 }
 
 function handleOrdersVisibilityChange() {
-  if (!document.hidden) scheduleOrdersRefresh(0)
+  if (!document.hidden) scheduleReconciliation()
 }
 
 function handleOrdersWindowFocus() {
-  scheduleOrdersRefresh(0)
+  scheduleReconciliation()
 }
 
 function startAutomaticOrdersRefresh() {
-  if (!supabase) return
+  if (!supabase || ordersRealtimeChannel) return
   ordersRealtimeChannel = supabase
     .channel('crm-orders-interface')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_orders' }, () =>
-      scheduleOrdersRefresh(),
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_orders' }, (payload) =>
+      queueRemoteOrderRefresh(payload.new.id),
     )
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_order_items' }, () =>
-      scheduleOrdersRefresh(),
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_orders' }, (payload) =>
+      queueRemoteOrderRefresh(payload.new.id),
     )
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_order_item_returns' }, () =>
-      scheduleOrdersRefresh(),
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'crm_orders' }, (payload) =>
+      removeRemoteOrder(payload.old.id),
     )
-    .subscribe()
-  newOrdersCheckTimer = window.setInterval(() => void checkForNewRemoteOrders(), 30_000)
-  fullOrdersRefreshTimer = window.setInterval(() => void refreshOrdersAutomatically(), 300_000)
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        scheduleReconciliation(0, true)
+      }
+    })
+  reconciliationInterval = window.setInterval(() => void reconcileRemoteOrders(), 900_000)
   document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
   window.addEventListener('focus', handleOrdersWindowFocus)
+}
+
+function sortOrders() {
+  orders.value.sort(
+    (left, right) =>
+      orderDateTime(right) - orderDateTime(left) ||
+      (right.orderNumber ?? 0) - (left.orderNumber ?? 0),
+  )
+}
+
+function mapRemoteOrders(
+  remoteOrders: Array<Record<string, unknown>>,
+  orderItemReturns: OrderItemReturn[] | null,
+) {
+  if (remoteOrders) {
+    const returnedItemsByKey = new Map(
+      (orderItemReturns ?? []).map((item) => [`${item.order_id}:${item.item_position}`, item]),
+    )
+    return remoteOrders.map((row) => {
+      const items = row.crm_order_items as Array<Record<string, unknown>>
+      return {
+        id: (row.order_label as string | null) ?? String(row.order_number),
+        orderNumber: Number(row.order_number),
+        displayNumber: (row.order_label as string | null) ?? undefined,
+        remoteId: row.id as string,
+        externalId: (row.external_id as string | null) ?? undefined,
+        date: row.order_date as string,
+        time: (row.order_time as string | null) ?? undefined,
+        customer: row.customer as string,
+        phone: row.phone as string,
+        customerEmail: (row.customer_email as string | null) ?? undefined,
+        customerComment: (row.customer_comment as string | null) ?? undefined,
+        internalComment: (row.internal_comment as string | null) ?? undefined,
+        platform: row.platform as Platform,
+        status: row.status as string,
+        shipping: Number(row.shipping),
+        paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
+        acquiring: Number(row.acquiring),
+        acquiringPercent:
+          row.acquiring_percent === null ? undefined : Number(row.acquiring_percent),
+        delivery: row.delivery as Delivery,
+        products: items
+          .sort((a, b) => Number(a.position) - Number(b.position))
+          .map((item) => {
+            const returnedItem = returnedItemsByKey.get(`${row.id}:${item.position}`)
+            return {
+              id: item.id as string,
+              position: Number(item.position),
+              name: item.product_name as string,
+              size: (item.size as string | null) ?? '',
+              imageUrl: (item.image_url as string | null) ?? undefined,
+              quantity: Number(item.quantity),
+              price: Number(item.price),
+              cost: Number(item.cost),
+              costUsd: Number(item.cost_usd ?? 0),
+              royaltyPercent:
+                item.royalty_percent === null ? undefined : Number(item.royalty_percent),
+              royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
+              royaltyManual: item.royalty_manual === true,
+              returnedQuantity: Number(returnedItem?.returned_quantity ?? 0),
+              returnedAt: returnedItem?.returned_at ?? undefined,
+            }
+          }),
+      } satisfies Order
+    })
+  }
+  return []
+}
+
+async function refreshRemoteOrders(remoteIds: string[]) {
+  if (!supabase || !remoteIds.length) return
+  const { data: remoteOrders, error: ordersError } = await supabase
+    .from('crm_orders')
+    .select('*, crm_order_items(*)')
+    .in('id', remoteIds)
+  if (ordersError || !remoteOrders) {
+    console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
+    return
+  }
+  const { data: orderItemReturns, error: returnsError } = await supabase
+    .from('crm_order_item_returns')
+    .select('order_id, item_position, product_name, returned_quantity, returned_at')
+    .in('order_id', remoteIds)
+  if (returnsError) {
+    console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
+    return
+  }
+  const refreshedOrders = mapRemoteOrders(remoteOrders, orderItemReturns)
+  const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
+  for (const remoteId of remoteIds) {
+    if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
+  }
+  for (const order of refreshedOrders) {
+    const index = orders.value.findIndex((item) => item.remoteId === order.remoteId)
+    if (index === -1) orders.value.push(order)
+    else orders.value[index] = order
+  }
+  registerRefreshedRemoteOrders(
+    refreshedOrders.map((order) => ({
+      remoteId: order.remoteId,
+      orderId: String(order.id),
+      platform: order.platform,
+    })),
+  )
+  for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
+  sortOrders()
+}
+
+async function reconcileRemoteOrders(force = false) {
+  if (!supabase || isReconciliationRunning || (!force && document.hidden)) return
+  isReconciliationRunning = true
+  try {
+    const { data: remoteOrders, error } = await supabase.from('crm_orders').select('id, updated_at')
+    if (error || !remoteOrders) {
+      console.error('Не удалось сверить изменения заказов CRM:', error)
+      return
+    }
+    const remoteIds = new Set(remoteOrders.map((order) => String(order.id)))
+    const deletedRemoteIds = orders.value
+      .map((order) => order.remoteId)
+      .filter(
+        (remoteId): remoteId is string => typeof remoteId === 'string' && !remoteIds.has(remoteId),
+      )
+    for (const remoteId of deletedRemoteIds) removeRemoteOrder(remoteId)
+    const changedIds = remoteOrders
+      .filter((order) => remoteOrderVersions.get(String(order.id)) !== String(order.updated_at))
+      .map((order) => String(order.id))
+    await refreshRemoteOrders(changedIds)
+    lastReconciliationAt = Date.now()
+  } finally {
+    isReconciliationRunning = false
+  }
 }
 
 async function loadRemoteOrders() {
@@ -1805,90 +1948,20 @@ async function loadRemoteOrders() {
   const { data: orderItemReturns } = await supabase
     .from('crm_order_item_returns')
     .select('order_id, item_position, product_name, returned_quantity, returned_at')
-  if (remoteOrders) {
-    registerRemoteOrders(
-      remoteOrders.map((row) => ({
-        remoteId: String(row.id),
-        orderId: row.order_label ?? String(row.order_number),
-        platform: row.platform as Platform,
-      })),
-    )
-  }
-  knownRemoteOrderCount = remoteOrders?.length ?? 0
   if (!remoteOrders?.length) {
     await persistOrders()
     return
   }
-  const returnedItemsByKey = new Map(
-    ((orderItemReturns as OrderItemReturn[] | null) ?? []).map((item) => [
-      `${item.order_id}:${item.item_position}`,
-      item,
-    ]),
-  )
-  orders.value = remoteOrders
-    .map((row) => ({
-      id: row.order_label ?? String(row.order_number),
-      orderNumber: Number(row.order_number),
-      displayNumber: row.order_label ?? undefined,
-      remoteId: row.id,
-      externalId: row.external_id ?? undefined,
-      date: row.order_date,
-      time: row.order_time ?? undefined,
-      customer: row.customer,
-      phone: row.phone,
-      customerEmail: row.customer_email ?? undefined,
-      customerComment: row.customer_comment ?? undefined,
-      internalComment: row.internal_comment ?? undefined,
+  registerRemoteOrders(
+    remoteOrders.map((row) => ({
+      remoteId: String(row.id),
+      orderId: row.order_label ?? String(row.order_number),
       platform: row.platform as Platform,
-      status: row.status,
-      shipping: Number(row.shipping),
-      paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
-      acquiring: Number(row.acquiring),
-      acquiringPercent: row.acquiring_percent === null ? undefined : Number(row.acquiring_percent),
-      delivery: row.delivery as Delivery,
-      products: (
-        row.crm_order_items as Array<{
-          id: string
-          position: number
-          product_name: string
-          size: string | null
-          image_url: string | null
-          quantity: number
-          price: number
-          cost: number
-          cost_usd: number
-          royalty_percent: number | null
-          royalty_amount: number | null
-          royalty_manual: boolean | null
-        }>
-      )
-        .sort((a, b) => a.position - b.position)
-        .map((item) => {
-          const returnedItem = returnedItemsByKey.get(`${row.id}:${item.position}`)
-          return {
-            id: item.id,
-            position: Number(item.position),
-            name: item.product_name,
-            size: item.size ?? '',
-            imageUrl: item.image_url ?? undefined,
-            quantity: Number(item.quantity),
-            price: Number(item.price),
-            cost: Number(item.cost),
-            costUsd: Number(item.cost_usd ?? 0),
-            royaltyPercent:
-              item.royalty_percent === null ? undefined : Number(item.royalty_percent),
-            royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
-            royaltyManual: item.royalty_manual === true,
-            returnedQuantity: Number(returnedItem?.returned_quantity ?? 0),
-            returnedAt: returnedItem?.returned_at ?? undefined,
-          }
-        }),
-    }))
-    .sort(
-      (left, right) =>
-        orderDateTime(right) - orderDateTime(left) ||
-        (right.orderNumber ?? 0) - (left.orderNumber ?? 0),
-    )
+    })),
+  )
+  orders.value = mapRemoteOrders(remoteOrders, orderItemReturns)
+  for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
+  sortOrders()
 }
 
 async function runDeliveryTrackingOnLoad() {
@@ -1929,6 +2002,7 @@ async function runDeliveryTrackingOnLoad() {
 
 onMounted(async () => {
   await loadRemoteOrders()
+  startAutomaticOrdersRefresh()
   // Функция сама проверяет киевское расписание и обрабатывает только просроченные доставки.
   // Запуск при открытии CRM нужен, чтобы не ждать ближайшего cron-цикла после простоя вкладки.
   await runDeliveryTrackingOnLoad()
@@ -1944,13 +2018,12 @@ onMounted(async () => {
   // This is a one-time return from the price list, not a permanent open-order state.
   if (route.query.returnOrder || route.query.returnSearch || route.query.returnRegistry)
     await router.replace({ query: {} })
-  startAutomaticOrdersRefresh()
 })
 
 onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
-  if (newOrdersCheckTimer) window.clearInterval(newOrdersCheckTimer)
-  if (fullOrdersRefreshTimer) window.clearInterval(fullOrdersRefreshTimer)
+  if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
+  if (reconciliationInterval) window.clearInterval(reconciliationInterval)
   document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
   window.removeEventListener('focus', handleOrdersWindowFocus)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
