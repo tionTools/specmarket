@@ -63,14 +63,14 @@ function sameShipment(left: JsonRecord, right: JsonRecord) {
   return shipmentValue(left.ttn) === shipmentValue(right.ttn) && carrierKind(left) === carrierKind(right)
 }
 
-function isDue(delivery: JsonRecord, minutes: number, now: number) {
+function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, now: number) {
   if (
     !minutes ||
     !text(delivery.ttn) ||
     (!hasActiveTracking(delivery) && (isFinal(text(delivery.trackingStatus)) || isFinal(text(delivery.status))))
   )
     return false
-  const checked = Date.parse(text(delivery.trackingLastCheckedAt))
+  const checked = Date.parse(text(lastCheckedAt))
   return !Number.isFinite(checked) || now - checked >= minutes * 60_000
 }
 
@@ -331,7 +331,7 @@ Deno.serve(async (request) => {
   const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
   const scheduled = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user } } = await auth.auth.getUser()
+  const { data: { user } } = scheduled ? { data: { user: null } } : await auth.auth.getUser()
   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   const forced = body.force === true && !scheduled && Boolean(user)
@@ -344,6 +344,12 @@ Deno.serve(async (request) => {
     .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
     .not('delivery->>ttn', 'is', null)
   if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
+  const ids = (rows ?? []).map((row) => row.id)
+  const { data: states, error: statesError } = ids.length
+    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)
+    : { data: [], error: null }
+  if (statesError) return Response.json({ ok: false, message: statesError.message }, { status: 500, headers: corsHeaders })
+  const stateByOrder = new Map((states ?? []).map((state) => [state.order_id, state]))
   let checked = 0
   let updated = 0
   let failed = 0
@@ -351,19 +357,22 @@ Deno.serve(async (request) => {
     const delivery = record(row.delivery)
     const carrier = carrierKind(delivery)
     const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
-    if (!carrier || (!forced && !isDue(delivery, minutes, now.getTime())) || (forced && !trackable)) continue
+    if (!carrier || (!forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) || (forced && !trackable)) continue
     try {
       const result = await getTrackingStatus(delivery)
       const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
       if (currentError) throw currentError
       const currentDelivery = record(currentRow?.delivery)
       if (!sameShipment(delivery, currentDelivery)) continue
-      const changed = result.status !== text(currentDelivery.trackingStatus)
+      const changed = result.status !== text(currentDelivery.trackingStatus) || result.normalizedStatus !== text(currentDelivery.trackingNormalizedStatus)
+      const state = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
+      const { error: stateError } = await admin.from('crm_delivery_tracking_state').upsert(state)
+      if (stateError) throw stateError
+      checked += 1
+      if (!changed) continue
       const nextDelivery: JsonRecord = {
         ...currentDelivery,
         trackingStatus: result.status,
-        trackingLastCheckedAt: now.toISOString(),
-        trackingLastError: '',
       }
       if (changed) nextDelivery.trackingStatusChangedAt = now.toISOString()
       if (result.provider && result.details) {
@@ -376,8 +385,7 @@ Deno.serve(async (request) => {
       }
       const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
       if (updateError) throw updateError
-      checked += 1
-      if (changed) updated += 1
+      updated += 1
     } catch (error) {
       failed += 1
       console.error(`Tracking ${text(delivery.ttn)}:`, error)
@@ -388,13 +396,9 @@ Deno.serve(async (request) => {
       }
       const currentDelivery = record(currentRow?.delivery)
       if (!sameShipment(delivery, currentDelivery)) continue
-      await admin.from('crm_orders').update({
-        delivery: {
-          ...currentDelivery,
-          trackingLastCheckedAt: now.toISOString(),
-          trackingLastError: error instanceof Error ? error.message : 'Ошибка tracking',
-        },
-      }).eq('id', row.id)
+      await admin.from('crm_delivery_tracking_state').upsert({
+        order_id: row.id, last_checked_at: now.toISOString(), last_error: error instanceof Error ? error.message : 'Ошибка tracking', provider: carrier || null, updated_at: now.toISOString(),
+      })
     }
   }
   return Response.json({ ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed }, { headers: corsHeaders })

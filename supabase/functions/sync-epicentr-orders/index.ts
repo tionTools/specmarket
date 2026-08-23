@@ -124,7 +124,7 @@ function shipmentCarrier(value: unknown) {
 function preserveTracking(delivery: Record<string, unknown>, carrier: string, ttn: string): Record<string, unknown> {
   if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
   return Object.fromEntries(
-    Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined),
+    Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined),
   )
 }
 
@@ -293,7 +293,7 @@ Deno.serve(async (request) => {
   const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
   const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user } } = await auth.auth.getUser()
+  const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
@@ -330,6 +330,7 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const changedOrderIds: string[] = []
   const offerRows = orders.flatMap((order) => normalizeItems(order).map((item) => ({
     offer_id: epicentrOfferId(item.raw),
     product_title: item.title,
@@ -521,10 +522,12 @@ Deno.serve(async (request) => {
     if (orderId) {
       await admin.from('crm_orders').update(data).eq('id', orderId)
       updated += 1
+      changedOrderIds.push(orderId)
     } else {
       const inserted = await admin.from('crm_orders').insert(data).select('id').single()
       orderId = inserted.data?.id
       created += 1
+      if (orderId) changedOrderIds.push(orderId)
     }
     if (!orderId) continue
 
@@ -580,5 +583,5 @@ Deno.serve(async (request) => {
     }
   }
 
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })

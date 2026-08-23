@@ -23,7 +23,7 @@ function shipmentCarrier(value: unknown) {
 }
 function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
   if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
-  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
+  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined))
 }
 
 function nameOf(person: RecordValue) {
@@ -261,22 +261,6 @@ async function kastaRoyaltyForItem(token: string, item: RecordValue, cache: Map<
   }
 }
 
-async function latestKastaPage(token: string) {
-  let earliest = Date.parse('2023-01-01T00:00:00.000Z')
-  let latest = Date.now()
-  let candidate: RecordValue = {}
-  for (let attempt = 0; attempt < 18; attempt += 1) {
-    const middle = new Date((earliest + latest) / 2).toISOString()
-    const payload = await fetchKastaOrders(token, new URLSearchParams({ limit: '100', from: middle }))
-    const received = Array.isArray(payload.items) ? payload.items.length : 0
-    const remains = number(payload.remains)
-    if (received === 100 && remains === 0) candidate = payload
-    if (received < 100 || (received === 100 && remains === 0)) latest = Date.parse(middle)
-    else earliest = Date.parse(middle)
-  }
-  return candidate
-}
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const url = Deno.env.get('SUPABASE_URL')
@@ -290,25 +274,41 @@ Deno.serve(async (request) => {
   const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
   const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user } } = await auth.auth.getUser()
+  const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
   const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
   const fullSync = body.full === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
-  let payload: RecordValue
+  let payload: RecordValue = {}
+  let nextCursor = ''
+  let shouldSaveCursor = false
+  const orders: RecordValue[] = []
   try {
-    // Kasta cursors continue through the entire history. Bulk CRM syncs must
-    // always stay in the current 100-order window; only a direct order refresh
-    // is allowed to request a specific historical order.
-    payload = targetOrderId
-      ? await fetchKastaOrders(kastaToken, new URLSearchParams({ limit: '100', order_id: targetOrderId }))
-      : await latestKastaPage(kastaToken)
+    if (targetOrderId) {
+      payload = await fetchKastaOrders(kastaToken, new URLSearchParams({ limit: '100', order_id: targetOrderId }))
+      orders.push(...(Array.isArray(payload.items) ? payload.items.map(asRecord) : []))
+    } else {
+      const { data: savedCursor } = await admin.from('crm_sync_cursors').select('cursor, updated_at').eq('source', 'kasta_orders_incremental_v2').maybeSingle()
+      const age = savedCursor ? Date.now() - Date.parse(savedCursor.updated_at) : Infinity
+      if (!fullSync && age < 120_000) return Response.json({ ok: true, skipped: 'cooldown', retryAfterSeconds: Math.ceil((120_000 - age) / 1000), received: 0, created: 0, updated: 0, skippedUnchanged: 0, changedOrderIds: [] }, { headers: corsHeaders })
+      let cursor = fullSync ? '' : text(savedCursor?.cursor)
+      do {
+        const query = new URLSearchParams({ limit: '100' })
+        if (cursor) query.set('cursor', cursor)
+        else if (fullSync || !savedCursor) query.set('from', new Date(Date.now() - 7 * 86_400_000).toISOString())
+        payload = await fetchKastaOrders(kastaToken, query)
+        orders.push(...(Array.isArray(payload.items) ? payload.items.map(asRecord) : []))
+        nextCursor = text(payload.cursor)
+        cursor = nextCursor
+      } while (number(payload.remains) > 0 && cursor)
+      shouldSaveCursor = !fullSync
+    }
   } catch (error) {
-    return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status: 502, headers: corsHeaders })
+    const status = error instanceof Error && error.message === '429' ? 429 : 502
+    return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status, headers: corsHeaders })
   }
-  const orders = Array.isArray(payload.items) ? payload.items.map(asRecord) : []
   const externalIds = [...new Set(orders.map((order) => text(order.id)).filter(Boolean).map((id) => `kasta:${id}`))]
   const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
     ? await admin
@@ -326,6 +326,7 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const changedOrderIds: string[] = []
   let deletedSkipped = 0
 
   for (const order of orders) {
@@ -393,8 +394,8 @@ Deno.serve(async (request) => {
 	}
 })
     let orderId = existing?.id
-    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1 }
-    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1 }
+    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
+    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
     if (!orderId) continue
     const { data: previousItems } = await admin.from('crm_order_items').select('position, product_name, size, image_url, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
     const byPosition = new Map((previousItems ?? []).map((item) => [item.position, item]))
@@ -426,5 +427,6 @@ Deno.serve(async (request) => {
     }
     await admin.from('crm_order_items').insert(savedItems)
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped, deletedSkipped, remains: number(payload.remains) }, { headers: corsHeaders })
+  if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)], remains: number(payload.remains) }, { headers: corsHeaders })
 })

@@ -37,26 +37,6 @@ type SupplierPayment = {
   created_at: string
 }
 
-type OrderCost = {
-  id: string
-  status: string
-  delivery: { ttn?: string | null }
-  crm_order_items: Array<{
-    cost: number
-    cost_usd: number
-    quantity: number
-    position: number
-    product_name: string
-  }>
-}
-
-type OrderItemReturn = {
-  order_id: string
-  item_position: number
-  product_name: string
-  returned_quantity: number
-}
-
 const router = useRouter()
 const reconciliations = ref<Reconciliation[]>([])
 const payments = ref<SupplierPayment[]>([])
@@ -203,33 +183,23 @@ async function load() {
     return
   }
   isGuest.value = session.session.user.email?.toLowerCase() === 'guest@gmail.com'
-  const [settingsResult, reconciliationsResult, paymentsResult, ordersResult, returnsResult] =
-    await Promise.all([
-      supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
-      supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
-      supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
-      supabase
-        .from('crm_orders')
-        .select(
-          'id, status, delivery, crm_order_items(cost, cost_usd, quantity, position, product_name)',
-        ),
-      supabase
-        .from('crm_order_item_returns')
-        .select('order_id, item_position, product_name, returned_quantity'),
-    ])
+  const [settingsResult, reconciliationsResult, paymentsResult, totalsResult] = await Promise.all([
+    supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
+    supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
+    supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
+    supabase.rpc('get_crm_current_cost_totals'),
+  ])
   if (
     settingsResult.error ||
     reconciliationsResult.error ||
     paymentsResult.error ||
-    ordersResult.error ||
-    returnsResult.error
+    totalsResult.error
   ) {
     error.value = [
       settingsResult.error,
       reconciliationsResult.error,
       paymentsResult.error,
-      ordersResult.error,
-      returnsResult.error,
+      totalsResult.error,
     ]
       .flatMap((item) => (item ? [item.message] : []))
       .join(' ')
@@ -242,28 +212,9 @@ async function load() {
     kind: item.kind as Reconciliation['kind'],
   })) as Reconciliation[]
   payments.value = paymentsResult.data ?? []
-  const returnedQuantities = new Map(
-    ((returnsResult.data as OrderItemReturn[]) ?? []).map((item) => [
-      `${item.order_id}:${item.item_position}`,
-      Number(item.returned_quantity),
-    ]),
-  )
-  const currentCosts = ((ordersResult.data as OrderCost[]) ?? [])
-    .filter((order) => Boolean(order.delivery?.ttn?.trim()))
-    .reduce(
-      (total, order) => {
-        for (const item of order.crm_order_items ?? []) {
-          const returnedQuantity = returnedQuantities.get(`${order.id}:${item.position}`)
-          const netQuantity = Math.max(0, Number(item.quantity) - (returnedQuantity ?? 0))
-          if (Number(item.cost_usd) > 0) total.usd += Number(item.cost_usd) * netQuantity
-          else total.uah += Number(item.cost) * netQuantity
-        }
-        return total
-      },
-      { usd: 0, uah: 0 },
-    )
-  currentCostUsd.value = currentCosts.usd
-  currentCostUah.value = currentCosts.uah
+  const currentCosts = (totalsResult.data ?? {}) as { usd?: number; uah?: number }
+  currentCostUsd.value = Number(currentCosts.usd ?? 0)
+  currentCostUah.value = Number(currentCosts.uah ?? 0)
   isLoading.value = false
 }
 

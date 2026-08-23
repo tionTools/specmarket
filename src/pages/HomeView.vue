@@ -130,10 +130,11 @@ let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
 let ordersRealtimeChannel: RealtimeChannel | undefined
 let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
 let reconciliationTimer: ReturnType<typeof window.setTimeout> | undefined
-let reconciliationInterval: ReturnType<typeof window.setInterval> | undefined
 let isReconciliationRunning = false
 let lastReconciliationAt = 0
 const pendingRemoteOrderIds = new Set<string>()
+const pendingNewOrderIds = new Set<string>()
+let ordersRealtimeSubscribed = false
 const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
@@ -1507,7 +1508,7 @@ async function syncEpicentrOrders(full = false, fullSyncResults?: string[]) {
     : `Эпицентр: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await reconcileRemoteOrders(true)
+  await refreshOrdersAfterMarketplaceSync(data)
 }
 
 async function syncPromOrders(full = false, fullSyncResults?: string[]) {
@@ -1534,10 +1535,10 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
     : `Prom: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await reconcileRemoteOrders(true)
+  await refreshOrdersAfterMarketplaceSync(data)
 }
 
-async function syncKastaOrders(full = false, latest = false, fullSyncResults?: string[]) {
+async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
   if (!supabase || isGuest.value || isSyncingKasta.value) return
   isSyncingKasta.value = true
   if (!(await waitForPendingSaves())) {
@@ -1547,13 +1548,7 @@ async function syncKastaOrders(full = false, latest = false, fullSyncResults?: s
   syncEpicentrMessage.value = ''
   const { data, error } = await supabase.functions.invoke('sync-kasta-orders', {
     method: 'POST',
-    body: full
-      ? latest
-        ? { full: true, latest: true }
-        : { full: true }
-      : latest
-        ? { latest: true }
-        : undefined,
+    body: full ? { full: true } : undefined,
   })
   isSyncingKasta.value = false
   if (error || !data?.ok) {
@@ -1564,12 +1559,10 @@ async function syncKastaOrders(full = false, latest = false, fullSyncResults?: s
   }
   const message = full
     ? `Каста: полная синхронизация — найдено ${data.received}, обновлено ${data.updated}, добавлено ${data.created}.`
-    : latest
-      ? `Каста: последние заказы — найдено ${data.received}, добавлено ${data.created}, уже есть ${data.skipped ?? 0}.`
-      : `Каста: найдено ${data.received}, добавлено новых ${data.created}, уже есть ${data.skipped ?? 0} — не изменены.`
+    : `Каста: найдено ${data.received}, добавлено ${data.created}, обновлено ${data.updated}, без изменений ${data.skippedUnchanged ?? data.skipped ?? 0}.`
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
-  await reconcileRemoteOrders(true)
+  await refreshOrdersAfterMarketplaceSync(data)
 }
 
 async function syncNewAllPlatforms() {
@@ -1588,7 +1581,7 @@ async function syncFullAllPlatforms() {
   if (isMarketplaceSyncBusy.value) return
   if (
     !window.confirm(
-      'Полная синхронизация обновит доступные заказы Prom и Эпицентра, а также последние 100 заказов Kasta. Продолжить?',
+      'Полная синхронизация обновит доступные заказы Prom и Эпицентра, а также заказы Kasta за последние 7 дней. Продолжить?',
     )
   )
     return
@@ -1597,7 +1590,7 @@ async function syncFullAllPlatforms() {
   try {
     await syncEpicentrOrders(true, fullSyncResults)
     await syncPromOrders(true, fullSyncResults)
-    await syncKastaOrders(true, true, fullSyncResults)
+    await syncKastaOrders(true, fullSyncResults)
     showSyncMessage(fullSyncResults.join('\n'))
   } finally {
     isSyncingAllPlatforms.value = false
@@ -1653,7 +1646,7 @@ async function syncKastaOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.displayNumber ?? order.id} обновлён из Каста.`)
-  await reloadOrdersAfterManualSync()
+  await refreshOrdersAfterMarketplaceSync(data)
   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
@@ -1686,7 +1679,7 @@ async function syncPromOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
-  await reloadOrdersAfterManualSync()
+  await refreshOrdersAfterMarketplaceSync(data)
   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
@@ -1719,7 +1712,7 @@ async function syncEpicentrOrder(order: Order) {
     return
   }
   showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
-  await reloadOrdersAfterManualSync()
+  await refreshOrdersAfterMarketplaceSync(data)
   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
 }
 
@@ -1738,8 +1731,15 @@ function orderSyncSnapshot(order: Order) {
   }
 }
 
-async function reloadOrdersAfterManualSync() {
-  await reconcileRemoteOrders(true)
+async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unknown }) {
+  const ids = Array.isArray(data.changedOrderIds)
+    ? data.changedOrderIds.filter((id): id is string => typeof id === 'string')
+    : null
+  if (ids === null) {
+    await reconcileRemoteOrders(true)
+    return
+  }
+  if (!ordersRealtimeSubscribed && ids.length) await refreshRemoteOrders(ids)
   if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
@@ -1774,35 +1774,27 @@ function scheduleReconciliation(delay = 750, force = false) {
   }, delay)
 }
 
-function handleOrdersVisibilityChange() {
-  if (!document.hidden) scheduleReconciliation()
-}
-
-function handleOrdersWindowFocus() {
-  scheduleReconciliation()
-}
-
 function startAutomaticOrdersRefresh() {
   if (!supabase || ordersRealtimeChannel) return
+  void supabase.realtime.setAuth()
   ordersRealtimeChannel = supabase
-    .channel('crm-orders-interface')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_orders' }, (payload) =>
-      queueRemoteOrderRefresh(payload.new.id),
-    )
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_orders' }, (payload) =>
-      queueRemoteOrderRefresh(payload.new.id),
-    )
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'crm_orders' }, (payload) =>
-      removeRemoteOrder(payload.old.id),
-    )
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        scheduleReconciliation(0, true)
+    .channel('crm:orders', { config: { private: true } })
+    .on('broadcast', { event: 'order_changed' }, ({ payload }) => {
+      const event = payload as { order_id?: string; operation?: string }
+      if (!event.order_id) return
+      if (event.operation === 'DELETE') removeRemoteOrder(event.order_id)
+      else {
+        if (event.operation === 'INSERT') pendingNewOrderIds.add(event.order_id)
+        queueRemoteOrderRefresh(event.order_id)
       }
     })
-  reconciliationInterval = window.setInterval(() => void reconcileRemoteOrders(), 900_000)
-  document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
-  window.addEventListener('focus', handleOrdersWindowFocus)
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        ordersRealtimeSubscribed = true
+        scheduleReconciliation(0, true)
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
+        ordersRealtimeSubscribed = false
+    })
 }
 
 function sortOrders() {
@@ -1898,8 +1890,10 @@ async function refreshRemoteOrders(remoteIds: string[]) {
   }
   for (const order of refreshedOrders) {
     const index = orders.value.findIndex((item) => item.remoteId === order.remoteId)
-    if (index === -1) orders.value.push(order)
-    else orders.value[index] = order
+    if (index === -1) {
+      orders.value.push(order)
+      if (pendingNewOrderIds.delete(order.remoteId)) notifyNewOrder(order)
+    } else orders.value[index] = order
   }
   registerRefreshedRemoteOrders(
     refreshedOrders.map((order) => ({
@@ -1910,6 +1904,21 @@ async function refreshRemoteOrders(remoteIds: string[]) {
   )
   for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
   sortOrders()
+}
+
+function notifyNewOrder(order: Order) {
+  showSyncMessage(`Новый заказ · ${order.platform} · №${order.displayNumber ?? order.id}`)
+  const Audio = window.AudioContext
+  if (!Audio) return
+  try {
+    const context = new Audio()
+    const oscillator = context.createOscillator()
+    oscillator.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.2)
+  } catch {
+    /* browser has not unlocked audio yet */
+  }
 }
 
 async function reconcileRemoteOrders(force = false) {
@@ -1972,48 +1981,9 @@ async function loadRemoteOrders() {
   sortOrders()
 }
 
-async function runDeliveryTrackingOnLoad() {
-  if (!supabase || isGuest.value) return
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-  let session = sessionData.session
-  const expiresSoon = !session?.expires_at || session.expires_at * 1000 - Date.now() < 60_000
-  if (sessionError || expiresSoon) {
-    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
-    session = refreshed.session
-    if (refreshError || !session) {
-      console.warn(
-        'Не удалось авторизовать запуск tracking доставки:',
-        refreshError?.message ?? sessionError?.message ?? 'сессия отсутствует',
-      )
-      return
-    }
-  }
-
-  if (!session) {
-    console.warn('Не удалось авторизовать запуск tracking доставки: сессия отсутствует')
-    return
-  }
-
-  user.value = session.user
-  const { data, error } = await supabase.functions.invoke<{ ok?: boolean; message?: string }>(
-    'sync-delivery-tracking',
-    { method: 'POST' },
-  )
-  if (error || !data?.ok) {
-    console.warn(
-      'Не удалось запустить tracking доставки:',
-      error?.message ?? data?.message ?? 'неизвестная ошибка',
-    )
-  }
-}
-
 onMounted(async () => {
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
-  // Функция сама проверяет киевское расписание и обрабатывает только просроченные доставки.
-  // Запуск при открытии CRM нужен, чтобы не ждать ближайшего cron-цикла после простоя вкладки.
-  await runDeliveryTrackingOnLoad()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
@@ -2031,9 +2001,6 @@ onMounted(async () => {
 onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
-  if (reconciliationInterval) window.clearInterval(reconciliationInterval)
-  document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
-  window.removeEventListener('focus', handleOrdersWindowFocus)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
 })
 

@@ -23,7 +23,7 @@ function shipmentCarrier(value: unknown) {
 }
 function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
   if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
-  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
+  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined))
 }
 const promStatusNames: Record<string, string> = {
   pending: 'Новий',
@@ -415,7 +415,7 @@ Deno.serve(async (request) => {
   const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
   const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user } } = await auth.auth.getUser()
+  const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
@@ -440,6 +440,7 @@ Deno.serve(async (request) => {
   let created = 0
   let updated = 0
   let skipped = 0
+  const changedOrderIds: string[] = []
   const productSizeCache = new Map<string, string>()
   const knownExternalIds = new Set<string>()
   if (!requestedExternalId && orders.length) {
@@ -569,8 +570,8 @@ Deno.serve(async (request) => {
       },
     }
     let orderId = existing?.id
-    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1 }
-    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1 }
+    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
+    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
     if (!orderId) continue
 
     const { data: currentItems } = await admin.from('crm_order_items')
@@ -617,5 +618,5 @@ Deno.serve(async (request) => {
       await admin.from('crm_order_items').insert(itemRows)
     }
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })
