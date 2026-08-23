@@ -448,20 +448,23 @@ Deno.serve(async (request) => {
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
   const hashes = new Map(await Promise.all(orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const)))
   const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
-  const { data: syncRows } = externalIds.length
+  const { data: syncRows, error: syncStateError } = externalIds.length
     ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, order_id').eq('platform', 'Пром').in('external_id', externalIds)
     : { data: [] }
+  if (syncStateError) return Response.json({ ok: false, message: syncStateError.message }, { status: 500, headers: corsHeaders })
   const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
   const candidates = orders.filter((order) => requestedExternalId || fullSync || stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !== hashes.get(`prom:${text(order.id)}`))
   const skippedUnchanged = orders.length - candidates.length
   if (!candidates.length) return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
   const candidateExternalIds = candidates.map((order) => `prom:${text(order.id)}`)
-  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
+  const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
+  if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const candidateOrderIds = (existingRows ?? []).map((row) => row.id)
-  const { data: existingItems } = candidateOrderIds.length
+  const { data: existingItems, error: existingItemsError } = candidateOrderIds.length
     ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', candidateOrderIds)
     : { data: [] }
+  if (existingItemsError) return Response.json({ ok: false, message: existingItemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, RecordValue[]>()
   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
@@ -582,8 +585,8 @@ Deno.serve(async (request) => {
     }
     let orderId = existing?.id
     const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
-    if (orderId && orderChanged) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1 }
-    else if (!orderId) { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1 }
+    if (orderId && orderChanged) { const { error } = await admin.from('crm_orders').update(data).eq('id', orderId); if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders }); updated += 1; changedOrderIds.push(orderId) }
+    else if (!orderId) { const { data: inserted, error } = await admin.from('crm_orders').insert(data).select('id').single(); if (error || !inserted?.id) return Response.json({ ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' }, { status: 500, headers: corsHeaders }); orderId = inserted.id; created += 1 }
     if (!orderId) continue
     if (!existing) changedOrderIds.push(orderId)
 
@@ -629,13 +632,16 @@ Deno.serve(async (request) => {
       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
       if (!same(comparableRows, comparableCurrent)) {
-        await admin.from('crm_order_items').delete().eq('order_id', orderId)
-        await admin.from('crm_order_items').insert(itemRows)
+        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+        const { error: insertError } = await admin.from('crm_order_items').insert(itemRows)
+        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
         if (!orderChanged) updated += 1
         changedOrderIds.push(orderId)
       } else if (orderChanged) changedOrderIds.push(orderId)
     }
-    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
+    if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })

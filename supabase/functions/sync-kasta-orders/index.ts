@@ -228,7 +228,7 @@ async function fetchKastaOrders(token: string, query: URLSearchParams, path = '/
   const response = await fetch(`https://hub.kasta.ua${path}?${query}`, {
     headers: { Authorization: token, Accept: 'application/json' },
   })
-  if (!response.ok) throw new Error(String(response.status))
+  if (!response.ok) throw { status: response.status, retryAfter: response.headers.get('Retry-After') }
   return asRecord(await response.json())
 }
 
@@ -300,7 +300,8 @@ Deno.serve(async (request) => {
       payload = await fetchKastaOrders(kastaToken, new URLSearchParams({ limit: '100', order_id: targetOrderId }))
       orders.push(...(Array.isArray(payload.items) ? payload.items.map(asRecord) : []))
     } else {
-      const { data: savedCursor } = await admin.from('crm_sync_cursors').select('cursor, updated_at').eq('source', 'kasta_orders_incremental_v2').maybeSingle()
+      const { data: savedCursor, error: cursorError } = await admin.from('crm_sync_cursors').select('cursor, updated_at').eq('source', 'kasta_orders_incremental_v2').maybeSingle()
+      if (cursorError) return Response.json({ ok: false, message: cursorError.message }, { status: 500, headers: corsHeaders })
       const age = savedCursor ? Date.now() - Date.parse(savedCursor.updated_at) : Infinity
       if (!fullSync && age < 120_000) return Response.json({ ok: true, skipped: 'cooldown', retryAfterSeconds: Math.ceil((120_000 - age) / 1000), received: 0, created: 0, updated: 0, skippedUnchanged: 0, changedOrderIds: [] }, { headers: corsHeaders })
       let cursor = fullSync ? '' : text(savedCursor?.cursor)
@@ -316,8 +317,9 @@ Deno.serve(async (request) => {
       shouldSaveCursor = !fullSync
     }
   } catch (error) {
-    const status = error instanceof Error && error.message === '429' ? 429 : 502
-    return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status, headers: corsHeaders })
+    const failed = error as { status?: number; retryAfter?: string }
+    const status = failed.status === 429 ? 429 : 502
+    return Response.json({ ok: false, message: `Каста не отдала заказы (${failed.status ?? 'ошибка'}).` }, { status, headers: { ...corsHeaders, ...(failed.retryAfter ? { 'Retry-After': failed.retryAfter } : {}) } })
   }
   const hashes = new Map(await Promise.all(orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const)))
   const externalIds = [...hashes.keys()]
@@ -332,22 +334,25 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: `Не удалось проверить удалённые Kasta-заказы (${deletedOrdersError.message}).` }, { status: 500, headers: corsHeaders })
   }
   const deletedExternalIds = new Set((deletedOrders ?? []).map((order) => text(order.external_id)))
-  const { data: syncRows } = externalIds.length
+  const { data: syncRows, error: syncStateError } = externalIds.length
     ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash').eq('platform', 'Каста').in('external_id', externalIds)
     : { data: [] }
+  if (syncStateError) return Response.json({ ok: false, message: syncStateError.message }, { status: 500, headers: corsHeaders })
   const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
   const candidates = orders.filter((order) => targetOrderId || fullSync || stateByExternalId.get(`kasta:${text(order.id)}`)?.source_hash !== hashes.get(`kasta:${text(order.id)}`))
   const skippedUnchanged = orders.length - candidates.length
   if (!candidates.length) {
-    if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
+    if (shouldSaveCursor && nextCursor) { const { error } = await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() }); if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders }) }
     return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, deletedSkipped: 0, changedOrderIds: [] }, { headers: corsHeaders })
   }
   const candidateExternalIds = candidates.map((order) => `kasta:${text(order.id)}`)
-  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
+  const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
+  if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
-  const { data: existingItems } = (existingRows ?? []).length
+  const { data: existingItems, error: itemsError } = (existingRows ?? []).length
     ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', existingRows.map((row) => row.id))
     : { data: [] }
+  if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, RecordValue[]>()
   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
@@ -423,8 +428,8 @@ Deno.serve(async (request) => {
 })
     let orderId = existing?.id
     const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
-    if (orderId && orderChanged) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
-    else if (!orderId) { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
+    if (orderId && orderChanged) { const { error } = await admin.from('crm_orders').update(data).eq('id', orderId); if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders }); updated += 1; changedOrderIds.push(orderId) }
+    else if (!orderId) { const { data: inserted, error } = await admin.from('crm_orders').insert(data).select('id').single(); if (error || !inserted?.id) return Response.json({ ok: false, message: error?.message ?? 'Не удалось создать заказ Каста.' }, { status: 500, headers: corsHeaders }); orderId = inserted.id; created += 1; changedOrderIds.push(orderId) }
     if (!orderId) continue
     const previousItems = itemsByOrder.get(orderId) ?? []
     const byPosition = new Map((previousItems ?? []).map((item) => [item.position, item]))
@@ -456,12 +461,15 @@ Deno.serve(async (request) => {
     const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
     const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
     if (!same(comparableSaved, comparableExisting)) {
-      await admin.from('crm_order_items').delete().eq('order_id', orderId)
-      await admin.from('crm_order_items').insert(savedItems)
+      const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+      if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+      const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
+      if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
       if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
     }
-    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Каста', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Каста', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
+    if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
-  if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
+  if (shouldSaveCursor && nextCursor) { const { error } = await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() }); if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders }) }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)], remains: number(payload.remains) }, { headers: corsHeaders })
 })

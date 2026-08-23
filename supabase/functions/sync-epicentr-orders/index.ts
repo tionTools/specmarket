@@ -341,9 +341,10 @@ Deno.serve(async (request) => {
   const listOrders = orders
   const hashes = new Map(await Promise.all(listOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
   const externalIds = listOrders.map((order) => order.id).filter(Boolean)
-  const { data: states } = externalIds.length
+  const { data: states, error: statesError } = externalIds.length
     ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', externalIds)
     : { data: [] }
+  if (statesError) return Response.json({ ok: false, message: statesError.message }, { status: 500, headers: corsHeaders })
   const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
   const kyivHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
   const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
@@ -356,11 +357,13 @@ Deno.serve(async (request) => {
   })
   const skippedUnchanged = listOrders.length - orders.length
   if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
-  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', orders.map((order) => order.id))
+  const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', orders.map((order) => order.id))
+  if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
-  const { data: batchedItems } = (existingRows ?? []).length
+  const { data: batchedItems, error: itemsError } = (existingRows ?? []).length
     ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual').in('order_id', existingRows.map((row) => row.id))
     : { data: [] }
+  if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, Record<string, unknown>[]>()
   for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let created = 0
@@ -543,11 +546,13 @@ Deno.serve(async (request) => {
     let orderId = existing.data?.id
     const orderChanged = !existing.data || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing.data?.[key]])), data)
     if (orderId && orderChanged) {
-      await admin.from('crm_orders').update(data).eq('id', orderId)
+      const { error } = await admin.from('crm_orders').update(data).eq('id', orderId)
+      if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
       updated += 1
       changedOrderIds.push(orderId)
     } else if (!orderId) {
       const inserted = await admin.from('crm_orders').insert(data).select('id').single()
+      if (inserted.error || !inserted.data?.id) return Response.json({ ok: false, message: inserted.error?.message ?? 'Не удалось создать заказ Эпицентра.' }, { status: 500, headers: corsHeaders })
       orderId = inserted.data?.id
       created += 1
       if (orderId) changedOrderIds.push(orderId)
@@ -605,7 +610,8 @@ Deno.serve(async (request) => {
         if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
       }
     }
-    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Эпицентр', external_id: externalId, order_id: orderId, source_hash: hashes.get(order.id), synced_at: new Date().toISOString() })
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Эпицентр', external_id: externalId, order_id: orderId, source_hash: hashes.get(order.id), synced_at: new Date().toISOString() })
+    if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
 
   return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
