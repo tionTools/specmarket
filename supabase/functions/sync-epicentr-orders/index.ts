@@ -1,5 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`
+  return JSON.stringify(value)
+}
+async function sourceHash(value: unknown) {
+  const bytes = new TextEncoder().encode(stableStringify(value))
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -327,9 +337,26 @@ Deno.serve(async (request) => {
     const payload = await response.json() as { items?: EpicentrOrder[] }
     orders = payload.items ?? []
   }
+  const listOrders = orders
+  const hashes = new Map(await Promise.all(listOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
+  const externalIds = listOrders.map((order) => order.id).filter(Boolean)
+  const { data: states } = externalIds.length
+    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', externalIds)
+    : { data: [] }
+  const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
+  const kyivHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
+  const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
+  const final = (order: EpicentrOrder) => /cancel|return|complete|closed|deliver|finish/i.test(`${order.statusCode} ${order.status}`)
+  orders = listOrders.filter((order) => {
+    if (requestedExternalId || fullSync) return true
+    const state = stateByExternalId.get(order.id)
+    return !state || state.source_hash !== hashes.get(order.id) || (!final(order) && Date.now() - Date.parse(state.synced_at) >= ttlMs)
+  })
+  const skippedUnchanged = listOrders.length - orders.length
+  if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
   let created = 0
   let updated = 0
-  let skipped = 0
+  const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   const offerRows = orders.flatMap((order) => normalizeItems(order).map((item) => ({
     offer_id: epicentrOfferId(item.raw),
@@ -392,18 +419,7 @@ Deno.serve(async (request) => {
       .maybeSingle()
     if (currentMapping?.category_id) categoryByOffer.set(offerId, currentMapping.category_id)
   }
-  const knownExternalIds = new Set<string>()
-  if (!requestedExternalId && orders.length) {
-    const externalIds = orders.map((order) => order.id).filter(Boolean)
-    const { data: existingOrders } = await admin.from('crm_orders').select('external_id').in('external_id', externalIds)
-    for (const row of existingOrders ?? []) if (row.external_id) knownExternalIds.add(row.external_id)
-  }
-
   for (const order of orders) {
-    if (!requestedExternalId && !fullSync && knownExternalIds.has(order.id)) {
-      skipped += 1
-      continue
-    }
     const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
     })
@@ -581,7 +597,8 @@ Deno.serve(async (request) => {
         return Response.json({ ok: false, message: `Не удалось записать позиции: ${insertError.message}` }, { status: 500, headers: corsHeaders })
       }
     }
+    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Эпицентр', external_id: externalId, order_id: orderId, source_hash: hashes.get(order.id), synced_at: new Date().toISOString() })
   }
 
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })

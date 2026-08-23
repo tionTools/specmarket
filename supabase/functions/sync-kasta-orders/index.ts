@@ -10,6 +10,15 @@ type RecordValue = Record<string, unknown>
 const asRecord = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`
+  return JSON.stringify(value)
+}
+async function sourceHash(value: unknown) {
+  const bytes = new TextEncoder().encode(stableStringify(value))
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
@@ -309,7 +318,8 @@ Deno.serve(async (request) => {
     const status = error instanceof Error && error.message === '429' ? 429 : 502
     return Response.json({ ok: false, message: `Каста не отдала заказы (${error instanceof Error ? error.message : 'ошибка'}).` }, { status, headers: corsHeaders })
   }
-  const externalIds = [...new Set(orders.map((order) => text(order.id)).filter(Boolean).map((id) => `kasta:${id}`))]
+  const hashes = new Map(await Promise.all(orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const)))
+  const externalIds = [...hashes.keys()]
   const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
     ? await admin
       .from('crm_deleted_marketplace_orders')
@@ -321,21 +331,33 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: `Не удалось проверить удалённые Kasta-заказы (${deletedOrdersError.message}).` }, { status: 500, headers: corsHeaders })
   }
   const deletedExternalIds = new Set((deletedOrders ?? []).map((order) => text(order.external_id)))
+  const { data: syncRows } = externalIds.length
+    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash').eq('platform', 'Каста').in('external_id', externalIds)
+    : { data: [] }
+  const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
+  const candidates = orders.filter((order) => targetOrderId || fullSync || stateByExternalId.get(`kasta:${text(order.id)}`)?.source_hash !== hashes.get(`kasta:${text(order.id)}`))
+  const skippedUnchanged = orders.length - candidates.length
+  if (!candidates.length) {
+    if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
+    return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, deletedSkipped: 0, changedOrderIds: [] }, { headers: corsHeaders })
+  }
+  const candidateExternalIds = candidates.map((order) => `kasta:${text(order.id)}`)
+  const { data: existingRows } = await admin.from('crm_orders').select('id, external_id, shipping, acquiring, acquiring_percent, delivery').in('external_id', candidateExternalIds)
+  const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   const royaltyCache = new Map<string, number>()
   let created = 0
   let updated = 0
-  let skipped = 0
+  const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   let deletedSkipped = 0
 
-  for (const order of orders) {
+  for (const order of candidates) {
     const kastaId = text(order.id)
     if (!kastaId) continue
     const externalId = `kasta:${kastaId}`
     if (deletedExternalIds.has(externalId)) { deletedSkipped += 1; continue }
-    const { data: existing } = await admin.from('crm_orders').select('id, shipping, acquiring, acquiring_percent, delivery').eq('external_id', externalId).maybeSingle()
-    if (existing && !fullSync && !targetOrderId) { skipped += 1; continue }
+    const existing = existingByExternalId.get(externalId)
     const client = asRecord(order.client)
     const address = asRecord(order.shipping_address)
     const delivery = asRecord(order.delivery_properties)
@@ -426,6 +448,7 @@ Deno.serve(async (request) => {
       savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
     }
     await admin.from('crm_order_items').insert(savedItems)
+    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Каста', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
   }
   if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)], remains: number(payload.remains) }, { headers: corsHeaders })

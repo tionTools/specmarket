@@ -10,6 +10,16 @@ type RecordValue = Record<string, unknown>
 const asRecord = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`
+  return JSON.stringify(value)
+}
+async function sourceHash(value: unknown) {
+  const bytes = new TextEncoder().encode(stableStringify(value))
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
@@ -436,34 +446,35 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
+  const hashes = new Map(await Promise.all(orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const)))
+  const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
+  const { data: syncRows } = externalIds.length
+    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, order_id').eq('platform', 'Пром').in('external_id', externalIds)
+    : { data: [] }
+  const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
+  const candidates = orders.filter((order) => requestedExternalId || fullSync || stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !== hashes.get(`prom:${text(order.id)}`))
+  const skippedUnchanged = orders.length - candidates.length
+  if (!candidates.length) return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
+  const candidateExternalIds = candidates.map((order) => `prom:${text(order.id)}`)
+  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
+  const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
+  const candidateOrderIds = (existingRows ?? []).map((row) => row.id)
+  const { data: existingItems } = candidateOrderIds.length
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', candidateOrderIds)
+    : { data: [] }
+  const itemsByOrder = new Map<string, RecordValue[]>()
+  for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   let created = 0
   let updated = 0
-  let skipped = 0
+  const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   const productSizeCache = new Map<string, string>()
-  const knownExternalIds = new Set<string>()
-  if (!requestedExternalId && orders.length) {
-    const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
-    const { data: existingOrders } = await admin.from('crm_orders').select('external_id').in('external_id', externalIds)
-    for (const row of existingOrders ?? []) if (row.external_id) knownExternalIds.add(row.external_id)
-  }
-
-  for (const order of orders) {
+  for (const order of candidates) {
     const promId = text(order.id)
     if (!promId) continue
     const externalId = `prom:${promId}`
-    if (!requestedExternalId && !fullSync && knownExternalIds.has(externalId)) {
-      skipped += 1
-      continue
-    }
-    let existing: RecordValue | null = null
-    if (requestedExternalId || fullSync) {
-      const { data } = await admin.from('crm_orders')
-        .select('id, shipping, acquiring, acquiring_percent, delivery')
-        .eq('external_id', externalId).maybeSingle()
-      existing = data
-    }
+    const existing = existingByExternalId.get(externalId) ?? null
     // Массовая кнопка ищет только новые заказы. Старые обновляются только
     // отдельной кнопкой в карточке конкретного заказа.
     const previousDelivery = asRecord(existing?.delivery)
@@ -570,15 +581,15 @@ Deno.serve(async (request) => {
       },
     }
     let orderId = existing?.id
-    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
-    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
+    const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
+    if (orderId && orderChanged) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1 }
+    else if (!orderId) { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1 }
     if (!orderId) continue
+    if (!existing) changedOrderIds.push(orderId)
 
-    const { data: currentItems } = await admin.from('crm_order_items')
-      .select('position, product_name, size, image_url, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
+    const currentItems = itemsByOrder.get(orderId) ?? []
     const byPosition = new Map((currentItems ?? []).map((item) => [item.position, item]))
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
-    await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const items = sourceItems(order)
     const itemPrice = (item: RecordValue) => {
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
@@ -615,8 +626,16 @@ Deno.serve(async (request) => {
       const imageUrl = feedProducts.get(rzid)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
       return { order_id: orderId, position, product_name: name, size, image_url: imageUrl || null, quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royalty_percent ?? royaltyPercent, royalty_amount: previous?.royalty_amount ?? royaltyAmount }
       }))
-      await admin.from('crm_order_items').insert(itemRows)
+      const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
+      const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+      if (!same(comparableRows, comparableCurrent)) {
+        await admin.from('crm_order_items').delete().eq('order_id', orderId)
+        await admin.from('crm_order_items').insert(itemRows)
+        if (!orderChanged) updated += 1
+        changedOrderIds.push(orderId)
+      } else if (orderChanged) changedOrderIds.push(orderId)
     }
+    await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })
