@@ -347,7 +347,8 @@ Deno.serve(async (request) => {
   const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
   const kyivHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
   const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
-  const final = (order: EpicentrOrder) => /cancel|return|complete|closed|deliver|finish/i.test(`${order.statusCode} ${order.status}`)
+  const terminalStatusCodes = new Set(['finished', 'completed', 'closed', 'canceled', 'returned', 'canceled_by_seller'])
+  const final = (order: EpicentrOrder) => terminalStatusCodes.has(String(order.statusCode).toLowerCase())
   orders = listOrders.filter((order) => {
     if (requestedExternalId || fullSync) return true
     const state = stateByExternalId.get(order.id)
@@ -431,7 +432,8 @@ Deno.serve(async (request) => {
     const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
     })
-    const detailPayload: unknown = detailResponse.ok ? await detailResponse.json() : undefined
+    if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
+    const detailPayload: unknown = await detailResponse.json()
     const detail = extractOrder(detailPayload)
     const source: EpicentrOrder = {
       ...order,

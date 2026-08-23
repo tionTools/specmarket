@@ -134,6 +134,10 @@ let isReconciliationRunning = false
 let lastReconciliationAt = 0
 const pendingRemoteOrderIds = new Set<string>()
 const pendingNewOrderIds = new Set<string>()
+const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
+let nextNewOrderToastId = 0
+let audioContext: AudioContext | undefined
+let audioUnlockListener: (() => void) | undefined
 let ordersRealtimeSubscribed = false
 const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
@@ -1010,6 +1014,7 @@ async function openPrintRegistry() {
       ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
   )
   let syncErrors = 0
+  const changedOrderIds = new Set<string>()
   for (const order of ordersWithoutTtn) {
     const functionName =
       order.platform === 'Пром'
@@ -1029,8 +1034,12 @@ async function openPrintRegistry() {
       body,
     })
     if (error || !data?.ok) syncErrors += 1
+    else
+      for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
+        if (typeof id === 'string') changedOrderIds.add(id)
   }
-  if (ordersWithoutTtn.length) await reconcileRemoteOrders(true)
+  if (!ordersRealtimeSubscribed && changedOrderIds.size)
+    await refreshRemoteOrders([...changedOrderIds])
 
   const registryOrders = orders.value.filter(
     (order) =>
@@ -1907,18 +1916,32 @@ async function refreshRemoteOrders(remoteIds: string[]) {
 }
 
 function notifyNewOrder(order: Order) {
-  showSyncMessage(`Новый заказ · ${order.platform} · №${order.displayNumber ?? order.id}`)
-  const Audio = window.AudioContext
-  if (!Audio) return
-  try {
-    const context = new Audio()
-    const oscillator = context.createOscillator()
-    oscillator.connect(context.destination)
-    oscillator.start()
-    oscillator.stop(context.currentTime + 0.2)
-  } catch {
-    /* browser has not unlocked audio yet */
+  const toast = {
+    id: ++nextNewOrderToastId,
+    text: `Новый заказ · ${order.platform} · №${order.displayNumber ?? order.id}`,
   }
+  newOrderToasts.value.push(toast)
+  window.setTimeout(() => {
+    newOrderToasts.value = newOrderToasts.value.filter((item) => item.id !== toast.id)
+  }, 3000)
+  if (!audioContext || audioContext.state !== 'running') return
+  try {
+    const oscillator = audioContext.createOscillator()
+    oscillator.connect(audioContext.destination)
+    oscillator.start()
+    oscillator.stop(audioContext.currentTime + 0.2)
+  } catch {}
+}
+
+function unlockNewOrderSound() {
+  if (!window.AudioContext) return
+  audioContext ??= new window.AudioContext()
+  void audioContext.resume().then(() => {
+    if (audioContext?.state !== 'running' || !audioUnlockListener) return
+    for (const event of ['pointerdown', 'click', 'keydown'])
+      window.removeEventListener(event, audioUnlockListener)
+    audioUnlockListener = undefined
+  })
 }
 
 async function reconcileRemoteOrders(force = false) {
@@ -1982,6 +2005,9 @@ async function loadRemoteOrders() {
 }
 
 onMounted(async () => {
+  audioUnlockListener = unlockNewOrderSound
+  for (const event of ['pointerdown', 'click', 'keydown'])
+    window.addEventListener(event, audioUnlockListener)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
@@ -2002,6 +2028,10 @@ onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
+  if (audioUnlockListener)
+    for (const event of ['pointerdown', 'click', 'keydown'])
+      window.removeEventListener(event, audioUnlockListener)
+  if (audioContext) void audioContext.close()
 })
 
 function openNewOrderDialog() {
@@ -2665,6 +2695,17 @@ function orderDateTime(order: Order) {
     </form>
   </div>
   <div v-else class="min-h-screen bg-slate-50 text-slate-900">
+    <div
+      class="pointer-events-none fixed inset-x-0 top-4 z-50 mx-auto flex max-w-md flex-col gap-2 px-4"
+    >
+      <p
+        v-for="toast in newOrderToasts"
+        :key="toast.id"
+        class="rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg"
+      >
+        {{ toast.text }}
+      </p>
+    </div>
     <RouterLink
       class="fixed right-0 top-1/2 z-[80] flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
       :to="{
