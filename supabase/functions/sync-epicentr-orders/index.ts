@@ -9,6 +9,7 @@ async function sourceHash(value: unknown) {
   const bytes = new TextEncoder().encode(stableStringify(value))
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
+const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -354,6 +355,13 @@ Deno.serve(async (request) => {
   })
   const skippedUnchanged = listOrders.length - orders.length
   if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
+  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', orders.map((order) => order.id))
+  const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
+  const { data: batchedItems } = (existingRows ?? []).length
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual').in('order_id', existingRows.map((row) => row.id))
+    : { data: [] }
+  const itemsByOrder = new Map<string, Record<string, unknown>[]>()
+  for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let created = 0
   let updated = 0
   const skipped = skippedUnchanged
@@ -432,11 +440,7 @@ Deno.serve(async (request) => {
       items: detail.items ?? order.items,
     }
     const externalId = source.id
-    const existing = requestedExternalId || fullSync
-      ? await admin.from('crm_orders')
-        .select('id, customer, phone, customer_email, shipping, acquiring, acquiring_percent, delivery')
-        .eq('external_id', externalId).maybeSingle()
-      : { data: null }
+    const existing = { data: existingByExternalId.get(externalId) ?? null }
     // Массовая кнопка добавляет только отсутствующие заказы. Обновление
     // существующего заказа остаётся отдельным действием в его карточке.
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
@@ -535,11 +539,12 @@ Deno.serve(async (request) => {
     }
 
     let orderId = existing.data?.id
-    if (orderId) {
+    const orderChanged = !existing.data || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing.data?.[key]])), data)
+    if (orderId && orderChanged) {
       await admin.from('crm_orders').update(data).eq('id', orderId)
       updated += 1
       changedOrderIds.push(orderId)
-    } else {
+    } else if (!orderId) {
       const inserted = await admin.from('crm_orders').insert(data).select('id').single()
       orderId = inserted.data?.id
       created += 1
@@ -547,10 +552,7 @@ Deno.serve(async (request) => {
     }
     if (!orderId) continue
 
-    const { data: currentItems } = await admin
-      .from('crm_order_items')
-      .select('position, product_name, size, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual')
-      .eq('order_id', orderId)
+    const currentItems = itemsByOrder.get(orderId) ?? []
     const itemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
     )
@@ -565,11 +567,7 @@ Deno.serve(async (request) => {
     )
     if (validItems.length) {
       for (const item of validItems) await ensureDetectedCategory(item.raw)
-      const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
-      if (deleteError) {
-        return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
-      }
-      const { error: insertError } = await admin.from('crm_order_items').insert(validItems.map((item, position) => {
+      const savedItems = validItems.map((item, position) => {
         const snapshotItem = manualItems[position]
         // В ручной синхронизации снимок позиции приоритетнее: API иногда
         // меняет написание товара, но это не повод терять введённые финансы.
@@ -592,9 +590,17 @@ Deno.serve(async (request) => {
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
           royalty_manual: royaltyManual,
         }
-      }))
-      if (insertError) {
+      })
+      const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
+      const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
+      if (!same(comparableSaved, comparableExisting)) {
+        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+        if (deleteError) return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
+        const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
+        if (insertError) {
         return Response.json({ ok: false, message: `Не удалось записать позиции: ${insertError.message}` }, { status: 500, headers: corsHeaders })
+        }
+        if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
       }
     }
     await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Эпицентр', external_id: externalId, order_id: orderId, source_hash: hashes.get(order.id), synced_at: new Date().toISOString() })

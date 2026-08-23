@@ -19,6 +19,7 @@ async function sourceHash(value: unknown) {
   const bytes = new TextEncoder().encode(stableStringify(value))
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
+const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
@@ -342,8 +343,13 @@ Deno.serve(async (request) => {
     return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, deletedSkipped: 0, changedOrderIds: [] }, { headers: corsHeaders })
   }
   const candidateExternalIds = candidates.map((order) => `kasta:${text(order.id)}`)
-  const { data: existingRows } = await admin.from('crm_orders').select('id, external_id, shipping, acquiring, acquiring_percent, delivery').in('external_id', candidateExternalIds)
+  const { data: existingRows } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
+  const { data: existingItems } = (existingRows ?? []).length
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', existingRows.map((row) => row.id))
+    : { data: [] }
+  const itemsByOrder = new Map<string, RecordValue[]>()
+  for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   const feedImages = await imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   const royaltyCache = new Map<string, number>()
   let created = 0
@@ -416,13 +422,13 @@ Deno.serve(async (request) => {
 	}
 })
     let orderId = existing?.id
-    if (orderId) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
-    else { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
+    const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
+    if (orderId && orderChanged) { await admin.from('crm_orders').update(data).eq('id', orderId); updated += 1; changedOrderIds.push(orderId) }
+    else if (!orderId) { const { data: inserted } = await admin.from('crm_orders').insert(data).select('id').single(); orderId = inserted?.id; created += 1; if (orderId) changedOrderIds.push(orderId) }
     if (!orderId) continue
-    const { data: previousItems } = await admin.from('crm_order_items').select('position, product_name, size, image_url, cost, cost_usd, royalty_percent, royalty_amount').eq('order_id', orderId)
+    const previousItems = itemsByOrder.get(orderId) ?? []
     const byPosition = new Map((previousItems ?? []).map((item) => [item.position, item]))
     if (!items.length) continue
-    await admin.from('crm_order_items').delete().eq('order_id', orderId)
     const savedItems = []
     for (const [position, item] of items.entries()) {
       const previous = byPosition.get(position)
@@ -447,7 +453,13 @@ Deno.serve(async (request) => {
       }
       savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
     }
-    await admin.from('crm_order_items').insert(savedItems)
+    const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
+    const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+    if (!same(comparableSaved, comparableExisting)) {
+      await admin.from('crm_order_items').delete().eq('order_id', orderId)
+      await admin.from('crm_order_items').insert(savedItems)
+      if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
+    }
     await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Каста', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
   }
   if (shouldSaveCursor && nextCursor) await admin.from('crm_sync_cursors').upsert({ source: 'kasta_orders_incremental_v2', cursor: nextCursor, updated_at: new Date().toISOString() })
