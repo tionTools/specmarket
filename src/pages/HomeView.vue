@@ -129,6 +129,7 @@ let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
 let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
 let ordersRealtimeChannel: RealtimeChannel | undefined
 let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
+let realtimeReconnectTimer: ReturnType<typeof window.setTimeout> | undefined
 let reconciliationTimer: ReturnType<typeof window.setTimeout> | undefined
 let isReconciliationRunning = false
 let lastReconciliationAt = 0
@@ -138,7 +139,9 @@ const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
 let nextNewOrderToastId = 0
 let audioContext: AudioContext | undefined
 let audioUnlockListener: (() => void) | undefined
-let ordersRealtimeSubscribed = false
+const ordersRealtimeSubscribed = ref(false)
+let isAutomaticOrdersRefreshActive = false
+let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
@@ -1038,7 +1041,7 @@ async function openPrintRegistry() {
       for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
         if (typeof id === 'string') changedOrderIds.add(id)
   }
-  if (!ordersRealtimeSubscribed && changedOrderIds.size)
+  if (!ordersRealtimeSubscribed.value && changedOrderIds.size)
     await refreshRemoteOrders([...changedOrderIds])
 
   const registryOrders = orders.value.filter(
@@ -1748,7 +1751,7 @@ async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unkno
     await reconcileRemoteOrders(true)
     return
   }
-  if (!ordersRealtimeSubscribed && ids.length) await refreshRemoteOrders(ids)
+  if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
   if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
@@ -1783,8 +1786,48 @@ function scheduleReconciliation(delay = 750, force = false) {
   }, delay)
 }
 
+function scheduleRealtimeReconnect(delay = 2000) {
+  if (
+    !supabase ||
+    !isAutomaticOrdersRefreshActive ||
+    isRealtimeRestarting ||
+    realtimeReconnectTimer
+  )
+    return
+  realtimeReconnectTimer = window.setTimeout(() => {
+    realtimeReconnectTimer = undefined
+    void restartAutomaticOrdersRefresh()
+  }, delay)
+}
+
+async function restartAutomaticOrdersRefresh() {
+  if (!supabase || !isAutomaticOrdersRefreshActive || isRealtimeRestarting) return
+  isRealtimeRestarting = true
+  const channel = ordersRealtimeChannel
+  ordersRealtimeChannel = undefined
+  try {
+    if (channel) await supabase.removeChannel(channel)
+  } finally {
+    isRealtimeRestarting = false
+  }
+  if (isAutomaticOrdersRefreshActive) startAutomaticOrdersRefresh()
+}
+
+function handleOrdersVisibilityChange() {
+  if (document.hidden) return
+  void reconcileRemoteOrders(true)
+  if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
+}
+
+function handleBrowserOnline() {
+  void reconcileRemoteOrders(true)
+  if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
+}
+
 function startAutomaticOrdersRefresh() {
   if (!supabase || ordersRealtimeChannel) return
+  isAutomaticOrdersRefreshActive = true
+  ordersRealtimeSubscribed.value = false
   void supabase.realtime.setAuth()
   ordersRealtimeChannel = supabase
     .channel('crm:orders', { config: { private: true } })
@@ -1799,10 +1842,16 @@ function startAutomaticOrdersRefresh() {
     })
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        ordersRealtimeSubscribed = true
+        ordersRealtimeSubscribed.value = true
+        if (realtimeReconnectTimer) {
+          window.clearTimeout(realtimeReconnectTimer)
+          realtimeReconnectTimer = undefined
+        }
         scheduleReconciliation(0, true)
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
-        ordersRealtimeSubscribed = false
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        ordersRealtimeSubscribed.value = false
+        scheduleRealtimeReconnect()
+      }
     })
 }
 
@@ -2008,6 +2057,8 @@ onMounted(async () => {
   audioUnlockListener = unlockNewOrderSound
   for (const event of ['pointerdown', 'click', 'keydown'])
     window.addEventListener(event, audioUnlockListener)
+  document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
+  window.addEventListener('online', handleBrowserOnline)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
@@ -2025,8 +2076,13 @@ onMounted(async () => {
 })
 
 onScopeDispose(() => {
+  isAutomaticOrdersRefreshActive = false
+  ordersRealtimeSubscribed.value = false
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
+  if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
+  document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
+  window.removeEventListener('online', handleBrowserOnline)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
   if (audioUnlockListener)
     for (const event of ['pointerdown', 'click', 'keydown'])
@@ -2724,6 +2780,23 @@ function orderDateTime(order: Order) {
         <div class="shrink-0">
           <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
           <h1 class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Заказы</h1>
+          <div
+            class="mt-2 inline-flex items-center gap-2 text-xs font-semibold"
+            :class="{
+              'text-emerald-700': ordersRealtimeSubscribed,
+              'text-red-700': !ordersRealtimeSubscribed,
+            }"
+          >
+            <span
+              class="size-2 rounded-full"
+              :class="{
+                'bg-emerald-500': ordersRealtimeSubscribed,
+                'bg-red-500': !ordersRealtimeSubscribed,
+              }"
+              aria-hidden="true"
+            ></span>
+            {{ ordersRealtimeSubscribed ? 'Онлайн' : 'Нет обновления' }}
+          </div>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 xl:flex-nowrap">
           <input
