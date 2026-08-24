@@ -5,7 +5,11 @@ import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
-import { displayCarrier } from '@/features/orders/display'
+import {
+  displayCarrier,
+  formatUkrainianPhone,
+  orderBusinessPlatform,
+} from '@/features/orders/display'
 import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
@@ -139,6 +143,13 @@ const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
 let nextNewOrderToastId = 0
 let audioContext: AudioContext | undefined
 let audioUnlockListener: (() => void) | undefined
+
+function dismissNewOrderToastsOnButtonClick(event: MouseEvent) {
+  if (!newOrderToasts.value.length) return
+  const target = event.target
+  if (target instanceof Element && target.closest('button')) newOrderToasts.value = []
+}
+
 const ordersRealtimeSubscribed = ref(false)
 let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
@@ -960,7 +971,7 @@ const matchingOrders = computed(() => {
     const matchesPlatform =
       isShowingCancelledAndReturned.value ||
       platformFilter.value === 'all' ||
-      order.platform === platformFilter.value
+      orderBusinessPlatform(order) === platformFilter.value
     const matchesOrderState = isPromRegistryView.value
       ? true
       : isShowingCancelledAndReturned.value
@@ -1212,7 +1223,7 @@ const summary = computed(() => {
 const platformSummary = computed(() =>
   platformOptions.map((platform) => {
     const platformOrders = ordersForPlatformSummary.value.filter(
-      (order) => order.platform === platform,
+      (order) => orderBusinessPlatform(order) === platform,
     )
     return {
       platform,
@@ -1967,12 +1978,9 @@ async function refreshRemoteOrders(remoteIds: string[]) {
 function notifyNewOrder(order: Order) {
   const toast = {
     id: ++nextNewOrderToastId,
-    text: `Новый заказ · ${order.platform} · №${order.displayNumber ?? order.id}`,
+    text: `Новый заказ · ${orderBusinessPlatform(order)} · №${order.displayNumber ?? order.id}`,
   }
   newOrderToasts.value.push(toast)
-  window.setTimeout(() => {
-    newOrderToasts.value = newOrderToasts.value.filter((item) => item.id !== toast.id)
-  }, 3000)
   if (!audioContext || audioContext.state !== 'running') return
   try {
     const oscillator = audioContext.createOscillator()
@@ -2058,6 +2066,7 @@ onMounted(async () => {
   for (const event of ['pointerdown', 'click', 'keydown'])
     window.addEventListener(event, audioUnlockListener)
   document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
+  document.addEventListener('click', dismissNewOrderToastsOnButtonClick, true)
   window.addEventListener('online', handleBrowserOnline)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
@@ -2082,6 +2091,7 @@ onScopeDispose(() => {
   if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
   document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
+  document.removeEventListener('click', dismissNewOrderToastsOnButtonClick, true)
   window.removeEventListener('online', handleBrowserOnline)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
   if (audioUnlockListener)
@@ -3343,8 +3353,8 @@ function orderDateTime(order: Order) {
                 >Не распечатан</span
               ></span
             ><span
-              ><strong :class="platformClass(order.platform)"
-                ><PlatformLogo :platform="order.platform" /></strong
+              ><strong :class="platformClass(orderBusinessPlatform(order))"
+                ><PlatformLogo :platform="orderBusinessPlatform(order)" /></strong
               ><span
                 class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ displayOrderStatus(order.status) }}</span
@@ -3587,7 +3597,7 @@ function orderDateTime(order: Order) {
                     <span
                       ><span class="text-slate-500">Телефон: </span
                       ><strong>{{
-                        order.phone || order.delivery.recipientPhone || '—'
+                        formatUkrainianPhone(order.phone || order.delivery.recipientPhone) || '—'
                       }}</strong></span
                     >
                     <span v-if="order.customerEmail"
@@ -4143,7 +4153,7 @@ function orderDateTime(order: Order) {
                     <dd class="mt-1 break-words font-semibold">{{ order.delivery.recipient }}</dd>
                   </div>
                   <dd class="self-end break-all font-semibold">
-                    {{ order.delivery.recipientPhone }}
+                    {{ formatUkrainianPhone(order.delivery.recipientPhone) }}
                   </dd>
                 </div>
                 <div class="mt-3">

@@ -3,7 +3,11 @@ import { computed, onMounted, onUnmounted } from 'vue'
 
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
-import { displayCarrier } from '@/features/orders/display'
+import {
+  displayCarrier,
+  formatUkrainianPhone,
+  orderBusinessPlatform,
+} from '@/features/orders/display'
 import type { Order } from '@/features/orders/types'
 
 const props = defineProps<{
@@ -239,7 +243,7 @@ onUnmounted(() => {
             <p class="mt-1 text-xs text-slate-500">{{ order.date }} · {{ order.time || '—' }}</p>
           </div>
           <div>
-            <PlatformLogo :platform="order.platform" />
+            <PlatformLogo :platform="orderBusinessPlatform(order)" />
             <p class="mt-1 text-xs font-semibold text-slate-600">
               {{ displayOrderStatus(order.status) }}
             </p>
@@ -298,7 +302,8 @@ onUnmounted(() => {
               </p>
             </div>
             <p class="mt-2 text-sm text-slate-600">
-              {{ order.delivery.recipient }} · {{ order.delivery.recipientPhone }}
+              {{ order.delivery.recipient }} ·
+              {{ formatUkrainianPhone(order.delivery.recipientPhone) }}
             </p>
             <p class="flex items-center gap-1 text-sm text-slate-600">
               <span>{{ displayCarrier(order.delivery.carrier) }} ·</span>
