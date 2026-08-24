@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onScopeDispose, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, toRaw, useTemplateRef } from 'vue'
 import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
@@ -2103,6 +2103,10 @@ onScopeDispose(() => {
   if (audioContext) void audioContext.close()
 })
 
+function cloneOrder(order: Order) {
+  return structuredClone(toRaw(order))
+}
+
 function openNewOrderDialog() {
   if (isGuest.value) return
   editingManualOrderId.value = null
@@ -2115,7 +2119,7 @@ function openEditOrderDialog(order: Order) {
   if (isGuest.value || order.externalId) return
   editingManualOrderId.value = order.remoteId ?? order.id
   orderDraftError.value = ''
-  orderDraft.value = structuredClone(order)
+  orderDraft.value = cloneOrder(order)
   orderDialog.value?.showModal()
 }
 
@@ -2141,7 +2145,7 @@ function updateDraftPlatform() {
 }
 
 function normalizedOrderDraft() {
-  const draft = structuredClone(orderDraft.value)
+  const draft = cloneOrder(orderDraft.value)
   draft.customer = draft.customer.trim()
   draft.phone = draft.phone.trim()
   draft.delivery.recipient = draft.delivery.recipient.trim() || draft.customer
@@ -2171,23 +2175,29 @@ function validateOrderDraft(order: Order) {
 
 async function saveOrderDraft() {
   if (isGuest.value || isSavingOrderDraft.value) return
-  const draft = normalizedOrderDraft()
-  const validationError = validateOrderDraft(draft)
-  if (validationError) {
-    orderDraftError.value = validationError
-    return
-  }
 
   isSavingOrderDraft.value = true
   orderDraftError.value = ''
   const editingId = editingManualOrderId.value
-  const existingIndex =
-    editingId === null
-      ? -1
-      : orders.value.findIndex((order) => (order.remoteId ?? order.id) === editingId)
-  const previousOrder = existingIndex >= 0 ? structuredClone(orders.value[existingIndex]) : null
+  let draft: Order | null = null
+  let existingIndex = -1
+  let previousOrder: Order | null = null
 
   try {
+    draft = normalizedOrderDraft()
+    const validationError = validateOrderDraft(draft)
+    if (validationError) {
+      orderDraftError.value = validationError
+      return
+    }
+
+    existingIndex =
+      editingId === null
+        ? -1
+        : orders.value.findIndex((order) => (order.remoteId ?? order.id) === editingId)
+    const existingOrder = existingIndex >= 0 ? orders.value[existingIndex] : undefined
+    previousOrder = existingOrder ? cloneOrder(existingOrder) : null
+
     if (editingId !== null) {
       if (existingIndex < 0 || !previousOrder) throw new Error('Редактируемый заказ не найден.')
       if (previousOrder.externalId)
@@ -2210,7 +2220,7 @@ async function saveOrderDraft() {
       )
       if (rollbackIndex >= 0) orders.value.splice(rollbackIndex, 1, previousOrder)
       sortOrders()
-    } else {
+    } else if (draft) {
       const rollbackIndex = orders.value.indexOf(draft)
       if (rollbackIndex >= 0) orders.value.splice(rollbackIndex, 1)
     }
@@ -4341,195 +4351,321 @@ function orderDateTime(order: Order) {
 
     <dialog
       ref="orderDialog"
-      class="w-[min(42rem,calc(100%-2rem))] rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/35"
+      class="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/35"
     >
-      <form class="p-6" novalidate @submit.prevent="saveOrderDraft">
-        <div class="flex items-center justify-between">
-          <h2 class="text-xl font-semibold">
-            {{ editingManualOrderId === null ? 'Новый заказ' : 'Редактирование заказа' }}
-          </h2>
-          <button class="text-2xl text-slate-500" type="button" @click="orderDialog?.close()">
+      <form
+        class="flex max-h-[calc(100dvh-2rem)] flex-col bg-slate-50"
+        novalidate
+        @submit.prevent="saveOrderDraft"
+      >
+        <div
+          class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4"
+        >
+          <div>
+            <h2 class="text-xl font-semibold text-slate-900">
+              {{ editingManualOrderId === null ? 'Новый заказ' : 'Редактирование заказа' }}
+            </h2>
+            <p class="mt-1 text-sm text-slate-500">
+              Обязательные поля отмечены *. ТТН и данные доставки можно заполнить позже.
+            </p>
+          </div>
+          <button
+            class="rounded-lg px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100"
+            type="button"
+            aria-label="Закрыть"
+            @click="orderDialog?.close()"
+          >
             ×
           </button>
         </div>
-        <div class="mt-5 grid gap-4 sm:grid-cols-2">
-          <label class="text-sm font-medium"
-            >Покупатель<input
-              v-model="orderDraft.customer"
-              required
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Телефон покупателя<input
-              v-model="orderDraft.phone"
-              required
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Площадка<select
-              v-model="orderDraft.platform"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              @change="updateDraftPlatform"
-            >
-              <option v-for="platform in platformOptions" :key="platform" :value="platform">
-                {{ platform }}
-              </option>
-            </select></label
-          ><label class="text-sm font-medium"
-            >Статус<select
-              v-model="orderDraft.status"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-            >
-              <option
-                v-for="status in statusOptions[orderDraft.platform]"
-                :key="status"
-                :value="status"
+
+        <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+          <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-semibold text-slate-900">Основные данные</h3>
+            <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <label class="text-sm font-medium text-slate-700">
+                Покупатель *
+                <input
+                  v-model="orderDraft.customer"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Телефон покупателя *
+                <input
+                  v-model="orderDraft.phone"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  inputmode="tel"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Площадка
+                <select
+                  v-model="orderDraft.platform"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  @change="updateDraftPlatform"
+                >
+                  <option v-for="platform in platformOptions" :key="platform" :value="platform">
+                    {{ platform }}
+                  </option>
+                </select>
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Статус
+                <select
+                  v-model="orderDraft.status"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                >
+                  <option
+                    v-for="status in statusOptions[orderDraft.platform]"
+                    :key="status"
+                    :value="status"
+                  >
+                    {{ status }}
+                  </option>
+                </select>
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Дата заказа *
+                <input
+                  v-model="orderDraft.date"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  type="date"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Время заказа
+                <input
+                  v-model="orderDraft.time"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  type="time"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h3 class="text-base font-semibold text-slate-900">Товары</h3>
+                <p class="mt-1 text-xs text-slate-500">
+                  Название обязательно. Размер можно оставить пустым.
+                </p>
+              </div>
+              <button
+                class="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                type="button"
+                @click="addProduct"
               >
-                {{ status }}
-              </option>
-            </select></label
-          >
-          <label class="text-sm font-medium"
-            >Дата заказа<input
-              v-model="orderDraft.date"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              type="date"
-          /></label>
-          <label class="text-sm font-medium"
-            >Время заказа<input
-              v-model="orderDraft.time"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              type="time"
-          /></label>
+                + Добавить товар
+              </button>
+            </div>
+
+            <div class="mt-4 space-y-4">
+              <div
+                v-for="(product, productIndex) in orderDraft.products"
+                :key="product.id"
+                class="rounded-xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div class="mb-3 flex items-center justify-between">
+                  <span class="text-sm font-semibold text-slate-700"
+                    >Товар {{ productIndex + 1 }}</span
+                  >
+                  <button
+                    v-if="orderDraft.products.length > 1"
+                    class="rounded-lg px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
+                    type="button"
+                    @click="removeProduct(product.id)"
+                  >
+                    Удалить товар
+                  </button>
+                </div>
+                <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <label class="text-sm font-medium text-slate-700 lg:col-span-2">
+                    Название товара *
+                    <input
+                      v-model="product.name"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="text-sm font-medium text-slate-700">
+                    Размер
+                    <input
+                      v-model="product.size"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="text-sm font-medium text-slate-700">
+                    Количество *
+                    <input
+                      v-model.number="product.quantity"
+                      min="1"
+                      step="1"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                      type="number"
+                    />
+                  </label>
+                  <label class="text-sm font-medium text-slate-700">
+                    Цена продажи, ₴ *
+                    <input
+                      v-model.number="product.price"
+                      min="0"
+                      step="0.01"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                      type="number"
+                    />
+                  </label>
+                  <label class="text-sm font-medium text-slate-700">
+                    Себестоимость, $
+                    <input
+                      :value="formatOrderNumber(product.costUsd ?? 0)"
+                      min="0"
+                      inputmode="decimal"
+                      class="mt-1 w-full rounded-lg border border-emerald-100 bg-white px-3 py-2 text-slate-900"
+                      type="text"
+                      @input="updateDraftUsdCost(product, $event)"
+                    />
+                  </label>
+                  <label class="text-sm font-medium text-slate-700">
+                    Себестоимость, ₴ *
+                    <input
+                      v-model.number="product.cost"
+                      min="0"
+                      step="0.01"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                      type="number"
+                      @input="product.costUsd = 0"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-semibold text-slate-900">Доставка</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              Если получатель и его телефон пустые, при сохранении будут использованы данные
+              покупателя.
+            </p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <label class="text-sm font-medium text-slate-700">
+                Получатель
+                <input
+                  v-model="orderDraft.delivery.recipient"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Телефон получателя
+                <input
+                  v-model="orderDraft.delivery.recipientPhone"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  inputmode="tel"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Перевозчик
+                <select
+                  v-model="orderDraft.delivery.carrier"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                >
+                  <option v-for="carrier in carrierOptions" :key="carrier" :value="carrier">
+                    {{ carrier }}
+                  </option>
+                </select>
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                ТТН
+                <input
+                  v-model="orderDraft.delivery.ttn"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Город
+                <input
+                  v-model="orderDraft.delivery.city"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Отделение / адрес
+                <input
+                  v-model="orderDraft.delivery.address"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-semibold text-slate-900">Дополнительные расходы</h3>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <label class="text-sm font-medium text-slate-700">
+                Доставка, ₴
+                <input
+                  v-model.number="orderDraft.shipping"
+                  min="0"
+                  step="0.01"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  type="number"
+                />
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Эквайринг, ₴
+                <input
+                  v-model.number="orderDraft.acquiring"
+                  min="0"
+                  step="0.01"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                  type="number"
+                />
+              </label>
+            </div>
+          </section>
         </div>
-        <fieldset class="mt-5 rounded-xl border border-slate-200 p-4">
-          <legend class="px-2 text-sm font-semibold">Товары в заказе</legend>
-          <div
-            v-for="product in orderDraft.products"
-            :key="product.id"
-            class="mt-2 grid gap-2 sm:grid-cols-[1fr_5rem_4rem_5rem_4.5rem_5rem_auto]"
+
+        <div class="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+          <p
+            v-if="orderDraftError"
+            class="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700"
+            role="alert"
           >
-            <input
-              v-model="product.name"
-              required
-              class="rounded-lg border border-slate-200 px-2 py-2"
-              placeholder="Товар"
-            /><input
-              v-model="product.size"
-              class="rounded-lg border border-slate-200 px-2 py-2"
-              placeholder="Размер"
-            /><input
-              v-model.number="product.quantity"
-              required
-              min="1"
-              step="1"
-              class="rounded-lg border border-slate-200 px-2 py-2"
-              type="number"
-              placeholder="Кол."
-            /><input
-              v-model.number="product.price"
-              required
-              min="0"
-              class="rounded-lg border border-slate-200 px-2 py-2"
-              type="number"
-              placeholder="Цена"
-            /><input
-              :value="formatOrderNumber(product.costUsd ?? 0)"
-              min="0"
-              inputmode="decimal"
-              class="rounded-lg border border-emerald-100 px-2 py-2"
-              type="text"
-              placeholder="Себест. $"
-              @input="updateDraftUsdCost(product, $event)"
-            /><input
-              v-model.number="product.cost"
-              required
-              min="0"
-              class="rounded-lg border border-slate-200 px-2 py-2"
-              type="number"
-              placeholder="Себест. ₴"
-              @input="product.costUsd = 0"
-            /><button
-              class="rounded-lg px-2 text-slate-500 hover:bg-slate-100"
+            {{ orderDraftError }}
+          </p>
+          <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              class="rounded-xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
               type="button"
-              @click="removeProduct(product.id)"
+              @click="orderDialog?.close()"
             >
-              ×
+              Отмена
+            </button>
+            <button
+              :disabled="isSavingOrderDraft"
+              class="rounded-xl bg-emerald-700 px-6 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+              type="submit"
+            >
+              {{
+                isSavingOrderDraft
+                  ? 'Сохраняем…'
+                  : editingManualOrderId === null
+                    ? 'Создать заказ'
+                    : 'Сохранить изменения'
+              }}
             </button>
           </div>
-          <button
-            class="mt-3 text-sm font-semibold text-emerald-700"
-            type="button"
-            @click="addProduct"
-          >
-            + Добавить товар
-          </button>
-        </fieldset>
-        <div class="mt-5 grid gap-4 sm:grid-cols-2">
-          <label class="text-sm font-medium"
-            >Получатель<input
-              v-model="orderDraft.delivery.recipient"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Телефон получателя<input
-              v-model="orderDraft.delivery.recipientPhone"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Перевозчик<select
-              v-model="orderDraft.delivery.carrier"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-            >
-              <option v-for="carrier in carrierOptions" :key="carrier" :value="carrier">
-                {{ carrier }}
-              </option>
-            </select></label
-          ><label class="text-sm font-medium"
-            >ТТН<input
-              v-model="orderDraft.delivery.ttn"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Город<input
-              v-model="orderDraft.delivery.city"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Отделение / адрес<input
-              v-model="orderDraft.delivery.address"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
-          ><label class="text-sm font-medium"
-            >Доставка, ₴<input
-              v-model.number="orderDraft.shipping"
-              min="0"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              type="number" /></label
-          ><label class="text-sm font-medium"
-            >Эквайринг, ₴<input
-              v-model.number="orderDraft.acquiring"
-              min="0"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              type="number"
-          /></label>
         </div>
-        <p class="mt-2 text-xs text-slate-500">
-          Если получатель или его телефон не указаны, будут использованы данные покупателя. Размер
-          товара можно оставить пустым.
-        </p>
-        <p
-          v-if="orderDraftError"
-          class="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700"
-        >
-          {{ orderDraftError }}
-        </p>
-        <button
-          :disabled="isSavingOrderDraft"
-          class="mt-6 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
-          type="submit"
-        >
-          {{
-            isSavingOrderDraft
-              ? 'Сохраняем…'
-              : editingManualOrderId === null
-                ? 'Создать заказ'
-                : 'Сохранить изменения'
-          }}
-        </button>
       </form>
     </dialog>
     <PrintRegistry
