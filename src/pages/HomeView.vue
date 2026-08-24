@@ -47,6 +47,9 @@ const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
+const editingManualOrderId = ref<string | number | null>(null)
+const isSavingOrderDraft = ref(false)
+const orderDraftError = ref('')
 const commentEditorOrderId = ref<string | number | null>(null)
 const editingInternalCommentOrderId = ref<string | number | null>(null)
 const editingInternalCommentValue = ref<Record<string, string>>({})
@@ -2102,7 +2105,17 @@ onScopeDispose(() => {
 
 function openNewOrderDialog() {
   if (isGuest.value) return
+  editingManualOrderId.value = null
+  orderDraftError.value = ''
   orderDraft.value = createOrderDraft()
+  orderDialog.value?.showModal()
+}
+
+function openEditOrderDialog(order: Order) {
+  if (isGuest.value || order.externalId) return
+  editingManualOrderId.value = order.remoteId ?? order.id
+  orderDraftError.value = ''
+  orderDraft.value = structuredClone(order)
   orderDialog.value?.showModal()
 }
 
@@ -2127,11 +2140,85 @@ function updateDraftPlatform() {
   }
 }
 
-function createOrder() {
-  if (isGuest.value) return
-  orders.value.unshift(structuredClone(orderDraft.value))
-  persistOrders()
-  orderDialog.value?.close()
+function normalizedOrderDraft() {
+  const draft = structuredClone(orderDraft.value)
+  draft.customer = draft.customer.trim()
+  draft.phone = draft.phone.trim()
+  draft.delivery.recipient = draft.delivery.recipient.trim() || draft.customer
+  draft.delivery.recipientPhone = draft.delivery.recipientPhone.trim() || draft.phone
+  draft.products = draft.products.map((product) => ({
+    ...product,
+    name: product.name.trim(),
+    size: product.size.trim(),
+  }))
+  return draft
+}
+
+function validateOrderDraft(order: Order) {
+  if (!order.customer) return 'Укажите покупателя.'
+  if (!order.phone) return 'Укажите телефон покупателя.'
+  if (!order.date) return 'Укажите дату заказа.'
+  if (!order.products.length) return 'Добавьте хотя бы один товар.'
+  if (order.products.some((product) => !product.name)) return 'Укажите название каждого товара.'
+  if (order.products.some((product) => !Number.isInteger(product.quantity) || product.quantity < 1))
+    return 'Количество товара должно быть целым числом не меньше 1.'
+  if (order.products.some((product) => !Number.isFinite(product.price) || product.price < 0))
+    return 'Цена товара должна быть числом не меньше 0.'
+  if (order.products.some((product) => !Number.isFinite(product.cost) || product.cost < 0))
+    return 'Себестоимость товара должна быть числом не меньше 0.'
+  return ''
+}
+
+async function saveOrderDraft() {
+  if (isGuest.value || isSavingOrderDraft.value) return
+  const draft = normalizedOrderDraft()
+  const validationError = validateOrderDraft(draft)
+  if (validationError) {
+    orderDraftError.value = validationError
+    return
+  }
+
+  isSavingOrderDraft.value = true
+  orderDraftError.value = ''
+  const editingId = editingManualOrderId.value
+  const existingIndex =
+    editingId === null
+      ? -1
+      : orders.value.findIndex((order) => (order.remoteId ?? order.id) === editingId)
+  const previousOrder = existingIndex >= 0 ? structuredClone(orders.value[existingIndex]) : null
+
+  try {
+    if (editingId !== null) {
+      if (existingIndex < 0 || !previousOrder) throw new Error('Редактируемый заказ не найден.')
+      if (previousOrder.externalId)
+        throw new Error('Заказ маркетплейса нельзя редактировать вручную.')
+      draft.remoteId = previousOrder.remoteId
+      draft.externalId = previousOrder.externalId
+      orders.value.splice(existingIndex, 1, draft)
+      sortOrders()
+      await persistOrders(draft)
+    } else {
+      orders.value.unshift(draft)
+      await persistOrders(draft)
+    }
+    editingManualOrderId.value = null
+    orderDialog.value?.close()
+  } catch (error) {
+    if (editingId !== null && previousOrder) {
+      const rollbackIndex = orders.value.findIndex(
+        (order) => (order.remoteId ?? order.id) === editingId,
+      )
+      if (rollbackIndex >= 0) orders.value.splice(rollbackIndex, 1, previousOrder)
+      sortOrders()
+    } else {
+      const rollbackIndex = orders.value.indexOf(draft)
+      if (rollbackIndex >= 0) orders.value.splice(rollbackIndex, 1)
+    }
+    window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+    orderDraftError.value = error instanceof Error ? error.message : 'Не удалось сохранить заказ.'
+  } finally {
+    isSavingOrderDraft.value = false
+  }
 }
 
 function updateOrderStatus(order: Order, status: string) {
@@ -3464,6 +3551,14 @@ function orderDateTime(order: Order) {
                     }}
                   </button>
                   <button
+                    v-if="!isGuest && !order.externalId"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    type="button"
+                    @click="openEditOrderDialog(order)"
+                  >
+                    Редактировать заказ
+                  </button>
+                  <button
                     v-if="order.platform === 'Эпицентр' && order.externalId"
                     class="relative rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
                     type="button"
@@ -4248,9 +4343,11 @@ function orderDateTime(order: Order) {
       ref="orderDialog"
       class="w-[min(42rem,calc(100%-2rem))] rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/35"
     >
-      <form class="p-6" @submit.prevent="createOrder">
+      <form class="p-6" novalidate @submit.prevent="saveOrderDraft">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-semibold">Новый заказ</h2>
+          <h2 class="text-xl font-semibold">
+            {{ editingManualOrderId === null ? 'Новый заказ' : 'Редактирование заказа' }}
+          </h2>
           <button class="text-2xl text-slate-500" type="button" @click="orderDialog?.close()">
             ×
           </button>
@@ -4291,6 +4388,12 @@ function orderDateTime(order: Order) {
             </select></label
           >
           <label class="text-sm font-medium"
+            >Дата заказа<input
+              v-model="orderDraft.date"
+              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              type="date"
+          /></label>
+          <label class="text-sm font-medium"
             >Время заказа<input
               v-model="orderDraft.time"
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -4302,7 +4405,7 @@ function orderDateTime(order: Order) {
           <div
             v-for="product in orderDraft.products"
             :key="product.id"
-            class="mt-2 grid gap-2 sm:grid-cols-[1fr_5rem_5rem_4.5rem_5rem_auto]"
+            class="mt-2 grid gap-2 sm:grid-cols-[1fr_5rem_4rem_5rem_4.5rem_5rem_auto]"
           >
             <input
               v-model="product.name"
@@ -4311,9 +4414,16 @@ function orderDateTime(order: Order) {
               placeholder="Товар"
             /><input
               v-model="product.size"
-              required
               class="rounded-lg border border-slate-200 px-2 py-2"
               placeholder="Размер"
+            /><input
+              v-model.number="product.quantity"
+              required
+              min="1"
+              step="1"
+              class="rounded-lg border border-slate-200 px-2 py-2"
+              type="number"
+              placeholder="Кол."
             /><input
               v-model.number="product.price"
               required
@@ -4357,12 +4467,10 @@ function orderDateTime(order: Order) {
           <label class="text-sm font-medium"
             >Получатель<input
               v-model="orderDraft.delivery.recipient"
-              required
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
           ><label class="text-sm font-medium"
             >Телефон получателя<input
               v-model="orderDraft.delivery.recipientPhone"
-              required
               class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label
           ><label class="text-sm font-medium"
             >Перевозчик<select
@@ -4399,11 +4507,28 @@ function orderDateTime(order: Order) {
               type="number"
           /></label>
         </div>
+        <p class="mt-2 text-xs text-slate-500">
+          Если получатель или его телефон не указаны, будут использованы данные покупателя. Размер
+          товара можно оставить пустым.
+        </p>
+        <p
+          v-if="orderDraftError"
+          class="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700"
+        >
+          {{ orderDraftError }}
+        </p>
         <button
-          class="mt-6 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800"
+          :disabled="isSavingOrderDraft"
+          class="mt-6 w-full rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
           type="submit"
         >
-          Создать заказ
+          {{
+            isSavingOrderDraft
+              ? 'Сохраняем…'
+              : editingManualOrderId === null
+                ? 'Создать заказ'
+                : 'Сохранить изменения'
+          }}
         </button>
       </form>
     </dialog>
