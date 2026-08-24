@@ -1262,8 +1262,8 @@ function createOrderDraft(): Order {
     time: currentTime(),
     customer: '',
     phone: '',
-    platform: 'Пром',
-    status: 'Новий',
+    platform: 'Р/С',
+    status: 'В дороге',
     products: [createProduct()],
     shipping: 0,
     paymentAmount: 0,
@@ -4520,7 +4520,7 @@ function orderDateTime(order: Order) {
                     />
                   </label>
                   <label class="text-sm font-medium text-slate-700">
-                    Себестоимость, $
+                    Себестоимость в $ (если закупка в долларах)
                     <input
                       :value="formatOrderNumber(product.costUsd ?? 0)"
                       min="0"
@@ -4531,7 +4531,7 @@ function orderDateTime(order: Order) {
                     />
                   </label>
                   <label class="text-sm font-medium text-slate-700">
-                    Себестоимость, ₴ *
+                    Себестоимость в ₴ (если закупка в гривнах) *
                     <input
                       v-model.number="product.cost"
                       min="0"
