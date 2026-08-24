@@ -15,6 +15,7 @@ export function isFinal(status: string) {
 export function readableStatus(source: string, code = ''): TrackingResult {
   const value = source.trim()
   const normalized = `${value} ${code}`.toLowerCase()
+  if (/відмова від одержання/.test(normalized)) return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
   if (/return|повернен|41010|31200/.test(normalized)) return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
   if (/cancel|скасован|відмінен|10600|10602|102|103/.test(normalized)) return { status: 'Отменено', final: true, normalizedStatus: 'cancelled' }
   if (/receivedwarehouse|received|отриман|получен|вручено|доставлено|41000|\b9\b|\b10\b|\b11\b/.test(normalized)) return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
