@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
+import { useScrollLock } from '@vueuse/core'
 
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
@@ -126,13 +127,12 @@ function carrierLogoKind(order: Order) {
   return ''
 }
 
-let previousBodyOverflow = ''
+const isScrollLocked = useScrollLock(document.body)
 onMounted(() => {
-  previousBodyOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
+  isScrollLocked.value = true
 })
 onUnmounted(() => {
-  document.body.style.overflow = previousBodyOverflow
+  isScrollLocked.value = false
 })
 </script>
 

@@ -15,12 +15,19 @@ Use only the stack declared in `package.json` and the repository configuration:
 - strict TypeScript
 - Pinia
 - Vue Router with routes declared in `src/router/index.ts`
+- `@vueuse/core`
 - Tailwind CSS v4 through `@tailwindcss/vite`
 - Vite
 - pnpm
 - ESLint, Oxlint, and Oxfmt
 
-Inspect `package.json` before relying on any additional package. Do not introduce conventions for Apollo, GraphQL, shadcn-vue, Reka UI, VueUse, TanStack, form libraries, test frameworks, Nuxt, Tauri, or other packages unless they are deliberately added later.
+Inspect `package.json` before relying on any additional package. Do not introduce conventions for Apollo, GraphQL, shadcn-vue, Reka UI, TanStack, form libraries, test frameworks, Nuxt, Tauri, or other packages unless they are deliberately added later.
+
+## Use VueUse first
+
+Before writing a shared reactive or browser utility, check `@vueuse/core`. If a stable composable preserves the required behavior, use it instead of manual listeners, timers, storage, clipboard, visibility, online-state, file-dialog, scroll-lock, or similar infrastructure. Import only the functions used.
+
+Do not apply VueUse mechanically to business logic: retain specialized code when a composable would change required semantics, validation, or the timing of writes, and briefly record why.
 
 ## Work from evidence
 

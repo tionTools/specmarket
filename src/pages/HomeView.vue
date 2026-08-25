@@ -1,7 +1,25 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onScopeDispose, ref, toRaw, useTemplateRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onScopeDispose,
+  ref,
+  toRaw,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  useClipboard,
+  useDocumentVisibility,
+  useEventListener,
+  useFileDialog,
+  useOnline,
+  useSessionStorage,
+  useTimeoutFn,
+} from '@vueuse/core'
 import {
   ChevronDown,
   Copy,
@@ -38,7 +56,21 @@ const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
-const promRegistryFileInput = useTemplateRef<HTMLInputElement>('promRegistryFileInput')
+const { copy } = useClipboard()
+const {
+  files: promRegistryFiles,
+  open: openPromRegistryFilePicker,
+  reset: resetPromRegistryFilePicker,
+} = useFileDialog({
+  accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  multiple: false,
+})
+const documentVisibility = useDocumentVisibility()
+const isOnline = useOnline()
+const registryDraftNavigation = useSessionStorage<string | null>(
+  registryDraftNavigationStorageKey,
+  null,
+)
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
@@ -85,19 +117,20 @@ const isApplyingPromRegistry = ref(false)
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
 const inlineActionNotice = ref<{ key: string; text: string } | null>(null)
-let inlineActionNoticeTimer: ReturnType<typeof setTimeout> | undefined
+let inlineActionNoticeKey = ''
+const { start: restartInlineActionNoticeTimer } = useTimeoutFn(
+  () => {
+    if (inlineActionNotice.value?.key === inlineActionNoticeKey) inlineActionNotice.value = null
+  },
+  1800,
+  { immediate: false },
+)
 
 function showInlineActionNotice(key: string, text: string) {
   inlineActionNotice.value = { key, text }
-  if (inlineActionNoticeTimer) window.clearTimeout(inlineActionNoticeTimer)
-  inlineActionNoticeTimer = window.setTimeout(() => {
-    if (inlineActionNotice.value?.key === key) inlineActionNotice.value = null
-  }, 1800)
+  inlineActionNoticeKey = key
+  restartInlineActionNoticeTimer()
 }
-
-onScopeDispose(() => {
-  if (inlineActionNoticeTimer) window.clearTimeout(inlineActionNoticeTimer)
-})
 type PromRegistryEntry = {
   orderNumber: string
   paymentAmount: number
@@ -147,8 +180,21 @@ const returnDraftQuantities = ref<Record<string, string>>({})
 const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
 const isSavingReturn = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
-let syncNoticeTimer: ReturnType<typeof window.setTimeout> | undefined
-let syncNoticeCleanupTimer: ReturnType<typeof window.setTimeout> | undefined
+const { start: restartSyncNoticeCleanupTimer, stop: stopSyncNoticeCleanupTimer } = useTimeoutFn(
+  () => {
+    syncEpicentrMessage.value = ''
+  },
+  500,
+  { immediate: false },
+)
+const { start: restartSyncNoticeTimer, stop: stopSyncNoticeTimer } = useTimeoutFn(
+  () => {
+    syncNoticeVisible.value = false
+    restartSyncNoticeCleanupTimer()
+  },
+  30000,
+  { immediate: false },
+)
 let ordersRealtimeChannel: RealtimeChannel | undefined
 let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
 let realtimeReconnectTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -160,7 +206,9 @@ const pendingNewOrderIds = new Set<string>()
 const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
 let nextNewOrderToastId = 0
 let audioContext: AudioContext | undefined
-let audioUnlockListener: (() => void) | undefined
+const stopAudioUnlockListeners = ['pointerdown', 'click', 'keydown'].map((event) =>
+  useEventListener(window, event, unlockNewOrderSound),
+)
 
 function dismissNewOrderToastsOnButtonClick(event: MouseEvent) {
   if (!newOrderToasts.value.length) return
@@ -175,21 +223,16 @@ const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
 function showSyncMessage(message: string) {
-  window.clearTimeout(syncNoticeTimer)
-  window.clearTimeout(syncNoticeCleanupTimer)
+  stopSyncNoticeTimer()
+  stopSyncNoticeCleanupTimer()
   syncEpicentrMessage.value = message
   syncNoticeVisible.value = true
-  syncNoticeTimer = window.setTimeout(() => {
-    syncNoticeVisible.value = false
-    syncNoticeCleanupTimer = window.setTimeout(() => {
-      syncEpicentrMessage.value = ''
-    }, 500)
-  }, 30000)
+  restartSyncNoticeTimer()
 }
 
 function showSyncError(message: string) {
-  window.clearTimeout(syncNoticeTimer)
-  window.clearTimeout(syncNoticeCleanupTimer)
+  stopSyncNoticeTimer()
+  stopSyncNoticeCleanupTimer()
   syncEpicentrMessage.value = message
   syncNoticeVisible.value = true
 }
@@ -510,11 +553,6 @@ function rowsFromPromRegistrySheet(sheet: XLSX.WorkSheet) {
   return rows
 }
 
-function openPromRegistryFilePicker() {
-  if (isGuest.value) return
-  promRegistryFileInput.value?.click()
-}
-
 function restorePromRegistryFinancials() {
   for (const order of orders.value) {
     const original = promRegistryOriginalFinancials.get(order.id)
@@ -539,8 +577,8 @@ function clearPromRegistry() {
   registryKeyType.value = 'orderNumber'
   expandedRegistryOrderIds.value = []
   expandedOrderId.value = null
-  window.sessionStorage.removeItem(registryDraftNavigationStorageKey)
-  if (promRegistryFileInput.value) promRegistryFileInput.value.value = ''
+  registryDraftNavigation.value = null
+  resetPromRegistryFilePicker()
 }
 
 function saveRegistryDraftNavigation() {
@@ -551,11 +589,11 @@ function saveRegistryDraftNavigation() {
     source: registrySource.value,
     keyType: registryKeyType.value,
   }
-  window.sessionStorage.setItem(registryDraftNavigationStorageKey, JSON.stringify(draft))
+  registryDraftNavigation.value = JSON.stringify(draft)
 }
 
 function restoreRegistryDraftNavigation() {
-  const rawDraft = window.sessionStorage.getItem(registryDraftNavigationStorageKey)
+  const rawDraft = registryDraftNavigation.value
   if (!rawDraft) return
   try {
     const draft = JSON.parse(rawDraft) as Partial<RegistryDraftNavigation>
@@ -568,7 +606,7 @@ function restoreRegistryDraftNavigation() {
     isPromRegistryDraft.value = true
     applyPromRegistryPreview(draft.entries)
   } catch {
-    window.sessionStorage.removeItem(registryDraftNavigationStorageKey)
+    registryDraftNavigation.value = null
   }
 }
 
@@ -663,10 +701,8 @@ function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquirin
   return 'border-slate-200 text-slate-900'
 }
 
-async function handlePromRegistryFile(event: Event) {
+async function handlePromRegistryFile(file: File) {
   if (isGuest.value) return
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
   promRegistryError.value = ''
   try {
     const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
@@ -786,6 +822,11 @@ async function handlePromRegistryFile(event: Event) {
       error instanceof Error ? error.message : 'Не удалось прочитать реестр.'
   }
 }
+
+watch(promRegistryFiles, (files) => {
+  const file = files?.[0]
+  if (file) void handlePromRegistryFile(file)
+})
 
 async function confirmPromRegistryDistribution() {
   if (isGuest.value || !isPromRegistryDraft.value || isApplyingPromRegistry.value) return
@@ -1843,12 +1884,13 @@ async function restartAutomaticOrdersRefresh() {
 }
 
 function handleOrdersVisibilityChange() {
-  if (document.hidden) return
+  if (documentVisibility.value !== 'visible') return
   void reconcileRemoteOrders(true)
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
 }
 
 function handleBrowserOnline() {
+  if (!isOnline.value) return
   void reconcileRemoteOrders(true)
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
 }
@@ -2012,15 +2054,14 @@ function unlockNewOrderSound() {
   if (!window.AudioContext) return
   audioContext ??= new window.AudioContext()
   void audioContext.resume().then(() => {
-    if (audioContext?.state !== 'running' || !audioUnlockListener) return
-    for (const event of ['pointerdown', 'click', 'keydown'])
-      window.removeEventListener(event, audioUnlockListener)
-    audioUnlockListener = undefined
+    if (audioContext?.state !== 'running') return
+    stopAudioUnlockListeners.forEach((stop) => stop())
   })
 }
 
 async function reconcileRemoteOrders(force = false) {
-  if (!supabase || isReconciliationRunning || (!force && document.hidden)) return
+  if (!supabase || isReconciliationRunning || (!force && documentVisibility.value !== 'visible'))
+    return
   isReconciliationRunning = true
   try {
     const { data: remoteOrders, error } = await supabase.from('crm_orders').select('id, updated_at')
@@ -2080,12 +2121,9 @@ async function loadRemoteOrders() {
 }
 
 onMounted(async () => {
-  audioUnlockListener = unlockNewOrderSound
-  for (const event of ['pointerdown', 'click', 'keydown'])
-    window.addEventListener(event, audioUnlockListener)
-  document.addEventListener('visibilitychange', handleOrdersVisibilityChange)
+  watch(documentVisibility, handleOrdersVisibilityChange)
+  watch(isOnline, handleBrowserOnline)
   document.addEventListener('click', dismissNewOrderToastsOnButtonClick, true)
-  window.addEventListener('online', handleBrowserOnline)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
@@ -2108,13 +2146,8 @@ onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
-  document.removeEventListener('visibilitychange', handleOrdersVisibilityChange)
   document.removeEventListener('click', dismissNewOrderToastsOnButtonClick, true)
-  window.removeEventListener('online', handleBrowserOnline)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
-  if (audioUnlockListener)
-    for (const event of ['pointerdown', 'click', 'keydown'])
-      window.removeEventListener(event, audioUnlockListener)
   if (audioContext) void audioContext.close()
 })
 
@@ -2658,14 +2691,18 @@ function displayDeliveryAddress(delivery: Delivery) {
 }
 
 async function copyOrderNumber(order: Order) {
-  await navigator.clipboard.writeText(order.displayNumber ?? String(order.id))
-  showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
+  try {
+    await copy(order.displayNumber ?? String(order.id))
+    showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
+  } catch {}
 }
 
 async function copyTtn(ttn: string, orderId: Order['id']) {
   if (!ttn) return
-  await navigator.clipboard.writeText(ttn)
-  showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
+  try {
+    await copy(ttn)
+    showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
+  } catch {}
 }
 
 function openEpicentrOrder(order: Order) {
@@ -2921,18 +2958,11 @@ function orderDateTime(order: Order) {
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 xl:flex-nowrap">
-          <input
-            ref="promRegistryFileInput"
-            class="hidden"
-            type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            @change="handlePromRegistryFile"
-          />
           <button
             v-if="!isGuest"
             class="whitespace-nowrap rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50"
             type="button"
-            @click="openPromRegistryFilePicker"
+            @click="!isGuest && openPromRegistryFilePicker()"
           >
             <Upload class="size-4" aria-hidden="true" /> Импортировать реестр
           </button>
