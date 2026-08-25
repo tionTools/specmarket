@@ -210,10 +210,8 @@ const stopAudioUnlockListeners = ['pointerdown', 'click', 'keydown'].map((event)
   useEventListener(window, event, unlockNewOrderSound),
 )
 
-function dismissNewOrderToastsOnButtonClick(event: MouseEvent) {
-  if (!newOrderToasts.value.length) return
-  const target = event.target
-  if (target instanceof Element && target.closest('button')) newOrderToasts.value = []
+function dismissNewOrderToastsOnPointerDown() {
+  if (newOrderToasts.value.length) newOrderToasts.value = []
 }
 
 const ordersRealtimeSubscribed = ref(false)
@@ -447,27 +445,48 @@ const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
 const getOrderPreviewImage = (order: Order) => order.products[0]?.imageUrl
 const getProductAmount = (product: OrderProduct) => product.price * product.quantity
-const getOrderCost = (order: Order) =>
-  order.products.reduce((sum, product) => sum + product.cost * product.quantity, 0)
+const getRemainingQuantity = (product: OrderProduct) =>
+  Math.max(0, product.quantity - (product.returnedQuantity ?? 0))
+const getNetOrderAmount = (order: Order) =>
+  order.products.reduce((sum, product) => sum + product.price * getRemainingQuantity(product), 0)
+const getNetOrderCost = (order: Order) =>
+  order.products.reduce((sum, product) => sum + product.cost * getRemainingQuantity(product), 0)
 const getProductRoyalty = (order: Order, product: OrderProduct) => {
   const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
   return product.royaltyAmount ?? product.price * product.quantity * (percent / 100)
 }
-const getRoyalty = (order: Order) =>
-  order.products.reduce((sum, product) => sum + getProductRoyalty(order, product), 0)
+const getNetProductRoyalty = (order: Order, product: OrderProduct) => {
+  const remainingQuantity = getRemainingQuantity(product)
+  if (remainingQuantity === product.quantity) return getProductRoyalty(order, product)
+  if (product.quantity <= 0) return 0
+  if (product.royaltyAmount !== undefined)
+    return product.royaltyAmount * (remainingQuantity / product.quantity)
+  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
+  return product.price * remainingQuantity * (percent / 100)
+}
+const getNetRoyalty = (order: Order) =>
+  order.products.reduce((sum, product) => sum + getNetProductRoyalty(order, product), 0)
+const hasAcceptedReturn = (order: Order) =>
+  order.products.some((product) => (product.returnedQuantity ?? 0) > 0)
+const getActualRevenue = (order: Order) => {
+  const paymentAmount = order.paymentAmount ?? 0
+  if (order.platform !== 'Каста' || !hasAcceptedReturn(order)) return paymentAmount
+  const returnedAmount = getOrderAmount(order) - getNetOrderAmount(order)
+  return Math.max(0, paymentAmount - returnedAmount)
+}
 const getPlannedProfit = (order: Order) =>
-  getOrderAmount(order) * 0.983 -
-  getOrderCost(order) -
-  getRoyalty(order) -
+  getNetOrderAmount(order) * 0.983 -
+  getNetOrderCost(order) -
+  getNetRoyalty(order) -
   order.shipping -
   (order.extraExpenses ?? 0)
 // Фактическая прибыль появляется только после ручного внесения полученной
 // суммы. Статус площадки сам по себе не означает, что деньги уже получены.
 const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
 const getActualProfit = (order: Order) =>
-  (order.paymentAmount ?? 0) -
-  getOrderCost(order) -
-  getRoyalty(order) -
+  getActualRevenue(order) -
+  getNetOrderCost(order) -
+  getNetRoyalty(order) -
   order.shipping -
   order.acquiring -
   (order.extraExpenses ?? 0)
@@ -867,9 +886,11 @@ function isCancelledOrReturned(order: Order) {
 }
 
 const reportOrders = computed(() =>
-  orders.value.filter(
-    (order) => !isCancelledOrReturned(order) && order.delivery.ttn.trim().length > 0,
-  ),
+  orders.value.filter((order) => {
+    if (!order.delivery.ttn.trim()) return false
+    if (!isCancelledOrReturned(order)) return true
+    return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
+  }),
 )
 const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
@@ -1260,19 +1281,19 @@ const summary = computed(() => {
   return {
     today: {
       orders: ordersForToday.value.length,
-      turnover: sum(ordersForToday.value, getOrderAmount),
+      turnover: sum(ordersForToday.value, getNetOrderAmount),
       planned: sum(ordersForToday.value, getPlannedProfit),
       actual: sum(ordersForToday.value.filter(isPaid), getActualProfit),
     },
     period: {
       orders: ordersForSelectedPeriod.value.length,
-      turnover: sum(ordersForSelectedPeriod.value, getOrderAmount),
+      turnover: sum(ordersForSelectedPeriod.value, getNetOrderAmount),
       planned: sum(ordersForSelectedPeriod.value, getPlannedProfit),
       actual: sum(ordersForSelectedPeriod.value.filter(isPaid), getActualProfit),
     },
     previous: {
       orders: ordersForPreviousPeriod.value.length,
-      turnover: sum(ordersForPreviousPeriod.value, getOrderAmount),
+      turnover: sum(ordersForPreviousPeriod.value, getNetOrderAmount),
       planned: sum(ordersForPreviousPeriod.value, getPlannedProfit),
       actual: sum(ordersForPreviousPeriod.value.filter(isPaid), getActualProfit),
     },
@@ -1287,7 +1308,7 @@ const platformSummary = computed(() =>
     return {
       platform,
       count: platformOrders.length,
-      turnover: platformOrders.reduce((sum, order) => sum + getOrderAmount(order), 0),
+      turnover: platformOrders.reduce((sum, order) => sum + getNetOrderAmount(order), 0),
       planned: platformOrders.reduce((sum, order) => sum + getPlannedProfit(order), 0),
       actual: platformOrders.filter(isPaid).reduce((sum, order) => sum + getActualProfit(order), 0),
     }
@@ -2123,7 +2144,7 @@ async function loadRemoteOrders() {
 onMounted(async () => {
   watch(documentVisibility, handleOrdersVisibilityChange)
   watch(isOnline, handleBrowserOnline)
-  document.addEventListener('click', dismissNewOrderToastsOnButtonClick, true)
+  document.addEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
@@ -2146,7 +2167,7 @@ onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
-  document.removeEventListener('click', dismissNewOrderToastsOnButtonClick, true)
+  document.removeEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
   if (audioContext) void audioContext.close()
 })
@@ -3993,19 +4014,19 @@ function orderDateTime(order: Order) {
                 <div>
                   <span class="text-slate-500">Итого с/с</span
                   ><strong class="mt-1 block text-base">{{
-                    formatMoney(getOrderCost(order))
+                    formatMoney(getNetOrderCost(order))
                   }}</strong>
                 </div>
                 <div>
                   <span class="text-slate-500">Итого продажа</span
                   ><strong class="mt-1 block text-base">{{
-                    formatMoney(getOrderAmount(order))
+                    formatMoney(getNetOrderAmount(order))
                   }}</strong>
                 </div>
                 <div>
                   <span class="text-slate-500">Роялти</span
                   ><strong class="mt-1 block text-base">{{
-                    formatMoney(getRoyalty(order))
+                    formatMoney(getNetRoyalty(order))
                   }}</strong>
                 </div>
                 <label class="text-slate-500"

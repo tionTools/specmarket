@@ -151,8 +151,8 @@ function orderDateKey(value: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, isCancelledOrReturned: boolean): number | undefined {
-  if (isCancelledOrReturned) return 0
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, deliveryWasNotCompleted: boolean): number | undefined {
+  if (deliveryWasNotCompleted) return 0
   if (!blackUsed) return 0
   const tariff = [...TARIF_SCHEDULE]
     .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
@@ -162,7 +162,7 @@ function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: numb
   return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost ?? 0
 }
 
-function isCancelledOrReturned(order: RecordValue): boolean {
+function hasCancellationOrReturnStatus(order: RecordValue): boolean {
   const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
   return statuses.some((status) => {
     const type = text(status.type)
@@ -354,17 +354,23 @@ Deno.serve(async (request) => {
       const createdAt = text(createdStatus.created_at) || text(status.created_at)
       const items = itemRows(order)
       const deliveryFee = customerDeliveryFee(order, delivery)
-      const receivedDate = receivedAt(order)
+      const currentDelivery = asRecord(existing?.delivery)
+      const receivedDate = receivedAt(order) || text(currentDelivery.receivedAt)
       const blackUsed = delivery.black_used === true
-      // Show the expected co-finance as soon as the order is created. Once Kasta
-      // records receipt, its date becomes the tariff date; cancelled/returned
-      // orders are always cleared automatically.
+      // A cancellation/return makes delivery free only when the buyer never received
+      // the order. Once receipt happened, Kasta co-finance remains an actual expense.
       const tariffDate = orderDateKey(receivedDate || createdAt)
-      const calculatedShipping = calculateKastaDeliveryCost(tariffDate, deliveryFee, orderAmount(order, items), blackUsed, isCancelledOrReturned(order))
-      const deliveryStatus = text(status.type) === 'Delivered' || text(status.type) === 'ReceivedAtSelfDelivery' ? 'Получено' : text(status.type) === 'Cancelled' ? 'Скасовано' : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery' ? 'В дороге' : 'Запланировано'
+      const deliveryWasNotCompleted = hasCancellationOrReturnStatus(order) && !receivedDate
+      const calculatedShipping = calculateKastaDeliveryCost(tariffDate, deliveryFee, orderAmount(order, items), blackUsed, deliveryWasNotCompleted)
+      const deliveryStatus = receivedDate
+        ? 'Получено'
+        : text(status.type) === 'Cancelled'
+          ? 'Скасовано'
+          : text(status.type) === 'AnnouncedForDelivery' || text(status.type) === 'SentToDelivery'
+            ? 'В дороге'
+            : 'Запланировано'
       const customer = nameOf(client) || nameOf(address) || 'Покупатель Касты'
       const deliveryAddress = [text(asRecord(address.city).name), text(asRecord(address.warehouse).name)].filter(Boolean).join(', ')
-      const currentDelivery = asRecord(existing?.delivery)
       const deliveryCarrier = text(delivery.type) === 'novaposhta'
         ? 'Новая почта'
         : text(delivery.type) || text(currentDelivery.carrier) || 'Каста'
@@ -398,6 +404,7 @@ Deno.serve(async (request) => {
           paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
           paymentMethod: text(order.requested_payment_method),
           paymentStatus: text(order.card_payment_state),
+          receivedAt: receivedDate || undefined,
           ...preserveTracking(currentDelivery, deliveryCarrier, deliveryTtn),
           printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
           printedAt: text(currentDelivery.printedAt) || undefined,

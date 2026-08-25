@@ -34,6 +34,8 @@ export interface Delivery {
   paymentAmount?: number
   paymentMethod?: string
   paymentStatus?: string
+  /** Дата фактического получения заказа покупателем по данным маркетплейса. */
+  receivedAt?: string
   hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
   /** Последний статус, полученный из публичной tracking-ссылки перевозчика. */
