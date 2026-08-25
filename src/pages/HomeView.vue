@@ -56,7 +56,7 @@ const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
-const { copy } = useClipboard()
+const { copy, copied, isSupported: isClipboardSupported } = useClipboard({ copiedDuring: 0 })
 const {
   files: promRegistryFiles,
   open: openPromRegistryFilePicker,
@@ -2691,17 +2691,18 @@ function displayDeliveryAddress(delivery: Delivery) {
 }
 
 async function copyOrderNumber(order: Order) {
+  if (!isClipboardSupported.value) return
   try {
     await copy(order.displayNumber ?? String(order.id))
-    showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
+    if (copied.value) showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
   } catch {}
 }
 
 async function copyTtn(ttn: string, orderId: Order['id']) {
-  if (!ttn) return
+  if (!ttn || !isClipboardSupported.value) return
   try {
     await copy(ttn)
-    showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
+    if (copied.value) showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
   } catch {}
 }
 
