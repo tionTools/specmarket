@@ -2,6 +2,21 @@
 import { computed, nextTick, onMounted, onScopeDispose, ref, toRaw, useTemplateRef } from 'vue'
 import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  Globe2,
+  LogOut,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  Truck,
+  Upload,
+  X,
+} from '@lucide/vue'
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
@@ -2919,7 +2934,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="openPromRegistryFilePicker"
           >
-            ↑ Импортировать реестр
+            <Upload class="size-4" aria-hidden="true" /> Импортировать реестр
           </button>
           <button
             v-if="!isGuest"
@@ -2943,7 +2958,12 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncNewAllPlatforms"
           >
-            {{ isSyncingAllPlatforms ? 'Синхронизация…' : '↻ Новые заказы' }}
+            <RefreshCw
+              class="mr-1 inline size-4"
+              :class="{ 'animate-spin': isSyncingAllPlatforms }"
+              aria-hidden="true"
+            />
+            {{ isSyncingAllPlatforms ? 'Синхронизация…' : 'Новые заказы' }}
           </button>
           <button
             v-if="!isGuest"
@@ -2952,7 +2972,12 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncDeliveryTracking"
           >
-            {{ isSyncingDelivery ? '↻ Обновление…' : '↻ Доставки' }}
+            <RefreshCw
+              class="mr-1 inline size-4"
+              :class="{ 'animate-spin': isSyncingDelivery }"
+              aria-hidden="true"
+            />
+            {{ isSyncingDelivery ? 'Обновление…' : 'Доставки' }}
           </button>
           <button
             v-if="!isGuest"
@@ -2961,7 +2986,12 @@ function orderDateTime(order: Order) {
             type="button"
             @click="syncFullAllPlatforms"
           >
-            {{ isSyncingAllPlatforms ? 'Синхронизация…' : '↻ Полная синхронизация' }}
+            <RefreshCw
+              class="mr-1 inline size-4"
+              :class="{ 'animate-spin': isSyncingAllPlatforms }"
+              aria-hidden="true"
+            />
+            {{ isSyncingAllPlatforms ? 'Синхронизация…' : 'Полная синхронизация' }}
           </button>
           <button
             v-if="!isGuest"
@@ -2969,7 +2999,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="openNewOrderDialog"
           >
-            + Новый заказ
+            <Plus class="mr-1 inline size-4" aria-hidden="true" /> Новый заказ
           </button>
           <button
             class="ml-1 grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
@@ -2978,7 +3008,7 @@ function orderDateTime(order: Order) {
             aria-label="Выйти"
             @click="signOut"
           >
-            <img class="size-7 object-contain" src="/ui-icons/sign-out.png" alt="" />
+            <LogOut class="size-5" aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -3158,17 +3188,11 @@ function orderDateTime(order: Order) {
             @click="isPlatformSummaryExpanded = !isPlatformSummaryExpanded"
           >
             <span>По площадкам</span>
-            <svg
+            <ChevronDown
               class="size-4 transition-transform"
               :class="{ 'rotate-180': isPlatformSummaryExpanded }"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
               aria-hidden="true"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+            />
           </button>
           <div v-if="isPlatformSummaryExpanded" class="flex min-w-0 items-center justify-end gap-2">
             <select
@@ -3235,17 +3259,10 @@ function orderDateTime(order: Order) {
           class="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white p-4 sm:flex-row sm:flex-wrap"
         >
           <div class="relative w-full sm:max-w-md">
-            <svg
+            <Search
               class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
               aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-4-4" />
-            </svg>
+            />
             <input
               v-model="searchQuery"
               class="w-full rounded-xl border-2 border-emerald-400 bg-white py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
@@ -3258,7 +3275,7 @@ function orderDateTime(order: Order) {
               aria-label="Очистить поиск"
               @click="searchQuery = ''"
             >
-              ×
+              <X class="size-4" aria-hidden="true" />
             </button>
           </div>
           <select
@@ -3350,92 +3367,53 @@ function orderDateTime(order: Order) {
               : 'border-slate-300 hover:border-slate-400'
           "
         >
-          <button
+          <div
             class="grid w-full gap-3 px-5 py-4 text-left transition lg:grid-cols-[0.95fr_0.8fr_minmax(19rem,2.2fr)_0.75fr_0.95fr_1fr_minmax(7.5rem,2fr)_5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
-            type="button"
+            role="button"
+            tabindex="0"
             @click="toggleOrder(order.id)"
+            @keydown.enter="toggleOrder(order.id)"
+            @keydown.space.prevent="toggleOrder(order.id)"
           >
             <span
               ><span class="inline-flex items-center gap-1.5 whitespace-nowrap"
-                ><span
+                ><button
                   v-if="order.platform === 'Эпицентр' && order.externalId"
-                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
-                  title="Открыть заказ в Эпицентре"
+                  class="rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
+                  type="button"
+                  aria-label="Открыть заказ в Эпицентре"
                   @click.stop="openEpicentrOrder(order)"
-                  ><svg
-                    class="size-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
-                    />
-                    <path
-                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
-                    /></svg></span
-                ><span
+                >
+                  <ExternalLink class="size-5" aria-hidden="true" /></button
+                ><button
                   v-if="order.platform === 'Пром' && order.externalId"
-                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
-                  title="Открыть заказ в Prom"
+                  class="rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
+                  type="button"
+                  aria-label="Открыть заказ в Prom"
                   @click.stop="openPromOrder(order)"
-                  ><svg
-                    class="size-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
-                    />
-                    <path
-                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
-                    /></svg></span
-                ><span
+                >
+                  <ExternalLink class="size-5" aria-hidden="true" /></button
+                ><button
                   v-if="order.platform === 'Каста' && order.externalId"
-                  class="cursor-pointer rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
-                  title="Открыть заказ в Каста"
+                  class="rounded-md bg-indigo-100 p-1 text-indigo-700 ring-1 ring-indigo-200 transition hover:bg-indigo-200 hover:text-indigo-900"
+                  type="button"
+                  aria-label="Открыть заказ в Каста"
                   @click.stop="openKastaOrder(order)"
-                  ><svg
-                    class="size-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M10 13.8a4.5 4.5 0 0 0 6.36.06l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L8.9 6.6"
-                    />
-                    <path
-                      d="M14 10.2a4.5 4.5 0 0 0-6.36-.06l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36l1.22-1.22"
-                    /></svg></span
+                >
+                  <ExternalLink class="size-5" aria-hidden="true" /></button
                 ><strong>{{ order.displayNumber ?? order.id }}</strong
                 ><span
                   class="relative inline-flex items-center gap-1 align-middle text-sm font-semibold text-slate-400"
-                  ><span
-                    class="cursor-pointer rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
-                    title="Скопировать номер"
+                  ><button
+                    class="rounded p-1 text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                    type="button"
+                    aria-label="Скопировать номер"
                     @click.stop="copyOrderNumber(order)"
-                    ><svg
-                      class="size-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.25"
-                      aria-hidden="true"
-                    >
-                      <rect x="9" y="9" width="11" height="11" rx="2" />
-                      <path
-                        d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"
-                      /></svg></span
+                  >
+                    <Copy class="size-4" aria-hidden="true" /></button
                   ><span
                     v-if="inlineActionNotice?.key === `copy-order:${order.id}`"
                     class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
@@ -3487,7 +3465,7 @@ function orderDateTime(order: Order) {
                 ><span
                   v-if="order.delivery.hasWebsiteCommission"
                   class="ml-2 mt-1 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-slate-900"
-                  ><span aria-hidden="true">◎</span> Замовлення з сайту</span
+                  ><Globe2 class="size-4" aria-hidden="true" /> Замовлення з сайту</span
                 ></span
               ></span
             ><strong>{{ formatMoney(getOrderAmount(order)) }}</strong
@@ -3515,21 +3493,21 @@ function orderDateTime(order: Order) {
               ><CarrierLogo
                 v-if="carrierLogoKind(order) !== 'generic'"
                 :kind="carrierLogoKind(order)"
-                :title="displayCarrier(order.delivery.carrier)"
-              />
-              <span
+                :title="displayCarrier(order.delivery.carrier)" />
+              <button
                 v-if="!isGuest"
                 class="grid size-7 place-items-center rounded-md border border-rose-200 bg-white text-sm font-bold text-rose-600 hover:bg-rose-50"
-                role="button"
-                tabindex="0"
-                title="Удалить заказ из CRM"
+                type="button"
                 aria-label="Удалить заказ из CRM"
                 @click.stop="deleteOrder(order)"
-                @keydown.enter.stop="deleteOrder(order)"
-                >{{ deletingOrderId === order.id ? '…' : '🗑' }}</span
-              ></span
-            >
-          </button>
+              >
+                <RefreshCw
+                  v-if="deletingOrderId === order.id"
+                  class="size-4 animate-spin"
+                  aria-hidden="true"
+                /><Trash2 v-else class="size-4" aria-hidden="true" /></button
+            ></span>
+          </div>
           <div
             v-if="isOrderExpanded(order)"
             class="grid gap-5 bg-slate-200/80 p-5 lg:grid-cols-[minmax(0,1fr)_21rem]"
@@ -3575,7 +3553,12 @@ function orderDateTime(order: Order) {
                     :disabled="isSyncingEpicentr"
                     @click="syncEpicentrOrder(order)"
                   >
-                    {{ isSyncingEpicentr ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <RefreshCw
+                      class="mr-1 inline size-4"
+                      :class="{ 'animate-spin': isSyncingEpicentr }"
+                      aria-hidden="true"
+                    />
+                    {{ isSyncingEpicentr ? 'Синхронизация…' : 'Синхронизировать заказ' }}
                     <span
                       v-if="inlineActionNotice?.key === `sync:${order.id}`"
                       class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
@@ -3589,7 +3572,12 @@ function orderDateTime(order: Order) {
                     :disabled="isSyncingProm"
                     @click="syncPromOrder(order)"
                   >
-                    {{ isSyncingProm ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <RefreshCw
+                      class="mr-1 inline size-4"
+                      :class="{ 'animate-spin': isSyncingProm }"
+                      aria-hidden="true"
+                    />
+                    {{ isSyncingProm ? 'Синхронизация…' : 'Синхронизировать заказ' }}
                     <span
                       v-if="inlineActionNotice?.key === `sync:${order.id}`"
                       class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
@@ -3603,7 +3591,12 @@ function orderDateTime(order: Order) {
                     :disabled="isSyncingKasta"
                     @click="syncKastaOrder(order)"
                   >
-                    {{ isSyncingKasta ? 'Синхронизация…' : '↻ Синхронизировать заказ' }}
+                    <RefreshCw
+                      class="mr-1 inline size-4"
+                      :class="{ 'animate-spin': isSyncingKasta }"
+                      aria-hidden="true"
+                    />
+                    {{ isSyncingKasta ? 'Синхронизация…' : 'Синхронизировать заказ' }}
                     <span
                       v-if="inlineActionNotice?.key === `sync:${order.id}`"
                       class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
@@ -3727,7 +3720,7 @@ function orderDateTime(order: Order) {
                     aria-label="Комментарий к заказу"
                     @click="toggleInternalComment(order)"
                   >
-                    💬
+                    <MessageSquare class="size-4" aria-hidden="true" />
                   </button>
                 </div>
               </section>
@@ -4131,69 +4124,7 @@ function orderDateTime(order: Order) {
                         v-if="carrierLogoKind(order) !== 'generic'"
                         :kind="carrierLogoKind(order)"
                       />
-                      <template v-else>
-                        <svg
-                          v-if="carrierIcon(order.delivery.carrier) === 'nova'"
-                          aria-label="Новая почта"
-                          class="size-5 shrink-0 text-red-500"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.8"
-                        >
-                          <path
-                            d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"
-                          />
-                        </svg>
-                        <svg
-                          v-else-if="carrierIcon(order.delivery.carrier) === 'ukr'"
-                          aria-label="Укрпочта"
-                          class="size-5 shrink-0 text-yellow-500"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.4"
-                        >
-                          <path d="M3 7h18v11H3zM3 8l9 6 9-6" />
-                        </svg>
-                        <svg
-                          v-else-if="carrierIcon(order.delivery.carrier) === 'rozetka'"
-                          aria-label="RozetkaDelivery"
-                          class="size-5 shrink-0 text-emerald-600"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.2"
-                        >
-                          <path
-                            d="M4 7h11v10H4zM15 10h3l2 3v4h-5zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
-                          />
-                        </svg>
-                        <svg
-                          v-else-if="carrierIcon(order.delivery.carrier) === 'meest'"
-                          aria-label="Meest"
-                          class="size-5 shrink-0 text-sky-600"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.5"
-                        >
-                          <path d="M3 17V7l4 6 5-8 5 8 4-6v10" />
-                        </svg>
-                        <svg
-                          v-else
-                          aria-hidden="true"
-                          class="size-5 shrink-0 text-slate-500"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                        >
-                          <path
-                            d="M3 7h11v10H3zM14 10h3l3 3v4h-6zM7 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"
-                          />
-                        </svg>
-                      </template>
+                      <Truck v-else class="size-5 shrink-0 text-slate-500" aria-hidden="true" />
                       <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
                     </dd>
                     <dd
@@ -4205,20 +4136,10 @@ function orderDateTime(order: Order) {
                         class="grid size-6 shrink-0 place-items-center rounded text-blue-600 hover:bg-blue-100 hover:text-blue-800"
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Відкрити відстеження"
+                        aria-label="Відкрити відстеження"
                         @click.stop
                       >
-                        <svg
-                          class="size-4"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.25"
-                          aria-hidden="true"
-                        >
-                          <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15" />
-                          <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15" />
-                        </svg>
+                        <ExternalLink class="size-4" aria-hidden="true" />
                       </a>
                       <span class="whitespace-pre-line">{{
                         deliveryTtns(order.delivery).join('\n') || '—'
@@ -4226,21 +4147,11 @@ function orderDateTime(order: Order) {
                       <button
                         v-if="order.delivery.ttn"
                         class="relative grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
-                        title="Скопировать номер ТТН"
                         type="button"
+                        aria-label="Скопировать номер ТТН"
                         @click="copyTtn(order.delivery.ttn, order.id)"
                       >
-                        <svg
-                          class="size-4"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.25"
-                          aria-hidden="true"
-                        >
-                          <rect x="9" y="9" width="11" height="11" rx="2" />
-                          <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
-                        </svg>
+                        <Copy class="size-4" aria-hidden="true" />
                         <span
                           v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
                           class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
@@ -4375,7 +4286,7 @@ function orderDateTime(order: Order) {
             aria-label="Закрыть"
             @click="orderDialog?.close()"
           >
-            ×
+            <X class="size-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -4459,7 +4370,7 @@ function orderDateTime(order: Order) {
                 type="button"
                 @click="addProduct"
               >
-                + Добавить товар
+                <Plus class="mr-1 inline size-4" aria-hidden="true" /> Добавить товар
               </button>
             </div>
 
@@ -4479,7 +4390,7 @@ function orderDateTime(order: Order) {
                     type="button"
                     @click="removeProduct(product.id)"
                   >
-                    Удалить товар
+                    <Trash2 class="mr-1 inline size-4" aria-hidden="true" /> Удалить товар
                   </button>
                 </div>
                 <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

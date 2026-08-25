@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import type { User } from '@supabase/supabase-js'
 import { useRoute } from 'vue-router'
+import { ArrowLeft, GripVertical, Plus, Search, Trash2, X } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 import { supabase } from '@/lib/supabase'
@@ -351,7 +352,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
               },
             }"
           >
-            ← К заказам
+            <ArrowLeft class="mr-1 inline size-4" aria-hidden="true" /> К заказам
           </RouterLink>
           <p class="mt-5 text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
           <h1 class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -389,7 +390,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             type="button"
             @click="addItem"
           >
-            + Добавить позицию
+            <Plus class="mr-1 inline size-4" aria-hidden="true" /> Добавить позицию
           </button>
           <button
             v-if="!isGuest"
@@ -397,7 +398,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             type="button"
             @click="addGroup"
           >
-            + Добавить группу
+            <Plus class="mr-1 inline size-4" aria-hidden="true" /> Добавить группу
           </button>
           <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
             Позиций: <strong>{{ items.length }}</strong>
@@ -456,17 +457,10 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
       <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 p-4">
           <div class="relative w-full max-w-md">
-            <svg
+            <Search
               class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
               aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-4-4" />
-            </svg>
+            />
             <input
               v-model="searchQuery"
               class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
@@ -479,7 +473,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
               aria-label="Очистить поиск"
               @click="searchQuery = ''"
             >
-              ×
+              <X class="size-4" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -527,7 +521,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                   class="border-y-2 border-emerald-200 bg-emerald-50 px-3 py-2"
                 >
                   <div class="flex items-center gap-3">
-                    <span class="cursor-grab text-emerald-700" title="Перетащить">⠿</span>
+                    <GripVertical class="cursor-grab text-emerald-700" aria-label="Перетащить" />
                     <input
                       :value="item.name"
                       :readonly="editingCell !== getCellKey(item, 'name')"
@@ -541,23 +535,16 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                       type="button"
                       @click="confirmDelete(item)"
                     >
-                      <svg
-                        aria-hidden="true"
-                        class="size-4"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        viewBox="0 0 24 24"
+                      <Trash2 class="size-4" aria-hidden="true" /><span class="sr-only"
+                        >Удалить группу</span
                       >
-                        <path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg
-                      ><span class="sr-only">Удалить группу</span>
                     </button>
                   </div>
                 </td>
                 <template v-else>
                   <td class="sticky left-0 bg-white px-3 py-1.5 group-hover:bg-slate-50">
                     <div class="flex w-[32rem] items-center gap-1.5">
-                      <span class="cursor-grab text-slate-400" title="Перетащить">⠿</span>
+                      <GripVertical class="cursor-grab text-slate-400" aria-label="Перетащить" />
                       <input
                         :value="item.name"
                         :readonly="editingCell !== getCellKey(item, 'name')"
@@ -638,16 +625,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
                       type="button"
                       @click="confirmDelete(item)"
                     >
-                      <svg
-                        aria-hidden="true"
-                        class="size-4"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        viewBox="0 0 24 24"
+                      <Trash2 class="size-4" aria-hidden="true" /><span class="sr-only"
+                        >Удалить позицию</span
                       >
-                        <path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 14h10l1-14" /></svg
-                      ><span class="sr-only">Удалить позицию</span>
                     </button>
                   </td>
                 </template>

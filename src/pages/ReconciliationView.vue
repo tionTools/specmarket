@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ArrowLeft } from '@lucide/vue'
 
 import { supabase } from '@/lib/supabase'
 
@@ -424,7 +425,7 @@ onMounted(load)
           class="rounded-xl border border-slate-300 bg-white px-4 py-2 font-semibold"
           @click="router.push('/')"
         >
-          ← К заказам
+          <ArrowLeft class="mr-1 inline size-4" aria-hidden="true" /> К заказам
         </button>
       </div>
 
