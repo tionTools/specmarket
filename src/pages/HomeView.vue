@@ -136,6 +136,12 @@ type PromRegistryEntry = {
   paymentAmount: number
   acquiring: number
   hasAcquiring: boolean
+  operations?: Array<{
+    id: string
+    paymentAmount: number
+    acquiring: number
+    isReversal: boolean
+  }>
 }
 type RegistrySource = 'RozetkaPay' | 'NovaPay' | 'Kasta' | 'Укрпочта' | 'Meest Express'
 type RegistryKeyType = 'orderNumber' | 'ttn'
@@ -167,6 +173,11 @@ const promRegistryOriginalFinancials = new Map<
   string | number,
   { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
 >()
+const promRegistryExpectedFinancials = new Map<
+  string | number,
+  { paymentAmount: number; acquiring: number }
+>()
+const promRegistryPendingOperationIds = new Map<string | number, string[]>()
 const promRegistryNewFields = ref(new Set<string>())
 const promRegistryMismatchedFields = ref(new Set<string>())
 const promRegistryExistingFinancials = ref({ complete: 0, partial: 0 })
@@ -541,7 +552,13 @@ function registryKeyForOrder(order: Order) {
 }
 
 function getRegistryPaymentAmount(order: Order, entry: PromRegistryEntry) {
+  const expected = promRegistryExpectedFinancials.get(order.id)
+  if (expected) return expected.paymentAmount
   return registrySource.value === 'Kasta' ? getOrderAmount(order) : entry.paymentAmount
+}
+
+function getRegistryAcquiring(order: Order, entry: PromRegistryEntry) {
+  return promRegistryExpectedFinancials.get(order.id)?.acquiring ?? entry.acquiring
 }
 
 function parsePromRegistryAmount(value: unknown) {
@@ -581,6 +598,8 @@ function restorePromRegistryFinancials() {
     order.acquiringPercent = original.acquiringPercent
   }
   promRegistryOriginalFinancials.clear()
+  promRegistryExpectedFinancials.clear()
+  promRegistryPendingOperationIds.clear()
   promRegistryNewFields.value = new Set()
   promRegistryMismatchedFields.value = new Set()
   promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
@@ -588,6 +607,8 @@ function restorePromRegistryFinancials() {
 
 function clearPromRegistry() {
   if (isPromRegistryDraft.value) restorePromRegistryFinancials()
+  promRegistryExpectedFinancials.clear()
+  promRegistryPendingOperationIds.clear()
   promRegistryEntries.value = []
   promRegistryFileName.value = ''
   promRegistryError.value = ''
@@ -658,6 +679,83 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
     if (hasPayment && (!entry.hasAcquiring || hasAcquiring)) complete += 1
     else if (hasPayment || hasAcquiring) partial += 1
 
+    if (registrySource.value === 'RozetkaPay' && entry.operations?.length) {
+      const processedOperationIds = new Set(order.delivery.rozetkaPayOperationIds ?? [])
+      const pendingOperationIds: string[] = []
+      const operations = entry.operations.filter(
+        (operation) => !operation.id || !processedOperationIds.has(operation.id),
+      )
+      const regularOperations = operations.filter((operation) => !operation.isReversal)
+      const reversalOperations = operations.filter((operation) => operation.isReversal)
+      let paymentAmount = order.paymentAmount ?? 0
+      let acquiring = order.acquiring
+      let canApplyReversals = true
+
+      if (regularOperations.length) {
+        const registryPaymentAmount = regularOperations.reduce(
+          (total, operation) => total + operation.paymentAmount,
+          0,
+        )
+        const registryAcquiring = regularOperations.reduce(
+          (total, operation) => total + operation.acquiring,
+          0,
+        )
+        let regularOperationsMatch = true
+        if (!hasPayment && registryPaymentAmount > 0) {
+          paymentAmount = registryPaymentAmount
+          newFields.add(`${order.id}-paymentAmount`)
+        } else if (hasPayment && Math.abs(paymentAmount - registryPaymentAmount) > 0.01) {
+          mismatchedFields.add(`${order.id}-paymentAmount`)
+          regularOperationsMatch = false
+          canApplyReversals = false
+        }
+        if (entry.hasAcquiring && !hasAcquiring && registryAcquiring > 0) {
+          acquiring = registryAcquiring
+          newFields.add(`${order.id}-acquiring`)
+        } else if (
+          entry.hasAcquiring &&
+          hasAcquiring &&
+          Math.abs(acquiring - registryAcquiring) > 0.01
+        ) {
+          mismatchedFields.add(`${order.id}-acquiring`)
+          regularOperationsMatch = false
+          canApplyReversals = false
+        }
+        if (regularOperationsMatch) {
+          pendingOperationIds.push(
+            ...regularOperations.map((operation) => operation.id).filter(Boolean),
+          )
+        }
+      }
+
+      for (const operation of canApplyReversals ? reversalOperations : []) {
+        const nextPaymentAmount = paymentAmount + operation.paymentAmount
+        const nextAcquiring = acquiring + operation.acquiring
+        const paymentUnderflow = nextPaymentAmount < -0.01
+        const acquiringUnderflow = entry.hasAcquiring && nextAcquiring < -0.01
+        if (paymentUnderflow) mismatchedFields.add(`${order.id}-paymentAmount`)
+        if (acquiringUnderflow) mismatchedFields.add(`${order.id}-acquiring`)
+        if (paymentUnderflow || acquiringUnderflow) continue
+        paymentAmount = Math.max(0, nextPaymentAmount)
+        acquiring = Math.max(0, nextAcquiring)
+        newFields.add(`${order.id}-paymentAmount`)
+        if (entry.hasAcquiring) newFields.add(`${order.id}-acquiring`)
+        if (operation.id) pendingOperationIds.push(operation.id)
+      }
+
+      order.paymentAmount = paymentAmount
+      order.acquiring = acquiring
+      if (entry.hasAcquiring) {
+        const amount = getOrderAmount(order)
+        order.acquiringPercent = amount === 0 ? 0 : (acquiring / amount) * 100
+      }
+      promRegistryExpectedFinancials.set(order.id, { paymentAmount, acquiring })
+      if (pendingOperationIds.length) {
+        promRegistryPendingOperationIds.set(order.id, [...new Set(pendingOperationIds)])
+      }
+      continue
+    }
+
     const registryPaymentAmount = getRegistryPaymentAmount(order, entry)
     if (!hasPayment && registryPaymentAmount > 0) {
       order.paymentAmount = registryPaymentAmount
@@ -690,12 +788,15 @@ function isPromRegistryNewField(order: Order, field: 'paymentAmount' | 'acquirin
 
 function isPromRegistryFieldMismatch(order: Order, field: 'paymentAmount' | 'acquiring') {
   if (!isPromRegistryDraft.value) return false
+  if (promRegistryMismatchedFields.value.has(`${order.id}-${field}`)) return true
   const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
   if (!entry) return false
   if (field === 'acquiring' && !entry.hasAcquiring) return false
   const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
   const expected =
-    field === 'paymentAmount' ? getRegistryPaymentAmount(order, entry) : entry.acquiring
+    field === 'paymentAmount'
+      ? getRegistryPaymentAmount(order, entry)
+      : getRegistryAcquiring(order, entry)
   return Math.abs(actual - expected) > 0.01
 }
 
@@ -708,11 +809,12 @@ function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquirin
   const expected =
     field === 'paymentAmount' && entry
       ? getRegistryPaymentAmount(order, entry)
-      : (entry?.acquiring ?? 0)
+      : entry
+        ? getRegistryAcquiring(order, entry)
+        : 0
   if (
     isPromRegistryDraft.value &&
     isPromRegistryNewField(order, field) &&
-    expected > 0 &&
     Math.abs(actual - expected) <= 0.01
   ) {
     return 'border-violet-300 bg-violet-100 text-violet-950'
@@ -797,6 +899,17 @@ async function handlePromRegistryFile(file: File) {
                   (isKastaFactoring ? 'комісія за факторинг (довідково)' : 'комісія')
                 : normalizePromRegistryHeader(cell) === 'сума комісії з отримувача',
           )
+    const operationIdColumn =
+      source === 'RozetkaPay'
+        ? header.findIndex(
+            (cell) =>
+              normalizePromRegistryHeader(cell) === 'унікальний номер фінансової операції fc id',
+          )
+        : -1
+    const paymentTypeColumn =
+      source === 'RozetkaPay'
+        ? header.findIndex((cell) => normalizePromRegistryHeader(cell) === 'тип оплати')
+        : -1
     if (
       keyColumn < 0 ||
       (!isUkrposhta && !isMeest && acquiringColumn < 0) ||
@@ -815,10 +928,39 @@ async function handlePromRegistryFile(file: File) {
         paymentAmount: 0,
         acquiring: 0,
         hasAcquiring: !isUkrposhta && !isMeest,
+        operations: source === 'RozetkaPay' ? [] : undefined,
       }
-      if (!isKasta) entry.paymentAmount += parsePromRegistryAmount(row[paymentColumn])
+      const paymentAmount = isKasta ? 0 : parsePromRegistryAmount(row[paymentColumn])
+      if (!isKasta) entry.paymentAmount += paymentAmount
       if (!isUkrposhta && !isMeest) {
-        entry.acquiring += Math.abs(parsePromRegistryAmount(row[acquiringColumn]))
+        const rawAcquiring = parsePromRegistryAmount(row[acquiringColumn])
+        if (source === 'RozetkaPay') {
+          const acquiring = -rawAcquiring
+          const paymentType =
+            paymentTypeColumn >= 0
+              ? String(row[paymentTypeColumn] ?? '')
+                  .trim()
+                  .toLocaleLowerCase('uk-UA')
+              : ''
+          const isReversal =
+            paymentAmount < 0 || rawAcquiring > 0 || /повер|refund|return/.test(paymentType)
+          const operationId =
+            operationIdColumn >= 0 ? String(row[operationIdColumn] ?? '').trim() : ''
+          if (isReversal && !operationId) {
+            throw new Error(
+              `Для возврата RozetkaPay по заказу ${orderNumber} не найден FC ID. Без него сторнирование нельзя безопасно применить повторно.`,
+            )
+          }
+          entry.acquiring += acquiring
+          entry.operations?.push({
+            id: operationId,
+            paymentAmount,
+            acquiring,
+            isReversal,
+          })
+        } else {
+          entry.acquiring += Math.abs(rawAcquiring)
+        }
       }
       entriesByOrder.set(orderNumber, entry)
     }
@@ -861,7 +1003,16 @@ async function confirmPromRegistryDistribution() {
   )
     return
   isApplyingPromRegistry.value = true
+  const previousOperationIds = new Map<string | number, string[] | undefined>()
   try {
+    for (const order of matchedOrders) {
+      const pendingOperationIds = promRegistryPendingOperationIds.get(order.id)
+      if (!pendingOperationIds?.length) continue
+      previousOperationIds.set(order.id, order.delivery.rozetkaPayOperationIds)
+      order.delivery.rozetkaPayOperationIds = [
+        ...new Set([...(order.delivery.rozetkaPayOperationIds ?? []), ...pendingOperationIds]),
+      ]
+    }
     isPromRegistryDraft.value = false
     await persistOrdersNow(matchedOrders)
     promRegistryOriginalFinancials.clear()
@@ -872,6 +1023,12 @@ async function confirmPromRegistryDistribution() {
     showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
     isPromRegistryDraft.value = true
+    for (const order of matchedOrders) {
+      if (!previousOperationIds.has(order.id)) continue
+      const previousIds = previousOperationIds.get(order.id)
+      if (previousIds?.length) order.delivery.rozetkaPayOperationIds = previousIds
+      else delete order.delivery.rozetkaPayOperationIds
+    }
     promRegistryError.value =
       error instanceof Error ? error.message : 'Не удалось сохранить разнесение.'
   } finally {
@@ -3122,8 +3279,7 @@ function orderDateTime(order: Order) {
         >
           Уже было заполнено: {{ promRegistryExistingFinancials.complete }} из
           {{ promRegistryOrders.length }} полностью · {{ promRegistryExistingFinancials.partial }}
-          частично. Эти значения оставлены белыми; сиреневым отмечены только поля, которые
-          дозаполнил этот черновик.
+          частично. Сиреневым отмечены поля, которые изменил этот черновик.
         </p>
         <p
           v-if="isPromRegistryDraft && promRegistryMismatchCount"

@@ -576,6 +576,9 @@ Deno.serve(async (request) => {
           text(pick(paymentData, 'status', 'payment_status', 'state')) ||
           text(pick(order, 'payment_status', 'payment_state')) ||
           text(previousDelivery.paymentStatus),
+        rozetkaPayOperationIds: Array.isArray(previousDelivery.rozetkaPayOperationIds)
+          ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
+          : undefined,
         hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber),

@@ -36,6 +36,8 @@ export interface Delivery {
   paymentStatus?: string
   /** Дата фактического получения заказа покупателем по данным маркетплейса. */
   receivedAt?: string
+  /** Уже учтённые операции RozetkaPay, чтобы повторный импорт реестра не применял их повторно. */
+  rozetkaPayOperationIds?: string[]
   hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
   /** Последний статус, полученный из публичной tracking-ссылки перевозчика. */
