@@ -34,6 +34,7 @@
 - Use `pnpm`; do not use npm or yarn in this repository.
 - Read and apply the repo-local `frontend` skill before modifying Vue components, TypeScript frontend code, Pinia stores, routes, Tailwind styles, Vite configuration, or frontend lint/build configuration.
 - Follow its VueUse section before writing shared reactive or browser utilities.
+- For dynamic data tables, use the installed `@tanstack/vue-table` v9 API with typed columns, stable row IDs, explicit `tableFeatures`, and `FlexRender`; add only features required by the existing behavior.
 - Inspect existing code and dependencies before choosing a pattern. Reuse established project patterns and keep changes limited to the requested outcome.
 - Preserve unrelated user changes. Never stage files with `git add`.
 - Comment only when code cannot communicate a non-obvious constraint, workaround, or rationale. Do not narrate what the code already says.

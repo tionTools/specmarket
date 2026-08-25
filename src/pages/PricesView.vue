@@ -2,11 +2,11 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import type { User } from '@supabase/supabase-js'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, GripVertical, Plus, Search, Trash2, X } from '@lucide/vue'
+import { ArrowLeft, Plus } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
+import PricesTable from '@/features/prices/PricesTable.vue'
 import { supabase } from '@/lib/supabase'
-import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
@@ -65,7 +65,6 @@ const items = ref<PriceItem[]>(
     kind: item.kind ?? (sourceGroupIds.has(item.id) ? 'group' : 'item'),
   })),
 )
-const searchQuery = ref('')
 const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
@@ -77,11 +76,6 @@ const authError = ref('')
 const isLoading = ref(false)
 const showPassword = ref(false)
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
-
-const visibleItems = computed(() => {
-  const search = searchQuery.value.trim().toLowerCase()
-  return items.value.filter((item) => !search || item.name.toLowerCase().includes(search))
-})
 
 async function save() {
   if (isGuest.value) return
@@ -195,10 +189,6 @@ function finishUsdRateEdit(event: Event) {
 function formatPrice(value: number | null) {
   if (value === null) return ''
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
-}
-
-function getCostUah(item: PriceItem) {
-  return item.usd === null ? item.costUah : item.usd * usdRate.value
 }
 
 function addItem() {
@@ -455,189 +445,18 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         Гостевой режим: доступен только просмотр цен и себестоимости.
       </p>
       <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="border-b border-slate-200 p-4">
-          <div class="relative w-full max-w-md">
-            <Search
-              class="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-slate-500"
-              aria-hidden="true"
-            />
-            <input
-              v-model="searchQuery"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
-              placeholder="Поиск по названию товара"
-            />
-            <button
-              v-if="searchQuery"
-              class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-              type="button"
-              aria-label="Очистить поиск"
-              @click="searchQuery = ''"
-            >
-              <X class="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-        <div class="overflow-visible">
-          <table
-            class="catalog-table w-max border-collapse text-left text-sm"
-            :class="{ 'pointer-events-none select-none opacity-75': isGuest }"
-          >
-            <thead
-              class="sticky top-0 z-20 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 shadow-sm"
-            >
-              <tr>
-                <th class="sticky left-0 z-30 min-w-[32rem] bg-slate-50 px-3 py-2">Название</th>
-                <th class="px-1 py-3">Цена, $</th>
-                <th class="px-1 py-3">Вход, ₴</th>
-                <th class="px-1 py-3 text-blue-700"><PlatformLogo platform="Пром" /></th>
-                <th class="px-1 py-3 text-emerald-700"><PlatformLogo platform="Эпицентр" /></th>
-                <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <PlatformLogo platform="Каста" /><span>обычная</span>
-                </th>
-                <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <div class="flex flex-col items-center gap-0.5 leading-none">
-                    <PlatformLogo platform="Каста" /><span>Рек</span>
-                  </div>
-                </th>
-                <th class="w-[4.5rem] px-1 py-3 text-center text-orange-600">
-                  <PlatformLogo platform="Каста" /><span>акция</span>
-                </th>
-                <th class="w-10 px-1 py-3"><span class="sr-only">Действия</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="item in visibleItems"
-                :key="item.id"
-                class="border-t border-slate-100 hover:bg-slate-50"
-                draggable="true"
-                @dragover.prevent
-                @dragstart="startDragging(item.id)"
-                @drop="moveItem(item.id)"
-              >
-                <td
-                  v-if="item.kind === 'group'"
-                  colspan="9"
-                  class="border-y-2 border-emerald-200 bg-emerald-50 px-3 py-2"
-                >
-                  <div class="flex items-center gap-3">
-                    <GripVertical class="cursor-grab text-emerald-700" aria-label="Перетащить" />
-                    <input
-                      :value="item.name"
-                      :readonly="editingCell !== getCellKey(item, 'name')"
-                      class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1 font-bold uppercase text-emerald-950"
-                      @blur="finishEdit(item, 'name', $event)"
-                      @keydown.enter.prevent="toggleNameEdit(item, $event)"
-                    />
-                    <button
-                      class="ml-auto shrink-0 rounded-lg p-2 text-rose-700 hover:bg-rose-50"
-                      title="Удалить группу"
-                      type="button"
-                      @click="confirmDelete(item)"
-                    >
-                      <Trash2 class="size-4" aria-hidden="true" /><span class="sr-only"
-                        >Удалить группу</span
-                      >
-                    </button>
-                  </div>
-                </td>
-                <template v-else>
-                  <td class="sticky left-0 bg-white px-3 py-1.5 group-hover:bg-slate-50">
-                    <div class="flex w-[32rem] items-center gap-1.5">
-                      <GripVertical class="cursor-grab text-slate-400" aria-label="Перетащить" />
-                      <input
-                        :value="item.name"
-                        :readonly="editingCell !== getCellKey(item, 'name')"
-                        class="w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold"
-                        @blur="finishEdit(item, 'name', $event)"
-                        @keydown.enter.prevent="toggleNameEdit(item, $event)"
-                      />
-                    </div>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <input
-                      :value="formatPrice(item.usd)"
-                      class="w-[3.75rem] rounded-lg border border-slate-200 px-1.5 py-1"
-                      inputmode="decimal"
-                      type="text"
-                      :readonly="editingCell !== getCellKey(item, 'usd')"
-                      @blur="finishEdit(item, 'usd', $event)"
-                      @keydown.enter.prevent="togglePriceEdit(item, 'usd', $event)"
-                    />
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <input
-                      :value="formatPrice(getCostUah(item))"
-                      :class="
-                        item.usd === null
-                          ? 'border-slate-200 bg-white'
-                          : 'border-emerald-100 bg-emerald-50 text-emerald-900'
-                      "
-                      class="w-[4.5rem] rounded-lg px-1.5 py-1"
-                      inputmode="decimal"
-                      type="text"
-                      :readonly="item.usd !== null || editingCell !== getCellKey(item, 'costUah')"
-                      @blur="finishEdit(item, 'costUah', $event)"
-                      @keydown.enter.prevent="togglePriceEdit(item, 'costUah', $event)"
-                    />
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <input
-                      :value="formatPrice(item.prom)"
-                      class="w-[4.5rem] rounded-lg border border-blue-100 px-1.5 py-1"
-                      inputmode="decimal"
-                      type="text"
-                      :readonly="editingCell !== getCellKey(item, 'prom')"
-                      @blur="finishEdit(item, 'prom', $event)"
-                      @keydown.enter.prevent="togglePriceEdit(item, 'prom', $event)"
-                    />
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <input
-                      :value="formatPrice(item.epic)"
-                      class="w-[4.5rem] rounded-lg border border-emerald-100 px-1.5 py-1"
-                      inputmode="decimal"
-                      type="text"
-                      :readonly="editingCell !== getCellKey(item, 'epic')"
-                      @blur="finishEdit(item, 'epic', $event)"
-                      @keydown.enter.prevent="togglePriceEdit(item, 'epic', $event)"
-                    />
-                  </td>
-                  <td
-                    v-for="key in ['kastaOne', 'kastaTwo', 'kastaThree'] as const"
-                    :key="key"
-                    class="px-2 py-1.5"
-                  >
-                    <input
-                      :value="formatPrice(item[key])"
-                      class="w-[4.5rem] rounded-lg border border-orange-100 px-1.5 py-1"
-                      inputmode="decimal"
-                      type="text"
-                      :readonly="editingCell !== getCellKey(item, key)"
-                      @blur="finishEdit(item, key, $event)"
-                      @keydown.enter.prevent="togglePriceEdit(item, key, $event)"
-                    />
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <button
-                      class="rounded-lg p-2 text-rose-700 hover:bg-rose-50"
-                      title="Удалить позицию"
-                      type="button"
-                      @click="confirmDelete(item)"
-                    >
-                      <Trash2 class="size-4" aria-hidden="true" /><span class="sr-only"
-                        >Удалить позицию</span
-                      >
-                    </button>
-                  </td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-if="visibleItems.length === 0" class="p-8 text-center text-sm text-slate-500">
-          Товары не найдены.
-        </p>
+        <PricesTable
+          :items="items"
+          :usd-rate="usdRate"
+          :editing-cell="editingCell"
+          :guest="isGuest"
+          @start-dragging="startDragging"
+          @move-item="moveItem"
+          @confirm-delete="confirmDelete"
+          @toggle-name-edit="toggleNameEdit"
+          @toggle-price-edit="togglePriceEdit"
+          @finish-edit="finishEdit"
+        />
       </section>
       <p class="mt-3 text-xs text-slate-500">
         Если заполнена цена в $, «Вход, ₴» = цена в $ × курс. Без долларовой цены «Вход, ₴»

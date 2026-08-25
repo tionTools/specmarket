@@ -3,29 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 
+import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'
+import type { Reconciliation } from '@/features/reconciliation/types'
 import { supabase } from '@/lib/supabase'
-
-type Reconciliation = {
-  id: string
-  kind: 'initial' | 'reconciliation'
-  reconciled_at: string
-  usd_rate: number
-  accounting_usd: number
-  accounting_uah: number
-  accounting_total: number
-  reserve_uah: number
-  crm_balance_usd_before_adjustment: number
-  crm_balance_uah_before_adjustment: number
-  crm_balance_usd_after_adjustment: number
-  crm_balance_uah_after_adjustment: number
-  crm_balance_before_adjustment: number
-  adjustment_uah: number
-  crm_balance_after_adjustment: number
-  discrepancy_uah: number
-  cost_snapshot_usd: number
-  cost_snapshot_uah: number
-  created_at: string
-}
 
 type SupplierPayment = {
   id: string
@@ -699,74 +679,17 @@ onMounted(load)
 
           <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="text-lg font-bold">История сверок</h2>
-            <div v-if="history.length" class="mt-4 overflow-x-auto">
-              <table class="w-full min-w-[72rem] text-left text-sm">
-                <thead class="text-slate-500">
-                  <tr>
-                    <th class="pb-2">Дата</th>
-                    <th class="pb-2">Тип</th>
-                    <th class="pb-2">USD</th>
-                    <th class="pb-2">Гривна</th>
-                    <th class="pb-2">Курс</th>
-                    <th class="pb-2">Мой экв., грн</th>
-                    <th class="pb-2">USD 1С</th>
-                    <th class="pb-2">Грн 1С</th>
-                    <th class="pb-2">Всего 1С</th>
-                    <th class="pb-2">Бронь</th>
-                    <th class="pb-2">Сторно</th>
-                    <th class="pb-2">Расхождение</th>
-                    <th v-if="!isGuest" class="pb-2"><span class="sr-only">Действия</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in history" :key="item.id" class="border-t border-slate-100">
-                    <td class="py-2">{{ dateTime(item.reconciled_at) }}</td>
-                    <td class="py-2 font-semibold">
-                      {{ item.kind === 'initial' ? 'Начальное сальдо' : 'Сверка' }}
-                    </td>
-                    <td class="py-2">
-                      {{ money(Number(item.crm_balance_usd_after_adjustment)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ money(Number(item.crm_balance_uah_after_adjustment)) }}
-                    </td>
-                    <td class="py-2">{{ money(Number(item.usd_rate)) }}</td>
-                    <td class="py-2 font-semibold">
-                      {{ money(reconciliationTotal(item)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(Number(item.accounting_usd)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(Number(item.accounting_uah)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(accountingTotalForHistory(item)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(Number(item.reserve_uah)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(Number(item.adjustment_uah)) }}
-                    </td>
-                    <td class="py-2">
-                      {{ item.kind === 'initial' ? '—' : money(Number(item.discrepancy_uah)) }}
-                    </td>
-                    <td v-if="!isGuest" class="py-2 text-right">
-                      <button
-                        v-if="item.id === latestReconciliation?.id"
-                        :disabled="isSaving"
-                        class="rounded-lg px-2 py-1 text-rose-700 hover:bg-rose-50"
-                        @click="deleteLatestReconciliation"
-                      >
-                        Удалить последнюю
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-else class="mt-4 text-sm text-slate-500">Зафиксированных сверок пока нет.</p>
+            <ReconciliationHistoryTable
+              :history="history"
+              :guest="isGuest"
+              :saving="isSaving"
+              :latest-id="latestReconciliation?.id"
+              :money="money"
+              :date-time="dateTime"
+              :reconciliation-total="reconciliationTotal"
+              :accounting-total-for-history="accountingTotalForHistory"
+              @delete-latest="deleteLatestReconciliation"
+            />
           </section>
         </template>
       </template>

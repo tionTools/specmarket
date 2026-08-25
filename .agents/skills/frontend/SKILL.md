@@ -16,12 +16,17 @@ Use only the stack declared in `package.json` and the repository configuration:
 - Pinia
 - Vue Router with routes declared in `src/router/index.ts`
 - `@vueuse/core`
+- `@tanstack/vue-table` for dynamic data tables
 - Tailwind CSS v4 through `@tailwindcss/vite`
 - Vite
 - pnpm
 - ESLint, Oxlint, and Oxfmt
 
 Inspect `package.json` before relying on any additional package. Do not introduce conventions for Apollo, GraphQL, shadcn-vue, Reka UI, TanStack, form libraries, test frameworks, Nuxt, Tauri, or other packages unless they are deliberately added later.
+
+## Build dynamic tables with TanStack Table
+
+For a dynamic data table, use the installed `@tanstack/vue-table` v9 API: `useTable`, explicit `tableFeatures`, typed column definitions, stable row IDs, and `FlexRender` for headers and cells. Keep loading, persistence, router, and business actions in the owning page; feature table components receive props and emit actions. Add only the required table features—do not introduce sorting, filtering, pagination, or other TanStack capabilities unless the current behavior requires them.
 
 ## Use VueUse first
 
