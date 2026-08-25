@@ -80,7 +80,7 @@ function priceCell(
 
 const columns = [
   {
-    id: 'name',
+    accessorKey: 'name',
     header: 'Название',
     cell: ({ row }: { row: { original: PriceItem } }) => {
       const item = row.original
@@ -186,7 +186,18 @@ const columns = [
 ] satisfies ColumnDef<typeof features, PriceItem>[]
 
 const data = computed(() => props.items)
-const table = useTable({ features, columns, data, getRowId: (item: PriceItem) => String(item.id) })
+const table = useTable({
+  features,
+  columns,
+  data,
+  getRowId: (item: PriceItem) => String(item.id),
+  globalFilterFn: (row, _columnId, filterValue) => {
+    const search = String(filterValue ?? '')
+      .trim()
+      .toLowerCase()
+    return !search || row.original.name.toLowerCase().includes(search)
+  },
+})
 const isEmpty = computed(() => table.getRowModel().rows.length === 0)
 
 function handleSearch(event: Event) {

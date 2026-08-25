@@ -250,9 +250,11 @@ function moveItem(targetId: number) {
   const sourceIndex = items.value.findIndex((item) => item.id === sourceId)
   const targetIndex = items.value.findIndex((item) => item.id === targetId)
   if (sourceIndex < 0 || targetIndex < 0) return
-  const [source] = items.value.splice(sourceIndex, 1)
+  const reorderedItems = [...items.value]
+  const [source] = reorderedItems.splice(sourceIndex, 1)
   if (!source) return
-  items.value.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, source)
+  reorderedItems.splice(targetIndex, 0, source)
+  items.value = reorderedItems
   draggedItemId.value = null
   save()
 }
