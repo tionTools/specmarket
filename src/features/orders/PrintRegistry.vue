@@ -6,6 +6,7 @@ import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import {
   displayCarrier,
+  formatDeliveryTtn,
   formatUkrainianPhone,
   orderBusinessPlatform,
 } from '@/features/orders/display'
@@ -308,7 +309,9 @@ onUnmounted(() => {
             <p class="flex items-center gap-1 text-sm text-slate-600">
               <span>{{ displayCarrier(order.delivery.carrier) }} ·</span>
               <CarrierLogo v-if="carrierLogoKind(order)" :kind="carrierLogoKind(order)" />
-              <span class="font-bold text-blue-600">{{ order.delivery.ttn }}</span>
+              <span class="font-bold text-blue-600">{{
+                formatDeliveryTtn(order.delivery.carrier, order.delivery.ttn)
+              }}</span>
             </p>
             <p v-if="order.internalComment" class="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-sm">
               {{ order.internalComment }}

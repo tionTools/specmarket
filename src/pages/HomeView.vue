@@ -39,7 +39,9 @@ import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
 import {
+  deliveryTtnForClipboard,
   displayCarrier,
+  formatDeliveryTtn,
   formatUkrainianPhone,
   orderBusinessPlatform,
 } from '@/features/orders/display'
@@ -2925,10 +2927,10 @@ async function copyOrderNumber(order: Order) {
   } catch {}
 }
 
-async function copyTtn(ttn: string, orderId: Order['id']) {
-  if (!ttn || !isClipboardSupported.value) return
+async function copyTtn(delivery: Delivery, orderId: Order['id']) {
+  if (!delivery.ttn || !isClipboardSupported.value) return
   try {
-    await copy(ttn)
+    await copy(deliveryTtnForClipboard(delivery.carrier, delivery.ttn))
     if (copied.value) showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
   } catch {}
 }
@@ -4407,14 +4409,16 @@ function orderDateTime(order: Order) {
                         <ExternalLink class="size-4" aria-hidden="true" />
                       </a>
                       <span class="whitespace-pre-line">{{
-                        deliveryTtns(order.delivery).join('\n') || '—'
+                        deliveryTtns(order.delivery)
+                          .map((ttn) => formatDeliveryTtn(order.delivery.carrier, ttn))
+                          .join('\n') || '—'
                       }}</span>
                       <button
                         v-if="order.delivery.ttn"
                         class="relative grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
                         type="button"
                         aria-label="Скопировать номер ТТН"
-                        @click="copyTtn(order.delivery.ttn, order.id)"
+                        @click="copyTtn(order.delivery, order.id)"
                       >
                         <Copy class="size-4" aria-hidden="true" />
                         <span

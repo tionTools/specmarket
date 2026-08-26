@@ -22,6 +22,30 @@ export function displayCarrier(carrier: string) {
   return carrier
 }
 
+export function isNovaPoshtaCarrier(carrier: string) {
+  const normalized = carrier
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  return (
+    normalized === 'nova_poshta' ||
+    normalized === 'novaposhta' ||
+    normalized === 'новая_почта' ||
+    normalized === 'нова_пошта'
+  )
+}
+
+export function formatDeliveryTtn(carrier: string, ttn: string) {
+  if (!isNovaPoshtaCarrier(carrier)) return ttn
+  const digits = ttn.replace(/\D/g, '')
+  if (digits.length !== 14) return ttn
+  return `${digits.slice(0, 2)} ${digits.slice(2, 6)} ${digits.slice(6, 10)} ${digits.slice(10, 14)}`
+}
+
+export function deliveryTtnForClipboard(carrier: string, ttn: string) {
+  return isNovaPoshtaCarrier(carrier) ? ttn.replace(/\D/g, '') : ttn
+}
+
 export function orderBusinessPlatform(order: Pick<Order, 'platform' | 'delivery'>): Platform {
   return order.platform === 'Пром' && order.delivery.hasWebsiteCommission === true
     ? 'Сайт'
