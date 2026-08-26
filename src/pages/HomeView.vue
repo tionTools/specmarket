@@ -2199,10 +2199,20 @@ function mapRemoteOrders(
   return []
 }
 
+function focusedOrderCellOrder() {
+  const activeElement = document.activeElement
+  if (!(activeElement instanceof HTMLInputElement)) return undefined
+  if (!activeElement.classList.contains('order-cell-edit')) return undefined
+  const orderCard = activeElement.closest<HTMLElement>('[data-order-id]')
+  if (!orderCard) return undefined
+  return orders.value.find((order) => String(order.id) === orderCard.dataset.orderId)
+}
+
 function isRemoteOrderLocallyBusy(remoteId: string) {
   if (pendingLocalOrderSaves.has(remoteId)) return true
-  if (!editingOrderCell.value) return false
-  return orderFromEditKey(editingOrderCell.value)?.remoteId === remoteId
+  if (editingOrderCell.value && orderFromEditKey(editingOrderCell.value)?.remoteId === remoteId)
+    return true
+  return focusedOrderCellOrder()?.remoteId === remoteId
 }
 
 async function refreshRemoteOrders(remoteIds: string[]) {
@@ -3064,14 +3074,21 @@ function updateOrderNumber(
   if (field === 'cost') product.costUsd = 0
 }
 
+function flushDeferredRemoteOrder(order: Order | undefined) {
+  const remoteId = order?.remoteId
+  if (!remoteId || !deferredRemoteOrderIds.delete(remoteId)) return
+  queueRemoteOrderRefresh(remoteId)
+}
+
 function finishOrderCell(key: string, onCommit?: () => void) {
+  const order = orderFromEditKey(key)
   if (editingOrderCell.value === key) {
-    const order = orderFromEditKey(key)
     onCommit?.()
     editingOrderCell.value = null
     delete editingOrderValue.value[key]
     persistOrders(order)
   }
+  flushDeferredRemoteOrder(order)
 }
 
 function orderDateTime(order: Order) {
@@ -3607,6 +3624,7 @@ function orderDateTime(order: Order) {
           v-for="order in visibleOrders"
           :key="order.id"
           :id="`order-${order.id}`"
+          :data-order-id="String(order.id)"
           class="mb-3 overflow-hidden rounded-xl border bg-white shadow-sm transition"
           :class="
             isOrderExpanded(order)
