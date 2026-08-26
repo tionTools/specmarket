@@ -191,6 +191,8 @@ const returnDraftQuantities = ref<Record<string, string>>({})
 const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
 const isSavingReturn = ref(false)
 let persistenceQueue: Promise<void> = Promise.resolve()
+const pendingLocalOrderSaves = new Map<string, number>()
+const deferredRemoteOrderIds = new Set<string>()
 const { start: restartSyncNoticeCleanupTimer, stop: stopSyncNoticeCleanupTimer } = useTimeoutFn(
   () => {
     syncEpicentrMessage.value = ''
@@ -1529,15 +1531,40 @@ function orderWithRegistryFinancialsRestored(order: Order): Order {
   }
 }
 
+function incrementPendingLocalSaves(savedOrders: Order[]) {
+  const remoteIds = new Set(
+    savedOrders
+      .map((savedOrder) => savedOrder.remoteId)
+      .filter((remoteId): remoteId is string => typeof remoteId === 'string'),
+  )
+  for (const remoteId of remoteIds)
+    pendingLocalOrderSaves.set(remoteId, (pendingLocalOrderSaves.get(remoteId) ?? 0) + 1)
+  return remoteIds
+}
+
+function decrementPendingLocalSaves(remoteIds: Set<string>) {
+  for (const remoteId of remoteIds) {
+    const remaining = (pendingLocalOrderSaves.get(remoteId) ?? 1) - 1
+    if (remaining > 0) {
+      pendingLocalOrderSaves.set(remoteId, remaining)
+      continue
+    }
+    pendingLocalOrderSaves.delete(remoteId)
+    if (deferredRemoteOrderIds.delete(remoteId)) queueRemoteOrderRefresh(remoteId)
+  }
+}
+
 function persistOrders(order?: Order) {
   if (isGuest.value) return Promise.resolve()
   const savedOrders = order
     ? [orderWithRegistryFinancialsRestored(order)]
     : orders.value.map(orderWithRegistryFinancialsRestored)
   const localOrders = orders.value.map(orderWithRegistryFinancialsRestored)
+  const pendingRemoteIds = incrementPendingLocalSaves(savedOrders)
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
     .then(() => persistOrdersNow(savedOrders, localOrders))
+    .finally(() => decrementPendingLocalSaves(pendingRemoteIds))
   return persistenceQueue
 }
 
@@ -2172,12 +2199,24 @@ function mapRemoteOrders(
   return []
 }
 
+function isRemoteOrderLocallyBusy(remoteId: string) {
+  if (pendingLocalOrderSaves.has(remoteId)) return true
+  if (!editingOrderCell.value) return false
+  return orderFromEditKey(editingOrderCell.value)?.remoteId === remoteId
+}
+
 async function refreshRemoteOrders(remoteIds: string[]) {
   if (!supabase || !remoteIds.length) return
+  const refreshableIds = [...new Set(remoteIds)].filter((remoteId) => {
+    if (!isRemoteOrderLocallyBusy(remoteId)) return true
+    deferredRemoteOrderIds.add(remoteId)
+    return false
+  })
+  if (!refreshableIds.length) return
   const { data: remoteOrders, error: ordersError } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')
-    .in('id', remoteIds)
+    .in('id', refreshableIds)
   if (ordersError || !remoteOrders) {
     console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
     return
@@ -2185,14 +2224,14 @@ async function refreshRemoteOrders(remoteIds: string[]) {
   const { data: orderItemReturns, error: returnsError } = await supabase
     .from('crm_order_item_returns')
     .select('order_id, item_position, product_name, returned_quantity, returned_at')
-    .in('order_id', remoteIds)
+    .in('order_id', refreshableIds)
   if (returnsError) {
     console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
     return
   }
   const refreshedOrders = mapRemoteOrders(remoteOrders, orderItemReturns)
   const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
-  for (const remoteId of remoteIds) {
+  for (const remoteId of refreshableIds) {
     if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
   }
   for (const order of refreshedOrders) {
@@ -4805,7 +4844,13 @@ function orderDateTime(order: Order) {
 </template>
 
 <style scoped>
+.order-edit .order-cell-edit[readonly]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #60a5fa;
+}
+
 .order-edit .order-cell-edit:not([readonly]) {
+  outline: none;
   background-color: #fffbeb;
   box-shadow: 0 0 0 2px #fbbf24;
 }
