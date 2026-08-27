@@ -1308,7 +1308,16 @@ async function openPrintRegistry() {
   for (const order of ordersWithoutTtn) {
     if (order.remoteId) registryRefreshIds.add(order.remoteId)
   }
-  if (registryRefreshIds.size) await refreshRemoteOrders([...registryRefreshIds])
+  if (registryRefreshIds.size) {
+    const registryRefreshSucceeded = await refreshRemoteOrders([...registryRefreshIds])
+    if (!registryRefreshSucceeded) {
+      isPreparingPrintRegistry.value = false
+      showSyncError(
+        'Не удалось получить актуальные данные заказов перед формированием реестра. Реестр не сформирован.',
+      )
+      return
+    }
+  }
 
   const registryOrders = orders.value.filter(
     (order) =>
@@ -2231,21 +2240,24 @@ function isRemoteOrderLocallyBusy(remoteId: string) {
   return focusedOrderCellOrder()?.remoteId === remoteId
 }
 
-async function refreshRemoteOrders(remoteIds: string[]) {
-  if (!supabase || !remoteIds.length) return
-  const refreshableIds = [...new Set(remoteIds)].filter((remoteId) => {
+async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
+  if (!supabase) return false
+  if (!remoteIds.length) return true
+  const uniqueRemoteIds = [...new Set(remoteIds)]
+  const refreshableIds = uniqueRemoteIds.filter((remoteId) => {
     if (!isRemoteOrderLocallyBusy(remoteId)) return true
     deferredRemoteOrderIds.add(remoteId)
     return false
   })
-  if (!refreshableIds.length) return
+  const refreshedAllRequestedOrders = refreshableIds.length === uniqueRemoteIds.length
+  if (!refreshableIds.length) return false
   const { data: remoteOrders, error: ordersError } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')
     .in('id', refreshableIds)
   if (ordersError || !remoteOrders) {
     console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
-    return
+    return false
   }
   const { data: orderItemReturns, error: returnsError } = await supabase
     .from('crm_order_item_returns')
@@ -2253,7 +2265,7 @@ async function refreshRemoteOrders(remoteIds: string[]) {
     .in('order_id', refreshableIds)
   if (returnsError) {
     console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
-    return
+    return false
   }
   const refreshedOrders = mapRemoteOrders(remoteOrders, orderItemReturns)
   const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
@@ -2276,6 +2288,7 @@ async function refreshRemoteOrders(remoteIds: string[]) {
   )
   for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
   sortOrders()
+  return refreshedAllRequestedOrders
 }
 
 function notifyNewOrder(order: Order) {
