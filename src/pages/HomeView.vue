@@ -3604,7 +3604,7 @@ function orderDateTime(order: Order) {
           </div>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[10.75rem_8rem_minmax(0,1fr)_7rem_7.75rem_7.75rem_14.5rem_4.5rem] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden grid-cols-[175px_130px_minmax(0,1fr)_110px_120px_120px_240px_80px] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
           <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
           ><span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
@@ -3637,7 +3637,7 @@ function orderDateTime(order: Order) {
           "
         >
           <div
-            class="grid w-full gap-x-2 gap-y-3 px-5 py-4 text-left transition lg:grid-cols-[10.75rem_8rem_minmax(0,1fr)_7rem_7.75rem_7.75rem_14.5rem_4.5rem] lg:items-center"
+            class="grid w-full gap-x-2 gap-y-3 px-5 py-4 text-left transition lg:grid-cols-[175px_130px_minmax(0,1fr)_110px_120px_120px_240px_80px] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
