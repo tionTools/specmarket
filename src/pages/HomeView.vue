@@ -1304,8 +1304,11 @@ async function openPrintRegistry() {
         if (typeof id === 'string') changedOrderIds.add(id)
     }
   }
-  if (!ordersRealtimeSubscribed.value && changedOrderIds.size)
-    await refreshRemoteOrders([...changedOrderIds])
+  const registryRefreshIds = new Set(changedOrderIds)
+  for (const order of ordersWithoutTtn) {
+    if (order.remoteId) registryRefreshIds.add(order.remoteId)
+  }
+  if (registryRefreshIds.size) await refreshRemoteOrders([...registryRefreshIds])
 
   const registryOrders = orders.value.filter(
     (order) =>
