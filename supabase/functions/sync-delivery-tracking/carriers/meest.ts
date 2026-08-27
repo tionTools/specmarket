@@ -3,6 +3,8 @@ import type { TrackingResult } from '../types.ts'
 
 function meestReadableStatus(source: string, code: string) {
   if (code === '2') return { status: 'Создана накладная', final: false, normalizedStatus: 'created' }
+  if (code === '1622' || /^доручено$/i.test(source.trim()))
+    return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
   return readableStatus(source, code)
 }
 
@@ -31,7 +33,7 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
   })))
   return {
     ...base,
-    status: source,
+    status: base.normalizedStatus === 'delivered' ? base.status : source,
     final,
     provider: 'meest_api',
     details: {

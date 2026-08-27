@@ -1270,28 +1270,39 @@ async function openPrintRegistry() {
   )
   let syncErrors = 0
   const changedOrderIds = new Set<string>()
-  for (const order of ordersWithoutTtn) {
-    const functionName =
-      order.platform === 'Пром'
-        ? 'sync-prom-orders'
-        : order.platform === 'Эпицентр'
-          ? 'sync-epicentr-orders'
-          : 'sync-kasta-orders'
-    const body =
-      order.platform === 'Каста'
-        ? { externalId: order.externalId }
-        : {
-            externalId: order.externalId,
-            manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
-          }
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      method: 'POST',
-      body,
-    })
-    if (error || !data?.ok) syncErrors += 1
-    else
+  const functions = supabase.functions
+  const syncConcurrency = 4
+  for (let index = 0; index < ordersWithoutTtn.length; index += syncConcurrency) {
+    const batch = ordersWithoutTtn.slice(index, index + syncConcurrency)
+    const results = await Promise.all(
+      batch.map(async (order) => {
+        const functionName =
+          order.platform === 'Пром'
+            ? 'sync-prom-orders'
+            : order.platform === 'Эпицентр'
+              ? 'sync-epicentr-orders'
+              : 'sync-kasta-orders'
+        const body =
+          order.platform === 'Каста'
+            ? { externalId: order.externalId }
+            : {
+                externalId: order.externalId,
+                manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+              }
+        return functions.invoke(functionName, {
+          method: 'POST',
+          body,
+        })
+      }),
+    )
+    for (const { data, error } of results) {
+      if (error || !data?.ok) {
+        syncErrors += 1
+        continue
+      }
       for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
         if (typeof id === 'string') changedOrderIds.add(id)
+    }
   }
   if (!ordersRealtimeSubscribed.value && changedOrderIds.size)
     await refreshRemoteOrders([...changedOrderIds])
