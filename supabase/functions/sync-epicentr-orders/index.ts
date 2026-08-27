@@ -504,6 +504,7 @@ Deno.serve(async (request) => {
       : apiDeliveryStatus ||
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
     const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
+    const hasManualShipping = previousDelivery.shippingSource === 'manual'
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
     const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
@@ -518,9 +519,13 @@ Deno.serve(async (request) => {
       customer_comment: source.comment ?? null,
       platform: 'Эпицентр',
       status,
-      // Берём фактическую стоимость доставки из API. Если площадка её не отдала,
-      // сохраняем вручную внесённую сумму в CRM.
-      shipping: hasShippingFromApi ? Number(shipment?.deliveryPrice) : Number(existing.data?.shipping ?? 0),
+      // Ручная корректировка в CRM имеет приоритет над данными площадки.
+      // Пока пользователь не менял сумму, берём фактическую стоимость доставки из API.
+      shipping: hasManualShipping
+        ? Number(existing.data?.shipping ?? 0)
+        : hasShippingFromApi
+          ? Number(shipment?.deliveryPrice)
+          : Number(existing.data?.shipping ?? 0),
       // Эквайринг вводится в CRM, а API площадки его не возвращает.
       acquiring: manual.acquiring !== undefined ? Number(manual.acquiring) : Number(existing.data?.acquiring ?? 0),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : Number(manual.acquiringPercent)) : existing.data?.acquiring_percent ?? null,
@@ -535,6 +540,7 @@ Deno.serve(async (request) => {
         payer: 'Не вказано',
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
         paymentAmount,
+        shippingSource: hasManualShipping ? 'manual' : undefined,
         paymentMethod: shipment?.paymentProvider ?? '',
         paymentStatus: shipment?.paymentStatus ?? '',
         ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn),

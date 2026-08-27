@@ -355,6 +355,7 @@ Deno.serve(async (request) => {
       const items = itemRows(order)
       const deliveryFee = customerDeliveryFee(order, delivery)
       const currentDelivery = asRecord(existing?.delivery)
+      const hasManualShipping = currentDelivery.shippingSource === 'manual'
       const receivedDate = receivedAt(order) || text(currentDelivery.receivedAt)
       const blackUsed = delivery.black_used === true
       // A cancellation/return makes delivery free only when the buyer never received
@@ -387,7 +388,9 @@ Deno.serve(async (request) => {
         customer_comment: Array.isArray(order.comments) ? order.comments.map(text).filter(Boolean).join('\n') || null : null,
         platform: 'Каста',
         status: (orderStatuses[text(status.type)] ?? text(status.type)) || 'Новый',
-        shipping: calculatedShipping ?? Number(existing?.shipping ?? 0),
+        shipping: hasManualShipping
+          ? Number(existing?.shipping ?? 0)
+          : calculatedShipping ?? Number(existing?.shipping ?? 0),
         acquiring: Number(existing?.acquiring ?? 0),
         acquiring_percent: existing?.acquiring_percent ?? null,
         delivery: {
@@ -401,6 +404,7 @@ Deno.serve(async (request) => {
           payer: blackUsed || order.kasta_pays_for_shipping === true ? 'Каста' : text(currentDelivery.payer) || 'Не указано',
           blackUsed,
           customerDeliveryFee: deliveryFee,
+          shippingSource: hasManualShipping ? 'manual' : undefined,
           paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
           paymentMethod: text(order.requested_payment_method),
           paymentStatus: text(order.card_payment_state),

@@ -541,12 +541,13 @@ Deno.serve(async (request) => {
     const websiteOrderCommission = orderLevelCommission(order)
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
-    const shippingSource = hasSellerDeliveryCost
-      ? 'seller-api'
-      : promoSellerDeliveryCost !== undefined
-        ? 'prom-promo'
-        : previousDelivery.shippingSource === 'manual'
-          ? 'manual'
+    const hasManualShipping = previousDelivery.shippingSource === 'manual'
+    const shippingSource = hasManualShipping
+      ? 'manual'
+      : hasSellerDeliveryCost
+        ? 'seller-api'
+        : promoSellerDeliveryCost !== undefined
+          ? 'prom-promo'
           : 'none'
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const data = {
@@ -556,9 +557,11 @@ Deno.serve(async (request) => {
       customer_email: text(order.email) || text(order.client_email) || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: orderStatus,
-      shipping: hasSellerDeliveryCost
-        ? number(sellerDeliveryCost)
-        : promoSellerDeliveryCost ?? (previousDelivery.shippingSource === 'manual' ? number(existing?.shipping) : 0),
+      shipping: hasManualShipping
+        ? number(existing?.shipping)
+        : hasSellerDeliveryCost
+          ? number(sellerDeliveryCost)
+          : promoSellerDeliveryCost ?? 0,
       acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
       delivery: {
