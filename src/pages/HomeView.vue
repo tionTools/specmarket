@@ -81,7 +81,7 @@ type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
 const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
 const platformSummaryFrom = ref('')
 const platformSummaryTo = ref('')
-const orderListPeriod = ref<PlatformSummaryPeriod>('custom')
+const orderListPeriod = ref<PlatformSummaryPeriod>('month')
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const isComparingPreviousPeriod = ref(false)
@@ -1177,15 +1177,20 @@ const ordersForPreviousPeriod = computed(() => {
     return date !== null && date >= from && date <= to
   })
 })
-const orderListPeriodLabel = computed(
-  () =>
-    ({
+const orderListPeriodLabel = computed(() => {
+  if (orderListPeriod.value !== 'custom') {
+    return {
       week: 'Неделя',
       decade: 'Декада',
       month: 'Месяц',
-      custom: 'Период',
-    })[orderListPeriod.value],
-)
+    }[orderListPeriod.value]
+  }
+
+  const { from, to } = orderListRange.value
+  const formatter = new Intl.DateTimeFormat('ru-RU')
+  if (from.getTime() === to.getTime()) return formatter.format(from)
+  return `${formatter.format(from)}–${formatter.format(to)}`
+})
 const promRegistryEntriesByOrder = computed(
   () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
 )
