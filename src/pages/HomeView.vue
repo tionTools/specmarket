@@ -22,6 +22,8 @@ import {
 } from '@vueuse/core'
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   ExternalLink,
   Globe2,
@@ -79,7 +81,7 @@ type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
 const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
 const platformSummaryFrom = ref('')
 const platformSummaryTo = ref('')
-const orderListPeriod = ref<PlatformSummaryPeriod>('month')
+const orderListPeriod = ref<PlatformSummaryPeriod>('custom')
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const isComparingPreviousPeriod = ref(false)
@@ -453,8 +455,10 @@ platformSummaryFrom.value = inputDate(
   new Date(defaultPlatformSummaryDate.getFullYear(), defaultPlatformSummaryDate.getMonth(), 1),
 )
 platformSummaryTo.value = inputDate(defaultPlatformSummaryDate)
-orderListFrom.value = platformSummaryFrom.value
-orderListTo.value = platformSummaryTo.value
+const defaultOrderListDate = new Date(defaultPlatformSummaryDate)
+defaultOrderListDate.setDate(defaultOrderListDate.getDate() - 1)
+orderListFrom.value = inputDate(defaultOrderListDate)
+orderListTo.value = inputDate(defaultOrderListDate)
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
@@ -1133,6 +1137,35 @@ const previousOrderListRange = computed(() => ({
   from: shiftDateByMonths(orderListRange.value.from, -1),
   to: shiftDateByMonths(orderListRange.value.to, -1),
 }))
+const orderListQuickDateLabel = computed(() => {
+  const first = parseInputDate(orderListFrom.value)
+  const second = parseInputDate(orderListTo.value) ?? first
+  if (!first || !second) return '—'
+  const formatter = new Intl.DateTimeFormat('ru-RU')
+  if (first.getTime() === second.getTime()) return formatter.format(first)
+  return `${formatter.format(first)}–${formatter.format(second)}`
+})
+
+function shiftOrderListCustomRange(days: number) {
+  const fallback = startOfLocalDay(new Date())
+  fallback.setDate(fallback.getDate() - 1)
+  const first = parseInputDate(orderListFrom.value) ?? fallback
+  const second = parseInputDate(orderListTo.value) ?? first
+  const shiftedFirst = new Date(first)
+  const shiftedSecond = new Date(second)
+  shiftedFirst.setDate(shiftedFirst.getDate() + days)
+  shiftedSecond.setDate(shiftedSecond.getDate() + days)
+  orderListPeriod.value = 'custom'
+  orderListFrom.value = inputDate(shiftedFirst)
+  orderListTo.value = inputDate(shiftedSecond)
+}
+
+function showTodayInOrderList() {
+  const today = startOfLocalDay(new Date())
+  orderListPeriod.value = 'custom'
+  orderListFrom.value = inputDate(today)
+  orderListTo.value = inputDate(today)
+}
 const previousOrderListRangeLabel = computed(
   () =>
     `${formatShortDate(previousOrderListRange.value.from)}–${formatShortDate(previousOrderListRange.value.to)}`,
@@ -3593,6 +3626,43 @@ function orderDateTime(order: Order) {
             Отмены и возвраты
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
+            <div
+              v-if="orderListPeriod === 'custom'"
+              class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+              aria-label="Быстрая навигация по датам"
+            >
+              <button
+                class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                type="button"
+                aria-label="На один день назад"
+                title="На один день назад"
+                @click="shiftOrderListCustomRange(-1)"
+              >
+                <ChevronLeft class="size-4" aria-hidden="true" />
+              </button>
+              <span
+                class="min-w-[7.25rem] border-x border-slate-200 px-2 text-center text-sm font-semibold tabular-nums text-slate-700"
+              >
+                {{ orderListQuickDateLabel }}
+              </span>
+              <button
+                class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                type="button"
+                aria-label="На один день вперёд"
+                title="На один день вперёд"
+                @click="shiftOrderListCustomRange(1)"
+              >
+                <ChevronRight class="size-4" aria-hidden="true" />
+              </button>
+            </div>
+            <button
+              v-if="orderListPeriod === 'custom'"
+              class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+              type="button"
+              @click="showTodayInOrderList"
+            >
+              Сегодня
+            </button>
             <label
               class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
             >
@@ -3633,7 +3703,7 @@ function orderDateTime(order: Order) {
         <div
           class="mt-3 hidden grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
         >
-          <span>Номер заказа</span><span>Площадка<br />Статус</span><span>Товары</span
+          <span>Номер заказа</span><span>Статус<br />Площадка</span><span>Товары</span
           ><span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
           ><span class="border-l border-slate-200 pl-3 text-right">Факт. прибыль</span
           ><span class="border-l border-slate-200 pl-3 text-right">План. прибыль</span
@@ -3723,13 +3793,12 @@ function orderDateTime(order: Order) {
                 class="mt-1 inline-flex rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900"
                 >Не распечатан</span
               ></span
-            ><span
-              ><strong :class="platformClass(orderBusinessPlatform(order))"
-                ><PlatformLogo :platform="orderBusinessPlatform(order)" /></strong
+            ><span class="flex min-w-0 flex-col items-start gap-1"
               ><span
-                class="mt-1 block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
+                class="block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                 >{{ displayOrderStatus(order.status) }}</span
-              ></span
+              ><strong :class="platformClass(orderBusinessPlatform(order))"
+                ><PlatformLogo :platform="orderBusinessPlatform(order)" /></strong></span
             ><span class="flex min-w-0 items-center gap-3"
               ><img
                 v-if="getOrderPreviewImage(order)"
