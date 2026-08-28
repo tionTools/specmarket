@@ -27,6 +27,7 @@ import {
   Copy,
   ExternalLink,
   Globe2,
+  Link2,
   LogOut,
   MessageSquare,
   Plus,
@@ -105,6 +106,7 @@ const commentEditorOrderId = ref<string | number | null>(null)
 const editingInternalCommentOrderId = ref<string | number | null>(null)
 const editingInternalCommentValue = ref<Record<string, string>>({})
 const usdRate = ref(45.2)
+const linkedPriceProductKeys = ref(new Set<string>())
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
@@ -1541,7 +1543,50 @@ function createProduct(): OrderProduct {
   return { id: crypto.randomUUID(), name: '', size: '', quantity: 1, price: 0, cost: 0 }
 }
 
+function marketplacePriceLinkKey(platform: Platform, marketplaceProductKey: string) {
+  return `${platform}:${marketplaceProductKey}`
+}
+
+function canLinkProductPrice(order: Order, product: OrderProduct) {
+  return (
+    ['Пром', 'Эпицентр', 'Каста'].includes(order.platform) &&
+    Boolean(order.remoteId) &&
+    product.position !== undefined &&
+    Boolean(product.marketplaceProductKey)
+  )
+}
+
+function isProductPriceLinked(order: Order, product: OrderProduct) {
+  return Boolean(
+    product.marketplaceProductKey &&
+    linkedPriceProductKeys.value.has(
+      marketplacePriceLinkKey(order.platform, product.marketplaceProductKey),
+    ),
+  )
+}
+
+function openProductPriceLink(order: Order, product: OrderProduct) {
+  if (isGuest.value || !canLinkProductPrice(order, product) || !product.marketplaceProductKey)
+    return
+  void router.push({
+    path: '/prices',
+    query: {
+      linkMode: '1',
+      linkPlatform: order.platform,
+      linkProductKey: product.marketplaceProductKey,
+      linkOrderRemoteId: order.remoteId,
+      linkPosition: String(product.position),
+      linkTitle: product.name,
+      ...(product.size ? { linkSize: product.size } : {}),
+      returnOrder: String(order.id),
+      ...(searchQuery.value ? { returnSearch: searchQuery.value } : {}),
+      ...(isPromRegistryDraft.value ? { returnRegistry: '1' } : {}),
+    },
+  })
+}
+
 function updateDraftUsdCost(product: OrderProduct, event: Event) {
+  product.costManual = true
   const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
   if (!Number.isFinite(value)) return
   product.costUsd = value
@@ -1658,6 +1703,9 @@ function serializeOrder(order: Order) {
       image_url: product.imageUrl ?? null,
       cost: product.cost,
       cost_usd: product.costUsd ?? 0,
+      marketplace_product_key: product.marketplaceProductKey ?? null,
+      cost_manual: product.costManual ?? false,
+      price_item_id: product.priceItemId ?? null,
       royalty_percent: product.royaltyPercent ?? null,
       royalty_amount: product.royaltyAmount ?? null,
       royalty_manual: product.royaltyManual ?? false,
@@ -2074,6 +2122,9 @@ function orderSyncSnapshot(order: Order) {
       name: product.name,
       cost: product.cost,
       costUsd: product.costUsd ?? 0,
+      marketplaceProductKey: product.marketplaceProductKey,
+      costManual: product.costManual ?? false,
+      priceItemId: product.priceItemId,
       royaltyPercent: product.royaltyPercent ?? null,
       royaltyAmount: product.royaltyAmount ?? null,
       royaltyManual: product.royaltyManual ?? false,
@@ -2248,6 +2299,9 @@ function mapRemoteOrders(
               price: Number(item.price),
               cost: Number(item.cost),
               costUsd: Number(item.cost_usd ?? 0),
+              marketplaceProductKey: (item.marketplace_product_key as string | null) ?? undefined,
+              costManual: item.cost_manual === true,
+              priceItemId: (item.price_item_id as string | null) ?? undefined,
               royaltyPercent:
                 item.royalty_percent === null ? undefined : Number(item.royalty_percent),
               royaltyAmount: item.royalty_amount === null ? undefined : Number(item.royalty_amount),
@@ -2391,6 +2445,16 @@ async function loadRemoteOrders() {
     .eq('key', 'usd_rate')
     .maybeSingle()
   if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)
+  const { data: priceLinks, error: priceLinksError } = await supabase
+    .from('crm_product_price_links')
+    .select('platform, marketplace_product_key')
+  if (priceLinksError)
+    console.error('Не удалось загрузить привязки себестоимости:', priceLinksError)
+  linkedPriceProductKeys.value = new Set(
+    (priceLinks ?? []).map((link) =>
+      marketplacePriceLinkKey(link.platform as Platform, String(link.marketplace_product_key)),
+    ),
+  )
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')
@@ -3183,12 +3247,16 @@ function updateOrderNumber(
   const value = Number(raw.replace(',', '.'))
   if (!Number.isFinite(value)) return
   if (field === 'costUsd') {
+    product.costManual = true
     product.costUsd = value
     if (value !== 0) product.cost = value * usdRate.value
     return
   }
   product[field] = value
-  if (field === 'cost') product.costUsd = 0
+  if (field === 'cost') {
+    product.costManual = true
+    product.costUsd = 0
+  }
 }
 
 function flushDeferredRemoteOrder(order: Order | undefined) {
@@ -4198,8 +4266,30 @@ function orderDateTime(order: Order) {
                     <div class="min-w-0">
                       <strong class="block">{{ product.name }}</strong>
                       <div
-                        class="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-[5.75rem_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:justify-end"
+                        class="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-[2.5rem_5.75rem_2.75rem_3.4rem_3.6rem_3.2rem_3.8rem_8.25rem] sm:justify-end"
                       >
+                        <div class="mt-5 flex h-8 items-center justify-center">
+                          <button
+                            v-if="canLinkProductPrice(order, product)"
+                            class="grid size-8 place-items-center rounded-lg border transition"
+                            :class="
+                              isProductPriceLinked(order, product)
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
+                            "
+                            :disabled="isGuest"
+                            :title="
+                              isProductPriceLinked(order, product)
+                                ? 'Товар привязан к себестоимости. Нажмите, чтобы изменить привязку.'
+                                : 'Привязать товар к строке себестоимости'
+                            "
+                            type="button"
+                            @click="openProductPriceLink(order, product)"
+                          >
+                            <Link2 class="size-4" aria-hidden="true" />
+                            <span class="sr-only">Привязать себестоимость</span>
+                          </button>
+                        </div>
                         <p
                           class="mt-5 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2 text-sm font-semibold text-violet-700"
                           :class="{ invisible: !product.size }"
@@ -4896,7 +4986,10 @@ function orderDateTime(order: Order) {
                       step="0.01"
                       class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
                       type="number"
-                      @input="product.costUsd = 0"
+                      @input="
+                        product.costUsd = 0
+                        product.costManual = true
+                      "
                     />
                   </label>
                 </div>

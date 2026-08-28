@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -361,11 +362,17 @@ Deno.serve(async (request) => {
   if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const { data: batchedItems, error: itemsError } = (existingRows ?? []).length
-    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual').in('order_id', existingRows.map((row) => row.id))
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual, marketplace_product_key, cost_manual, price_item_id').in('order_id', existingRows.map((row) => row.id))
     : { data: [] }
   if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, Record<string, unknown>[]>()
   for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
+  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  try {
+    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Эпицентр')
+  } catch (error) {
+    return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Эпицентра: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+  }
   let created = 0
   let updated = 0
   const skipped = skippedUnchanged
@@ -589,6 +596,8 @@ Deno.serve(async (request) => {
         const savedRoyaltyPercent = currentItem?.royalty_percent ?? currentItem?.royaltyPercent
         const royaltyManual = currentItem?.royalty_manual === true || currentItem?.royaltyManual === true || storedItem?.royalty_manual === true
         const automaticRoyaltyPercent = mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw)
+        const marketplaceProductKey = epicentrOfferId(item.raw) || readableText(currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey)
+        const resolvedCost = resolvedOrderItemCost(currentItem, priceCostSnapshots.get(marketplaceProductKey))
         return {
           order_id: orderId,
           position,
@@ -597,8 +606,11 @@ Deno.serve(async (request) => {
           image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
-          cost: Number(currentItem?.cost ?? 0),
-          cost_usd: Number(currentItem?.cost_usd ?? currentItem?.costUsd ?? 0),
+          cost: resolvedCost.cost,
+          cost_usd: resolvedCost.costUsd,
+          marketplace_product_key: marketplaceProductKey || null,
+          cost_manual: resolvedCost.costManual,
+          price_item_id: resolvedCost.priceItemId,
           royalty_percent: royaltyManual ? savedRoyaltyPercent ?? null : automaticRoyaltyPercent ?? null,
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
           royalty_manual: royaltyManual,

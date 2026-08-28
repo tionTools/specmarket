@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import type { User } from '@supabase/supabase-js'
-import { useRoute } from 'vue-router'
-import { ArrowLeft, Plus } from '@lucide/vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, Link2, Plus } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 import PricesTable from '@/features/prices/PricesTable.vue'
@@ -53,6 +53,7 @@ const epicQuestionValues: Record<number, number> = {
 
 const storageKey = 'specmarket-crm-prices'
 const route = useRoute()
+const router = useRouter()
 const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
@@ -76,6 +77,27 @@ const authError = ref('')
 const isLoading = ref(false)
 const showPassword = ref(false)
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+
+type LinkPlatform = 'Пром' | 'Эпицентр' | 'Каста'
+const queryText = (value: unknown) => (typeof value === 'string' ? value : '')
+const linkPlatform = computed<LinkPlatform | null>(() => {
+  const platform = queryText(route.query.linkPlatform)
+  return ['Пром', 'Эпицентр', 'Каста'].includes(platform) ? (platform as LinkPlatform) : null
+})
+const linkProductKey = computed(() => queryText(route.query.linkProductKey))
+const linkOrderRemoteId = computed(() => queryText(route.query.linkOrderRemoteId))
+const linkPosition = computed(() => {
+  const position = Number(queryText(route.query.linkPosition))
+  return Number.isInteger(position) && position >= 0 ? position : null
+})
+const linkTitle = computed(() => queryText(route.query.linkTitle))
+const linkSize = computed(() => queryText(route.query.linkSize))
+const linkMode = computed(
+  () => route.query.linkMode === '1' && Boolean(linkPlatform.value && linkProductKey.value),
+)
+const linkedPriceItemId = ref<string | null>(null)
+const linkError = ref('')
+const isLinking = ref(false)
 
 const deletedItems = new WeakSet<PriceItem>()
 let savePromise: Promise<void> | null = null
@@ -181,9 +203,114 @@ async function loadCatalog() {
     .eq('key', 'usd_rate')
     .maybeSingle()
   if (setting?.numeric_value) usdRate.value = Number(setting.numeric_value)
+  await loadCurrentPriceLink()
+}
+
+async function loadCurrentPriceLink() {
+  linkedPriceItemId.value = null
+  linkError.value = ''
+  if (!supabase || !user.value || !linkMode.value || !linkPlatform.value || !linkProductKey.value)
+    return
+  const { data, error } = await supabase
+    .from('crm_product_price_links')
+    .select('price_item_id')
+    .eq('platform', linkPlatform.value)
+    .eq('marketplace_product_key', linkProductKey.value)
+    .maybeSingle()
+  if (error) {
+    linkError.value = `Не удалось загрузить текущую привязку: ${error.message}`
+    return
+  }
+  linkedPriceItemId.value = data?.price_item_id ?? null
+}
+
+function returnQuery() {
+  return {
+    ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+    ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+    ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
+  }
+}
+
+async function linkPriceItem(item: PriceItem) {
+  if (
+    !supabase ||
+    !user.value ||
+    isGuest.value ||
+    isLinking.value ||
+    item.kind === 'group' ||
+    !item.remoteId ||
+    !linkMode.value ||
+    !linkPlatform.value ||
+    !linkProductKey.value
+  )
+    return
+
+  linkError.value = ''
+  isLinking.value = true
+  let currentOrderItem: { id: string; cost_manual: boolean } | null = null
+  if (linkOrderRemoteId.value && linkPosition.value !== null) {
+    const { data, error } = await supabase
+      .from('crm_order_items')
+      .select('id, cost_manual')
+      .eq('order_id', linkOrderRemoteId.value)
+      .eq('position', linkPosition.value)
+      .maybeSingle()
+    if (error || !data) {
+      isLinking.value = false
+      linkError.value = `Не удалось найти текущую позицию заказа: ${error?.message ?? 'позиция не найдена'}`
+      return
+    }
+    currentOrderItem = { id: String(data.id), cost_manual: data.cost_manual === true }
+  }
+
+  const now = new Date().toISOString()
+  const { error: mappingError } = await supabase.from('crm_product_price_links').upsert(
+    {
+      platform: linkPlatform.value,
+      marketplace_product_key: linkProductKey.value,
+      price_item_id: item.remoteId,
+      product_title: linkTitle.value || null,
+      size: linkSize.value || null,
+      updated_at: now,
+    },
+    { onConflict: 'platform,marketplace_product_key' },
+  )
+  if (mappingError) {
+    isLinking.value = false
+    linkError.value = `Не удалось сохранить привязку: ${mappingError.message}`
+    return
+  }
+
+  linkedPriceItemId.value = item.remoteId
+  if (currentOrderItem) {
+    const costUsd = item.usd ?? 0
+    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
+    const updatePayload: Record<string, unknown> = {
+      marketplace_product_key: linkProductKey.value,
+      price_item_id: item.remoteId,
+    }
+    if (!currentOrderItem.cost_manual) {
+      updatePayload.cost = cost
+      updatePayload.cost_usd = costUsd
+    }
+    const { error: itemError } = await supabase
+      .from('crm_order_items')
+      .update(updatePayload)
+      .eq('id', currentOrderItem.id)
+    if (itemError) {
+      isLinking.value = false
+      linkError.value = `Привязка сохранена, но себестоимость текущего заказа не обновлена: ${itemError.message}`
+      return
+    }
+  }
+
+  isLinking.value = false
+  await router.push({ path: '/', query: returnQuery() })
 }
 
 onMounted(async () => {
+  window.scrollTo({ top: 0, left: 0 })
   if (!supabase) {
     authError.value = 'Нет настроек Supabase в опубликованной версии сайта.'
     return
@@ -191,6 +318,8 @@ onMounted(async () => {
   const { data } = await supabase.auth.getSession()
   user.value = data.session?.user ?? null
   if (user.value) await loadCatalog()
+  await nextTick()
+  window.scrollTo({ top: 0, left: 0 })
 })
 
 function updateUsdRate(event: Event) {
@@ -509,12 +638,34 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
       >
         Гостевой режим: доступен только просмотр цен и себестоимости.
       </p>
+      <section
+        v-if="user && linkMode"
+        class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-950 shadow-sm"
+      >
+        <div class="flex items-start gap-3">
+          <Link2 class="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true" />
+          <div>
+            <p class="font-semibold">
+              Привязать товар: <strong>{{ linkTitle || 'Без названия' }}</strong>
+              <span v-if="linkSize"> · размер {{ linkSize }}</span>
+              <span v-if="linkPlatform"> · {{ linkPlatform }}</span>
+            </p>
+            <p class="mt-1 text-xs text-emerald-800">
+              Найдите эталонную строку себестоимости и нажмите «Привязать».
+            </p>
+            <p v-if="linkError" class="mt-2 text-sm font-semibold text-rose-700">{{ linkError }}</p>
+          </div>
+        </div>
+      </section>
       <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
         <PricesTable
           :items="items"
           :usd-rate="usdRate"
           :editing-cell="editingCell"
           :guest="isGuest"
+          :link-mode="linkMode"
+          :linked-price-item-id="linkedPriceItemId"
+          :initial-search="linkMode ? linkTitle : ''"
           @start-dragging="startDragging"
           @move-item="moveItem"
           @insert-item-after="insertItemAfter"
@@ -522,6 +673,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           @toggle-name-edit="toggleNameEdit"
           @toggle-price-edit="togglePriceEdit"
           @finish-edit="finishEdit"
+          @link-item="linkPriceItem"
         />
       </section>
       <p class="mt-3 text-xs text-slate-500">

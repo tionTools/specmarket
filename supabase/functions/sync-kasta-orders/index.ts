@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +23,17 @@ async function sourceHash(value: unknown) {
 const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+function kastaProductKey(item: RecordValue) {
+  const uniqueSkuId = text(item.unique_sku_id)
+  if (uniqueSkuId) return uniqueSkuId
+  const supplierCode = text(item.supplier_code)
+  const size = text(pick(item, 'kasta_size', 'size')).trim().toLowerCase()
+  if (supplierCode && size) return `supplier:${supplierCode}|size:${size}`
+  const barcode = itemBarcode(item)
+  if (barcode) return `barcode:${barcode}`
+  if (supplierCode) return `supplier:${supplierCode}`
+  return text(pick(item, 'offer_id', 'product_id', 'id'))
+}
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
 function shipmentCarrier(value: unknown) {
   const carrier = shipmentValue(value)
@@ -288,6 +300,13 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
+  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  try {
+    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Каста')
+  } catch (error) {
+    return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Kasta: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+  }
+
   const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
   const fullSync = body.full === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
@@ -333,7 +352,7 @@ Deno.serve(async (request) => {
     if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
     const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
     const { data: existingItems, error: itemsError } = (existingRows ?? []).length
-      ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', existingRows.map((row) => row.id))
+      ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, marketplace_product_key, cost_manual, price_item_id').in('order_id', existingRows.map((row) => row.id))
       : { data: [], error: null }
     if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
     const itemsByOrder = new Map<string, RecordValue[]>()
@@ -438,7 +457,9 @@ Deno.serve(async (request) => {
         const quantity = itemQuantity(item)
         const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
         const supplierCode = text(item.supplier_code)
+        const marketplaceProductKey = kastaProductKey(item) || text(previous?.marketplace_product_key ?? previous?.marketplaceProductKey)
         const feedImage = feedImages.get(uniqueSkuId) || feedImages.get(supplierCode)
+        const resolvedCost = resolvedOrderItemCost(previous, priceCostSnapshots.get(marketplaceProductKey))
         const directRoyalty = royaltyPercent(item.royalty)
         const needsCatalogRoyalty = targetOrderId || previous === undefined
         const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
@@ -454,7 +475,7 @@ Deno.serve(async (request) => {
             apiRoyalty,
           } }))
         }
-        savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd), royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
+        savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: resolvedCost.cost, cost_usd: resolvedCost.costUsd, marketplace_product_key: marketplaceProductKey || null, cost_manual: resolvedCost.costManual, price_item_id: resolvedCost.priceItemId, royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
       }
       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))

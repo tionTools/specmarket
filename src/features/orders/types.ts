@@ -10,6 +10,9 @@ export interface OrderProduct {
   price: number
   cost: number
   costUsd?: number
+  marketplaceProductKey?: string
+  costManual?: boolean
+  priceItemId?: string
   royaltyPercent?: number
   royaltyAmount?: number
   royaltyManual?: boolean

@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-type Item = { product_name: string; size?: string; image_url?: string | null; quantity: number; price: number; cost: number; cost_usd?: number; royalty_percent?: number | null; royalty_amount?: number | null; royalty_manual?: boolean }
+type Item = { product_name: string; size?: string; image_url?: string | null; quantity: number; price: number; cost: number; cost_usd?: number; marketplace_product_key?: string | null; cost_manual?: boolean; price_item_id?: string | null; royalty_percent?: number | null; royalty_amount?: number | null; royalty_manual?: boolean }
 type SavedOrder = {
   remoteId?: string; order_number: number; order_label?: string | null; order_date: string; order_time?: string | null; customer: string; phone: string
   customer_email?: string | null; customer_comment?: string | null; internal_comment?: string | null; platform: string; status: string; shipping: number; acquiring: number
@@ -78,7 +78,7 @@ Deno.serve(async (request) => {
     }
     const { data: currentItems } = await admin
       .from('crm_order_items')
-      .select('position, product_name, royalty_manual')
+      .select('position, product_name, marketplace_product_key, cost_manual, price_item_id, royalty_manual')
       .eq('order_id', remoteId)
     const currentItemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
@@ -91,6 +91,9 @@ Deno.serve(async (request) => {
         return {
           order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
           price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
+          marketplace_product_key: item.marketplace_product_key ?? currentItem?.marketplace_product_key ?? null,
+          cost_manual: item.cost_manual ?? currentItem?.cost_manual ?? false,
+          price_item_id: item.price_item_id ?? currentItem?.price_item_id ?? null,
           royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
           royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
         }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
-import { GripVertical, Plus, Search, Trash2, X } from '@lucide/vue'
+import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
+import { GripVertical, Link2, Plus, Search, Trash2, X } from '@lucide/vue'
 import {
   FlexRender,
   columnVisibilityFeature,
@@ -22,6 +22,9 @@ const props = defineProps<{
   usdRate: number
   editingCell: string | null
   guest: boolean
+  linkMode?: boolean
+  linkedPriceItemId?: string | null
+  initialSearch?: string
 }>()
 
 const emit = defineEmits<{
@@ -32,6 +35,7 @@ const emit = defineEmits<{
   toggleNameEdit: [item: PriceItem, event: KeyboardEvent]
   togglePriceEdit: [item: PriceItem, field: PriceField, event: KeyboardEvent]
   finishEdit: [item: PriceItem, field: 'name' | PriceField, event: Event]
+  linkItem: [item: PriceItem]
 }>()
 
 const features = tableFeatures({
@@ -170,20 +174,41 @@ const columns = [
   {
     id: 'actions',
     header: () => h('span', { class: 'sr-only' }, 'Действия'),
-    cell: ({ row }: { row: { original: PriceItem } }) =>
-      h(
-        'button',
-        {
-          class: 'rounded-lg p-2 text-rose-700 hover:bg-rose-50',
-          title: 'Удалить позицию',
-          type: 'button',
-          onClick: () => emit('confirmDelete', row.original),
-        },
-        [
-          h(Trash2, { class: 'size-4', 'aria-hidden': 'true' }),
-          h('span', { class: 'sr-only' }, 'Удалить позицию'),
-        ],
-      ),
+    cell: ({ row }: { row: { original: PriceItem } }) => {
+      const linked = row.original.remoteId === props.linkedPriceItemId
+      return props.linkMode
+        ? h(
+            'button',
+            {
+              class: `inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold disabled:opacity-40 ${
+                linked
+                  ? 'border-emerald-500 bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              }`,
+              disabled: !row.original.remoteId,
+              title: linked ? 'Текущая привязка' : 'Привязать эту позицию',
+              type: 'button',
+              onClick: () => emit('linkItem', row.original),
+            },
+            [
+              h(Link2, { class: 'size-4', 'aria-hidden': 'true' }),
+              h('span', linked ? 'Привязано' : 'Привязать'),
+            ],
+          )
+        : h(
+            'button',
+            {
+              class: 'rounded-lg p-2 text-rose-700 hover:bg-rose-50',
+              title: 'Удалить позицию',
+              type: 'button',
+              onClick: () => emit('confirmDelete', row.original),
+            },
+            [
+              h(Trash2, { class: 'size-4', 'aria-hidden': 'true' }),
+              h('span', { class: 'sr-only' }, 'Удалить позицию'),
+            ],
+          )
+    },
   },
 ] satisfies ColumnDef<typeof features, PriceItem>[]
 
@@ -202,9 +227,34 @@ const table = useTable({
 })
 const isEmpty = computed(() => table.getRowModel().rows.length === 0)
 
+const searchInput = ref<HTMLInputElement | null>(null)
+
 function handleSearch(event: Event) {
   table.setGlobalFilter((event.target as HTMLInputElement).value)
 }
+
+function focusSearch() {
+  void nextTick(() => {
+    searchInput.value?.focus()
+    searchInput.value?.select()
+  })
+}
+
+onMounted(() => {
+  table.setGlobalFilter(props.initialSearch ?? '')
+  focusSearch()
+})
+
+watch(
+  () => props.initialSearch,
+  (value) => {
+    if (value === undefined) return
+    table.setGlobalFilter(value)
+    focusSearch()
+  },
+)
+
+defineExpose({ focusSearch })
 </script>
 
 <template>
@@ -215,6 +265,7 @@ function handleSearch(event: Event) {
         aria-hidden="true"
       />
       <input
+        ref="searchInput"
         :value="table.atoms.globalFilter.get()"
         class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-10 pr-10 text-sm outline-none transition focus:border-emerald-600"
         placeholder="Поиск по названию товара"
@@ -225,7 +276,10 @@ function handleSearch(event: Event) {
         class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700"
         type="button"
         aria-label="Очистить поиск"
-        @click="table.setGlobalFilter('')"
+        @click="
+          table.setGlobalFilter('')
+          focusSearch()
+        "
       >
         <X class="size-4" aria-hidden="true" />
       </button>
@@ -249,7 +303,8 @@ function handleSearch(event: Event) {
               'text-blue-700': header.column.id === 'prom',
               'text-emerald-700': header.column.id === 'epic',
               'w-[4.5rem] text-center text-orange-600': header.column.id.startsWith('kasta'),
-              'w-10': header.column.id === 'actions',
+              'w-28': header.column.id === 'actions' && linkMode,
+              'w-10': header.column.id === 'actions' && !linkMode,
             }"
           >
             <FlexRender v-if="!header.isPlaceholder" :header="header" />
@@ -261,6 +316,10 @@ function handleSearch(event: Event) {
           v-for="row in table.getRowModel().rows"
           :key="row.id"
           class="group border-t border-slate-100 hover:bg-slate-50"
+          :class="{
+            'bg-emerald-50 ring-1 ring-inset ring-emerald-300':
+              linkMode && row.original.remoteId === linkedPriceItemId,
+          }"
           draggable="true"
           @dragover.prevent
           @dragstart="emit('startDragging', row.original.id)"

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +23,7 @@ async function sourceHash(value: unknown) {
 const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const promProductKey = (item: RecordValue) => text(pick(item, 'rzid', 'variation_id', 'id'))
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
 function shipmentCarrier(value: unknown) {
   const carrier = shipmentValue(value)
@@ -462,11 +464,17 @@ Deno.serve(async (request) => {
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const candidateOrderIds = (existingRows ?? []).map((row) => row.id)
   const { data: existingItems, error: existingItemsError } = candidateOrderIds.length
-    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount').in('order_id', candidateOrderIds)
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, marketplace_product_key, cost_manual, price_item_id').in('order_id', candidateOrderIds)
     : { data: [] }
   if (existingItemsError) return Response.json({ ok: false, message: existingItemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, RecordValue[]>()
   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
+  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  try {
+    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Пром')
+  } catch (error) {
+    return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+  }
   const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   let created = 0
   let updated = 0
@@ -631,9 +639,25 @@ Deno.serve(async (request) => {
       const apiSize = await resolvedProductSize(item, name, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
       // A missing value in Prom's response must never erase a manually saved size.
       const size = apiSize || text(previous?.size) || ''
-      const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
-      const imageUrl = feedProducts.get(rzid)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
-      return { order_id: orderId, position, product_name: name, size, image_url: imageUrl || null, quantity, price, cost: number(previous?.cost), cost_usd: number(previous?.cost_usd ?? previous?.costUsd), royalty_percent: previous?.royalty_percent ?? royaltyPercent, royalty_amount: previous?.royalty_amount ?? royaltyAmount }
+      const marketplaceProductKey = promProductKey(item) || text(previous?.marketplace_product_key ?? previous?.marketplaceProductKey)
+      const imageUrl = feedProducts.get(marketplaceProductKey)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
+      const resolvedCost = resolvedOrderItemCost(previous, priceCostSnapshots.get(marketplaceProductKey))
+      return {
+        order_id: orderId,
+        position,
+        product_name: name,
+        size,
+        image_url: imageUrl || null,
+        quantity,
+        price,
+        cost: resolvedCost.cost,
+        cost_usd: resolvedCost.costUsd,
+        marketplace_product_key: marketplaceProductKey || null,
+        cost_manual: resolvedCost.costManual,
+        price_item_id: resolvedCost.priceItemId,
+        royalty_percent: previous?.royalty_percent ?? previous?.royaltyPercent ?? royaltyPercent,
+        royalty_amount: previous?.royalty_amount ?? previous?.royaltyAmount ?? royaltyAmount,
+      }
       }))
       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
