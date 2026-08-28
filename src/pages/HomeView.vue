@@ -3027,9 +3027,9 @@ async function copyOrderForSpreadsheet(order: Order) {
     products,
     formatSpreadsheetNumber(getNetOrderCost(order)),
     formatSpreadsheetNumber(getNetOrderAmount(order)),
+    '',
     formatSpreadsheetNumber(getNetRoyalty(order)),
     formatSpreadsheetNumber(order.shipping),
-    '',
     '',
     '',
     '',
@@ -3840,20 +3840,6 @@ function orderDateTime(order: Order) {
                     class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
                     >Скопировано</span
                   ></span
-                ><span class="relative inline-flex items-center align-middle"
-                  ><button
-                    class="rounded-md bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 hover:text-emerald-900"
-                    type="button"
-                    title="Скопировать строку для Excel"
-                    aria-label="Скопировать строку для Excel"
-                    @click.stop="copyOrderForSpreadsheet(order)"
-                  >
-                    Excel</button
-                  ><span
-                    v-if="inlineActionNotice?.key === `copy-excel:${order.id}`"
-                    class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
-                    >Строка скопирована</span
-                  ></span
                 ></span
               ><span class="mt-1 block text-xs text-slate-500"
                 >{{ order.date }}<template v-if="order.time"> · {{ order.time }}</template></span
@@ -3959,6 +3945,22 @@ function orderDateTime(order: Order) {
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center justify-end gap-3">
                 <div class="flex flex-wrap items-center gap-3">
+                  <span v-if="!isGuest" class="relative inline-flex items-center">
+                    <button
+                      class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
+                      type="button"
+                      title="Скопировать строку для Excel"
+                      aria-label="Скопировать строку для Excel"
+                      @click="copyOrderForSpreadsheet(order)"
+                    >
+                      Excel
+                    </button>
+                    <span
+                      v-if="inlineActionNotice?.key === `copy-excel:${order.id}`"
+                      class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                      >Строка скопирована</span
+                    >
+                  </span>
                   <span
                     v-if="returnSignalLabel(order) && !isOrderFullyReturned(order)"
                     class="rounded-lg bg-rose-100 px-3 py-1.5 text-sm font-bold text-rose-800"
