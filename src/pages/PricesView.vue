@@ -77,10 +77,14 @@ const isLoading = ref(false)
 const showPassword = ref(false)
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
-async function save() {
-  if (isGuest.value) return
+const deletedItems = new WeakSet<PriceItem>()
+let savePromise: Promise<void> | null = null
+let saveRequested = false
+
+async function persistCatalog() {
   if (!supabase || !user.value) return
-  for (const [position, item] of items.value.entries()) {
+  const snapshot = [...items.value]
+  for (const [position, item] of snapshot.entries()) {
     const payload = {
       legacy_id: item.id,
       position,
@@ -94,13 +98,41 @@ async function save() {
       kasta_recommended: item.kastaTwo,
       kasta_sale: item.kastaThree,
     }
-    if (item.remoteId)
+    if (item.remoteId) {
       await supabase.from('crm_price_items').update(payload).eq('id', item.remoteId)
-    else {
-      const { data } = await supabase.from('crm_price_items').insert(payload).select('id').single()
-      if (data) item.remoteId = data.id
+      continue
     }
+
+    const { data } = await supabase.from('crm_price_items').insert(payload).select('id').single()
+    if (!data) continue
+
+    if (deletedItems.has(item) || !items.value.includes(item)) {
+      await supabase.from('crm_price_items').delete().eq('id', data.id)
+      continue
+    }
+
+    item.remoteId = data.id
   }
+}
+
+function save() {
+  if (isGuest.value || !supabase || !user.value) return Promise.resolve()
+  saveRequested = true
+  if (savePromise) return savePromise
+
+  savePromise = (async () => {
+    try {
+      while (saveRequested) {
+        saveRequested = false
+        await persistCatalog()
+      }
+    } finally {
+      savePromise = null
+      if (saveRequested) void save()
+    }
+  })()
+
+  return savePromise
 }
 
 function saveRate() {
@@ -193,7 +225,7 @@ function formatPrice(value: number | null) {
 
 function addItem() {
   if (isGuest.value) return
-  items.value.unshift({
+  const item: PriceItem = {
     id: Date.now(),
     name: 'Новая позиция',
     usd: null,
@@ -203,13 +235,14 @@ function addItem() {
     kastaOne: null,
     kastaTwo: null,
     kastaThree: null,
-  })
-  save()
+  }
+  items.value = [item, ...items.value]
+  void save()
 }
 
 function addGroup() {
   if (isGuest.value) return
-  items.value.unshift({
+  const item: PriceItem = {
     id: Date.now(),
     kind: 'group',
     name: 'Новая группа товаров',
@@ -220,17 +253,33 @@ function addGroup() {
     kastaOne: null,
     kastaTwo: null,
     kastaThree: null,
-  })
-  save()
+  }
+  items.value = [item, ...items.value]
+  void save()
 }
 
-function deleteItem(itemId: number) {
+async function deleteItem(itemId: number) {
   if (isGuest.value) return
-  const removed = items.value.find((item) => item.id === itemId)
+  const removedIndex = items.value.findIndex((item) => item.id === itemId)
+  const removed = items.value[removedIndex]
+  if (!removed) return
+
+  deletedItems.add(removed)
   items.value = items.value.filter((item) => item.id !== itemId)
-  if (removed?.remoteId && supabase)
-    void supabase.from('crm_price_items').delete().eq('id', removed.remoteId)
-  save()
+
+  if (removed.remoteId && supabase) {
+    const { error } = await supabase.from('crm_price_items').delete().eq('id', removed.remoteId)
+    if (error) {
+      deletedItems.delete(removed)
+      const restoredItems = [...items.value]
+      restoredItems.splice(Math.min(removedIndex, restoredItems.length), 0, removed)
+      items.value = restoredItems
+      window.alert(`Не удалось удалить позицию: ${error.message}`)
+      return
+    }
+  }
+
+  await save()
 }
 
 function confirmDelete(item: PriceItem) {
