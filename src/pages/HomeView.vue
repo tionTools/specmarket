@@ -1547,6 +1547,22 @@ function marketplacePriceLinkKey(platform: Platform, marketplaceProductKey: stri
   return `${platform}:${marketplaceProductKey}`
 }
 
+async function refreshLinkedPriceProductKeys() {
+  if (!supabase) return
+  const { data: priceLinks, error } = await supabase
+    .from('crm_product_price_links')
+    .select('platform, marketplace_product_key')
+  if (error) {
+    console.error('Не удалось загрузить привязки себестоимости:', error)
+    return
+  }
+  linkedPriceProductKeys.value = new Set(
+    (priceLinks ?? []).map((link) =>
+      marketplacePriceLinkKey(link.platform as Platform, String(link.marketplace_product_key)),
+    ),
+  )
+}
+
 function canLinkProductPrice(order: Order, product: OrderProduct) {
   return (
     ['Пром', 'Эпицентр', 'Каста'].includes(order.platform) &&
@@ -2202,11 +2218,9 @@ async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unkno
   const ids = Array.isArray(data.changedOrderIds)
     ? data.changedOrderIds.filter((id): id is string => typeof id === 'string')
     : null
-  if (ids === null) {
-    await reconcileRemoteOrders(true)
-    return
-  }
-  if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
+  if (ids === null) await reconcileRemoteOrders(true)
+  else if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
+  await refreshLinkedPriceProductKeys()
   if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
 }
 
@@ -2511,16 +2525,7 @@ async function loadRemoteOrders() {
     .eq('key', 'usd_rate')
     .maybeSingle()
   if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)
-  const { data: priceLinks, error: priceLinksError } = await supabase
-    .from('crm_product_price_links')
-    .select('platform, marketplace_product_key')
-  if (priceLinksError)
-    console.error('Не удалось загрузить привязки себестоимости:', priceLinksError)
-  linkedPriceProductKeys.value = new Set(
-    (priceLinks ?? []).map((link) =>
-      marketplacePriceLinkKey(link.platform as Platform, String(link.marketplace_product_key)),
-    ),
-  )
+  await refreshLinkedPriceProductKeys()
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
     .select('*, crm_order_items(*)')

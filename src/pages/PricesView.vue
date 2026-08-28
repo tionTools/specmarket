@@ -96,6 +96,14 @@ const linkMode = computed(
   () => route.query.linkMode === '1' && Boolean(linkPlatform.value && linkProductKey.value),
 )
 const linkedPriceItemId = ref<string | null>(null)
+const linkedPriceItem = computed(
+  () => items.value.find((item) => item.remoteId === linkedPriceItemId.value) ?? null,
+)
+const linkedPriceCostUah = computed(() => {
+  const item = linkedPriceItem.value
+  if (!item) return null
+  return item.usd === null ? item.costUah : item.usd * usdRate.value
+})
 const linkError = ref('')
 const isLinking = ref(false)
 
@@ -683,6 +691,32 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </div>
       </section>
       <section v-if="user" class="mt-7 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div
+          v-if="linkMode"
+          class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 px-4 py-3 text-sm"
+        >
+          <span class="font-semibold text-slate-600">Привязано к:</span>
+          <strong v-if="linkedPriceItem" class="text-emerald-800">{{
+            linkedPriceItem.name
+          }}</strong>
+          <span v-else class="font-medium text-orange-700">пока не привязано</span>
+          <div
+            v-if="linkedPriceItem"
+            class="ml-auto flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-semibold tabular-nums text-slate-800"
+          >
+            <span
+              ><span class="mr-1 text-slate-500">$</span
+              >{{ linkedPriceItem.usd === null ? '—' : formatPrice(linkedPriceItem.usd) }}</span
+            >
+            <span
+              ><span class="mr-1 text-slate-500">₴</span
+              >{{ linkedPriceCostUah === null ? '—' : formatPrice(linkedPriceCostUah) }}</span
+            >
+          </div>
+          <span class="text-xs text-slate-500"
+            >Выберите другую строку ниже, чтобы перепривязать.</span
+          >
+        </div>
         <PricesTable
           :items="items"
           :usd-rate="usdRate"
