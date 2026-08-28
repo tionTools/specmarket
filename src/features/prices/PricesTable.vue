@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { GripVertical, Search, Trash2, X } from '@lucide/vue'
+import { GripVertical, Plus, Search, Trash2, X } from '@lucide/vue'
 import {
   FlexRender,
   columnVisibilityFeature,
@@ -27,6 +27,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   startDragging: [id: number]
   moveItem: [id: number]
+  insertItemAfter: [id: number]
   confirmDelete: [item: PriceItem]
   toggleNameEdit: [item: PriceItem, event: KeyboardEvent]
   togglePriceEdit: [item: PriceItem, field: PriceField, event: KeyboardEvent]
@@ -258,7 +259,7 @@ function handleSearch(event: Event) {
         <tr
           v-for="row in table.getRowModel().rows"
           :key="row.id"
-          class="border-t border-slate-100 hover:bg-slate-50"
+          class="group border-t border-slate-100 hover:bg-slate-50"
           draggable="true"
           @dragover.prevent
           @dragstart="emit('startDragging', row.original.id)"
@@ -267,7 +268,7 @@ function handleSearch(event: Event) {
           <td
             v-if="row.original.kind === 'group'"
             :colspan="table.getVisibleLeafColumns().length"
-            class="border-y-2 border-emerald-200 bg-emerald-50 px-3 py-2"
+            class="relative border-y-2 border-emerald-200 bg-emerald-50 px-3 py-2"
           >
             <div class="flex items-center gap-3">
               <GripVertical class="cursor-grab text-emerald-700" aria-label="Перетащить" />
@@ -289,6 +290,17 @@ function handleSearch(event: Event) {
                 >
               </button>
             </div>
+            <button
+              v-if="!guest"
+              class="absolute -bottom-2 left-10 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
+              title="Добавить позицию ниже"
+              type="button"
+              @mousedown.stop
+              @click.stop="emit('insertItemAfter', row.original.id)"
+            >
+              <Plus class="size-3" aria-hidden="true" />
+              <span class="sr-only">Добавить позицию ниже</span>
+            </button>
           </td>
           <template v-else>
             <td
@@ -296,10 +308,22 @@ function handleSearch(event: Event) {
               :key="cell.id"
               class="px-2 py-1.5"
               :class="{
-                'sticky left-0 bg-white px-3 group-hover:bg-slate-50': cell.column.id === 'name',
+                'relative sticky left-0 bg-white px-3 group-hover:bg-slate-50':
+                  cell.column.id === 'name',
               }"
             >
               <FlexRender :cell="cell" />
+              <button
+                v-if="cell.column.id === 'name' && !guest"
+                class="absolute -bottom-2 left-10 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
+                title="Добавить позицию ниже"
+                type="button"
+                @mousedown.stop
+                @click.stop="emit('insertItemAfter', row.original.id)"
+              >
+                <Plus class="size-3" aria-hidden="true" />
+                <span class="sr-only">Добавить позицию ниже</span>
+              </button>
             </td>
           </template>
         </tr>

@@ -223,9 +223,8 @@ function formatPrice(value: number | null) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace('.', ',')
 }
 
-function addItem() {
-  if (isGuest.value) return
-  const item: PriceItem = {
+function createItem(): PriceItem {
+  return {
     id: Date.now(),
     name: 'Новая позиция',
     usd: null,
@@ -236,7 +235,22 @@ function addItem() {
     kastaTwo: null,
     kastaThree: null,
   }
-  items.value = [item, ...items.value]
+}
+
+function addItem() {
+  if (isGuest.value) return
+  items.value = [createItem(), ...items.value]
+  void save()
+}
+
+function insertItemAfter(targetId: number) {
+  if (isGuest.value) return
+  const targetIndex = items.value.findIndex((item) => item.id === targetId)
+  if (targetIndex < 0) return
+
+  const nextItems = [...items.value]
+  nextItems.splice(targetIndex + 1, 0, createItem())
+  items.value = nextItems
   void save()
 }
 
@@ -503,6 +517,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           :guest="isGuest"
           @start-dragging="startDragging"
           @move-item="moveItem"
+          @insert-item-after="insertItemAfter"
           @confirm-delete="confirmDelete"
           @toggle-name-edit="toggleNameEdit"
           @toggle-price-edit="togglePriceEdit"
