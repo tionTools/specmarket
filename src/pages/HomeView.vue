@@ -2984,11 +2984,61 @@ function displayDeliveryAddress(delivery: Delivery) {
   return values.join(' — ') || '—'
 }
 
+const spreadsheetNumberFormatter = new Intl.NumberFormat('uk-UA', {
+  maximumFractionDigits: 2,
+  useGrouping: false,
+})
+
+function formatSpreadsheetNumber(value: number) {
+  return spreadsheetNumberFormatter.format(value)
+}
+
+function spreadsheetProductLabel(product: OrderProduct) {
+  const productName = [product.name.trim(), product.size.trim()].filter(Boolean).join(' ')
+  return `${productName} × ${getRemainingQuantity(product)}`
+}
+
+function spreadsheetOrderComment(order: Order) {
+  const paymentMethod = displayPaymentMethod(order.delivery.paymentMethod)
+  const ttn = order.delivery.ttn
+    ? deliveryTtnForClipboard(order.delivery.carrier, order.delivery.ttn)
+    : ''
+  return [paymentMethod === '—' ? '' : paymentMethod, order.displayNumber ?? String(order.id), ttn]
+    .filter(Boolean)
+    .join(' ')
+}
+
 async function copyOrderNumber(order: Order) {
   if (!isClipboardSupported.value) return
   try {
     await copy(order.displayNumber ?? String(order.id))
     if (copied.value) showInlineActionNotice(`copy-order:${order.id}`, 'Скопировано')
+  } catch {}
+}
+
+async function copyOrderForSpreadsheet(order: Order) {
+  if (!isClipboardSupported.value) return
+
+  const products = order.products
+    .filter((product) => getRemainingQuantity(product) > 0)
+    .map(spreadsheetProductLabel)
+    .join(', ')
+  const cells = [
+    products,
+    formatSpreadsheetNumber(getNetOrderCost(order)),
+    formatSpreadsheetNumber(getNetOrderAmount(order)),
+    formatSpreadsheetNumber(getNetRoyalty(order)),
+    formatSpreadsheetNumber(order.shipping),
+    '',
+    '',
+    '',
+    '',
+    spreadsheetOrderComment(order),
+  ]
+
+  try {
+    await copy(cells.join('\t'))
+    if (copied.value) showInlineActionNotice(`copy-excel:${order.id}`, 'Строка скопирована')
   } catch {}
 }
 
@@ -3789,6 +3839,20 @@ function orderDateTime(order: Order) {
                     v-if="inlineActionNotice?.key === `copy-order:${order.id}`"
                     class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
                     >Скопировано</span
+                  ></span
+                ><span class="relative inline-flex items-center align-middle"
+                  ><button
+                    class="rounded-md bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 hover:text-emerald-900"
+                    type="button"
+                    title="Скопировать строку для Excel"
+                    aria-label="Скопировать строку для Excel"
+                    @click.stop="copyOrderForSpreadsheet(order)"
+                  >
+                    Excel</button
+                  ><span
+                    v-if="inlineActionNotice?.key === `copy-excel:${order.id}`"
+                    class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                    >Строка скопирована</span
                   ></span
                 ></span
               ><span class="mt-1 block text-xs text-slate-500"
