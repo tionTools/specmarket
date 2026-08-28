@@ -1568,7 +1568,7 @@ function isProductPriceLinked(order: Order, product: OrderProduct) {
 function isFamilyPriceLinkKey(platform: Platform, key: string) {
   if (platform === 'Пром') return /^(?:sku|external|product):/.test(key)
   if (platform === 'Эпицентр') return /^(?:product|offer):/.test(key)
-  if (platform === 'Каста') return /^(?:supplier|product):/.test(key)
+  if (platform === 'Каста') return /^(?:supplier|product):/.test(key) && !key.includes('|size:')
   return false
 }
 
