@@ -3003,7 +3003,7 @@ function spreadsheetOrderComment(order: Order) {
   const ttn = order.delivery.ttn
     ? deliveryTtnForClipboard(order.delivery.carrier, order.delivery.ttn)
     : ''
-  return [paymentMethod === '—' ? '' : paymentMethod, order.displayNumber ?? String(order.id), ttn]
+  return [paymentMethod === '—' ? '' : paymentMethod, ttn, order.displayNumber ?? String(order.id)]
     .filter(Boolean)
     .join(' ')
 }
@@ -3943,24 +3943,24 @@ function orderDateTime(order: Order) {
             @click="handleOrderWorkspaceClick(order, $event)"
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
-              <div class="flex flex-wrap items-center justify-end gap-3">
-                <div class="flex flex-wrap items-center gap-3">
-                  <span v-if="!isGuest" class="relative inline-flex items-center">
-                    <button
-                      class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
-                      type="button"
-                      title="Скопировать строку для Excel"
-                      aria-label="Скопировать строку для Excel"
-                      @click="copyOrderForSpreadsheet(order)"
-                    >
-                      Excel
-                    </button>
-                    <span
-                      v-if="inlineActionNotice?.key === `copy-excel:${order.id}`"
-                      class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
-                      >Строка скопирована</span
-                    >
-                  </span>
+              <div class="flex flex-wrap items-center gap-3">
+                <span v-if="!isGuest" class="relative inline-flex items-center">
+                  <button
+                    class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
+                    type="button"
+                    title="Скопировать строку для Excel"
+                    aria-label="Скопировать строку для Excel"
+                    @click="copyOrderForSpreadsheet(order)"
+                  >
+                    Excel
+                  </button>
+                  <span
+                    v-if="inlineActionNotice?.key === `copy-excel:${order.id}`"
+                    class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                    >Строка скопирована</span
+                  >
+                </span>
+                <div class="ml-auto flex flex-wrap items-center justify-end gap-3">
                   <span
                     v-if="returnSignalLabel(order) && !isOrderFullyReturned(order)"
                     class="rounded-lg bg-rose-100 px-3 py-1.5 text-sm font-bold text-rose-800"
