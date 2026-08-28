@@ -4986,10 +4986,7 @@ function orderDateTime(order: Order) {
                       step="0.01"
                       class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900"
                       type="number"
-                      @input="
-                        product.costUsd = 0
-                        product.costManual = true
-                      "
+                      @input="((product.costUsd = 0), (product.costManual = true))"
                     />
                   </label>
                 </div>

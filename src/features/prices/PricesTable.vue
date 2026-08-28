@@ -276,10 +276,7 @@ defineExpose({ focusSearch })
         class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700"
         type="button"
         aria-label="Очистить поиск"
-        @click="
-          table.setGlobalFilter('')
-          focusSearch()
-        "
+        @click="(table.setGlobalFilter(''), focusSearch())"
       >
         <X class="size-4" aria-hidden="true" />
       </button>
