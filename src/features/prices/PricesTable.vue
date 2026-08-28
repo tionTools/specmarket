@@ -64,7 +64,7 @@ function priceCell(
     const disabled = field === 'costUah' && item.usd !== null
     return h('input', {
       value: formatPrice(value(item)),
-      class: typeof className === 'function' ? className(item) : className,
+      class: `catalog-cell-edit ${typeof className === 'function' ? className(item) : className}`,
       inputmode: 'decimal',
       type: 'text',
       readonly: disabled || props.editingCell !== getCellKey(item, field),
@@ -90,7 +90,8 @@ const columns = [
         h('input', {
           value: item.name,
           readonly: props.editingCell !== getCellKey(item, 'name'),
-          class: 'w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold',
+          class:
+            'catalog-cell-edit w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold',
           onBlur: (event: Event) => emit('finishEdit', item, 'name', event),
           onKeydown: (event: KeyboardEvent) => {
             if (event.key === 'Enter') {
@@ -275,7 +276,7 @@ function handleSearch(event: Event) {
               <input
                 :value="row.original.name"
                 :readonly="editingCell !== getCellKey(row.original, 'name')"
-                class="w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1 font-bold uppercase text-emerald-950"
+                class="catalog-cell-edit w-full max-w-md rounded-lg border border-emerald-200 bg-white px-2 py-1 font-bold uppercase text-emerald-950"
                 @blur="emit('finishEdit', row.original, 'name', $event)"
                 @keydown.enter.prevent="emit('toggleNameEdit', row.original, $event)"
               />
@@ -292,7 +293,7 @@ function handleSearch(event: Event) {
             </div>
             <button
               v-if="!guest"
-              class="absolute -bottom-2 left-10 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
+              class="absolute -bottom-2 -right-2 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
               title="Добавить позицию ниже"
               type="button"
               @mousedown.stop
@@ -308,14 +309,14 @@ function handleSearch(event: Event) {
               :key="cell.id"
               class="px-2 py-1.5"
               :class="{
-                'relative sticky left-0 bg-white px-3 group-hover:bg-slate-50':
-                  cell.column.id === 'name',
+                'sticky left-0 bg-white px-3 group-hover:bg-slate-50': cell.column.id === 'name',
+                relative: cell.column.id === 'actions',
               }"
             >
               <FlexRender :cell="cell" />
               <button
-                v-if="cell.column.id === 'name' && !guest"
-                class="absolute -bottom-2 left-10 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
+                v-if="cell.column.id === 'actions' && !guest"
+                class="absolute -bottom-2 -right-2 z-40 grid size-5 place-items-center rounded-full border border-emerald-300 bg-white text-emerald-700 opacity-0 shadow-sm transition hover:bg-emerald-50 focus:opacity-100 group-hover:opacity-100"
                 title="Добавить позицию ниже"
                 type="button"
                 @mousedown.stop
@@ -332,3 +333,16 @@ function handleSearch(event: Event) {
   </div>
   <p v-if="isEmpty" class="p-8 text-center text-sm text-slate-500">Товары не найдены.</p>
 </template>
+
+<style scoped>
+.catalog-cell-edit[readonly]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #60a5fa;
+}
+
+.catalog-cell-edit:not([readonly]) {
+  outline: none;
+  background-color: #fffbeb;
+  box-shadow: 0 0 0 2px #fbbf24;
+}
+</style>

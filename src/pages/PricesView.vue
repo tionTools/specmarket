@@ -533,8 +533,13 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
 </template>
 
 <style scoped>
-.catalog-cell:not([readonly]),
-.catalog-table input:not([readonly]) {
+.catalog-cell[readonly]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #60a5fa;
+}
+
+.catalog-cell:not([readonly]) {
+  outline: none;
   background-color: #fffbeb;
   box-shadow: 0 0 0 2px #fbbf24;
 }
