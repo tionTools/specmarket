@@ -248,11 +248,16 @@ async function linkPriceItem(item: PriceItem) {
 
   linkError.value = ''
   isLinking.value = true
-  let currentOrderItem: { id: string; cost_manual: boolean } | null = null
+  let currentOrderItem: {
+    id: string
+    cost_manual: boolean
+    cost: number
+    cost_usd: number
+  } | null = null
   if (linkOrderRemoteId.value && linkPosition.value !== null) {
     const { data, error } = await supabase
       .from('crm_order_items')
-      .select('id, cost_manual')
+      .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')
       .eq('order_id', linkOrderRemoteId.value)
       .eq('position', linkPosition.value)
       .maybeSingle()
@@ -261,7 +266,23 @@ async function linkPriceItem(item: PriceItem) {
       linkError.value = `Не удалось найти текущую позицию заказа: ${error?.message ?? 'позиция не найдена'}`
       return
     }
-    currentOrderItem = { id: String(data.id), cost_manual: data.cost_manual === true }
+    const currentMarketplaceProductKey = String(data.marketplace_product_key ?? '').trim()
+    const currentProductName = String(data.product_name ?? '')
+    if (
+      (currentMarketplaceProductKey && currentMarketplaceProductKey !== linkProductKey.value) ||
+      (!currentMarketplaceProductKey && linkTitle.value && currentProductName !== linkTitle.value)
+    ) {
+      isLinking.value = false
+      linkError.value =
+        'Позиция заказа изменилась во время привязки. Вернитесь в заказ и откройте привязку заново.'
+      return
+    }
+    currentOrderItem = {
+      id: String(data.id),
+      cost_manual: data.cost_manual === true,
+      cost: Number(data.cost ?? 0),
+      cost_usd: Number(data.cost_usd ?? 0),
+    }
   }
 
   const now = new Date().toISOString()
@@ -271,7 +292,7 @@ async function linkPriceItem(item: PriceItem) {
       marketplace_product_key: linkProductKey.value,
       price_item_id: item.remoteId,
       product_title: linkTitle.value || null,
-      size: linkSize.value || null,
+      size: null,
       updated_at: now,
     },
     { onConflict: 'platform,marketplace_product_key' },
@@ -290,7 +311,11 @@ async function linkPriceItem(item: PriceItem) {
       marketplace_product_key: linkProductKey.value,
       price_item_id: item.remoteId,
     }
-    if (!currentOrderItem.cost_manual) {
+    const mayAutofillCost =
+      !currentOrderItem.cost_manual &&
+      currentOrderItem.cost === 0 &&
+      currentOrderItem.cost_usd === 0
+    if (mayAutofillCost) {
       updatePayload.cost = cost
       updatePayload.cost_usd = costUsd
     }
@@ -665,7 +690,6 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           :guest="isGuest"
           :link-mode="linkMode"
           :linked-price-item-id="linkedPriceItemId"
-          :initial-search="linkMode ? linkTitle : ''"
           @start-dragging="startDragging"
           @move-item="moveItem"
           @insert-item-after="insertItemAfter"

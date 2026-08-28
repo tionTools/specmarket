@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +23,17 @@ async function sourceHash(value: unknown) {
 const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
-const promProductKey = (item: RecordValue) => text(pick(item, 'rzid', 'variation_id', 'id'))
+function promProductKey(item: RecordValue) {
+  // Себестоимость привязывается к товару, а не к размерной вариации.
+  // SKU в заказах Prom — артикул; rzid/variation_id/id — идентификатор варианта и здесь не используется.
+  const sku = text(item.sku).trim()
+  if (sku) return `sku:${sku}`
+  const externalId = text(item.external_id).trim()
+  if (externalId) return `external:${externalId}`
+  const productId = text(pick(item, 'product_id', 'productId')).trim()
+  if (productId) return `product:${productId}`
+  return ''
+}
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
 function shipmentCarrier(value: unknown) {
   const carrier = shipmentValue(value)
@@ -639,9 +649,37 @@ Deno.serve(async (request) => {
       const apiSize = await resolvedProductSize(item, name, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
       // A missing value in Prom's response must never erase a manually saved size.
       const size = apiSize || text(previous?.size) || ''
-      const marketplaceProductKey = promProductKey(item) || text(previous?.marketplace_product_key ?? previous?.marketplaceProductKey)
-      const imageUrl = feedProducts.get(marketplaceProductKey)?.imageUrl || text(pick(item, 'image', 'image_url', 'imageUrl')) || text(previous?.image_url)
-      const resolvedCost = resolvedOrderItemCost(previous, priceCostSnapshots.get(marketplaceProductKey))
+      const previousMarketplaceProductKey = text(
+        previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
+      )
+      const marketplaceProductKey = promProductKey(item) || previousMarketplaceProductKey
+      let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
+      if (
+        !linkedPriceCost &&
+        marketplaceProductKey &&
+        previousMarketplaceProductKey &&
+        marketplaceProductKey !== previousMarketplaceProductKey
+      ) {
+        const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
+        if (legacyPriceCost) {
+          const promoted = await promoteLegacyPriceLink(
+            admin,
+            'Пром',
+            previousMarketplaceProductKey,
+            marketplaceProductKey,
+            legacyPriceCost,
+            name,
+          )
+          if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+          linkedPriceCost = legacyPriceCost
+        }
+      }
+      const variationId = text(pick(item, 'rzid', 'variation_id', 'id'))
+      const imageUrl =
+        feedProducts.get(variationId)?.imageUrl ||
+        text(pick(item, 'image', 'image_url', 'imageUrl')) ||
+        text(previous?.image_url)
+      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)
       return {
         order_id: orderId,
         position,

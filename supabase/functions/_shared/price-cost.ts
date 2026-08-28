@@ -60,6 +60,28 @@ export async function loadPlatformPriceCostSnapshots(
   return snapshots
 }
 
+export async function promoteLegacyPriceLink(
+  admin: SupabaseClient,
+  platform: string,
+  legacyKey: string,
+  canonicalKey: string,
+  snapshot: PriceCostSnapshot | undefined,
+  productTitle?: string,
+): Promise<boolean> {
+  if (!legacyKey || !canonicalKey || legacyKey === canonicalKey || !snapshot) return false
+
+  const { error } = await admin.from('crm_product_price_links').insert({
+    platform,
+    marketplace_product_key: canonicalKey,
+    price_item_id: snapshot.priceItemId,
+    product_title: productTitle || null,
+    size: null,
+  })
+  if (!error) return true
+  if (error.code === '23505') return false
+  throw error
+}
+
 export function resolvedOrderItemCost(
   previous: RecordValue | undefined,
   linked: PriceCostSnapshot | undefined,

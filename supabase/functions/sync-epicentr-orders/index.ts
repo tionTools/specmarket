@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -205,6 +205,18 @@ type NormalizedItem = { title: string; quantity: number; price: number; raw: Rec
 
 function epicentrOfferId(item: Record<string, unknown>) {
   return readableText(item.offerId ?? item.offer_id ?? item.productId ?? item.product_id)
+}
+
+function epicentrProductKey(item: Record<string, unknown>) {
+  // Для себестоимости используем ID карточки товара, а не размерный offerId.
+  const product = asRecord(item.product)
+  const productId = readableText(
+    item.productId ?? item.product_id ?? product.id ?? product.productId ?? product.product_id,
+  )
+  if (productId) return `product:${productId}`
+  const offerId = readableText(item.offerId ?? item.offer_id)
+  if (offerId) return `offer:${offerId}`
+  return ''
 }
 
 function normalizeItems(order: unknown): NormalizedItem[] {
@@ -587,7 +599,7 @@ Deno.serve(async (request) => {
     )
     if (validItems.length) {
       for (const item of validItems) await ensureDetectedCategory(item.raw)
-      const savedItems = validItems.map((item, position) => {
+      const savedItems = await Promise.all(validItems.map(async (item, position) => {
         const snapshotItem = manualItems[position]
         // В ручной синхронизации снимок позиции приоритетнее: API иногда
         // меняет написание товара, но это не повод терять введённые финансы.
@@ -596,8 +608,33 @@ Deno.serve(async (request) => {
         const savedRoyaltyPercent = currentItem?.royalty_percent ?? currentItem?.royaltyPercent
         const royaltyManual = currentItem?.royalty_manual === true || currentItem?.royaltyManual === true || storedItem?.royalty_manual === true
         const automaticRoyaltyPercent = mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw)
-        const marketplaceProductKey = epicentrOfferId(item.raw) || readableText(currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey)
-        const resolvedCost = resolvedOrderItemCost(currentItem, priceCostSnapshots.get(marketplaceProductKey))
+        const previousMarketplaceProductKey = readableText(
+          currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey,
+        )
+        const marketplaceProductKey =
+          epicentrProductKey(item.raw) || previousMarketplaceProductKey
+        let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
+        if (
+          !linkedPriceCost &&
+          marketplaceProductKey &&
+          previousMarketplaceProductKey &&
+          marketplaceProductKey !== previousMarketplaceProductKey
+        ) {
+          const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
+          if (legacyPriceCost) {
+            const promoted = await promoteLegacyPriceLink(
+              admin,
+              'Эпицентр',
+              previousMarketplaceProductKey,
+              marketplaceProductKey,
+              legacyPriceCost,
+              item.title,
+            )
+            if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+            linkedPriceCost = legacyPriceCost
+          }
+        }
+        const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost)
         return {
           order_id: orderId,
           position,
@@ -615,7 +652,7 @@ Deno.serve(async (request) => {
           royalty_amount: currentItem?.royalty_amount ?? currentItem?.royaltyAmount ?? null,
           royalty_manual: royaltyManual,
         }
-      })
+      }))
       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
       const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
       if (!same(comparableSaved, comparableExisting)) {

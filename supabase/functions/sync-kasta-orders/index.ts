@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,16 +24,15 @@ const same = (left: unknown, right: unknown) => stableStringify(left) === stable
 const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 function kastaProductKey(item: RecordValue) {
-  const uniqueSkuId = text(item.unique_sku_id)
-  if (uniqueSkuId) return uniqueSkuId
-  const supplierCode = text(item.supplier_code)
-  const size = text(pick(item, 'kasta_size', 'size')).trim().toLowerCase()
-  if (supplierCode && size) return `supplier:${supplierCode}|size:${size}`
-  const barcode = itemBarcode(item)
-  if (barcode) return `barcode:${barcode}`
+  // supplier_code — артикул товара и не зависит от размера. Размерные unique_sku_id/barcode
+  // для привязки себестоимости намеренно не используются.
+  const supplierCode = text(item.supplier_code).trim()
   if (supplierCode) return `supplier:${supplierCode}`
-  return text(pick(item, 'offer_id', 'product_id', 'id'))
+  const productId = text(pick(item, 'product_id', 'productId')).trim()
+  if (productId) return `product:${productId}`
+  return ''
 }
+
 const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
 function shipmentCarrier(value: unknown) {
   const carrier = shipmentValue(value)
@@ -457,9 +456,36 @@ Deno.serve(async (request) => {
         const quantity = itemQuantity(item)
         const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
         const supplierCode = text(item.supplier_code)
-        const marketplaceProductKey = kastaProductKey(item) || text(previous?.marketplace_product_key ?? previous?.marketplaceProductKey)
+        const previousMarketplaceProductKey = text(
+          previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
+        )
+        const marketplaceProductKey = kastaProductKey(item) || previousMarketplaceProductKey
+        let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
+        if (
+          !linkedPriceCost &&
+          marketplaceProductKey &&
+          previousMarketplaceProductKey &&
+          marketplaceProductKey !== previousMarketplaceProductKey
+        ) {
+          const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
+          if (legacyPriceCost) {
+            const productName = text(
+              pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code'),
+            )
+            const promoted = await promoteLegacyPriceLink(
+              admin,
+              'Каста',
+              previousMarketplaceProductKey,
+              marketplaceProductKey,
+              legacyPriceCost,
+              productName,
+            )
+            if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+            linkedPriceCost = legacyPriceCost
+          }
+        }
         const feedImage = feedImages.get(uniqueSkuId) || feedImages.get(supplierCode)
-        const resolvedCost = resolvedOrderItemCost(previous, priceCostSnapshots.get(marketplaceProductKey))
+        const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)
         const directRoyalty = royaltyPercent(item.royalty)
         const needsCatalogRoyalty = targetOrderId || previous === undefined
         const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)

@@ -1551,8 +1551,8 @@ function canLinkProductPrice(order: Order, product: OrderProduct) {
   return (
     ['Пром', 'Эпицентр', 'Каста'].includes(order.platform) &&
     Boolean(order.remoteId) &&
-    product.position !== undefined &&
-    Boolean(product.marketplaceProductKey)
+    Boolean(order.externalId) &&
+    product.position !== undefined
   )
 }
 
@@ -1565,15 +1565,81 @@ function isProductPriceLinked(order: Order, product: OrderProduct) {
   )
 }
 
-function openProductPriceLink(order: Order, product: OrderProduct) {
-  if (isGuest.value || !canLinkProductPrice(order, product) || !product.marketplaceProductKey)
-    return
-  void router.push({
+function isFamilyPriceLinkKey(platform: Platform, key: string) {
+  if (platform === 'Пром') return /^(?:sku|external|product):/.test(key)
+  if (platform === 'Эпицентр') return /^(?:product|offer):/.test(key)
+  if (platform === 'Каста') return /^(?:supplier|product):/.test(key)
+  return false
+}
+
+async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
+  if (
+    !supabase ||
+    !order.externalId ||
+    !order.remoteId ||
+    product.position === undefined ||
+    isMarketplaceSyncBusy.value
+  )
+    return product.marketplaceProductKey ?? ''
+
+  const functionName =
+    order.platform === 'Пром'
+      ? 'sync-prom-orders'
+      : order.platform === 'Эпицентр'
+        ? 'sync-epicentr-orders'
+        : 'sync-kasta-orders'
+  const body =
+    order.platform === 'Каста'
+      ? { externalId: order.externalId }
+      : {
+          externalId: order.externalId,
+          manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+        }
+  const { data, error } = await supabase.functions.invoke(functionName, { method: 'POST', body })
+  if (error || !data?.ok) {
+    showSyncError(
+      data?.message ??
+        error?.message ??
+        'Не удалось обновить идентификатор товара перед привязкой.',
+    )
+    return ''
+  }
+
+  const { data: rows, error: itemError } = await supabase
+    .from('crm_order_items')
+    .select('position, product_name, marketplace_product_key')
+    .eq('order_id', order.remoteId)
+    .order('position')
+  if (itemError) {
+    showSyncError(`Не удалось проверить товар перед привязкой: ${itemError.message}`)
+    return ''
+  }
+  const refreshedItem =
+    (rows ?? []).find(
+      (row) => Number(row.position) === product.position && row.product_name === product.name,
+    ) ?? (rows ?? []).find((row) => row.product_name === product.name)
+  const refreshedKey = String(refreshedItem?.marketplace_product_key ?? '').trim()
+  if (!refreshedKey) {
+    showSyncError('Площадка не вернула стабильный идентификатор товара без привязки к размеру.')
+    return ''
+  }
+  void refreshOrdersAfterMarketplaceSync(data)
+  return refreshedKey
+}
+
+async function openProductPriceLink(order: Order, product: OrderProduct) {
+  if (isGuest.value || !canLinkProductPrice(order, product)) return
+  let linkProductKey = product.marketplaceProductKey ?? ''
+  if (!linkProductKey || !isFamilyPriceLinkKey(order.platform, linkProductKey)) {
+    linkProductKey = await refreshPriceLinkProductKey(order, product)
+    if (!linkProductKey || !isFamilyPriceLinkKey(order.platform, linkProductKey)) return
+  }
+  await router.push({
     path: '/prices',
     query: {
       linkMode: '1',
       linkPlatform: order.platform,
-      linkProductKey: product.marketplaceProductKey,
+      linkProductKey,
       linkOrderRemoteId: order.remoteId,
       linkPosition: String(product.position),
       linkTitle: product.name,
