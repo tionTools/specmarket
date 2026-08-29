@@ -89,13 +89,17 @@ const columns = [
     header: 'Название',
     cell: ({ row }: { row: { original: PriceItem } }) => {
       const item = row.original
+      const editing = props.editingCell === getCellKey(item, 'name')
       return h('div', { class: 'flex w-[32rem] items-center gap-1.5' }, [
         h(GripVertical, { class: 'cursor-grab text-slate-400', 'aria-label': 'Перетащить' }),
         h('input', {
           value: item.name,
-          readonly: props.editingCell !== getCellKey(item, 'name'),
-          class:
-            'catalog-cell-edit w-full rounded-lg border border-slate-200 px-2 py-1 font-semibold',
+          readonly: !editing,
+          class: `catalog-cell-edit w-full cursor-text rounded-lg border px-2 py-1 font-semibold transition caret-slate-900 selection:bg-blue-200 selection:text-slate-950 focus:outline-none ${
+            editing
+              ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-300'
+              : 'border-slate-200 bg-white hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200'
+          }`,
           onBlur: (event: Event) => emit('finishEdit', item, 'name', event),
           onKeydown: (event: KeyboardEvent) => {
             if (event.key === 'Enter') {
