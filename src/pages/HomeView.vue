@@ -44,11 +44,19 @@ import { demoOrders } from '@/features/orders/demoOrders'
 import {
   deliveryTtnForClipboard,
   displayCarrier,
+  displayDeliveryAddress,
   formatDeliveryTtn,
   formatUkrainianPhone,
   orderBusinessPlatform,
 } from '@/features/orders/display'
-import type { Delivery, Order, OrderProduct, Platform } from '@/features/orders/types'
+import type {
+  Delivery,
+  Order,
+  OrderProduct,
+  Platform,
+  ShipmentHistoryEntry,
+  ShipmentRelation,
+} from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
@@ -2650,6 +2658,146 @@ function validateOrderDraft(order: Order) {
   return ''
 }
 
+function normalizedShipmentValue(value: string) {
+  return value.replace(/\s/g, '').toLowerCase()
+}
+
+function normalizedDeliveryAddress(city: string, address: string) {
+  return [city, address].filter(Boolean).join(', ').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function addUniqueLegacyValue(values: string[] | undefined, value: string) {
+  const normalized = value.trim().replace(/\s+/g, ' ').toLowerCase()
+  if (!normalized) return values ?? []
+  const result = values ? [...values] : []
+  if (!result.some((item) => item.trim().replace(/\s+/g, ' ').toLowerCase() === normalized))
+    result.push(value)
+  return result
+}
+
+function shipmentHistoryIdentity(entry: ShipmentHistoryEntry) {
+  return JSON.stringify({
+    ttn: normalizedShipmentValue(entry.ttn),
+    relation: entry.relation,
+    relatedTtn: normalizedShipmentValue(entry.relatedTtn ?? ''),
+    city: entry.city?.trim().replace(/\s+/g, ' ').toLowerCase() ?? '',
+    address: entry.address?.trim().replace(/\s+/g, ' ').toLowerCase() ?? '',
+    branchNumber: entry.branchNumber?.trim().toLowerCase() ?? '',
+    locationCode: entry.locationCode?.trim().toLowerCase() ?? '',
+    postalCode: entry.postalCode?.trim().toLowerCase() ?? '',
+    source: entry.source,
+  })
+}
+
+function appendShipmentHistory(
+  history: ShipmentHistoryEntry[],
+  entry: ShipmentHistoryEntry,
+): ShipmentHistoryEntry[] {
+  if (!entry.ttn.trim()) return history
+  const identity = shipmentHistoryIdentity(entry)
+  const index = history.findIndex((item) => shipmentHistoryIdentity(item) === identity)
+  if (index < 0) return [...history, entry]
+  const next = [...history]
+  next[index] = {
+    ...history[index],
+    ...entry,
+    firstSeenAt: history[index]?.firstSeenAt || entry.firstSeenAt,
+  }
+  return next
+}
+
+function manualShipmentSnapshot(
+  delivery: Delivery,
+  relation: ShipmentRelation,
+  seenAt: string,
+  relatedTtn = '',
+): ShipmentHistoryEntry {
+  return {
+    ttn: delivery.ttn.trim(),
+    carrier: delivery.carrier,
+    relation,
+    ...(relatedTtn ? { relatedTtn } : {}),
+    ...(delivery.city.trim() ? { city: delivery.city.trim() } : {}),
+    ...(delivery.address.trim() ? { address: delivery.address.trim() } : {}),
+    ...(delivery.trackingDestinationBranchNumber
+      ? { branchNumber: delivery.trackingDestinationBranchNumber }
+      : {}),
+    ...(delivery.trackingDestinationLocationCode
+      ? { locationCode: delivery.trackingDestinationLocationCode }
+      : {}),
+    ...(delivery.trackingDestinationPostalCode
+      ? { postalCode: delivery.trackingDestinationPostalCode }
+      : {}),
+    source: 'manual',
+    firstSeenAt: seenAt,
+    lastSeenAt: seenAt,
+  }
+}
+
+function clearTrackingSnapshot(delivery: Delivery) {
+  for (const key of Object.keys(delivery)) {
+    if (key.startsWith('tracking')) delete (delivery as unknown as Record<string, unknown>)[key]
+  }
+}
+
+function preserveManualDeliveryHistory(draft: Order, previousOrder: Order | null) {
+  const seenAt = new Date().toISOString()
+  const delivery = draft.delivery
+  let history = [...(delivery.shipmentHistory ?? [])]
+  if (!previousOrder) {
+    if (delivery.ttn.trim()) {
+      history = appendShipmentHistory(history, manualShipmentSnapshot(delivery, 'original', seenAt))
+      delivery.shipmentHistory = history
+    }
+    return
+  }
+
+  const previous = previousOrder.delivery
+  const previousTtn = previous.ttn.trim()
+  const nextTtn = delivery.ttn.trim()
+  const ttnChanged = normalizedShipmentValue(previousTtn) !== normalizedShipmentValue(nextTtn)
+  const addressChanged =
+    normalizedDeliveryAddress(previous.city, previous.address) !==
+    normalizedDeliveryAddress(delivery.city, delivery.address)
+  if (!ttnChanged && !addressChanged) return
+
+  if (previousTtn) {
+    const previousHistory = [...history]
+      .reverse()
+      .find((entry) => normalizedShipmentValue(entry.ttn) === normalizedShipmentValue(previousTtn))
+    history = appendShipmentHistory(history, {
+      ...manualShipmentSnapshot(
+        previous,
+        previousHistory?.relation ?? 'original',
+        seenAt,
+        previousHistory?.relatedTtn,
+      ),
+      source: previousHistory?.source ?? 'manual',
+      firstSeenAt: previousHistory?.firstSeenAt ?? seenAt,
+    })
+  }
+
+  const previousAddress = [previous.city, previous.address].filter(Boolean).join(', ')
+  if (ttnChanged && previousTtn)
+    delivery.ttnHistory = addUniqueLegacyValue(delivery.ttnHistory, previousTtn)
+  if ((ttnChanged || addressChanged) && previousAddress)
+    delivery.addressHistory = addUniqueLegacyValue(delivery.addressHistory, previousAddress)
+
+  if (ttnChanged) clearTrackingSnapshot(delivery)
+  if (nextTtn) {
+    history = appendShipmentHistory(
+      history,
+      manualShipmentSnapshot(
+        delivery,
+        ttnChanged ? 'replacement' : 'unknown',
+        seenAt,
+        ttnChanged ? previousTtn : '',
+      ),
+    )
+  }
+  delivery.shipmentHistory = history
+}
+
 async function saveOrderDraft() {
   if (isGuest.value || isSavingOrderDraft.value) return
 
@@ -2674,6 +2822,7 @@ async function saveOrderDraft() {
         : orders.value.findIndex((order) => (order.remoteId ?? order.id) === editingId)
     const existingOrder = existingIndex >= 0 ? orders.value[existingIndex] : undefined
     previousOrder = existingOrder ? cloneOrder(existingOrder) : null
+    preserveManualDeliveryHistory(draft, previousOrder)
 
     if (editingId !== null) {
       if (existingIndex < 0 || !previousOrder) throw new Error('Редактируемый заказ не найден.')
@@ -2901,6 +3050,7 @@ function displayDeliveryStatus(status: string) {
     at_pickup_point: 'Готово к выдаче',
     ready_for_delivery: 'Готово к выдаче',
     ready_for_pickup: 'Готово к выдаче',
+    forwarding: 'Переадресовано',
     returning: 'Возвращается отправителю',
     return_to_sender: 'Возвращается отправителю',
     returned: 'Возвращено',
@@ -2973,7 +3123,11 @@ function trackingUrl(delivery: Delivery) {
 
 function deliveryTtns(delivery: Delivery): string[] {
   const seen = new Set<string>()
-  return [...(delivery.ttnHistory ?? []), delivery.ttn].filter((ttn) => {
+  return [
+    ...(delivery.ttnHistory ?? []),
+    ...(delivery.shipmentHistory ?? []).map((entry) => entry.ttn),
+    delivery.ttn,
+  ].filter((ttn) => {
     const normalized = ttn.replace(/\s/g, '')
     if (!normalized || seen.has(normalized)) return false
     seen.add(normalized)
@@ -3107,16 +3261,79 @@ function isDeliveryPaymentPaid(order: Order) {
   )
 }
 
-function displayDeliveryAddress(delivery: Delivery) {
-  const current = [delivery.city, delivery.address].filter(Boolean).join(', ')
+function shipmentHistoryAddress(entry: ShipmentHistoryEntry) {
+  return displayDeliveryAddress(entry.city ?? '', entry.address ?? '')
+}
+
+function currentShipmentHistoryEntry(delivery: Delivery) {
+  const currentTtn = normalizedShipmentValue(delivery.ttn)
+  const currentAddress = normalizedDeliveryAddress(delivery.city, delivery.address)
+  return [...(delivery.shipmentHistory ?? [])]
+    .reverse()
+    .find(
+      (entry) =>
+        normalizedShipmentValue(entry.ttn) === currentTtn &&
+        normalizedDeliveryAddress(entry.city ?? '', entry.address ?? '') === currentAddress,
+    )
+}
+
+function previousShipmentHistory(delivery: Delivery) {
+  const current = currentShipmentHistoryEntry(delivery)
+  const currentIdentity = current ? shipmentHistoryIdentity(current) : ''
   const seen = new Set<string>()
-  const values = [...(delivery.addressHistory ?? []), current].filter((address) => {
-    const normalized = address.trim().replace(/\s+/g, ' ').toLowerCase()
-    if (!normalized || seen.has(normalized)) return false
-    seen.add(normalized)
+  return [...(delivery.shipmentHistory ?? [])].reverse().filter((entry) => {
+    const identity = shipmentHistoryIdentity(entry)
+    if (identity === currentIdentity || seen.has(identity)) return false
+    seen.add(identity)
     return true
   })
-  return values.join(' — ') || '—'
+}
+
+function legacyPreviousTtns(delivery: Delivery) {
+  const represented = new Set([
+    normalizedShipmentValue(delivery.ttn),
+    ...(delivery.shipmentHistory ?? []).map((entry) => normalizedShipmentValue(entry.ttn)),
+  ])
+  return (delivery.ttnHistory ?? []).filter((ttn) => {
+    const normalized = normalizedShipmentValue(ttn)
+    return normalized && !represented.has(normalized)
+  })
+}
+
+function legacyPreviousAddresses(delivery: Delivery) {
+  const represented = new Set([
+    normalizedDeliveryAddress(delivery.city, delivery.address),
+    ...(delivery.shipmentHistory ?? []).map((entry) =>
+      normalizedDeliveryAddress(entry.city ?? '', entry.address ?? ''),
+    ),
+  ])
+  return (delivery.addressHistory ?? []).filter((address) => {
+    const normalized = address.trim().replace(/\s+/g, ' ').toLowerCase()
+    return normalized && !represented.has(normalized)
+  })
+}
+
+function hasDeliveryHistory(delivery: Delivery) {
+  return (
+    previousShipmentHistory(delivery).length > 0 ||
+    legacyPreviousTtns(delivery).length > 0 ||
+    legacyPreviousAddresses(delivery).length > 0
+  )
+}
+
+function deliveryWasRedirected(delivery: Delivery) {
+  return (delivery.shipmentHistory ?? []).some((entry) => entry.relation === 'redirect')
+}
+
+function shipmentRelationLabel(relation: ShipmentRelation) {
+  const labels: Record<ShipmentRelation, string> = {
+    original: 'Первоначальная ТТН',
+    redirect: 'Переадресация',
+    return: 'Возврат',
+    replacement: 'Замена ТТН',
+    unknown: 'Связь не определена',
+  }
+  return labels[relation]
 }
 
 const spreadsheetNumberFormatter = new Intl.NumberFormat('uk-UA', {
@@ -4736,6 +4953,9 @@ function orderDateTime(order: Order) {
                     <dd
                       class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
                     >
+                      <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase"
+                        >Текущая ТТН:</span
+                      >
                       <a
                         v-if="trackingUrl(order.delivery)"
                         :href="trackingUrl(order.delivery)"
@@ -4747,10 +4967,10 @@ function orderDateTime(order: Order) {
                       >
                         <ExternalLink class="size-4" aria-hidden="true" />
                       </a>
-                      <span class="whitespace-pre-line">{{
-                        deliveryTtns(order.delivery)
-                          .map((ttn) => formatDeliveryTtn(order.delivery.carrier, ttn))
-                          .join('\n') || '—'
+                      <span>{{
+                        order.delivery.ttn
+                          ? formatDeliveryTtn(order.delivery.carrier, order.delivery.ttn)
+                          : '—'
                       }}</span>
                       <button
                         v-if="order.delivery.ttn"
@@ -4767,6 +4987,12 @@ function orderDateTime(order: Order) {
                         >
                       </button>
                     </dd>
+                    <dd
+                      v-if="deliveryWasRedirected(order.delivery)"
+                      class="text-xs font-semibold text-violet-700"
+                    >
+                      Переадресовано
+                    </dd>
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -4782,11 +5008,53 @@ function orderDateTime(order: Order) {
                 </div>
                 <div class="mt-3">
                   <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                    Адрес
+                    {{ hasDeliveryHistory(order.delivery) ? 'Сейчас' : 'Адрес' }}
                   </dt>
                   <dd class="mt-1 break-words font-semibold">
-                    {{ displayDeliveryAddress(order.delivery) }}
+                    {{ displayDeliveryAddress(order.delivery.city, order.delivery.address) }}
                   </dd>
+                  <details
+                    v-if="hasDeliveryHistory(order.delivery)"
+                    class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                  >
+                    <summary class="cursor-pointer text-xs font-semibold text-slate-600">
+                      Ранее
+                    </summary>
+                    <div class="mt-2 space-y-2 text-xs text-slate-600">
+                      <div
+                        v-for="(entry, historyIndex) in previousShipmentHistory(order.delivery)"
+                        :key="`${shipmentHistoryIdentity(entry)}:${historyIndex}`"
+                        class="border-t border-slate-200 pt-2 first:border-t-0 first:pt-0"
+                      >
+                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span class="font-semibold text-slate-800">{{
+                            formatDeliveryTtn(order.delivery.carrier, entry.ttn)
+                          }}</span>
+                          <span
+                            class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase"
+                            >{{ shipmentRelationLabel(entry.relation) }}</span
+                          >
+                        </div>
+                        <div class="mt-0.5 break-words">{{ shipmentHistoryAddress(entry) }}</div>
+                      </div>
+                      <div v-if="legacyPreviousTtns(order.delivery).length">
+                        <span class="font-semibold text-slate-700">{{
+                          legacyPreviousTtns(order.delivery).length === 1
+                            ? 'Первоначальная ТТН:'
+                            : 'Предыдущие ТТН:'
+                        }}</span>
+                        {{
+                          legacyPreviousTtns(order.delivery)
+                            .map((ttn) => formatDeliveryTtn(order.delivery.carrier, ttn))
+                            .join(', ')
+                        }}
+                      </div>
+                      <div v-if="legacyPreviousAddresses(order.delivery).length">
+                        <span class="font-semibold text-slate-700">Предыдущие адреса:</span>
+                        {{ legacyPreviousAddresses(order.delivery).join(' · ') }}
+                      </div>
+                    </div>
+                  </details>
                 </div>
                 <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
                   <div class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4">

@@ -30,6 +30,68 @@ function sameShipment(left: Record<string, unknown>, right: Record<string, unkno
 function trackingFields(delivery: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && value !== undefined))
 }
+function normalizedHistoryText(value: unknown) {
+  return text(value).trim().replace(/\s+/g, ' ').toLowerCase()
+}
+function shipmentHistoryKey(value: unknown) {
+  const entry = asRecord(value)
+  return JSON.stringify({
+    ttn: shipmentValue(entry.ttn),
+    relation: text(entry.relation),
+    relatedTtn: shipmentValue(entry.relatedTtn),
+    city: normalizedHistoryText(entry.city),
+    address: normalizedHistoryText(entry.address),
+    branchNumber: normalizedHistoryText(entry.branchNumber),
+    locationCode: normalizedHistoryText(entry.locationCode),
+    postalCode: normalizedHistoryText(entry.postalCode),
+    source: text(entry.source),
+  })
+}
+function mergeShipmentHistory(current: unknown, incoming: unknown) {
+  const merged = new Map<string, Record<string, unknown>>()
+  for (const value of [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(incoming) ? incoming : []),
+  ]) {
+    const entry = asRecord(value)
+    if (!text(entry.ttn)) continue
+    const key = shipmentHistoryKey(entry)
+    const existing = merged.get(key)
+    merged.set(key, existing ? {
+      ...existing,
+      ...entry,
+      firstSeenAt: text(existing.firstSeenAt) || text(entry.firstSeenAt),
+      lastSeenAt: text(entry.lastSeenAt) || text(existing.lastSeenAt),
+    } : entry)
+  }
+  return [...merged.values()]
+}
+function mergeLegacyHistory(current: unknown, incoming: unknown) {
+  const values: string[] = []
+  for (const value of [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(incoming) ? incoming : []),
+  ]) {
+    const item = text(value)
+    const normalized = normalizedHistoryText(item)
+    if (normalized && !values.some((existing) => normalizedHistoryText(existing) === normalized)) values.push(item)
+  }
+  return values
+}
+function carrierManagedDelivery(current: Record<string, unknown>, incoming: Record<string, unknown>) {
+  const shipmentHistory = mergeShipmentHistory(current.shipmentHistory, incoming.shipmentHistory)
+  const ttnHistory = mergeLegacyHistory(current.ttnHistory, incoming.ttnHistory)
+  const addressHistory = mergeLegacyHistory(current.addressHistory, incoming.addressHistory)
+  const fields: Record<string, unknown> = {
+    ...trackingFields(current),
+    ...(shipmentHistory.length ? { shipmentHistory } : {}),
+    ...(ttnHistory.length ? { ttnHistory } : {}),
+    ...(addressHistory.length ? { addressHistory } : {}),
+  }
+  if (text(current.trackingDestinationCity)) fields.city = current.city
+  if (text(current.trackingDestinationAddress)) fields.address = current.address
+  return fields
+}
 function withoutTracking(delivery: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(delivery).filter(([key]) => !key.startsWith('tracking')))
 }
@@ -59,7 +121,7 @@ Deno.serve(async (request) => {
       if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
       const currentDelivery = asRecord(current?.delivery)
       delivery = sameShipment(currentDelivery, order.delivery)
-        ? { ...order.delivery, ...trackingFields(currentDelivery) }
+        ? { ...order.delivery, ...carrierManagedDelivery(currentDelivery, order.delivery) }
         : withoutTracking(order.delivery)
     }
     const data = {

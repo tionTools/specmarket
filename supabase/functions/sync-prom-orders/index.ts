@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,18 +35,30 @@ function promProductKey(item: RecordValue) {
   if (productId) return `product:${productId}`
   return ''
 }
-const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
-function shipmentCarrier(value: unknown) {
-  const carrier = shipmentValue(value)
-  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
-  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
-  if (carrier.includes('rozetka')) return 'rozetka'
-  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
-  return carrier
-}
-function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
-  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
-  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined))
+function preserveTracking(
+  delivery: RecordValue,
+  carrier: string,
+  ttn: string,
+  destination: { city: string; address: string },
+): RecordValue {
+  if (!marketplaceMatchesCarrierDelivery(delivery, carrier, ttn))
+    return marketplaceReplacementHistory(delivery, carrier, ttn, destination)
+  const keepCarrierDelivery = marketplaceMustKeepCarrierDelivery(delivery, carrier, ttn)
+  const preserved = Object.fromEntries(
+    Object.entries(delivery).filter(([key, value]) =>
+      (key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined) ||
+      (['shipmentHistory', 'ttnHistory', 'addressHistory'].includes(key) && value !== undefined),
+    ),
+  )
+  if (keepCarrierDelivery) {
+    preserved.ttn = delivery.ttn
+    preserved.city = delivery.city
+    preserved.address = delivery.address
+  } else {
+    if (text(delivery.trackingDestinationCity)) preserved.city = delivery.city
+    if (text(delivery.trackingDestinationAddress)) preserved.address = delivery.address
+  }
+  return preserved
 }
 const promStatusNames: Record<string, string> = {
   pending: 'Новий',
@@ -602,7 +615,7 @@ Deno.serve(async (request) => {
           : undefined,
         hasWebsiteCommission: websiteOrderCommission > 0,
         shippingSource,
-        ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber),
+        ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
       },

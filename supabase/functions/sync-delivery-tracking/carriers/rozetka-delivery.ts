@@ -34,20 +34,26 @@ export async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
   const code = text(latest.id) || text(fallback.id) || text(shipment.last_status)
   const base = rozetkaReadableStatus(source, code)
   const finalDepartment = record(shipment.final_department)
+  const finalDepartmentName = text(finalDepartment.public_name) || text(finalDepartment.name)
+  const trackingEvents = compactEvents(events.map((event) => ({
+    at: text(event.date),
+    status: text(event.name),
+    code: text(event.id),
+    location: rozetkaLocation(event),
+  })))
   return {
     ...base,
     status: source,
     provider: 'rozetka_delivery_public_api',
+    source: 'public_tracking',
+    activeTtn: ttn.replace(/\s/g, ''),
+    destination: finalDepartmentName ? { address: finalDepartmentName } : undefined,
+    relatedShipments: [],
+    events: trackingEvents,
     details: {
       trackingEventAt: text(latest.date) || text(fallback.date) || text(shipment.last_status_date),
-      trackingLocation: rozetkaLocation(latest) || rozetkaLocation(fallback) || text(finalDepartment.public_name) || text(finalDepartment.name),
+      trackingLocation: rozetkaLocation(latest) || rozetkaLocation(fallback) || finalDepartmentName,
       trackingStatusCode: code,
-      trackingEvents: compactEvents(events.map((event) => ({
-        at: text(event.date),
-        status: text(event.name),
-        code: text(event.id),
-        location: rozetkaLocation(event),
-      }))),
     },
   }
 }

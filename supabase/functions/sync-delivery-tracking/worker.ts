@@ -1,7 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { carrierKind } from './carrier-detection.ts'
 import { meestStatus } from './carriers/meest.ts'
-import { novaStatus } from './carriers/nova-poshta.ts'
+import { novaStatus, type NovaRedirectCircuit } from './carriers/nova-poshta.ts'
 import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
 import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
 import { isFinal, record, text } from './normalize.ts'
@@ -10,7 +10,7 @@ import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './ty
 
 const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
 
-type TrackingOrderRow = { id: string; delivery: unknown }
+type TrackingOrderRow = { id: string; external_id: unknown; delivery: unknown }
 type TrackingStateRow = { order_id: string; last_checked_at: unknown }
 
 function currentKyiv() {
@@ -43,10 +43,10 @@ function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, no
   return !Number.isFinite(checked) || now - checked >= minutes * 60_000
 }
 
-async function getTrackingStatus(delivery: JsonRecord): Promise<TrackingResult> {
+async function getTrackingStatus(delivery: JsonRecord, novaRedirectCircuit: NovaRedirectCircuit): Promise<TrackingResult> {
   const ttn = text(delivery.ttn)
   switch (carrierKind(delivery)) {
-    case 'nova': return novaStatus(ttn)
+    case 'nova': return novaStatus(ttn, novaRedirectCircuit)
     case 'meest': return meestStatus(ttn)
     case 'rozetka': return rozetkaStatus(ttn)
     case 'ukrposhta': return ukrposhtaStatus(ttn)
@@ -60,7 +60,7 @@ export async function runTrackingWorker(admin: SupabaseClient, forced: boolean):
 
   const now = new Date()
   const { data: rows, error } = await admin.from('crm_orders')
-    .select('id, delivery')
+    .select('id, external_id, delivery')
     .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
     .not('delivery->>ttn', 'is', null)
   if (error) return { status: 500, body: { ok: false, message: error.message } }
@@ -75,13 +75,14 @@ export async function runTrackingWorker(admin: SupabaseClient, forced: boolean):
   let checked = 0
   let updated = 0
   let failed = 0
+  const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
   for (const row of orderRows) {
     const delivery = record(row.delivery)
     const carrier: CarrierKind = carrierKind(delivery)
     const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
     if (!carrier || (!forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) || (forced && !trackable)) continue
     try {
-      const result = await getTrackingStatus(delivery)
+      const result = await getTrackingStatus(delivery, novaRedirectCircuit)
       const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
       if (currentError) throw currentError
       const currentDelivery = record(currentRow?.delivery)
@@ -92,7 +93,12 @@ export async function runTrackingWorker(admin: SupabaseClient, forced: boolean):
       if (stateError) throw stateError
       checked += 1
       if (!changed) continue
-      const nextDelivery = mergeTrackingDelivery(currentDelivery, result, now.toISOString())
+      const nextDelivery = mergeTrackingDelivery(
+        currentDelivery,
+        result,
+        now.toISOString(),
+        text(row.external_id) ? 'marketplace' : 'manual',
+      )
       const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
       if (updateError) throw updateError
       updated += 1

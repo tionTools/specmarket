@@ -36,6 +36,12 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
     status: base.normalizedStatus === 'delivered' ? base.status : source,
     final,
     provider: 'meest_api',
+    source: 'carrier_api',
+    activeTtn: ttn.replace(/\s/g, ''),
+    // The current v3 endpoint exposes event cities. It does not document them as the
+    // recipient's final pickup point, so no destination is derived from eventCityDescr.
+    relatedShipments: [],
+    events: trackingEvents,
     details: {
       trackingEventAt: text(latest?.eventDateTime),
       trackingLocation: text(record(latest?.eventCityDescr).descrUA),
@@ -43,7 +49,6 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationDetails: text(record(latest?.eventDetailDescr).descrUA),
       trackingStatusCode: eventCode,
       trackingDeliveredAt: eventCode === '1622' ? text(latest?.eventDateTime) : '',
-      trackingEvents,
     },
   }
 }

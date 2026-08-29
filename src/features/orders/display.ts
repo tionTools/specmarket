@@ -46,6 +46,18 @@ export function deliveryTtnForClipboard(carrier: string, ttn: string) {
   return isNovaPoshtaCarrier(carrier) ? ttn.replace(/\D/g, '') : ttn
 }
 
+export function displayDeliveryAddress(city: string, address: string) {
+  const normalizedCity = city.trim()
+  const normalizedAddress = address.trim()
+  if (!normalizedAddress) return normalizedCity || '—'
+  if (
+    !normalizedCity ||
+    normalizedAddress.toLocaleLowerCase().includes(normalizedCity.toLocaleLowerCase())
+  )
+    return normalizedAddress
+  return `${normalizedCity}, ${normalizedAddress}`
+}
+
 export function orderBusinessPlatform(order: Pick<Order, 'platform' | 'delivery'>): Platform {
   return order.platform === 'Пром' && order.delivery.hasWebsiteCommission === true
     ? 'Сайт'

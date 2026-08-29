@@ -20,16 +20,37 @@ export interface OrderProduct {
   returnedAt?: string
 }
 
-export interface Delivery {
-  carrier: 'Новая почта' | 'Укрпочта' | 'RozetkaDelivery' | 'Meest'
+export type DeliveryCarrier = 'Новая почта' | 'Укрпочта' | 'RozetkaDelivery' | 'Meest'
+export type ShipmentRelation = 'original' | 'redirect' | 'return' | 'replacement' | 'unknown'
+export type ShipmentSource = 'marketplace' | 'carrier_api' | 'public_tracking' | 'manual'
+
+export interface ShipmentHistoryEntry {
   ttn: string
-  /** Предыдущие ТТН при переадресациях Prom. */
+  carrier: string
+  relation: ShipmentRelation
+  relatedTtn?: string
+  city?: string
+  address?: string
+  branchNumber?: string
+  locationCode?: string
+  postalCode?: string
+  source: ShipmentSource
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export interface Delivery {
+  carrier: DeliveryCarrier
+  ttn: string
+  /** Legacy: previous TTNs. Kept for backward compatibility; do not pair by index with addressHistory. */
   ttnHistory?: string[]
+  /** Structured TTN/address snapshots for current delivery and all known changes. */
+  shipmentHistory?: ShipmentHistoryEntry[]
   recipient: string
   recipientPhone: string
   city: string
   address: string
-  /** Полные предыдущие адреса при переадресациях Prom. */
+  /** Legacy: previous full addresses. Kept for backward compatibility; do not pair by index with ttnHistory. */
   addressHistory?: string[]
   status: string
   payer: string
@@ -43,12 +64,18 @@ export interface Delivery {
   rozetkaPayOperationIds?: string[]
   hasWebsiteCommission?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
-  /** Последний статус, полученный из публичной tracking-ссылки перевозчика. */
+  /** Последний статус, полученный из tracking перевозчика. */
   trackingStatus?: string
   trackingNormalizedStatus?: string
   trackingLastCheckedAt?: string
   trackingStatusChangedAt?: string
+  trackingDataChangedAt?: string
   trackingLastError?: string
+  trackingDestinationCity?: string
+  trackingDestinationAddress?: string
+  trackingDestinationBranchNumber?: string
+  trackingDestinationLocationCode?: string
+  trackingDestinationPostalCode?: string
   printCheckedAt?: string
   printedAt?: string
 }

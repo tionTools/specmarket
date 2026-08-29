@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,18 +34,30 @@ function kastaProductKey(item: RecordValue) {
   return ''
 }
 
-const shipmentValue = (value: unknown) => text(value).replace(/\s/g, '').toLowerCase()
-function shipmentCarrier(value: unknown) {
-  const carrier = shipmentValue(value)
-  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
-  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
-  if (carrier.includes('rozetka')) return 'rozetka'
-  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
-  return carrier
-}
-function preserveTracking(delivery: RecordValue, carrier: string, ttn: string): RecordValue {
-  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
-  return Object.fromEntries(Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined))
+function preserveTracking(
+  delivery: RecordValue,
+  carrier: string,
+  ttn: string,
+  destination: { city: string; address: string },
+): RecordValue {
+  if (!marketplaceMatchesCarrierDelivery(delivery, carrier, ttn))
+    return marketplaceReplacementHistory(delivery, carrier, ttn, destination)
+  const keepCarrierDelivery = marketplaceMustKeepCarrierDelivery(delivery, carrier, ttn)
+  const preserved = Object.fromEntries(
+    Object.entries(delivery).filter(([key, value]) =>
+      (key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined) ||
+      (['shipmentHistory', 'ttnHistory', 'addressHistory'].includes(key) && value !== undefined),
+    ),
+  )
+  if (keepCarrierDelivery) {
+    preserved.ttn = delivery.ttn
+    preserved.city = delivery.city
+    preserved.address = delivery.address
+  } else {
+    if (text(delivery.trackingDestinationCity)) preserved.city = delivery.city
+    if (text(delivery.trackingDestinationAddress)) preserved.address = delivery.address
+  }
+  return preserved
 }
 
 function nameOf(person: RecordValue) {
@@ -427,7 +440,10 @@ Deno.serve(async (request) => {
           paymentMethod: text(order.requested_payment_method),
           paymentStatus: text(order.card_payment_state),
           receivedAt: receivedDate || undefined,
-          ...preserveTracking(currentDelivery, deliveryCarrier, deliveryTtn),
+          ...preserveTracking(currentDelivery, deliveryCarrier, deliveryTtn, {
+            city: text(asRecord(address.city).name),
+            address: deliveryAddress,
+          }),
           printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
           printedAt: text(currentDelivery.printedAt) || undefined,
         },

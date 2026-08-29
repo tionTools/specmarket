@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -120,24 +121,30 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-function shipmentValue(value: unknown) {
-  return readableText(value).replace(/\s/g, '').toLowerCase()
-}
-
-function shipmentCarrier(value: unknown) {
-  const carrier = shipmentValue(value)
-  if (carrier.includes('nova') || carrier.includes('нова')) return 'nova'
-  if (carrier.includes('meest') || carrier.includes('міст')) return 'meest'
-  if (carrier.includes('rozetka')) return 'rozetka'
-  if (carrier.includes('ukr') || carrier.includes('укр')) return 'ukrposhta'
-  return carrier
-}
-
-function preserveTracking(delivery: Record<string, unknown>, carrier: string, ttn: string): Record<string, unknown> {
-  if (shipmentValue(delivery.ttn) !== shipmentValue(ttn) || shipmentCarrier(delivery.carrier) !== shipmentCarrier(carrier)) return {}
-  return Object.fromEntries(
-    Object.entries(delivery).filter(([key, value]) => key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined),
+function preserveTracking(
+  delivery: Record<string, unknown>,
+  carrier: string,
+  ttn: string,
+  destination: { city: string; address: string },
+): Record<string, unknown> {
+  if (!marketplaceMatchesCarrierDelivery(delivery, carrier, ttn))
+    return marketplaceReplacementHistory(delivery, carrier, ttn, destination)
+  const keepCarrierDelivery = marketplaceMustKeepCarrierDelivery(delivery, carrier, ttn)
+  const preserved = Object.fromEntries(
+    Object.entries(delivery).filter(([key, value]) =>
+      (key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined) ||
+      (['shipmentHistory', 'ttnHistory', 'addressHistory'].includes(key) && value !== undefined),
+    ),
   )
+  if (keepCarrierDelivery) {
+    preserved.ttn = delivery.ttn
+    preserved.city = delivery.city
+    preserved.address = delivery.address
+  } else {
+    if (text(delivery.trackingDestinationCity)) preserved.city = delivery.city
+    if (text(delivery.trackingDestinationAddress)) preserved.address = delivery.address
+  }
+  return preserved
 }
 
 function itemSize(item: Record<string, unknown>) {
@@ -562,7 +569,7 @@ Deno.serve(async (request) => {
         shippingSource: hasManualShipping ? 'manual' : undefined,
         paymentMethod: shipment?.paymentProvider ?? '',
         paymentStatus: shipment?.paymentStatus ?? '',
-        ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn),
+        ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn, { city, address }),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
       },
