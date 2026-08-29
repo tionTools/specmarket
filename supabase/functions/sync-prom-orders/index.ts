@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+import { paymentDetails } from '../_shared/payment-details.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -516,6 +517,12 @@ Deno.serve(async (request) => {
     const deliveryProvider = asRecord(order.delivery_provider_data)
     const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
     const paymentData = asRecord(order.payment_data)
+    const savedPayment = paymentDetails(previousDelivery, {
+      paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
+      paymentStatus:
+        text(pick(paymentData, 'status', 'payment_status', 'state')) ||
+        text(pick(order, 'payment_status', 'payment_state')),
+    })
     const trackingNumber =
       text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) ||
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
@@ -604,12 +611,7 @@ Deno.serve(async (request) => {
         ttnHistory: ttnHistory.length ? ttnHistory : undefined,
         addressHistory: addressHistory.length ? addressHistory : undefined,
         status: deliveryStatus, payer,
-        paymentAmount: typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined,
-        paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
-        paymentStatus:
-          text(pick(paymentData, 'status', 'payment_status', 'state')) ||
-          text(pick(order, 'payment_status', 'payment_state')) ||
-          text(previousDelivery.paymentStatus),
+        ...savedPayment,
         rozetkaPayOperationIds: Array.isArray(previousDelivery.rozetkaPayOperationIds)
           ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
           : undefined,

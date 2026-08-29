@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+import { paymentDetails } from '../_shared/payment-details.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -477,6 +478,10 @@ Deno.serve(async (request) => {
     const previousDelivery = (existing.data?.delivery ?? {}) as Record<string, unknown>
     const shipment = source.address?.shipment
     const recipient = source.address?.recipient
+    const savedPayment = paymentDetails(previousDelivery, {
+      paymentMethod: readableText(shipment?.paymentProvider),
+      paymentStatus: readableText(shipment?.paymentStatus),
+    })
     let city = readableText(shipment?.settlement) || readableText(shipment?.city) || readableText(source.address?.city)
     let address = readableText(shipment?.address) || readableText(shipment?.office) || readableText(source.address?.address)
     if (shipment?.provider && shipment.settlementId) {
@@ -529,7 +534,6 @@ Deno.serve(async (request) => {
       ? 'Получено'
       : apiDeliveryStatus ||
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
-    const paymentAmount = typeof previousDelivery.paymentAmount === 'number' ? previousDelivery.paymentAmount : undefined
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
@@ -565,10 +569,8 @@ Deno.serve(async (request) => {
         status: deliveryStatus,
         payer: 'Не вказано',
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
-        paymentAmount,
+        ...savedPayment,
         shippingSource: hasManualShipping ? 'manual' : undefined,
-        paymentMethod: shipment?.paymentProvider ?? '',
-        paymentStatus: shipment?.paymentStatus ?? '',
         ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn, { city, address }),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,

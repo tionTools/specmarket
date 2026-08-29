@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+import { paymentDetails } from '../_shared/payment-details.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -386,6 +387,10 @@ Deno.serve(async (request) => {
       const items = itemRows(order)
       const deliveryFee = customerDeliveryFee(order, delivery)
       const currentDelivery = asRecord(existing?.delivery)
+      const savedPayment = paymentDetails(currentDelivery, {
+        paymentMethod: text(order.requested_payment_method),
+        paymentStatus: text(order.card_payment_state),
+      })
       const hasManualShipping = currentDelivery.shippingSource === 'manual'
       const receivedDate = receivedAt(order) || text(currentDelivery.receivedAt)
       const blackUsed = delivery.black_used === true
@@ -436,9 +441,7 @@ Deno.serve(async (request) => {
           blackUsed,
           customerDeliveryFee: deliveryFee,
           shippingSource: hasManualShipping ? 'manual' : undefined,
-          paymentAmount: typeof currentDelivery.paymentAmount === 'number' ? currentDelivery.paymentAmount : undefined,
-          paymentMethod: text(order.requested_payment_method),
-          paymentStatus: text(order.card_payment_state),
+          ...savedPayment,
           receivedAt: receivedDate || undefined,
           ...preserveTracking(currentDelivery, deliveryCarrier, deliveryTtn, {
             city: text(asRecord(address.city).name),

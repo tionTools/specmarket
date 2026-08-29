@@ -60,6 +60,7 @@ import type {
 import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
+import { reapplyRegistryPreview } from '@/features/orders/registry-preview'
 import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
@@ -2229,7 +2230,11 @@ async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unkno
   if (ids === null) await reconcileRemoteOrders(true)
   else if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
   await refreshLinkedPriceProductKeys()
-  if (isPromRegistryDraft.value) applyPromRegistryPreview(promRegistryEntries.value)
+  reapplyRegistryPreview(
+    isPromRegistryDraft.value,
+    promRegistryEntries.value,
+    applyPromRegistryPreview,
+  )
 }
 
 function scheduleTargetedOrdersRefresh(delay = 750) {
@@ -2467,6 +2472,11 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
     })),
   )
   for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
+  reapplyRegistryPreview(
+    isPromRegistryDraft.value,
+    promRegistryEntries.value,
+    applyPromRegistryPreview,
+  )
   sortOrders()
   return refreshedAllRequestedOrders
 }
