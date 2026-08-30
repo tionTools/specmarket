@@ -3275,25 +3275,14 @@ function shipmentHistoryAddress(entry: ShipmentHistoryEntry) {
   return displayDeliveryAddress(entry.city ?? '', entry.address ?? '')
 }
 
-function currentShipmentHistoryEntry(delivery: Delivery) {
-  const currentTtn = normalizedShipmentValue(delivery.ttn)
-  const currentAddress = normalizedDeliveryAddress(delivery.city, delivery.address)
-  return [...(delivery.shipmentHistory ?? [])]
-    .reverse()
-    .find(
-      (entry) =>
-        normalizedShipmentValue(entry.ttn) === currentTtn &&
-        normalizedDeliveryAddress(entry.city ?? '', entry.address ?? '') === currentAddress,
-    )
-}
-
 function previousShipmentHistory(delivery: Delivery) {
-  const current = currentShipmentHistoryEntry(delivery)
-  const currentIdentity = current ? shipmentHistoryIdentity(current) : ''
+  const currentTtn = normalizedShipmentValue(delivery.ttn)
   const seen = new Set<string>()
   return [...(delivery.shipmentHistory ?? [])].reverse().filter((entry) => {
+    const entryTtn = normalizedShipmentValue(entry.ttn)
+    if (!entryTtn || entryTtn === currentTtn) return false
     const identity = shipmentHistoryIdentity(entry)
-    if (identity === currentIdentity || seen.has(identity)) return false
+    if (seen.has(identity)) return false
     seen.add(identity)
     return true
   })
@@ -3324,11 +3313,7 @@ function legacyPreviousAddresses(delivery: Delivery) {
 }
 
 function hasDeliveryHistory(delivery: Delivery) {
-  return (
-    previousShipmentHistory(delivery).length > 0 ||
-    legacyPreviousTtns(delivery).length > 0 ||
-    legacyPreviousAddresses(delivery).length > 0
-  )
+  return previousShipmentHistory(delivery).length > 0 || legacyPreviousTtns(delivery).length > 0
 }
 
 function deliveryWasRedirected(delivery: Delivery) {
