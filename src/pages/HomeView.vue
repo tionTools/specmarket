@@ -3182,11 +3182,18 @@ function statusOptionsForOrder(order: Order) {
 
 function carrierIcon(carrier: string): 'nova' | 'ukr' | 'rozetka' | 'meest' | 'generic' {
   const value = carrier.toLowerCase()
+  const normalized = value.trim().replace(/[\s-]+/g, '_')
   if (value.includes('nova') || value.includes('новая') || value.includes('нова пошта'))
     return 'nova'
   if (value.includes('ukr') || value.includes('укр')) return 'ukr'
   if (value.includes('rozetka')) return 'rozetka'
-  if (value.includes('meest') || value.includes('міст')) return 'meest'
+  if (
+    value.includes('meest') ||
+    value.includes('міст') ||
+    /^(?:cvz|pickup_point|collection_point)_epicent(?:e)?r$/.test(normalized) ||
+    normalized === 'parcel_box_epicentr'
+  )
+    return 'meest'
   return 'generic'
 }
 
@@ -5000,8 +5007,23 @@ function orderDateTime(order: Order) {
                       <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
                     </dd>
                     <dd
-                      class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
+                      class="relative flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
                     >
+                      <button
+                        v-if="oneCClipboardText(order.delivery)"
+                        class="absolute left-0 top-1/2 h-5 min-w-7 -translate-y-1/2 rounded border border-slate-300 bg-slate-100 px-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+                        type="button"
+                        title="Скопировать строку для 1С"
+                        aria-label="Скопировать строку для 1С"
+                        @click="copyOneCTemplate(order.delivery, order.id)"
+                      >
+                        1с
+                        <span
+                          v-if="inlineActionNotice?.key === `copy-1c:${order.id}`"
+                          class="pointer-events-none absolute top-full left-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                          >Скопировано</span
+                        >
+                      </button>
                       <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase"
                         >Текущая ТТН:</span
                       >
@@ -5032,22 +5054,6 @@ function orderDateTime(order: Order) {
                         <span
                           v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
                           class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
-                          >Скопировано</span
-                        >
-                      </button>
-                    </dd>
-                    <dd v-if="oneCClipboardText(order.delivery)" class="flex justify-center">
-                      <button
-                        class="relative h-5 min-w-7 rounded border border-slate-300 bg-slate-100 px-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-200 hover:text-slate-800"
-                        type="button"
-                        title="Скопировать строку для 1С"
-                        aria-label="Скопировать строку для 1С"
-                        @click="copyOneCTemplate(order.delivery, order.id)"
-                      >
-                        1с
-                        <span
-                          v-if="inlineActionNotice?.key === `copy-1c:${order.id}`"
-                          class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
                           >Скопировано</span
                         >
                       </button>
