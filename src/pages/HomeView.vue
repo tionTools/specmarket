@@ -4998,16 +4998,8 @@ function orderDateTime(order: Order) {
               <dl class="mt-2 text-sm">
                 <div class="pb-1">
                   <div class="space-y-0.5 text-center">
-                    <dd class="flex min-w-0 items-center justify-center gap-2 font-semibold">
-                      <CarrierLogo
-                        v-if="carrierLogoKind(order) !== 'generic'"
-                        :kind="carrierLogoKind(order)"
-                      />
-                      <Truck v-else class="size-5 shrink-0 text-slate-500" aria-hidden="true" />
-                      <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
-                    </dd>
                     <dd
-                      class="relative flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
+                      class="relative flex min-w-0 items-center justify-center gap-2 font-semibold"
                     >
                       <button
                         v-if="oneCClipboardText(order.delivery)"
@@ -5024,6 +5016,16 @@ function orderDateTime(order: Order) {
                           >Скопировано</span
                         >
                       </button>
+                      <CarrierLogo
+                        v-if="carrierLogoKind(order) !== 'generic'"
+                        :kind="carrierLogoKind(order)"
+                      />
+                      <Truck v-else class="size-5 shrink-0 text-slate-500" aria-hidden="true" />
+                      <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
+                    </dd>
+                    <dd
+                      class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
+                    >
                       <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase"
                         >Текущая ТТН:</span
                       >
