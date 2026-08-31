@@ -68,6 +68,7 @@ const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
 const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
+const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -88,13 +89,26 @@ const registryDraftNavigation = useSessionStorage<string | null>(
 )
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
-type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'custom'
+type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'last30' | 'custom'
+type PreferredOrderListMonthPeriod = Extract<PlatformSummaryPeriod, 'month' | 'last30'>
+
+function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
+  return window.localStorage.getItem(preferredOrderListMonthPeriodStorageKey) === 'last30'
+    ? 'last30'
+    : 'month'
+}
+
 const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
 const platformSummaryFrom = ref('')
 const platformSummaryTo = ref('')
-const orderListPeriod = ref<PlatformSummaryPeriod>('month')
+const orderListPeriod = ref<PlatformSummaryPeriod>(loadPreferredOrderListMonthPeriod())
 const orderListFrom = ref('')
 const orderListTo = ref('')
+watch(orderListPeriod, (period) => {
+  if (period === 'month' || period === 'last30') {
+    window.localStorage.setItem(preferredOrderListMonthPeriodStorageKey, period)
+  }
+})
 const isComparingPreviousPeriod = ref(false)
 const isPlatformSummaryExpanded = ref(false)
 const isShowingCancelledAndReturned = ref(false)
@@ -1118,6 +1132,11 @@ const platformSummaryRange = computed(() => {
     )
     return { from, to }
   }
+  if (platformSummaryPeriod.value === 'last30') {
+    const from = new Date(today)
+    from.setDate(today.getDate() - 29)
+    return { from, to: today }
+  }
   if (platformSummaryPeriod.value === 'custom') {
     const first = parseInputDate(platformSummaryFrom.value) ?? today
     const second = parseInputDate(platformSummaryTo.value) ?? first
@@ -1145,6 +1164,11 @@ const orderListRange = computed(() => {
   if (orderListPeriod.value === 'decade') {
     const startDay = today.getDate() <= 10 ? 1 : today.getDate() <= 20 ? 11 : 21
     return { from: new Date(today.getFullYear(), today.getMonth(), startDay), to: today }
+  }
+  if (orderListPeriod.value === 'last30') {
+    const from = new Date(today)
+    from.setDate(today.getDate() - 29)
+    return { from, to: today }
   }
   if (orderListPeriod.value === 'custom') {
     const first = parseInputDate(orderListFrom.value) ?? today
@@ -1213,6 +1237,7 @@ const orderListPeriodLabel = computed(() => {
       week: 'Неделя',
       decade: 'Декада',
       month: 'Месяц',
+      last30: 'Последние 30 дней',
     }[orderListPeriod.value]
   }
 
@@ -3991,6 +4016,7 @@ function orderDateTime(order: Order) {
               <option value="week">Неделя</option>
               <option value="decade">Декада</option>
               <option value="month">Месяц</option>
+              <option value="last30">Последние 30 дней</option>
               <option value="custom">Произвольный период</option>
             </select>
             <template v-if="platformSummaryPeriod === 'custom'">
@@ -4143,6 +4169,7 @@ function orderDateTime(order: Order) {
               <option value="week">Неделя</option>
               <option value="decade">Декада</option>
               <option value="month">Месяц</option>
+              <option value="last30">Последние 30 дней</option>
               <option value="custom">Произвольный период</option>
             </select>
             <template v-if="orderListPeriod === 'custom'">
