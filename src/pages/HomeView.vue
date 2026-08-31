@@ -67,6 +67,7 @@ const storageKey = 'specmarket-crm-demo-orders'
 const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
 const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
+const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -313,6 +314,24 @@ function readStoredUnopenedOrders() {
 let hasRemoteOrderBaseline = window.localStorage.getItem(knownRemoteOrderIdsStorageKey) !== null
 let knownRemoteOrderIds = new Set(readStoredStringArray(knownRemoteOrderIdsStorageKey))
 const unopenedNewOrders = ref<UnopenedNewOrder[]>(readStoredUnopenedOrders())
+const copiedSpreadsheetOrderIds = ref(
+  new Set(readStoredStringArray(copiedSpreadsheetOrderIdsStorageKey)),
+)
+
+function isSpreadsheetOrderCopied(order: Order) {
+  return copiedSpreadsheetOrderIds.value.has(String(order.id))
+}
+
+function markSpreadsheetOrderCopied(order: Order) {
+  const orderId = String(order.id)
+  if (copiedSpreadsheetOrderIds.value.has(orderId)) return
+
+  copiedSpreadsheetOrderIds.value = new Set([...copiedSpreadsheetOrderIds.value, orderId])
+  window.localStorage.setItem(
+    copiedSpreadsheetOrderIdsStorageKey,
+    JSON.stringify([...copiedSpreadsheetOrderIds.value]),
+  )
+}
 
 function persistNewOrderTracking() {
   window.localStorage.setItem(
@@ -3385,8 +3404,27 @@ async function copyOrderForSpreadsheet(order: Order) {
 
   try {
     await copy(cells.join('\t'))
+    markSpreadsheetOrderCopied(order)
     if (copied.value) showInlineActionNotice(`copy-excel:${order.id}`, 'Строка скопирована')
   } catch {}
+}
+
+function oneCClipboardText(delivery: Delivery) {
+  const ttn = deliveryTtnForClipboard(delivery.carrier, delivery.ttn).trim()
+  if (!ttn) return ''
+
+  switch (carrierIcon(delivery.carrier)) {
+    case 'nova':
+      return `дроп ${ttn}`
+    case 'rozetka':
+      return `дроп Розетка ${ttn}`
+    case 'meest':
+      return `дроп Мист ${ttn}`
+    case 'ukr':
+      return `дроп Укрпочта ${ttn}  (068-565-55-52)`
+    default:
+      return ''
+  }
 }
 
 async function copyTtn(delivery: Delivery, orderId: Order['id']) {
@@ -3394,6 +3432,17 @@ async function copyTtn(delivery: Delivery, orderId: Order['id']) {
   try {
     await copy(deliveryTtnForClipboard(delivery.carrier, delivery.ttn))
     if (copied.value) showInlineActionNotice(`copy-ttn:${orderId}`, 'Скопировано')
+  } catch {}
+}
+
+async function copyOneCTemplate(delivery: Delivery, orderId: Order['id']) {
+  if (!isClipboardSupported.value) return
+  const text = oneCClipboardText(delivery)
+  if (!text) return
+
+  try {
+    await copy(text)
+    if (copied.value) showInlineActionNotice(`copy-1c:${orderId}`, 'Скопировано')
   } catch {}
 }
 
@@ -4297,7 +4346,12 @@ function orderDateTime(order: Order) {
               <div class="flex flex-wrap items-center gap-3">
                 <span v-if="!isGuest" class="relative inline-flex items-center">
                   <button
-                    class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
+                    class="rounded-lg border px-3 py-1.5 text-sm font-semibold"
+                    :class="
+                      isSpreadsheetOrderCopied(order)
+                        ? 'border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-600'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900'
+                    "
                     type="button"
                     title="Скопировать строку для Excel"
                     aria-label="Скопировать строку для Excel"
@@ -4978,6 +5032,22 @@ function orderDateTime(order: Order) {
                         <span
                           v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
                           class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                          >Скопировано</span
+                        >
+                      </button>
+                    </dd>
+                    <dd v-if="oneCClipboardText(order.delivery)" class="flex justify-center">
+                      <button
+                        class="relative h-5 min-w-7 rounded border border-slate-300 bg-slate-100 px-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+                        type="button"
+                        title="Скопировать строку для 1С"
+                        aria-label="Скопировать строку для 1С"
+                        @click="copyOneCTemplate(order.delivery, order.id)"
+                      >
+                        1с
+                        <span
+                          v-if="inlineActionNotice?.key === `copy-1c:${order.id}`"
+                          class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
                           >Скопировано</span
                         >
                       </button>
