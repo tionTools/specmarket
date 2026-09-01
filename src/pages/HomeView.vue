@@ -1094,6 +1094,10 @@ function isCancelledOrReturned(order: Order) {
   )
 }
 
+function isCancelledOrder(order: Order) {
+  return /скас|отмен|cancel/.test(displayOrderStatus(order.status).toLowerCase())
+}
+
 const reportOrders = computed(() =>
   orders.value.filter((order) => {
     if (!order.delivery.ttn.trim()) return false
@@ -1101,11 +1105,13 @@ const reportOrders = computed(() =>
     return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
   }),
 )
+const unpaidShipmentAccountingStart = new Date(2026, 7, 1)
 const unpaidShipmentAmount = computed(() =>
   orders.value
     .filter((order) => {
-      if (!order.delivery.ttn.trim() || isPaid(order) || isCancelledOrReturned(order)) return false
-      return !['returning', 'returned'].includes(order.delivery.trackingNormalizedStatus ?? '')
+      const orderDate = parseOrderDate(order.date)
+      if (orderDate === null || orderDate < unpaidShipmentAccountingStart) return false
+      return Boolean(order.delivery.ttn.trim()) && !isPaid(order) && !isCancelledOrder(order)
     })
     .reduce((total, order) => total + getNetOrderAmount(order), 0),
 )
@@ -3909,7 +3915,9 @@ function orderDateTime(order: Order) {
         </p>
       </section>
 
-      <section class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[0.58fr_1.04fr_1.19fr_1.19fr]">
+      <section
+        class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[0.58fr_1.04fr_1.19fr_1.05fr_0.85fr]"
+      >
         <article
           class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
@@ -3979,7 +3987,7 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
           <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">
             Фактическая прибыль
@@ -3990,18 +3998,22 @@ function orderDateTime(order: Order) {
               {{ formatMoney(summary.period.actual) }}
             </p>
           </div>
-          <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">В дороге</p>
-            <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(unpaidShipmentAmount) }}
-            </p>
-          </div>
           <div
             v-if="isComparingPreviousPeriod"
             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
             <strong>{{ formatMoney(summary.previous.actual) }}</strong>
+          </div>
+        </article>
+        <article
+          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="text-sm font-medium text-slate-600">В дороге</p>
+          <div class="border-l border-slate-300 pl-2 text-left">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(unpaidShipmentAmount) }}
+            </p>
           </div>
         </article>
       </section>
