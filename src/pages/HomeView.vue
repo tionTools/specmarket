@@ -104,6 +104,7 @@ const platformSummaryTo = ref('')
 const orderListPeriod = ref<PlatformSummaryPeriod>(loadPreferredOrderListMonthPeriod())
 const orderListFrom = ref('')
 const orderListTo = ref('')
+const orderListDate = ref('')
 watch(orderListPeriod, (period) => {
   if (period === 'month' || period === 'last30') {
     window.localStorage.setItem(preferredOrderListMonthPeriodStorageKey, period)
@@ -503,6 +504,7 @@ const defaultOrderListDate = new Date(defaultPlatformSummaryDate)
 defaultOrderListDate.setDate(defaultOrderListDate.getDate() - 1)
 orderListFrom.value = inputDate(defaultOrderListDate)
 orderListTo.value = inputDate(defaultOrderListDate)
+orderListDate.value = inputDate(defaultOrderListDate)
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
@@ -1205,34 +1207,17 @@ const previousOrderListRange = computed(() => ({
   from: shiftDateByMonths(orderListRange.value.from, -1),
   to: shiftDateByMonths(orderListRange.value.to, -1),
 }))
-const orderListQuickDateLabel = computed(() => {
-  const first = parseInputDate(orderListFrom.value)
-  const second = parseInputDate(orderListTo.value) ?? first
-  if (!first || !second) return '—'
-  const formatter = new Intl.DateTimeFormat('ru-RU')
-  if (first.getTime() === second.getTime()) return formatter.format(first)
-  return `${formatter.format(first)}–${formatter.format(second)}`
-})
-
-function shiftOrderListCustomRange(days: number) {
+function shiftOrderListDate(days: number) {
   const fallback = startOfLocalDay(new Date())
   fallback.setDate(fallback.getDate() - 1)
-  const first = parseInputDate(orderListFrom.value) ?? fallback
-  const second = parseInputDate(orderListTo.value) ?? first
-  const shiftedFirst = new Date(first)
-  const shiftedSecond = new Date(second)
-  shiftedFirst.setDate(shiftedFirst.getDate() + days)
-  shiftedSecond.setDate(shiftedSecond.getDate() + days)
-  orderListPeriod.value = 'custom'
-  orderListFrom.value = inputDate(shiftedFirst)
-  orderListTo.value = inputDate(shiftedSecond)
+  const selectedDate = parseInputDate(orderListDate.value) ?? fallback
+  const shiftedDate = new Date(selectedDate)
+  shiftedDate.setDate(shiftedDate.getDate() + days)
+  orderListDate.value = inputDate(shiftedDate)
 }
 
 function showTodayInOrderList() {
-  const today = startOfLocalDay(new Date())
-  orderListPeriod.value = 'custom'
-  orderListFrom.value = inputDate(today)
-  orderListTo.value = inputDate(today)
+  orderListDate.value = inputDate(startOfLocalDay(new Date()))
 }
 const previousOrderListRangeLabel = computed(
   () =>
@@ -1298,7 +1283,7 @@ const matchingOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   const isTtnSearch = /^[\d\s-]+$/.test(search)
-  const { from, to } = orderListRange.value
+  const selectedDate = parseInputDate(orderListDate.value)
   return orders.value.filter((order) => {
     const haystack = [
       JSON.stringify(order),
@@ -1326,12 +1311,15 @@ const matchingOrders = computed(() => {
         ? isCancelledOrReturned(order)
         : !isCancelledOrReturned(order)
     const orderDate = parseOrderDate(order.date)
-    const matchesPeriod =
-      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
+    const matchesDate =
+      isPromRegistryView.value ||
+      (selectedDate !== null &&
+        orderDate !== null &&
+        orderDate.getTime() === selectedDate.getTime())
     return (
       matchesPlatform &&
       matchesOrderState &&
-      matchesPeriod &&
+      matchesDate &&
       (!isPromRegistryView.value || promRegistryOrders.value.includes(order))
     )
   })
@@ -4140,43 +4128,44 @@ function orderDateTime(order: Order) {
             Отмены и возвраты
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
-            <div
-              v-if="orderListPeriod === 'custom'"
-              class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-              aria-label="Быстрая навигация по датам"
-            >
+            <div class="flex items-center gap-2 border-r border-slate-200 pr-2">
+              <div
+                class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                aria-label="Фильтр списка заказов по дате"
+              >
+                <button
+                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  type="button"
+                  aria-label="На один день назад"
+                  title="На один день назад"
+                  @click="shiftOrderListDate(-1)"
+                >
+                  <ChevronLeft class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  v-model="orderListDate"
+                  class="h-9 w-36 border-x border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums text-slate-700 outline-none"
+                  type="date"
+                  aria-label="Дата списка заказов"
+                />
+                <button
+                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  type="button"
+                  aria-label="На один день вперёд"
+                  title="На один день вперёд"
+                  @click="shiftOrderListDate(1)"
+                >
+                  <ChevronRight class="size-4" aria-hidden="true" />
+                </button>
+              </div>
               <button
-                class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
                 type="button"
-                aria-label="На один день назад"
-                title="На один день назад"
-                @click="shiftOrderListCustomRange(-1)"
+                @click="showTodayInOrderList"
               >
-                <ChevronLeft class="size-4" aria-hidden="true" />
-              </button>
-              <span
-                class="min-w-[7.25rem] border-x border-slate-200 px-2 text-center text-sm font-semibold tabular-nums text-slate-700"
-              >
-                {{ orderListQuickDateLabel }}
-              </span>
-              <button
-                class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                type="button"
-                aria-label="На один день вперёд"
-                title="На один день вперёд"
-                @click="shiftOrderListCustomRange(1)"
-              >
-                <ChevronRight class="size-4" aria-hidden="true" />
+                Сегодня
               </button>
             </div>
-            <button
-              v-if="orderListPeriod === 'custom'"
-              class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
-              type="button"
-              @click="showTodayInOrderList"
-            >
-              Сегодня
-            </button>
             <label
               class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
             >
@@ -4190,7 +4179,7 @@ function orderDateTime(order: Order) {
             <select
               v-model="orderListPeriod"
               class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-              aria-label="Период списка заказов"
+              aria-label="Период статистики заказов"
             >
               <option value="week">Неделя</option>
               <option value="decade">Декада</option>
@@ -4203,14 +4192,14 @@ function orderDateTime(order: Order) {
                 v-model="orderListFrom"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
                 type="date"
-                aria-label="Начало периода списка заказов"
+                aria-label="Начало периода статистики заказов"
               />
               <span class="text-sm text-slate-400">—</span>
               <input
                 v-model="orderListTo"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
                 type="date"
-                aria-label="Конец периода списка заказов"
+                aria-label="Конец периода статистики заказов"
               />
             </template>
           </div>
