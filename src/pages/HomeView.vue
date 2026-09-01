@@ -1101,6 +1101,14 @@ const reportOrders = computed(() =>
     return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
   }),
 )
+const unpaidShipmentAmount = computed(() =>
+  orders.value
+    .filter((order) => {
+      if (!order.delivery.ttn.trim() || isPaid(order) || isCancelledOrReturned(order)) return false
+      return !['returning', 'returned'].includes(order.delivery.trackingNormalizedStatus ?? '')
+    })
+    .reduce((total, order) => total + getNetOrderAmount(order), 0),
+)
 const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
     return orders.value.filter((order) => Boolean(order.delivery.printedAt))
@@ -1560,7 +1568,6 @@ const summary = computed(() => {
       orders: ordersForToday.value.length,
       turnover: sum(ordersForToday.value, getNetOrderAmount),
       planned: sum(ordersForToday.value, getPlannedProfit),
-      actual: sum(ordersForToday.value.filter(isPaid), getActualProfit),
     },
     period: {
       orders: ordersForSelectedPeriod.value.length,
@@ -3978,15 +3985,15 @@ function orderDateTime(order: Order) {
             Фактическая прибыль
           </p>
           <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
-            <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(summary.today.actual) }}
-            </p>
-          </div>
-          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.actual) }}
+            </p>
+          </div>
+          <div class="border-l border-slate-300 pl-2 text-left">
+            <p class="text-[10px] uppercase text-slate-400">В дороге</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(unpaidShipmentAmount) }}
             </p>
           </div>
           <div
