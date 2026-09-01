@@ -90,7 +90,8 @@ const registryDraftNavigation = useSessionStorage<string | null>(
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
 type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'last30' | 'custom'
-type PreferredOrderListMonthPeriod = Extract<PlatformSummaryPeriod, 'month' | 'last30'>
+type OrderListPeriod = PlatformSummaryPeriod | 'day'
+type PreferredOrderListMonthPeriod = Extract<OrderListPeriod, 'month' | 'last30'>
 
 function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
   return window.localStorage.getItem(preferredOrderListMonthPeriodStorageKey) === 'last30'
@@ -101,7 +102,7 @@ function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
 const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
 const platformSummaryFrom = ref('')
 const platformSummaryTo = ref('')
-const orderListPeriod = ref<PlatformSummaryPeriod>(loadPreferredOrderListMonthPeriod())
+const orderListPeriod = ref<OrderListPeriod>(loadPreferredOrderListMonthPeriod())
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const orderListDate = ref('')
@@ -1172,6 +1173,10 @@ const ordersForPlatformSummary = computed(() => {
 })
 const orderListRange = computed(() => {
   const today = startOfLocalDay(new Date())
+  if (orderListPeriod.value === 'day') {
+    const selectedDate = parseInputDate(orderListDate.value) ?? today
+    return { from: selectedDate, to: selectedDate }
+  }
   if (orderListPeriod.value === 'week') {
     const from = new Date(today)
     from.setDate(today.getDate() - ((today.getDay() + 6) % 7))
@@ -1231,6 +1236,9 @@ const ordersForPreviousPeriod = computed(() => {
   })
 })
 const orderListPeriodLabel = computed(() => {
+  if (orderListPeriod.value === 'day') {
+    return new Intl.DateTimeFormat('ru-RU').format(orderListRange.value.from)
+  }
   if (orderListPeriod.value !== 'custom') {
     return {
       week: 'Неделя',
@@ -1283,7 +1291,7 @@ const matchingOrders = computed(() => {
   const search = searchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   const isTtnSearch = /^[\d\s-]+$/.test(search)
-  const selectedDate = parseInputDate(orderListDate.value)
+  const { from, to } = orderListRange.value
   return orders.value.filter((order) => {
     const haystack = [
       JSON.stringify(order),
@@ -1311,15 +1319,12 @@ const matchingOrders = computed(() => {
         ? isCancelledOrReturned(order)
         : !isCancelledOrReturned(order)
     const orderDate = parseOrderDate(order.date)
-    const matchesDate =
-      isPromRegistryView.value ||
-      (selectedDate !== null &&
-        orderDate !== null &&
-        orderDate.getTime() === selectedDate.getTime())
+    const matchesPeriod =
+      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
       matchesPlatform &&
       matchesOrderState &&
-      matchesDate &&
+      matchesPeriod &&
       (!isPromRegistryView.value || promRegistryOrders.value.includes(order))
     )
   })
@@ -4128,10 +4133,32 @@ function orderDateTime(order: Order) {
             Отмены и возвраты
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
-            <div class="flex items-center gap-2 border-r border-slate-200 pr-2">
+            <label
+              class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
+            >
+              <input
+                v-model="isComparingPreviousPeriod"
+                class="size-3.5 accent-indigo-600"
+                type="checkbox"
+              />
+              Сравнить
+            </label>
+            <select
+              v-model="orderListPeriod"
+              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              aria-label="Фильтр заказов по дате или периоду"
+            >
+              <option value="day">День</option>
+              <option value="week">Неделя</option>
+              <option value="decade">Декада</option>
+              <option value="month">Месяц</option>
+              <option value="last30">Последние 30 дней</option>
+              <option value="custom">Произвольный период</option>
+            </select>
+            <template v-if="orderListPeriod === 'day'">
               <div
                 class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-                aria-label="Фильтр списка заказов по дате"
+                aria-label="Фильтр заказов по одному дню"
               >
                 <button
                   class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
@@ -4146,7 +4173,7 @@ function orderDateTime(order: Order) {
                   v-model="orderListDate"
                   class="h-9 w-36 border-x border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums text-slate-700 outline-none"
                   type="date"
-                  aria-label="Дата списка заказов"
+                  aria-label="Дата заказов"
                 />
                 <button
                   class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
@@ -4165,41 +4192,20 @@ function orderDateTime(order: Order) {
               >
                 Сегодня
               </button>
-            </div>
-            <label
-              class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
-            >
-              <input
-                v-model="isComparingPreviousPeriod"
-                class="size-3.5 accent-indigo-600"
-                type="checkbox"
-              />
-              Сравнить
-            </label>
-            <select
-              v-model="orderListPeriod"
-              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-              aria-label="Период статистики заказов"
-            >
-              <option value="week">Неделя</option>
-              <option value="decade">Декада</option>
-              <option value="month">Месяц</option>
-              <option value="last30">Последние 30 дней</option>
-              <option value="custom">Произвольный период</option>
-            </select>
+            </template>
             <template v-if="orderListPeriod === 'custom'">
               <input
                 v-model="orderListFrom"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
                 type="date"
-                aria-label="Начало периода статистики заказов"
+                aria-label="Начало периода заказов"
               />
               <span class="text-sm text-slate-400">—</span>
               <input
                 v-model="orderListTo"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
                 type="date"
-                aria-label="Конец периода статистики заказов"
+                aria-label="Конец периода заказов"
               />
             </template>
           </div>
