@@ -335,6 +335,61 @@ function findNestedSize(value: unknown, depth = 0): string {
   return ''
 }
 
+function promTranslationProductIds(item: RecordValue) {
+  const variationId = text(pick(item, 'rzid', 'variation_id', 'id')).trim()
+  const productId = text(pick(item, 'product_id', 'productId')).trim()
+  return [...new Set([variationId, productId].filter(Boolean))]
+}
+
+async function ukrainianProductNameById(
+  productId: string,
+  promToken: string,
+  cache: Map<string, Promise<string>>,
+) {
+  const cached = cache.get(productId)
+  if (cached) return cached
+
+  const pending = (async () => {
+    try {
+      const endpoint = new URL(`https://my.prom.ua/api/v1/products/translation/${encodeURIComponent(productId)}`)
+      endpoint.searchParams.set('lang', 'uk')
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+      })
+      if (!response.ok) return ''
+      const payload = asRecord(await response.json())
+      const translation = asRecord(payload.translation)
+      const data = asRecord(payload.data)
+      return (
+        readable(pick(payload, 'name', 'title', 'product_name')) ||
+        readable(pick(translation, 'name', 'title', 'product_name')) ||
+        readable(pick(data, 'name', 'title', 'product_name'))
+      ).trim()
+    } catch {
+      return ''
+    }
+  })()
+
+  cache.set(productId, pending)
+  return pending
+}
+
+async function resolvedUkrainianProductName(
+  item: RecordValue,
+  fallbackName: string,
+  promToken: string,
+  cache: Map<string, Promise<string>>,
+) {
+  const direct = readable(pick(item, 'name_ua', 'name_uk', 'product_name_ua', 'product_name_uk')).trim()
+  if (direct) return direct
+
+  for (const productId of promTranslationProductIds(item)) {
+    const translated = await ukrainianProductNameById(productId, promToken, cache)
+    if (translated) return translated
+  }
+  return fallbackName
+}
+
 function productSize(item: RecordValue, name: string) {
   const direct = readable(pick(item, 'variation', 'size', 'option', 'options', 'variant', 'variation_name', 'size_name'))
   if (direct) return direct
@@ -505,6 +560,7 @@ Deno.serve(async (request) => {
   const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   const productSizeCache = new Map<string, string>()
+  const productNameCache = new Map<string, Promise<string>>()
   for (const order of candidates) {
     const promId = text(order.id)
     if (!promId) continue
@@ -641,7 +697,8 @@ Deno.serve(async (request) => {
     const orderCommission = number(asRecord(order.cpa_commission).amount)
     if (items.length) {
       const itemRows = await Promise.all(items.map(async (item, position) => {
-      const name = text(item.name) || text(item.product_name) || 'Товар Prom'
+      const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+      const name = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
       // Позиция стабильнее названия: одинаковые товары могут повторяться,
       // а название в Prom иногда меняется.
       const manualItem = manualItems[position]
@@ -661,7 +718,7 @@ Deno.serve(async (request) => {
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
-      const apiSize = await resolvedProductSize(item, name, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
+      const apiSize = await resolvedProductSize(item, sourceName, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
       // A missing value in Prom's response must never erase a manually saved size.
       const size = apiSize || text(previous?.size) || ''
       const previousMarketplaceProductKey = text(
