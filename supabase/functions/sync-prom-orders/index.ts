@@ -335,38 +335,44 @@ function findNestedSize(value: unknown, depth = 0): string {
   return ''
 }
 
-function promTranslationProductIds(item: RecordValue) {
-  const variationId = text(pick(item, 'rzid', 'variation_id', 'id')).trim()
+type ProductTranslationResult = { name: string; retry: boolean }
+
+function promTranslationProductId(item: RecordValue) {
   const productId = text(pick(item, 'product_id', 'productId')).trim()
-  return [...new Set([variationId, productId].filter(Boolean))]
+  if (productId) return productId
+  return text(pick(item, 'rzid', 'variation_id', 'id')).trim()
 }
 
 async function ukrainianProductNameById(
   productId: string,
   promToken: string,
-  cache: Map<string, Promise<string>>,
+  cache: Map<string, Promise<ProductTranslationResult>>,
 ) {
   const cached = cache.get(productId)
   if (cached) return cached
 
-  const pending = (async () => {
+  const pending = (async (): Promise<ProductTranslationResult> => {
     try {
       const endpoint = new URL(`https://my.prom.ua/api/v1/products/translation/${encodeURIComponent(productId)}`)
       endpoint.searchParams.set('lang', 'uk')
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
       })
-      if (!response.ok) return ''
+      if (!response.ok) {
+        const retry = response.status === 408 || response.status === 429 || response.status >= 500
+        return { name: '', retry }
+      }
       const payload = asRecord(await response.json())
       const translation = asRecord(payload.translation)
       const data = asRecord(payload.data)
-      return (
+      const name = (
         readable(pick(payload, 'name', 'title', 'product_name')) ||
         readable(pick(translation, 'name', 'title', 'product_name')) ||
         readable(pick(data, 'name', 'title', 'product_name'))
       ).trim()
+      return { name, retry: false }
     } catch {
-      return ''
+      return { name: '', retry: true }
     }
   })()
 
@@ -378,16 +384,15 @@ async function resolvedUkrainianProductName(
   item: RecordValue,
   fallbackName: string,
   promToken: string,
-  cache: Map<string, Promise<string>>,
-) {
+  cache: Map<string, Promise<ProductTranslationResult>>,
+): Promise<ProductTranslationResult> {
   const direct = readable(pick(item, 'name_ua', 'name_uk', 'product_name_ua', 'product_name_uk')).trim()
-  if (direct) return direct
+  if (direct) return { name: direct, retry: false }
 
-  for (const productId of promTranslationProductIds(item)) {
-    const translated = await ukrainianProductNameById(productId, promToken, cache)
-    if (translated) return translated
-  }
-  return fallbackName
+  const productId = promTranslationProductId(item)
+  if (!productId) return { name: fallbackName, retry: false }
+  const translated = await ukrainianProductNameById(productId, promToken, cache)
+  return { name: translated.name || fallbackName, retry: translated.retry }
 }
 
 function productSize(item: RecordValue, name: string) {
@@ -560,7 +565,7 @@ Deno.serve(async (request) => {
   const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   const productSizeCache = new Map<string, string>()
-  const productNameCache = new Map<string, Promise<string>>()
+  const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
   for (const order of candidates) {
     const promId = text(order.id)
     if (!promId) continue
@@ -695,10 +700,13 @@ Deno.serve(async (request) => {
     }
     const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
     const orderCommission = number(asRecord(order.cpa_commission).amount)
+    let needsTranslationRetry = false
     if (items.length) {
       const itemRows = await Promise.all(items.map(async (item, position) => {
       const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
-      const name = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
+      const localizedName = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
+      if (localizedName.retry) needsTranslationRetry = true
+      const name = localizedName.name
       // Позиция стабильнее названия: одинаковые товары могут повторяться,
       // а название в Prom иногда меняется.
       const manualItem = manualItems[position]
@@ -780,7 +788,9 @@ Deno.serve(async (request) => {
         changedOrderIds.push(orderId)
       } else if (orderChanged) changedOrderIds.push(orderId)
     }
-    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
+    const sourceHashValue = hashes.get(externalId)
+    const syncStateHash = needsTranslationRetry ? `retry:${sourceHashValue ?? ''}` : sourceHashValue
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: syncStateHash, synced_at: new Date().toISOString() })
     if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
   return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })

@@ -3406,6 +3406,11 @@ function spreadsheetOrderComment(order: Order) {
     .join(' ')
 }
 
+function spreadsheetPlatformLabel(order: Order) {
+  const platform = orderBusinessPlatform(order)
+  return platform === 'Эпицентр' ? 'Эпик' : platform
+}
+
 async function copyOrderNumber(order: Order) {
   if (!isClipboardSupported.value) return
   try {
@@ -3422,6 +3427,8 @@ async function copyOrderForSpreadsheet(order: Order) {
     .map(spreadsheetProductLabel)
     .join(', ')
   const cells = [
+    order.date,
+    spreadsheetPlatformLabel(order),
     products,
     formatSpreadsheetNumber(getNetOrderCost(order)),
     formatSpreadsheetNumber(getNetOrderAmount(order)),
