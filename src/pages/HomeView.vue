@@ -19,11 +19,13 @@ import {
   useOnline,
   useSessionStorage,
   useTimeoutFn,
+  useWindowScroll,
 } from '@vueuse/core'
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ArrowUp,
   Copy,
   ExternalLink,
   Globe2,
@@ -83,6 +85,7 @@ const {
 })
 const documentVisibility = useDocumentVisibility()
 const isOnline = useOnline()
+const { y: windowScrollY } = useWindowScroll()
 const registryDraftNavigation = useSessionStorage<string | null>(
   registryDraftNavigationStorageKey,
   null,
@@ -1563,6 +1566,10 @@ function toggleCancelledAndReturned() {
 function toggleUnpaidOrders() {
   isShowingUnpaidOnly.value = !isShowingUnpaidOnly.value
   if (isShowingUnpaidOnly.value) isShowingCancelledAndReturned.value = false
+}
+
+function scrollOrdersToTop() {
+  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
 }
 
 const summary = computed(() => {
@@ -3744,6 +3751,16 @@ function orderDateTime(order: Order) {
       title="Открыть цены и себестоимость"
       ><span>Ц</span><span>Е</span><span>Н</span><span>Ы</span></RouterLink
     >
+    <button
+      v-if="visibleOrders.length > 0 && windowScrollY > 320"
+      class="fixed right-5 bottom-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
+      type="button"
+      title="Наверх"
+      aria-label="Наверх"
+      @click="scrollOrdersToTop"
+    >
+      <ArrowUp class="size-5" aria-hidden="true" />
+    </button>
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div class="shrink-0">
