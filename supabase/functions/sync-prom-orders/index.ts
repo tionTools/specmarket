@@ -588,7 +588,7 @@ Deno.serve(async (request) => {
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const candidateOrderIds = (existingRows ?? []).map((row) => row.id)
   const { data: existingItems, error: existingItemsError } = candidateOrderIds.length
-    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, marketplace_product_key, cost_manual, price_item_id').in('order_id', candidateOrderIds)
+    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual, marketplace_product_key, cost_manual, price_item_id').in('order_id', candidateOrderIds)
     : { data: [] }
   if (existingItemsError) return Response.json({ ok: false, message: existingItemsError.message }, { status: 500, headers: corsHeaders })
   const itemsByOrder = new Map<string, RecordValue[]>()
@@ -733,6 +733,24 @@ Deno.serve(async (request) => {
     const currentItems = itemsByOrder.get(orderId) ?? []
     const byPosition = new Map((currentItems ?? []).map((item) => [item.position, item]))
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
+    const variantKey = (marketplaceProductKey: string, size: string) =>
+      marketplaceProductKey && size ? `${marketplaceProductKey}\u0000${size.trim().toLowerCase()}` : ''
+    const byVariant = new Map(
+      currentItems
+        .map((item) => [
+          variantKey(text(item.marketplace_product_key), text(item.size)),
+          item,
+        ] as const)
+        .filter(([key]) => Boolean(key)),
+    )
+    const manualByVariant = new Map(
+      manualItems
+        .map((item) => [
+          variantKey(text(item.marketplaceProductKey), text(item.size)),
+          item,
+        ] as const)
+        .filter(([key]) => Boolean(key)),
+    )
     const items = sourceItems(order)
     const itemPrice = (item: RecordValue) => {
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
@@ -747,12 +765,36 @@ Deno.serve(async (request) => {
       const localizedName = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
       if (localizedName.retry) needsTranslationRetry = true
       const name = localizedName.name
-      // Позиция стабильнее названия: одинаковые товары могут повторяться,
-      // а название в Prom иногда меняется.
-      const manualItem = manualItems[position]
-      const previous = manualItem && text(manualItem.name) === name ? manualItem : byPosition.get(position) ?? byName.get(name)
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
       const price = itemPrice(item)
+      const apiSize = await resolvedProductSize(
+        item,
+        sourceName,
+        promToken,
+        feedProducts,
+        productSizeCache,
+        Boolean(requestedExternalId),
+      )
+      const marketplaceProductKey = promProductKey(item)
+      const currentVariantKey = variantKey(marketplaceProductKey, apiSize)
+      const manualItem =
+        (currentVariantKey ? manualByVariant.get(currentVariantKey) : undefined) ??
+        manualItems.find(
+          (candidate) =>
+            text(candidate.name) === name && (!apiSize || text(candidate.size) === apiSize),
+        )
+      const matchesCurrentVariant = (candidate: RecordValue | undefined) =>
+        Boolean(candidate) &&
+        (!marketplaceProductKey ||
+          text(candidate?.marketplace_product_key ?? candidate?.marketplaceProductKey) ===
+            marketplaceProductKey) &&
+        (!apiSize || text(candidate?.size) === apiSize)
+      const namePrevious = byName.get(name)
+      const positionPrevious = byPosition.get(position)
+      const previous =
+        (currentVariantKey ? byVariant.get(currentVariantKey) : undefined) ??
+        (matchesCurrentVariant(namePrevious) ? namePrevious : undefined) ??
+        (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
       const itemCommission = commissionAmount(item)
       const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
       const websiteCommission = websiteOrderCommission && itemsAmount
@@ -766,19 +808,28 @@ Deno.serve(async (request) => {
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
-      const apiSize = await resolvedProductSize(item, sourceName, promToken, feedProducts, productSizeCache, Boolean(requestedExternalId))
+      const royaltyManual =
+        manualItem?.royaltyManual === true || previous?.royalty_manual === true
+      const preservedRoyaltyPercent =
+        manualItem?.royaltyManual === true
+          ? manualItem.royaltyPercent
+          : previous?.royalty_percent
+      const preservedRoyaltyAmount =
+        manualItem?.royaltyManual === true
+          ? manualItem.royaltyAmount
+          : previous?.royalty_amount
       // A missing value in Prom's response must never erase a manually saved size.
       const size = apiSize || text(previous?.size) || ''
       const previousMarketplaceProductKey = text(
         previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
       )
-      const marketplaceProductKey = promProductKey(item) || previousMarketplaceProductKey
-      let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
+      const resolvedMarketplaceProductKey = marketplaceProductKey || previousMarketplaceProductKey
+      let linkedPriceCost = priceCostSnapshots.get(resolvedMarketplaceProductKey)
       if (
         !linkedPriceCost &&
-        marketplaceProductKey &&
+        resolvedMarketplaceProductKey &&
         previousMarketplaceProductKey &&
-        marketplaceProductKey !== previousMarketplaceProductKey
+        resolvedMarketplaceProductKey !== previousMarketplaceProductKey
       ) {
         const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
         if (legacyPriceCost) {
@@ -786,11 +837,11 @@ Deno.serve(async (request) => {
             admin,
             'Пром',
             previousMarketplaceProductKey,
-            marketplaceProductKey,
+            resolvedMarketplaceProductKey,
             legacyPriceCost,
             name,
           )
-          if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+          if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, legacyPriceCost)
           linkedPriceCost = legacyPriceCost
         }
       }
@@ -809,11 +860,12 @@ Deno.serve(async (request) => {
         price,
         cost: resolvedCost.cost,
         cost_usd: resolvedCost.costUsd,
-        marketplace_product_key: marketplaceProductKey || null,
+        marketplace_product_key: resolvedMarketplaceProductKey || null,
         cost_manual: resolvedCost.costManual,
         price_item_id: resolvedCost.priceItemId,
-        royalty_percent: previous?.royalty_percent ?? previous?.royaltyPercent ?? royaltyPercent,
-        royalty_amount: previous?.royalty_amount ?? previous?.royaltyAmount ?? royaltyAmount,
+        royalty_percent: royaltyManual ? preservedRoyaltyPercent ?? null : royaltyPercent,
+        royalty_amount: royaltyManual ? preservedRoyaltyAmount ?? null : royaltyAmount,
+        royalty_manual: royaltyManual,
       }
       }))
       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)

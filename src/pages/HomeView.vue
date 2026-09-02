@@ -534,6 +534,8 @@ const getNetRoyalty = (order: Order) =>
   order.products.reduce((sum, product) => sum + getNetProductRoyalty(order, product), 0)
 const hasAcceptedReturn = (order: Order) =>
   order.products.some((product) => (product.returnedQuantity ?? 0) > 0)
+const isFullyAcceptedReturn = (order: Order) =>
+  hasAcceptedReturn(order) && getNetOrderAmount(order) === 0
 const getActualRevenue = (order: Order) => {
   const paymentAmount = order.paymentAmount ?? 0
   if (order.platform !== 'Каста' || !hasAcceptedReturn(order)) return paymentAmount
@@ -541,14 +543,18 @@ const getActualRevenue = (order: Order) => {
   return Math.max(0, paymentAmount - returnedAmount)
 }
 const getPlannedProfit = (order: Order) =>
-  getNetOrderAmount(order) * 0.983 -
-  getNetOrderCost(order) -
-  getNetRoyalty(order) -
-  order.shipping -
-  (order.extraExpenses ?? 0)
-// Фактическая прибыль появляется только после ручного внесения полученной
-// суммы. Статус площадки сам по себе не означает, что деньги уже получены.
+  isFullyAcceptedReturn(order)
+    ? 0
+    : getNetOrderAmount(order) * 0.983 -
+      getNetOrderCost(order) -
+      getNetRoyalty(order) -
+      order.shipping -
+      (order.extraExpenses ?? 0)
+// Обычно фактическая прибыль появляется после внесения оплаты. Полностью
+// принятый возврат — исключение: его отрицательный результат уже состоялся,
+// даже если итоговая сумма оплаты стала нулевой.
 const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
+const hasActualFinancialResult = (order: Order) => isPaid(order) || isFullyAcceptedReturn(order)
 const getActualProfit = (order: Order) =>
   getActualRevenue(order) -
   getNetOrderCost(order) -
@@ -1572,13 +1578,13 @@ const summary = computed(() => {
       orders: ordersForSelectedPeriod.value.length,
       turnover: sum(ordersForSelectedPeriod.value, getNetOrderAmount),
       planned: sum(ordersForSelectedPeriod.value, getPlannedProfit),
-      actual: sum(ordersForSelectedPeriod.value.filter(isPaid), getActualProfit),
+      actual: sum(ordersForSelectedPeriod.value.filter(hasActualFinancialResult), getActualProfit),
     },
     previous: {
       orders: ordersForPreviousPeriod.value.length,
       turnover: sum(ordersForPreviousPeriod.value, getNetOrderAmount),
       planned: sum(ordersForPreviousPeriod.value, getPlannedProfit),
-      actual: sum(ordersForPreviousPeriod.value.filter(isPaid), getActualProfit),
+      actual: sum(ordersForPreviousPeriod.value.filter(hasActualFinancialResult), getActualProfit),
     },
   }
 })
@@ -1593,7 +1599,9 @@ const platformSummary = computed(() =>
       count: platformOrders.length,
       turnover: platformOrders.reduce((sum, order) => sum + getNetOrderAmount(order), 0),
       planned: platformOrders.reduce((sum, order) => sum + getPlannedProfit(order), 0),
-      actual: platformOrders.filter(isPaid).reduce((sum, order) => sum + getActualProfit(order), 0),
+      actual: platformOrders
+        .filter(hasActualFinancialResult)
+        .reduce((sum, order) => sum + getActualProfit(order), 0),
     }
   }),
 )
@@ -2261,6 +2269,7 @@ function orderSyncSnapshot(order: Order) {
     acquiringPercent: order.acquiringPercent ?? null,
     items: order.products.map((product) => ({
       name: product.name,
+      size: product.size,
       cost: product.cost,
       costUsd: product.costUsd ?? 0,
       marketplaceProductKey: product.marketplaceProductKey,
@@ -4351,7 +4360,7 @@ function orderDateTime(order: Order) {
               class="flex self-stretch items-center justify-end whitespace-nowrap border-l border-slate-200 pl-3 text-right tabular-nums"
               >{{ formatMoney(getOrderAmount(order)) }}</strong
             ><span
-              v-if="isPaid(order)"
+              v-if="hasActualFinancialResult(order)"
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
               ><strong class="whitespace-nowrap">{{ formatMoney(getActualProfit(order)) }}</strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
