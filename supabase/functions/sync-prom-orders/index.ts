@@ -415,24 +415,52 @@ function productSize(item: RecordValue, name: string) {
   */
 }
 
+type FeedProductInfo = { size: string; imageUrl: string }
+type PromFeedProducts = {
+  byOfferId: Map<string, FeedProductInfo>
+  byUniqueAlias: Map<string, FeedProductInfo>
+}
+
+function promFeedIdentifiers(item: RecordValue) {
+  return [...new Set([
+    text(pick(item, 'rzid', 'variation_id', 'id')).trim(),
+    text(pick(item, 'product_id', 'productId')).trim(),
+    text(item.external_id).trim(),
+    text(item.sku).trim(),
+  ].filter(Boolean))]
+}
+
+function productFromPromFeed(item: RecordValue, feedProducts: PromFeedProducts) {
+  const identifiers = promFeedIdentifiers(item)
+  for (const identifier of identifiers) {
+    const exact = feedProducts.byOfferId.get(identifier)
+    if (exact) return exact
+  }
+  for (const identifier of identifiers) {
+    const alias = feedProducts.byUniqueAlias.get(identifier)
+    if (alias) return alias
+  }
+  return undefined
+}
+
 async function resolvedProductSize(
   item: RecordValue,
   name: string,
   promToken: string,
-  feedProducts: Map<string, FeedProductInfo>,
+  feedProducts: PromFeedProducts,
   productCache: Map<string, string>,
   useProductFallback: boolean,
 ) {
   const fromOrder = productSize(item, name)
   if (fromOrder) return fromOrder
 
-  // The item id points to the Prom product variation (rzid). It is a fallback
-  // only for an individual order refresh, so a bulk "new orders" scan remains fast.
-  const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
-  if (!rzid) return ''
-  const fromFeed = feedProducts.get(rzid)?.size
+  const fromFeed = productFromPromFeed(item, feedProducts)?.size
   if (fromFeed) return fromFeed
-  if (!useProductFallback) return ''
+
+  // Product API fallback is reserved for an individual order refresh, so a bulk
+  // "new orders" scan does not make one extra request per item.
+  const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
+  if (!rzid || !useProductFallback) return ''
   if (productCache.has(rzid)) return productCache.get(rzid) ?? ''
 
   try {
@@ -452,9 +480,12 @@ async function resolvedProductSize(
 
 function isSizeParameter(name: string) {
   const normalized = name.trim().toLocaleLowerCase()
-  const ukrainian = String.fromCodePoint(0x440, 0x43e, 0x437, 0x43c, 0x456, 0x440)
-  const russian = String.fromCodePoint(0x440, 0x430, 0x437, 0x43c, 0x435, 0x440)
-  return normalized === ukrainian || normalized === russian || normalized === 'size'
+  if (/(?:упаков|пакув|короб|pack|box)/i.test(normalized)) return false
+  return ['розмір', 'размер', 'size'].some((label) => {
+    if (!normalized.startsWith(label)) return false
+    const suffix = normalized.slice(label.length)
+    return suffix === '' || /^[\s:(_/-]/.test(suffix)
+  })
 }
 
 function decodeXmlText(value: string) {
@@ -462,37 +493,46 @@ function decodeXmlText(value: string) {
     .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
 }
 
-type FeedProductInfo = { size: string; imageUrl: string }
-
-function productFromFeedXml(xml: string, wantedOfferId: string): FeedProductInfo {
-  for (const match of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
-    if (match[2] !== wantedOfferId) continue
-    const body = match[3]
-    const imageUrl = decodeXmlText(body.match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
-    for (const param of body.matchAll(/<param\b[^>]*\bname=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/param>/gi)) {
-      if (isSizeParameter(decodeXmlText(param[2]))) return { size: decodeXmlText(param[3]), imageUrl }
-    }
-    return { size: '', imageUrl }
+function productFromFeedBody(body: string): FeedProductInfo {
+  const imageUrl = decodeXmlText(body.match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
+  for (const param of body.matchAll(/<param\b[^>]*\bname=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/param>/gi)) {
+    if (isSizeParameter(decodeXmlText(param[2]))) return { size: decodeXmlText(param[3]), imageUrl }
   }
-  return { size: '', imageUrl: '' }
+  return { size: '', imageUrl }
 }
 
-async function productsFromPromFeed(feedUrl: string | undefined) {
-  const products = new Map<string, FeedProductInfo>()
-  if (!feedUrl) return products
+async function productsFromPromFeed(feedUrl: string | undefined): Promise<PromFeedProducts> {
+  const byOfferId = new Map<string, FeedProductInfo>()
+  const byUniqueAlias = new Map<string, FeedProductInfo>()
+  if (!feedUrl) return { byOfferId, byUniqueAlias }
+  const aliasOwner = new Map<string, string>()
+  const ambiguousAliases = new Set<string>()
   try {
     const response = await fetch(feedUrl)
-    if (!response.ok) return products
+    if (!response.ok) return { byOfferId, byUniqueAlias }
     const xml = await response.text()
     for (const match of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
-      const offerId = match[2]
-      const product = productFromFeedXml(match[0], offerId)
-      if (product.size || product.imageUrl) products.set(offerId, product)
+      const offerId = match[2].trim()
+      const body = match[3]
+      const product = productFromFeedBody(body)
+      if (!product.size && !product.imageUrl) continue
+      byOfferId.set(offerId, product)
+
+      const vendorCode = decodeXmlText(body.match(/<vendorCode\b[^>]*>([\s\S]*?)<\/vendorCode>/i)?.[1] ?? '')
+      if (!vendorCode || ambiguousAliases.has(vendorCode)) continue
+      const owner = aliasOwner.get(vendorCode)
+      if (owner && owner !== offerId) {
+        byUniqueAlias.delete(vendorCode)
+        ambiguousAliases.add(vendorCode)
+        continue
+      }
+      aliasOwner.set(vendorCode, offerId)
+      byUniqueAlias.set(vendorCode, product)
     }
   } catch {
     // The marketplace sync continues with order data if the catalogue feed is unavailable.
   }
-  return products
+  return { byOfferId, byUniqueAlias }
 }
 
 Deno.serve(async (request) => {
