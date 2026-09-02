@@ -310,7 +310,7 @@ function formatDeliveryPointAddress(provider: string | undefined, officeId: stri
   return `${label}${plainAddress ? `, ${plainAddress}` : ''}`
 }
 
-Deno.serve(async (request) => {
+async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   const url = Deno.env.get('SUPABASE_URL')
@@ -340,32 +340,48 @@ Deno.serve(async (request) => {
   let orders: EpicentrOrder[] = []
 
   if (requestedExternalId) {
-    const [detailResponse, listResponse] = await Promise.all([
-      fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${requestedExternalId}`, {
-        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-      }),
-      fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
-        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-      }),
-    ])
+    // V6 is required for the order details. V4 is only an additional source for
+    // the cabinet status and must never make an individual sync fail.
+    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${requestedExternalId}`, {
+      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+    })
     if (!detailResponse.ok) {
       return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: detailResponse.status }, { status: 502, headers: corsHeaders })
     }
     const detailPayload: unknown = await detailResponse.json()
     const item = extractOrder(detailPayload)
-    let listStatusCode = ''
-    if (listResponse.ok) {
-      const listPayload = await listResponse.json() as { items?: EpicentrOrder[] }
-      const listedOrder = (listPayload.items ?? []).find((candidate) =>
-        readableText(candidate.id) === requestedExternalId || readableText(candidate.externalId) === requestedExternalId
-      )
-      listStatusCode = readableText(listedOrder?.statusCode ?? (listedOrder as unknown as Record<string, unknown> | undefined)?.status)
-    }
     const detailStatusCode = readableText(item.statusCode ?? item.status)
+    let listStatusCode = ''
+    let listStatusError = ''
+    try {
+      const listResponse = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
+        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+      })
+      if (listResponse.ok) {
+        const listPayload = await listResponse.json() as { items?: EpicentrOrder[] }
+        const listedOrder = (listPayload.items ?? []).find((candidate) =>
+          readableText(candidate.id) === requestedExternalId || readableText(candidate.externalId) === requestedExternalId
+        )
+        listStatusCode = readableText(listedOrder?.statusCode ?? (listedOrder as unknown as Record<string, unknown> | undefined)?.status)
+        if (!listedOrder) listStatusError = 'order-not-found-in-v4-list'
+      } else {
+        listStatusError = `http-${listResponse.status}`
+      }
+    } catch (error) {
+      listStatusError = error instanceof Error ? error.message : String(error)
+    }
+    const effectiveStatusCode = listStatusCode || detailStatusCode
+    console.info('Epicentr individual status source', {
+      orderId: requestedExternalId,
+      v4StatusCode: listStatusCode || null,
+      v6StatusCode: detailStatusCode || null,
+      effectiveStatusCode: effectiveStatusCode || null,
+      v4Error: listStatusError || null,
+    })
     orders = [{
       ...item,
       id: readableText(item.id) || requestedExternalId,
-      statusCode: listStatusCode || detailStatusCode,
+      statusCode: effectiveStatusCode,
       items: (item.items as EpicentrOrder['items']) ?? [],
     } as EpicentrOrder]
   } else {
@@ -704,4 +720,17 @@ Deno.serve(async (request) => {
   }
 
   return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
+}
+
+Deno.serve(async (request) => {
+  try {
+    return await handleRequest(request)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('sync-epicentr-orders unhandled error', error)
+    return Response.json(
+      { ok: false, message: `Ошибка синхронизации Эпицентра: ${message}` },
+      { status: 502, headers: corsHeaders },
+    )
+  }
 })
