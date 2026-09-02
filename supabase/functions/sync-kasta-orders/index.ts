@@ -176,8 +176,7 @@ function orderDateKey(value: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean, deliveryWasNotCompleted: boolean): number | undefined {
-  if (deliveryWasNotCompleted) return 0
+function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: number, orderAmount: number, blackUsed: boolean): number | undefined {
   if (!blackUsed) return 0
   const tariff = [...TARIF_SCHEDULE]
     .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
@@ -187,12 +186,9 @@ function calculateKastaDeliveryCost(orderDate: string, customerDeliveryFee: numb
   return tariff.rates.find((rate) => orderAmount <= rate.max)?.cost ?? 0
 }
 
-function hasCancellationOrReturnStatus(order: RecordValue): boolean {
+function hasCancellationStatus(order: RecordValue): boolean {
   const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
-  return statuses.some((status) => {
-    const type = text(status.type)
-    return type === 'Cancelled' || /^(?:Return|Refund)/.test(type)
-  })
+  return statuses.some((status) => text(status.type) === 'Cancelled')
 }
 
 function orderAmount(order: RecordValue, items: RecordValue[]): number {
@@ -394,11 +390,25 @@ Deno.serve(async (request) => {
       const hasManualShipping = currentDelivery.shippingSource === 'manual'
       const receivedDate = receivedAt(order) || text(currentDelivery.receivedAt)
       const blackUsed = delivery.black_used === true
-      // A cancellation/return makes delivery free only when the buyer never received
-      // the order. Once receipt happened, Kasta co-finance remains an actual expense.
-      const tariffDate = orderDateKey(receivedDate || createdAt)
-      const deliveryWasNotCompleted = hasCancellationOrReturnStatus(order) && !receivedDate
-      const calculatedShipping = calculateKastaDeliveryCost(tariffDate, deliveryFee, orderAmount(order, items), blackUsed, deliveryWasNotCompleted)
+      // Delivery is fixed when the order first enters CRM. Later Kasta return/refund
+      // payloads may reduce item amounts, but that must not recalculate an expense
+      // that was already recorded. The only automatic zeroing signal we trust here
+      // is an explicit Kasta Cancelled status before any receipt was recorded.
+      const tariffDate = orderDateKey(createdAt)
+      const cancelledBeforeReceipt = hasCancellationStatus(order) && !receivedDate
+      const calculatedShipping = calculateKastaDeliveryCost(
+        tariffDate,
+        deliveryFee,
+        orderAmount(order, items),
+        blackUsed,
+      )
+      const resolvedShipping = hasManualShipping
+        ? Number(existing?.shipping ?? 0)
+        : cancelledBeforeReceipt
+          ? 0
+          : existing
+            ? Number(existing.shipping ?? 0)
+            : calculatedShipping ?? 0
       const deliveryStatus = receivedDate
         ? 'Получено'
         : text(status.type) === 'Cancelled'
@@ -424,9 +434,7 @@ Deno.serve(async (request) => {
         customer_comment: Array.isArray(order.comments) ? order.comments.map(text).filter(Boolean).join('\n') || null : null,
         platform: 'Каста',
         status: (orderStatuses[text(status.type)] ?? text(status.type)) || 'Новый',
-        shipping: hasManualShipping
-          ? Number(existing?.shipping ?? 0)
-          : calculatedShipping ?? Number(existing?.shipping ?? 0),
+        shipping: resolvedShipping,
         acquiring: Number(existing?.acquiring ?? 0),
         acquiring_percent: existing?.acquiring_percent ?? null,
         delivery: {

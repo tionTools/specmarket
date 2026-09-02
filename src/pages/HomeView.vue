@@ -2461,7 +2461,11 @@ function mapRemoteOrders(
 
 function focusedOrderCellOrder() {
   const activeElement = document.activeElement
-  if (!(activeElement instanceof HTMLInputElement)) return undefined
+  if (
+    !(activeElement instanceof HTMLInputElement) &&
+    !(activeElement instanceof HTMLTextAreaElement)
+  )
+    return undefined
   if (!activeElement.classList.contains('order-cell-edit')) return undefined
   const orderCard = activeElement.closest<HTMLElement>('[data-order-id]')
   if (!orderCard) return undefined
@@ -5015,12 +5019,12 @@ function orderDateTime(order: Order) {
               <label
                 v-if="isInternalCommentVisible(order)"
                 data-order-card
-                class="mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
+                class="order-edit mt-4 block rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-500"
                 >Комментарий к заказу<textarea
                   :value="internalCommentValue(order)"
                   :rows="internalCommentRows(order)"
                   :readonly="isGuest || editingInternalCommentOrderId !== order.id"
-                  class="mt-2 block min-h-0 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition"
+                  class="order-cell-edit mt-2 block min-h-0 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition"
                   :class="
                     editingInternalCommentOrderId === order.id
                       ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100'
