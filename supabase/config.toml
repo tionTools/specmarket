@@ -371,6 +371,15 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+[functions.sync-prom-orders]
+verify_jwt = false
+
+[functions.sync-epicentr-orders]
+verify_jwt = false
+
+[functions.sync-kasta-orders]
+verify_jwt = false
+
 [functions.sync-delivery-tracking]
 verify_jwt = false
 

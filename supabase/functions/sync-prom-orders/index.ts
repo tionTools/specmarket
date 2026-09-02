@@ -794,9 +794,8 @@ Deno.serve(async (request) => {
           linkedPriceCost = legacyPriceCost
         }
       }
-      const variationId = text(pick(item, 'rzid', 'variation_id', 'id'))
       const imageUrl =
-        feedProducts.get(variationId)?.imageUrl ||
+        productFromPromFeed(item, feedProducts)?.imageUrl ||
         text(pick(item, 'image', 'image_url', 'imageUrl')) ||
         text(previous?.image_url)
       const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)
