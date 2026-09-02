@@ -2756,17 +2756,35 @@ function addUniqueLegacyValue(values: string[] | undefined, value: string) {
 }
 
 function shipmentHistoryIdentity(entry: ShipmentHistoryEntry) {
-  return JSON.stringify({
-    ttn: normalizedShipmentValue(entry.ttn),
-    relation: entry.relation,
-    relatedTtn: normalizedShipmentValue(entry.relatedTtn ?? ''),
-    city: entry.city?.trim().replace(/\s+/g, ' ').toLowerCase() ?? '',
-    address: entry.address?.trim().replace(/\s+/g, ' ').toLowerCase() ?? '',
-    branchNumber: entry.branchNumber?.trim().toLowerCase() ?? '',
-    locationCode: entry.locationCode?.trim().toLowerCase() ?? '',
-    postalCode: entry.postalCode?.trim().toLowerCase() ?? '',
-    source: entry.source,
-  })
+  return normalizedShipmentValue(entry.ttn)
+}
+
+function shipmentHistoryRelationPriority(relation: ShipmentRelation) {
+  const priority: Record<ShipmentRelation, number> = {
+    original: 5,
+    redirect: 4,
+    return: 4,
+    replacement: 3,
+    unknown: 1,
+  }
+  return priority[relation]
+}
+
+function mergeShipmentHistoryEntry(
+  current: ShipmentHistoryEntry,
+  incoming: ShipmentHistoryEntry,
+): ShipmentHistoryEntry {
+  const incomingIsPreferred =
+    shipmentHistoryRelationPriority(incoming.relation) >
+    shipmentHistoryRelationPriority(current.relation)
+  const preferred = incomingIsPreferred ? incoming : current
+  const fallback = incomingIsPreferred ? current : incoming
+  return {
+    ...fallback,
+    ...preferred,
+    firstSeenAt: current.firstSeenAt || incoming.firstSeenAt,
+    lastSeenAt: incoming.lastSeenAt || current.lastSeenAt,
+  }
 }
 
 function appendShipmentHistory(
@@ -2778,11 +2796,7 @@ function appendShipmentHistory(
   const index = history.findIndex((item) => shipmentHistoryIdentity(item) === identity)
   if (index < 0) return [...history, entry]
   const next = [...history]
-  next[index] = {
-    ...history[index],
-    ...entry,
-    firstSeenAt: history[index]?.firstSeenAt || entry.firstSeenAt,
-  }
+  next[index] = mergeShipmentHistoryEntry(history[index]!, entry)
   return next
 }
 
@@ -3354,15 +3368,13 @@ function shipmentHistoryAddress(entry: ShipmentHistoryEntry) {
 
 function previousShipmentHistory(delivery: Delivery) {
   const currentTtn = normalizedShipmentValue(delivery.ttn)
-  const seen = new Set<string>()
-  return [...(delivery.shipmentHistory ?? [])].reverse().filter((entry) => {
-    const entryTtn = normalizedShipmentValue(entry.ttn)
-    if (!entryTtn || entryTtn === currentTtn) return false
-    const identity = shipmentHistoryIdentity(entry)
-    if (seen.has(identity)) return false
-    seen.add(identity)
-    return true
-  })
+  const normalizedHistory = (delivery.shipmentHistory ?? []).reduce(
+    (history, entry) => appendShipmentHistory(history, entry),
+    [] as ShipmentHistoryEntry[],
+  )
+  return normalizedHistory
+    .filter((entry) => normalizedShipmentValue(entry.ttn) !== currentTtn)
+    .reverse()
 }
 
 function legacyPreviousTtns(delivery: Delivery) {
@@ -3753,7 +3765,7 @@ function orderDateTime(order: Order) {
     >
     <button
       v-if="visibleOrders.length > 0 && windowScrollY > 320"
-      class="fixed right-5 bottom-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
+      class="fixed bottom-5 left-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
       type="button"
       title="Наверх"
       aria-label="Наверх"

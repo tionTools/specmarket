@@ -85,22 +85,65 @@ function relatedShipmentsValue(shipments: RelatedShipment[] | undefined) {
   }))
 }
 
-function historyRows(value: unknown) {
-  return Array.isArray(value) ? value.map(record).filter((entry) => text(entry.ttn)) : []
+function historyRelationPriority(value: unknown) {
+  switch (text(value)) {
+    case 'original':
+      return 5
+    case 'redirect':
+    case 'return':
+      return 4
+    case 'replacement':
+      return 3
+    default:
+      return 1
+  }
 }
 
-function historyIdentity(entry: JsonRecord) {
-  return JSON.stringify({
-    ttn: shipmentValue(entry.ttn),
-    relation: text(entry.relation),
-    relatedTtn: shipmentValue(entry.relatedTtn),
-    city: normalizedText(entry.city),
-    address: normalizedText(entry.address),
-    branchNumber: normalizedText(entry.branchNumber),
-    locationCode: normalizedText(entry.locationCode),
-    postalCode: normalizedText(entry.postalCode),
-    source: text(entry.source),
-  })
+function mergeHistoryRows(current: JsonRecord, incoming: JsonRecord) {
+  const incomingIsPreferred =
+    historyRelationPriority(incoming.relation) > historyRelationPriority(current.relation)
+  const preferred = incomingIsPreferred ? incoming : current
+  const fallback = incomingIsPreferred ? current : incoming
+  return {
+    ...fallback,
+    ...preferred,
+    firstSeenAt: text(current.firstSeenAt) || text(incoming.firstSeenAt),
+    lastSeenAt: text(incoming.lastSeenAt) || text(current.lastSeenAt),
+  }
+}
+
+function normalizeHistoryRows(value: unknown) {
+  const rows = Array.isArray(value) ? value.map(record).filter((entry) => text(entry.ttn)) : []
+  const normalized: JsonRecord[] = []
+  const indexByTtn = new Map<string, number>()
+  for (const entry of rows) {
+    const ttn = shipmentValue(entry.ttn)
+    if (!ttn) continue
+    const existingIndex = indexByTtn.get(ttn)
+    if (existingIndex === undefined) {
+      indexByTtn.set(ttn, normalized.length)
+      normalized.push(entry)
+      continue
+    }
+    normalized[existingIndex] = mergeHistoryRows(normalized[existingIndex]!, entry)
+  }
+  return normalized
+}
+
+function hasDuplicateHistoryTtn(value: unknown) {
+  if (!Array.isArray(value)) return false
+  const seen = new Set<string>()
+  for (const rawEntry of value) {
+    const ttn = shipmentValue(record(rawEntry).ttn)
+    if (!ttn) continue
+    if (seen.has(ttn)) return true
+    seen.add(ttn)
+  }
+  return false
+}
+
+function historyRows(value: unknown) {
+  return normalizeHistoryRows(value)
 }
 
 function appendHistoryEntry(history: JsonRecord[], entry: JsonRecord, seenAt: string) {
@@ -117,18 +160,7 @@ function appendHistoryEntry(history: JsonRecord[], entry: JsonRecord, seenAt: st
     const value = text(entry[key])
     if (value) normalized[key] = value
   }
-  const identity = historyIdentity(normalized)
-  const existingIndex = history.findIndex((item) => historyIdentity(item) === identity)
-  if (existingIndex < 0) return [...history, normalized]
-  const existing = history[existingIndex]
-  const next = [...history]
-  next[existingIndex] = {
-    ...existing,
-    ...normalized,
-    firstSeenAt: text(existing.firstSeenAt) || text(normalized.firstSeenAt),
-    lastSeenAt: seenAt,
-  }
-  return next
+  return normalizeHistoryRows([...history, normalized])
 }
 
 function snapshotEntry(
@@ -181,6 +213,7 @@ export function sameShipment(left: JsonRecord, right: JsonRecord) {
 }
 
 export function trackingChanged(delivery: JsonRecord, result: TrackingResult) {
+  if (hasDuplicateHistoryTtn(delivery.shipmentHistory)) return true
   if (text(delivery.ttn) && !historyRows(delivery.shipmentHistory).length) return true
   if (result.status !== text(delivery.trackingStatus)) return true
   if (result.normalizedStatus !== text(delivery.trackingNormalizedStatus)) return true
