@@ -72,7 +72,6 @@ const statusNames: Record<string, string> = {
   sent: 'Відправлено',
   ready_for_pickup: 'Готово до видачі',
   finished: 'Завершено',
-  completed: 'Завершено',
   closed: 'Закрито',
   canceled: 'Скасовано',
   returned: 'Повернено',
@@ -310,7 +309,7 @@ function formatDeliveryPointAddress(provider: string | undefined, officeId: stri
   return `${label}${plainAddress ? `, ${plainAddress}` : ''}`
 }
 
-async function handleRequest(request: Request) {
+Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   const url = Deno.env.get('SUPABASE_URL')
@@ -340,50 +339,15 @@ async function handleRequest(request: Request) {
   let orders: EpicentrOrder[] = []
 
   if (requestedExternalId) {
-    // V6 is required for the order details. V4 is only an additional source for
-    // the cabinet status and must never make an individual sync fail.
-    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${requestedExternalId}`, {
+    const response = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${requestedExternalId}`, {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
     })
-    if (!detailResponse.ok) {
-      return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: detailResponse.status }, { status: 502, headers: corsHeaders })
+    if (!response.ok) {
+      return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: response.status }, { status: 502, headers: corsHeaders })
     }
-    const detailPayload: unknown = await detailResponse.json()
-    const item = extractOrder(detailPayload)
-    const detailStatusCode = readableText(item.statusCode ?? item.status)
-    let listStatusCode = ''
-    let listStatusError = ''
-    try {
-      const listResponse = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
-        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-      })
-      if (listResponse.ok) {
-        const listPayload = await listResponse.json() as { items?: EpicentrOrder[] }
-        const listedOrder = (listPayload.items ?? []).find((candidate) =>
-          readableText(candidate.id) === requestedExternalId || readableText(candidate.externalId) === requestedExternalId
-        )
-        listStatusCode = readableText(listedOrder?.statusCode ?? (listedOrder as unknown as Record<string, unknown> | undefined)?.status)
-        if (!listedOrder) listStatusError = 'order-not-found-in-v4-list'
-      } else {
-        listStatusError = `http-${listResponse.status}`
-      }
-    } catch (error) {
-      listStatusError = error instanceof Error ? error.message : String(error)
-    }
-    const effectiveStatusCode = listStatusCode || detailStatusCode
-    console.info('Epicentr individual status source', {
-      orderId: requestedExternalId,
-      v4StatusCode: listStatusCode || null,
-      v6StatusCode: detailStatusCode || null,
-      effectiveStatusCode: effectiveStatusCode || null,
-      v4Error: listStatusError || null,
-    })
-    orders = [{
-      ...item,
-      id: readableText(item.id) || requestedExternalId,
-      statusCode: effectiveStatusCode,
-      items: (item.items as EpicentrOrder['items']) ?? [],
-    } as EpicentrOrder]
+    const payload: unknown = await response.json()
+    const item = extractOrder(payload)
+    orders = [{ ...item, id: readableText(item.id) || requestedExternalId, items: (item.items as EpicentrOrder['items']) ?? [] } as EpicentrOrder]
   } else {
     const response = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
@@ -501,14 +465,9 @@ async function handleRequest(request: Request) {
     if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
     const detailPayload: unknown = await detailResponse.json()
     const detail = extractOrder(detailPayload)
-    const listStatusCode = readableText(order.statusCode ?? (order as unknown as Record<string, unknown>).status)
-    const detailStatusCode = readableText(detail.statusCode ?? detail.status)
     const source: EpicentrOrder = {
       ...order,
       ...detail,
-      // V4 list status is the marketplace order state shown in the Epicentr cabinet.
-      // V6 may lag behind it, so details must not overwrite a newer list status.
-      statusCode: listStatusCode || detailStatusCode,
       address: detail.address ?? order.address,
       items: detail.items ?? order.items,
     }
@@ -720,17 +679,4 @@ async function handleRequest(request: Request) {
   }
 
   return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
-}
-
-Deno.serve(async (request) => {
-  try {
-    return await handleRequest(request)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('sync-epicentr-orders unhandled error', error)
-    return Response.json(
-      { ok: false, message: `Ошибка синхронизации Эпицентра: ${message}` },
-      { status: 502, headers: corsHeaders },
-    )
-  }
 })
