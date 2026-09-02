@@ -142,8 +142,8 @@ function preserveTracking(
     preserved.city = delivery.city
     preserved.address = delivery.address
   } else {
-    if (text(delivery.trackingDestinationCity)) preserved.city = delivery.city
-    if (text(delivery.trackingDestinationAddress)) preserved.address = delivery.address
+    if (readableText(delivery.trackingDestinationCity)) preserved.city = delivery.city
+    if (readableText(delivery.trackingDestinationAddress)) preserved.address = delivery.address
   }
   return preserved
 }
