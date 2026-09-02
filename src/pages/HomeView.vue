@@ -1915,7 +1915,9 @@ function acceptWholeReturnDraft(order: Order) {
 function isOrderFullyReturned(order: Order) {
   return (
     order.products.length > 0 &&
-    order.products.every((product) => (product.returnedQuantity ?? 0) >= product.quantity)
+    order.products.every(
+      (product) => product.quantity > 0 && (product.returnedQuantity ?? 0) >= product.quantity,
+    )
   )
 }
 

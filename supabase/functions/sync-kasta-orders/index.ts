@@ -127,6 +127,81 @@ function itemQuantity(item: RecordValue) {
   return quantity === undefined ? 1 : number(quantity)
 }
 
+function hasGoodsReturnStatus(order: RecordValue) {
+  const statuses = Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []
+  if (statuses.some((status) => text(status.type) === 'Cancelled')) return false
+  return statuses.some((status) => /^(?:Return|Refund)/.test(text(status.type)))
+}
+
+function itemMatchKeys(item: RecordValue) {
+  const keys = new Set<string>()
+  const uniqueSkuId = text(item.unique_sku_id).trim()
+  const barcode = Array.isArray(item.barcode)
+    ? item.barcode.map(text).find(Boolean) ?? ''
+    : text(item.barcode).trim()
+  const supplierCode = text(item.supplier_code).trim()
+  const productId = text(pick(item, 'product_id', 'productId')).trim()
+  const size = text(pick(item, 'kasta_size', 'size')).trim().toLowerCase()
+  const name = text(pick(item, 'name', 'title', 'product_name', 'kind')).trim().toLowerCase()
+  if (uniqueSkuId) keys.add(`sku:${uniqueSkuId}`)
+  if (barcode) keys.add(`barcode:${barcode}`)
+  if (supplierCode) keys.add(`supplier:${supplierCode}\u0000${size}`)
+  if (productId) keys.add(`product:${productId}\u0000${size}`)
+  if (name) keys.add(`name:${name}\u0000${size}`)
+  return keys
+}
+
+function returnedQuantityForItem(order: RecordValue, item: RecordValue) {
+  const returnedItems = Array.isArray(order.returned_items)
+    ? order.returned_items.map(asRecord)
+    : []
+  const itemKeys = itemMatchKeys(item)
+  if (!itemKeys.size) return 0
+  return returnedItems.reduce((total, returnedItem) => {
+    const matches = [...itemMatchKeys(returnedItem)].some((key) => itemKeys.has(key))
+    if (!matches) return total
+    const returnedQuantity = pick(
+      returnedItem,
+      'returned_quantity',
+      'quantity',
+      'original_quantity',
+    )
+    return total + (returnedQuantity === undefined ? 1 : number(returnedQuantity))
+  }, 0)
+}
+
+function originalOrderItemQuantity(
+  order: RecordValue,
+  item: RecordValue,
+  previous: RecordValue | undefined,
+) {
+  const apiQuantity = itemQuantity(item)
+  if (!hasGoodsReturnStatus(order)) return apiQuantity
+
+  // CRM quantity is the originally ordered quantity. Kasta may later reduce/storno
+  // the API quantity during a return, but that must not silently accept the return
+  // inside CRM. A previously saved positive quantity is therefore authoritative.
+  const previousQuantity = number(previous?.quantity)
+  if (previousQuantity > 0) return Math.max(previousQuantity, apiQuantity)
+
+  const explicitOriginalQuantity = number(
+    pick(item, 'original_quantity', 'ordered_quantity', 'initial_quantity'),
+  )
+  if (explicitOriginalQuantity > 0)
+    return Math.max(explicitOriginalQuantity, apiQuantity)
+
+  // Recovery for orders already damaged by the old logic: after a full storno Kasta
+  // can expose the current ordered quantity as 0 while `returned_items` still carries
+  // the returned units. This restores the original quantity without marking it as
+  // accepted in crm_order_item_returns.
+  if (apiQuantity <= 0) {
+    const returnedQuantity = returnedQuantityForItem(order, item)
+    if (returnedQuantity > 0) return returnedQuantity
+  }
+
+  return apiQuantity
+}
+
 function itemImage(item: RecordValue) {
   const images = Array.isArray(item.images) ? item.images.map(text).filter(Boolean) : []
   return images[0] ?? text(pick(item, 'image', 'image_url', 'picture', 'photo'))
@@ -480,7 +555,7 @@ Deno.serve(async (request) => {
       const savedItems = []
       for (const [position, item] of items.entries()) {
         const previous = byPosition.get(position)
-        const quantity = itemQuantity(item)
+        const quantity = originalOrderItemQuantity(order, item, previous)
         const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
         const supplierCode = text(item.supplier_code)
         const previousMarketplaceProductKey = text(
