@@ -1,0 +1,29 @@
+diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
+index 830265f..feea289 100644
+--- a/supabase/functions/sync-delivery-tracking/worker.ts
++++ b/supabase/functions/sync-delivery-tracking/worker.ts
+@@ -24,6 +24,7 @@ function currentKyiv() {
+ function intervalMinutes() {
+   const { hour } = currentKyiv()
+   if (hour < 7) return 0
++  if (hour >= 9 && hour < 16) return 15
+   return hour < 21 ? 30 : 60
+ }
+ 
+diff --git a/supabase/migrations/20260903154500_delivery_tracking_15_minute_window.sql b/supabase/migrations/20260903154500_delivery_tracking_15_minute_window.sql
+new file mode 100644
+index 0000000..dc48691
+--- /dev/null
++++ b/supabase/migrations/20260903154500_delivery_tracking_15_minute_window.sql
+@@ -0,0 +1,11 @@
++-- Базовый cron вызывается каждые 15 минут; Edge Function сама сохраняет расписание Europe/Kyiv:
++-- 07:00–08:59 и 16:00–20:59 = 30 мин, 09:00–15:59 = 15 мин,
++-- 21:00–23:59 = 60 мин, ночью пропуск.
++
++select cron.unschedule(jobid)
++from cron.job
++where jobname = 'crm-delivery-tracking';
++
++select cron.schedule('crm-delivery-tracking', '*/15 * * * *', $$
++  select public.invoke_crm_marketplace_sync('sync-delivery-tracking', '{"scheduled":true}'::jsonb);
++$$);
