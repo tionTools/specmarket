@@ -24,6 +24,7 @@ function currentKyiv() {
 function intervalMinutes() {
   const { hour } = currentKyiv()
   if (hour < 7) return 0
+  if (hour >= 9 && hour < 16) return 15
   return hour < 21 ? 30 : 60
 }
 
