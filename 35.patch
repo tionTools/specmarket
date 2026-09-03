@@ -1,0 +1,20 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -3370,9 +3370,17 @@ function orderStatusTone(order: Order): OrderStatusTone {
+     (['Каста', 'Р/С', 'Сайт'].includes(order.platform) &&
+       /закрыт|закрит|closed|finished|completed/.test(status))
+   )
+     return 'orange'
+ 
++  const carrierConfirmsDelivery =
++    trackingNormalized === 'delivered' ||
++    ((!trackingNormalized || trackingNormalized === 'unknown') &&
++      /получ|отрим|доставлен|доставлено|вруч|delivered|received/.test(trackingStatus))
++
++  // Prom stays green after carrier delivery until the user confirms completion in Prom.
++  if (order.platform !== 'Пром' && carrierConfirmsDelivery) return 'orange'
++
+   const carrierConfirmsShipment =
+     ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
+     (!trackingNormalized &&
