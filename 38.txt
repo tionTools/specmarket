@@ -1,0 +1,37 @@
+Patch 38 — исправить распознавание Rozetka Delivery «У відділенні»
+
+Рабочий проект Codex:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Причина:
+- Patch 37 добавил regex `/\bу\s+відділенн/i`.
+- В JavaScript `\b` не даёт нужную границу перед кириллической `У`, поэтому фактический текст `У відділенні` не совпадает и остаётся `trackingNormalizedStatus = unknown`.
+- Из-за этого Prom-заказ со статусом `Принято` остаётся синим, хотя Rozetka Delivery уже сообщает `У відділенні`.
+
+Задача:
+- В `supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts` заменить только проблемную границу слова так, чтобы `У відділенні` надёжно распознавалось как `ready_for_pickup`.
+- Использовать выражение `/(?:^|\s)у\s+відділенн/i` вместо `/\bу\s+відділенн/i`.
+- Сохранить текущую логику: `final: false`, normalizedStatus `ready_for_pickup`; наружу `rozetkaStatus()` по-прежнему должен сохранять исходный текст статуса перевозчика.
+- Существующий тест `Rozetka Delivery maps У відділенні to ready for pickup` не удалять и не ослаблять.
+- Никаких других изменений.
+
+Порядок выполнения:
+1. Перейди в `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Не изменяй, не stage и не commit пользовательский `AGENTS.md`.
+3. Выполни `git fetch origin` и убедись, что локальный `main` синхронизирован с `origin/main`. Исходный main для Patch 38: `3c5e9cbbd26135a01f0d52d11150373541cc1a63`. Если `origin/main` уже новее, сначала проверь применимость патча к актуальному коду.
+4. Получи `38.patch` из ветки `origin/chatgpt-patches`.
+5. Выполни `git apply --check 38.patch`; при успехе примени `git apply 38.patch`. Если patch-файл снова окажется технически повреждён, разрешено вручную внести ТОЛЬКО эту однозначную замену regex, без других изменений.
+6. Проверь diff: изменён только `supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts`.
+7. Выполни проверки:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+8. Если `deno` доступен, запусти существующий targeted test для `carrier-baseline_test.ts`. Если `deno` недоступен, дополнительно выполни хотя бы прямую проверку regex через Node, что `У відділенні` совпадает с новым выражением, и укажи это в отчёте.
+9. После `pnpm format` повторно проверь diff, чтобы не попали посторонние форматирования.
+10. В commit включи только `supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts`. `AGENTS.md` не трогай.
+11. Сделай commit с понятным сообщением и push в `origin/main`.
+12. Обязательно задеплой Edge Function `sync-delivery-tracking`, потому что исправление находится в backend tracking-коде.
+13. Миграции не выполнять.
+14. В отчёте укажи: результат `git apply --check`, фактический diff/изменённые файлы, результаты проверок, результат Deno-теста или Node regex-check, commit SHA, push, deploy и итоговый `git status --short`.
