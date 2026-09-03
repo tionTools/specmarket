@@ -4128,6 +4128,28 @@ function orderDateTime(order: Order) {
             />
             <span class="min-w-0 flex-1">
               <strong>№{{ order.displayNumber ?? order.id }}</strong> · {{ order.customer }}
+              <template v-if="order.delivery.ttn">
+                ·
+                <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                  <span class="font-semibold text-slate-700">{{
+                    formatDeliveryTtn(order.delivery.carrier, order.delivery.ttn)
+                  }}</span>
+                  <button
+                    class="relative grid size-6 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                    type="button"
+                    title="Скопировать номер ТТН"
+                    aria-label="Скопировать номер ТТН"
+                    @click.prevent.stop="copyTtn(order.delivery, order.id)"
+                  >
+                    <Copy class="size-4" aria-hidden="true" />
+                    <span
+                      v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
+                      class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                      >Скопировано</span
+                    >
+                  </button>
+                </span>
+              </template>
             </span>
             <span
               class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
