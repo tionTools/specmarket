@@ -1,0 +1,51 @@
+Patch 33 — исправить цвет статуса для созданной, но ещё не принятой перевозчиком накладной
+
+Работай в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Источник истины: актуальный origin/main. Сначала убедись, что локальный main синхронизирован с origin/main. Не изменяй пользовательский AGENTS.md и не включай его в commit.
+
+1. Получи Patch 33 из ветки chatgpt-patches.
+2. Выполни git apply --check для 33.patch.
+3. Примени 33.patch полностью.
+
+Что исправляет Patch 33:
+- В src/pages/HomeView.vue функция orderStatusTone() больше не должна считать факт отправки по сырому trackingStatus, если trackingNormalizedStatus уже заполнен.
+- Нормализованный статус перевозчика является приоритетным источником истины:
+  - accepted / in_transit / ready_for_pickup / delivered => зелёный;
+  - created => не подтверждает отправку;
+  - unknown => не подтверждает отправку и должен падать обратно на статус площадки;
+  - returning / returned / cancelled => красный, как и раньше.
+- Сырой trackingStatus разрешено использовать как fallback для определения отправки только когда trackingNormalizedStatus отсутствует/пустой.
+- Конкретный регрессионный кейс: Prom со статусом «Принято» и сообщением Новой Почты «Відправник самостійно створив цю накладну, але ще не надав до відправки» не должен становиться зелёным. Обе плашки жизненного цикла должны быть синими до фактического принятия отправления перевозчиком.
+- Не менять остальные правила Patch 32: завершённые заказы оранжевые, возвраты/отмены красные, фактически принятые/идущие отправления зелёные, Epicentr «Відправлено» без carrier confirmation остаётся синим.
+
+После применения выполни проверки:
+pnpm format
+pnpm type-check
+pnpm lint
+pnpm build
+git diff --check
+
+Дополнительно статически проверь в итоговом коде:
+- trackingNormalizedStatus='created' + Prom «Принято» => blue;
+- trackingNormalizedStatus='unknown' + сырой текст с «відправ...» => blue;
+- trackingNormalizedStatus='accepted' => green;
+- trackingNormalizedStatus='in_transit' => green;
+- trackingNormalizedStatus='ready_for_pickup' => green;
+- trackingNormalizedStatus='delivered' при незавершённом Prom => green;
+- returning/returned/cancelled => red.
+
+Patch 33 меняет только:
+- src/pages/HomeView.vue
+
+Никаких миграций и deploy Supabase для этого патча не требуется.
+
+После успешных проверок:
+- убедись, что в commit входит только src/pages/HomeView.vue;
+- AGENTS.md не изменяй, не stage и не commit;
+- сделай commit, например: Fix unshipped carrier status color
+- push в origin/main;
+- в отчёте укажи commit SHA, результат push, результаты всех проверок и итоговый git status --short.
+
+Не открывай production или localhost и не обходи логин.
