@@ -5273,11 +5273,40 @@ function orderDateTime(order: Order) {
                             ? 'Первоначальная ТТН:'
                             : 'Предыдущие ТТН:'
                         }}</span>
-                        {{
-                          legacyPreviousTtns(order.delivery)
-                            .map((ttn) => formatDeliveryTtn(order.delivery.carrier, ttn))
-                            .join(', ')
-                        }}
+                        <span
+                          v-for="(ttn, legacyTtnIndex) in legacyPreviousTtns(order.delivery)"
+                          :key="`legacy-ttn:${ttn}:${legacyTtnIndex}`"
+                          class="ml-1 inline-flex items-center gap-1"
+                        >
+                          <span>{{ formatDeliveryTtn(order.delivery.carrier, ttn) }}</span>
+                          <button
+                            class="relative grid size-5 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                            type="button"
+                            title="Скопировать ТТН без пробелов"
+                            aria-label="Скопировать предыдущую ТТН без пробелов"
+                            @click.stop="
+                              copyHistoricalTtn(
+                                order.delivery,
+                                ttn,
+                                `copy-legacy-ttn:${order.id}:${legacyTtnIndex}`,
+                              )
+                            "
+                          >
+                            <Copy class="size-3.5" aria-hidden="true" />
+                            <span
+                              v-if="
+                                inlineActionNotice?.key ===
+                                `copy-legacy-ttn:${order.id}:${legacyTtnIndex}`
+                              "
+                              class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                              >Скопировано</span
+                            >
+                          </button>
+                          <span
+                            v-if="legacyTtnIndex < legacyPreviousTtns(order.delivery).length - 1"
+                            >,</span
+                          >
+                        </span>
                       </div>
                       <div v-if="legacyPreviousAddresses(order.delivery).length">
                         <span class="font-semibold text-slate-700">Предыдущие адреса:</span>
