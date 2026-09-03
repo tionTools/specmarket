@@ -598,7 +598,132 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
+  const body = await request.json().catch(() => ({})) as {
+    externalId?: unknown
+    full?: unknown
+    manual?: unknown
+    completeExternalIds?: unknown
+  }
+  if (body.completeExternalIds !== undefined && !Array.isArray(body.completeExternalIds)) {
+    return Response.json(
+      { ok: false, message: 'Неверный список заказов Prom для подтверждения.' },
+      { status: 400, headers: corsHeaders },
+    )
+  }
+  const requestedCompletionIds = Array.isArray(body.completeExternalIds)
+    ? [
+        ...new Set(
+          body.completeExternalIds
+            .map(text)
+            .map((id) => id.replace(/^prom:/, '').trim())
+            .filter(Boolean),
+        ),
+      ]
+    : []
+  if (requestedCompletionIds.length) {
+    if (isScheduledRequest) {
+      return Response.json(
+        { ok: false, message: 'Подтверждение статусов Prom доступно только пользователю CRM.' },
+        { status: 403, headers: corsHeaders },
+      )
+    }
+    if (
+      requestedCompletionIds.length > 100 ||
+      requestedCompletionIds.some((id) => !/^\d+$/.test(id))
+    ) {
+      return Response.json(
+        { ok: false, message: 'Неверные ID заказов Prom для подтверждения.' },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+
+    const crmExternalIds = requestedCompletionIds.map((id) => `prom:${id}`)
+    const { data: crmOrders, error: crmOrdersError } = await admin
+      .from('crm_orders')
+      .select('id, external_id, status, delivery')
+      .eq('platform', 'Пром')
+      .in('external_id', crmExternalIds)
+    if (crmOrdersError) {
+      return Response.json(
+        { ok: false, message: crmOrdersError.message },
+        { status: 500, headers: corsHeaders },
+      )
+    }
+
+    const byExternalId = new Map((crmOrders ?? []).map((order) => [order.external_id, order]))
+    const invalidIds = requestedCompletionIds.filter((id) => {
+      const order = byExternalId.get(`prom:${id}`)
+      if (!order) return true
+      const delivery = asRecord(order.delivery)
+      const trackingStatus = text(delivery.trackingNormalizedStatus).trim().toLowerCase()
+      const status = text(order.status).trim().toLowerCase()
+      return (
+        trackingStatus !== 'delivered' ||
+        /виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
+          status,
+        )
+      )
+    })
+    if (invalidIds.length) {
+      return Response.json(
+        {
+          ok: false,
+          message: `Нельзя подтвердить заказ(ы) Prom: ${invalidIds.join(', ')}. Проверьте актуальный статус доставки.`,
+        },
+        { status: 409, headers: corsHeaders },
+      )
+    }
+
+    const promResponse = await fetch('https://my.prom.ua/api/v1/orders/set_status', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${promToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'delivered',
+        ids: requestedCompletionIds.map(Number),
+      }),
+    })
+    if (!promResponse.ok) {
+      return Response.json(
+        {
+          ok: false,
+          message: `Prom не изменил статус заказов (HTTP ${promResponse.status}).`,
+        },
+        { status: 502, headers: corsHeaders },
+      )
+    }
+
+    const { data: updatedOrders, error: updateError } = await admin
+      .from('crm_orders')
+      .update({ status: 'Виконано' })
+      .eq('platform', 'Пром')
+      .in('external_id', crmExternalIds)
+      .select('id')
+    const updatedOrderRows = updatedOrders ?? []
+    if (updateError || updatedOrderRows.length !== requestedCompletionIds.length) {
+      return Response.json(
+        {
+          ok: false,
+          message:
+            'Prom изменил статус, но CRM не смогла полностью сохранить «Виконано». Запустите синхронизацию Prom.',
+        },
+        { status: 500, headers: corsHeaders },
+      )
+    }
+
+    return Response.json(
+      {
+        ok: true,
+        completed: updatedOrderRows.length,
+        changedOrderIds: updatedOrderRows.map((order) => order.id),
+      },
+      { headers: corsHeaders },
+    )
+  }
+
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
   const fullSync = body.full === true
   const manual = asRecord(body.manual)

@@ -149,6 +149,8 @@ const isMarketplaceSyncBusy = computed(
     isSyncingKasta.value,
 )
 const isApplyingPromRegistry = ref(false)
+const isConfirmingPromDelivered = ref(false)
+const selectedPromDeliveredOrderIds = ref(new Set<string>())
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
 const inlineActionNotice = ref<{ key: string; text: string } | null>(null)
@@ -441,8 +443,8 @@ const statusOptions: Record<Platform, string[]> = {
     'Скасовано продавцем',
   ],
   Каста: ['Новый', 'Принято', 'В дороге', 'Закрыт', 'Скасовано', 'Возврат'],
-  'Р/С': ['В дороге', 'Закрыт', 'Возврат'],
-  Сайт: ['В дороге', 'Закрыт', 'Возврат'],
+  'Р/С': ['Новый', 'В дороге', 'Закрыт', 'Возврат'],
+  Сайт: ['Новый', 'В дороге', 'Закрыт', 'Возврат'],
 }
 
 const storedOrders = window.localStorage.getItem(storageKey)
@@ -1309,6 +1311,22 @@ const promRegistryMismatchCount = computed(() =>
   ),
 )
 const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
+const promDeliveredConfirmationOrders = computed(() =>
+  orders.value.filter((order) => {
+    if (order.platform !== 'Пром' || !order.externalId) return false
+    if (order.delivery.trackingNormalizedStatus?.trim().toLowerCase() !== 'delivered') return false
+    const status = displayOrderStatus(order.status).toLowerCase()
+    return !/виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
+      status,
+    )
+  }),
+)
+const selectedPromDeliveredOrders = computed(() =>
+  promDeliveredConfirmationOrders.value.filter((order) =>
+    selectedPromDeliveredOrderIds.value.has(String(order.id)),
+  ),
+)
+const selectedPromDeliveredOrdersCount = computed(() => selectedPromDeliveredOrders.value.length)
 const promRegistryOrders = computed(() =>
   orders.value.filter((order) => promRegistryMatchIndex.value.entryByOrderId.has(order.id)),
 )
@@ -1797,7 +1815,7 @@ function createOrderDraft(): Order {
     customer: '',
     phone: '',
     platform: 'Р/С',
-    status: 'В дороге',
+    status: 'Новый',
     products: [createProduct()],
     shipping: 0,
     paymentAmount: 0,
@@ -2126,6 +2144,64 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
   if (fullSyncResults) fullSyncResults.push(message)
   else showSyncMessage(message)
   await refreshOrdersAfterMarketplaceSync(data)
+}
+
+function isPromDeliveredOrderSelected(order: Order) {
+  return selectedPromDeliveredOrderIds.value.has(String(order.id))
+}
+
+function togglePromDeliveredOrder(order: Order, checked: boolean) {
+  const next = new Set(selectedPromDeliveredOrderIds.value)
+  const id = String(order.id)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedPromDeliveredOrderIds.value = next
+}
+
+function selectAllPromDeliveredOrders() {
+  selectedPromDeliveredOrderIds.value = new Set(
+    promDeliveredConfirmationOrders.value.map((order) => String(order.id)),
+  )
+}
+
+async function confirmPromDeliveredOrders() {
+  if (!supabase || isGuest.value || isConfirmingPromDelivered.value) return
+  const selectedOrders = selectedPromDeliveredOrders.value
+  if (!selectedOrders.length) return
+  if (!window.confirm(`Перевести ${selectedOrders.length} заказов Prom в статус «Виконано»?`))
+    return
+
+  const completeExternalIds = selectedOrders
+    .map((order) => order.externalId)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  if (completeExternalIds.length !== selectedOrders.length) {
+    showSyncError('Не удалось определить ID всех выбранных заказов Prom.')
+    return
+  }
+
+  isConfirmingPromDelivered.value = true
+  try {
+    const { data, error } = await supabase.functions.invoke<{
+      ok?: boolean
+      message?: string
+      completed?: number
+      changedOrderIds?: string[]
+    }>('sync-prom-orders', {
+      method: 'POST',
+      body: { completeExternalIds },
+    })
+    if (error || !data?.ok) {
+      showSyncError(data?.message ?? error?.message ?? 'Не удалось изменить статусы заказов Prom.')
+      return
+    }
+    selectedPromDeliveredOrderIds.value = new Set()
+    await refreshOrdersAfterMarketplaceSync(data)
+    showSyncMessage(
+      `Prom: подтверждено выполненных заказов — ${data.completed ?? selectedOrders.length}.`,
+    )
+  } finally {
+    isConfirmingPromDelivered.value = false
+  }
 }
 
 async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
@@ -3275,6 +3351,71 @@ function deliveryStatusForOrder(order: Order) {
   return displayDeliveryStatus(order.delivery.status)
 }
 
+type OrderStatusTone = 'blue' | 'green' | 'orange' | 'red'
+
+function orderStatusTone(order: Order): OrderStatusTone {
+  const status = displayOrderStatus(order.status).trim().toLowerCase()
+  const trackingNormalized = order.delivery.trackingNormalizedStatus?.trim().toLowerCase() ?? ''
+  const trackingStatus = order.delivery.trackingStatus?.trim().toLowerCase() ?? ''
+  const deliveryStatus = order.delivery.status?.trim().toLowerCase() ?? ''
+
+  if (
+    ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
+    /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
+    /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(trackingStatus) ||
+    /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(deliveryStatus)
+  )
+    return 'red'
+
+  if (
+    (order.platform === 'Пром' && /виконан|заверш|delivered|completed/.test(status)) ||
+    (order.platform === 'Эпицентр' && /заверш|закрит|closed|finished|completed/.test(status)) ||
+    (['Каста', 'Р/С', 'Сайт'].includes(order.platform) &&
+      /закрыт|закрит|closed|finished|completed/.test(status))
+  )
+    return 'orange'
+
+  const carrierConfirmsShipment =
+    ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
+    /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
+      trackingStatus,
+    )
+
+  if (
+    carrierConfirmsShipment ||
+    (['Каста', 'Р/С', 'Сайт'].includes(order.platform) && /в дороге/.test(status))
+  )
+    return 'green'
+
+  return 'blue'
+}
+
+function statusBadgeClass(order: Order) {
+  switch (orderStatusTone(order)) {
+    case 'green':
+      return 'bg-green-100 text-green-800'
+    case 'orange':
+      return 'bg-orange-100 text-orange-800'
+    case 'red':
+      return 'bg-red-100 text-red-800'
+    default:
+      return 'bg-blue-100 text-blue-800'
+  }
+}
+
+function statusSelectClass(order: Order) {
+  switch (orderStatusTone(order)) {
+    case 'green':
+      return 'border-green-300 bg-green-50 text-green-800'
+    case 'orange':
+      return 'border-orange-300 bg-orange-50 text-orange-800'
+    case 'red':
+      return 'border-red-300 bg-red-50 text-red-800'
+    default:
+      return 'border-blue-300 bg-blue-50 text-blue-800'
+  }
+}
+
 function statusOptionsForOrder(order: Order) {
   const options = statusOptions[order.platform] ?? []
   const currentStatus = displayOrderStatus(order.status)
@@ -3945,6 +4086,63 @@ function orderDateTime(order: Order) {
         {{ promRegistryError }}
       </p>
       <section
+        v-if="!isGuest && promDeliveredConfirmationOrders.length"
+        class="mt-5 rounded-2xl border border-green-300 bg-green-50 p-4 shadow-sm"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="font-semibold text-green-950">Получены перевозчиком — подтвердить в Prom</p>
+            <p class="mt-1 text-sm text-green-800">
+              До подтверждения заказы остаются зелёными. После успешного изменения Prom на
+              «Виконано» — оранжевыми.
+            </p>
+          </div>
+          <button
+            class="rounded-lg border border-green-300 bg-white px-3 py-1.5 text-sm font-semibold text-green-800 hover:bg-green-100"
+            type="button"
+            @click="selectAllPromDeliveredOrders"
+          >
+            Выбрать все
+          </button>
+        </div>
+        <div class="mt-3 grid gap-2">
+          <label
+            v-for="order in promDeliveredConfirmationOrders"
+            :key="`prom-complete:${order.id}`"
+            class="flex items-center gap-3 rounded-xl border border-green-200 bg-white px-3 py-2 text-sm"
+          >
+            <input
+              :checked="isPromDeliveredOrderSelected(order)"
+              class="size-4 accent-green-700"
+              type="checkbox"
+              @change="togglePromDeliveredOrder(order, ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="min-w-0 flex-1">
+              <strong>№{{ order.displayNumber ?? order.id }}</strong> · {{ order.customer }}
+            </span>
+            <span
+              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
+              :class="statusBadgeClass(order)"
+              >{{ deliveryStatusForOrder(order) }}</span
+            >
+          </label>
+        </div>
+        <div class="mt-3 flex justify-end">
+          <button
+            class="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-wait disabled:opacity-50"
+            :disabled="isConfirmingPromDelivered || selectedPromDeliveredOrdersCount === 0"
+            type="button"
+            @click="confirmPromDeliveredOrders"
+          >
+            {{
+              isConfirmingPromDelivered
+                ? 'Подтверждаем…'
+                : `Подтвердить в Prom (${selectedPromDeliveredOrdersCount})`
+            }}
+          </button>
+        </div>
+      </section>
+      <section
         v-if="isPromRegistryView"
         class="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm"
       >
@@ -4391,7 +4589,8 @@ function orderDateTime(order: Order) {
               ></span
             ><span class="flex min-w-0 flex-col items-start gap-1"
               ><span
-                class="block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
+                class="block w-fit rounded-full px-2 py-0.5 text-xs font-semibold"
+                :class="statusBadgeClass(order)"
                 >{{ displayOrderStatus(order.status) }}</span
               ><strong :class="platformClass(orderBusinessPlatform(order))"
                 ><PlatformLogo :platform="orderBusinessPlatform(order)" /></strong></span
@@ -4456,7 +4655,8 @@ function orderDateTime(order: Order) {
                 class="whitespace-nowrap rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black tracking-wide text-white shadow-md ring-2 ring-fuchsia-200"
                 >НОВЫЙ ЗАКАЗ</span
               ><span
-                class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 lg:w-full lg:line-clamp-2 lg:leading-5"
+                class="w-fit rounded-full px-2.5 py-1 text-xs font-semibold lg:w-full lg:line-clamp-2 lg:leading-5"
+                :class="statusBadgeClass(order)"
                 >{{ deliveryStatusForOrder(order) }}</span
               ></span
             ><span class="flex items-center justify-end gap-2"
@@ -4597,7 +4797,8 @@ function orderDateTime(order: Order) {
                   <label class="flex items-center gap-2 text-sm text-slate-500"
                     >Статус<select
                       :value="displayOrderStatus(order.status)"
-                      class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
+                      class="rounded-lg border px-2 py-1 font-semibold"
+                      :class="statusSelectClass(order)"
                       @change="updateOrderStatus(order, ($event.target as HTMLSelectElement).value)"
                     >
                       <option
@@ -5125,7 +5326,8 @@ function orderDateTime(order: Order) {
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
                 <span
-                  class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                  class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                  :class="statusBadgeClass(order)"
                   >{{ deliveryStatusForOrder(order) }}</span
                 >
               </div>
