@@ -4686,6 +4686,25 @@ function orderDateTime(order: Order) {
           >
             <section :class="{ 'pointer-events-none select-none opacity-75': isGuest }">
               <div class="flex flex-wrap items-center gap-3">
+                <span
+                  v-if="!isGuest && oneCClipboardText(order.delivery)"
+                  class="relative inline-flex items-center"
+                >
+                  <button
+                    class="rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-200 hover:text-slate-900"
+                    type="button"
+                    title="Скопировать строку для 1С"
+                    aria-label="Скопировать строку для 1С"
+                    @click="copyOneCTemplate(order.delivery, order.id)"
+                  >
+                    1С
+                  </button>
+                  <span
+                    v-if="inlineActionNotice?.key === `copy-1c:${order.id}`"
+                    class="pointer-events-none absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white shadow-lg"
+                    >Строка скопирована</span
+                  >
+                </span>
                 <span v-if="!isGuest" class="relative inline-flex items-center">
                   <button
                     class="rounded-lg border px-3 py-1.5 text-sm font-semibold"
@@ -5338,21 +5357,6 @@ function orderDateTime(order: Order) {
                     <dd
                       class="relative flex min-w-0 items-center justify-center gap-2 font-semibold"
                     >
-                      <button
-                        v-if="oneCClipboardText(order.delivery)"
-                        class="absolute left-0 top-1/2 h-5 min-w-7 -translate-y-1/2 rounded border border-slate-300 bg-slate-100 px-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-200 hover:text-slate-800"
-                        type="button"
-                        title="Скопировать строку для 1С"
-                        aria-label="Скопировать строку для 1С"
-                        @click="copyOneCTemplate(order.delivery, order.id)"
-                      >
-                        1с
-                        <span
-                          v-if="inlineActionNotice?.key === `copy-1c:${order.id}`"
-                          class="pointer-events-none absolute top-full left-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
-                          >Скопировано</span
-                        >
-                      </button>
                       <CarrierLogo
                         v-if="carrierLogoKind(order) !== 'generic'"
                         :kind="carrierLogoKind(order)"
