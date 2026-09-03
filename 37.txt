@@ -1,0 +1,42 @@
+Patch 37 — Rozetka Delivery «У відділенні» считать готовым к выдаче
+
+Рабочий проект Codex:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Задача:
+- Исправить нормализацию статуса Rozetka Delivery «У відділенні».
+- Такой статус означает, что отправление уже находится у перевозчика в точке выдачи, поэтому normalizedStatus должен быть `ready_for_pickup`, final = false.
+- В CRM такой заказ должен отображаться зелёным по существующей цветовой логике.
+- Не менять общую логику цветов и не затрагивать другие статусы/перевозчиков.
+- Добавить регрессионный тест, который фиксирует это поведение для будущих заказов Rozetka Delivery.
+
+Исходный main для подготовки патча:
+9bb1fc00b95ba3e41f25bf5c714ffd9937f9266f
+
+Порядок выполнения:
+1. Перейди в C:\Users\Вадим\Documents\CRM моя\specmarket.
+2. Не изменяй, не stage и не commit пользовательский AGENTS.md.
+3. Выполни git fetch origin и синхронизируй локальный main с origin/main. Если origin/main новее указанного SHA, сначала убедись, что изменения Patch 37 всё ещё применимы к актуальному коду.
+4. Получи 37.patch из ветки origin/chatgpt-patches.
+5. Выполни `git apply --check 37.patch`. Если проверка проходит — примени `git apply 37.patch`.
+6. Убедись, что изменены только:
+   - supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts
+   - supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+7. Проверь фактическую логику:
+   - Rozetka Delivery `У відділенні` -> normalizedStatus `ready_for_pickup`;
+   - final остаётся false;
+   - исходный текст статуса по-прежнему показывается как `У відділенні`;
+   - остальные статусы Rozetka Delivery проходят через прежнюю нормализацию без изменений.
+8. Выполни проверки:
+   - pnpm format
+   - pnpm type-check
+   - pnpm lint
+   - pnpm build
+   - git diff --check
+   - если Deno доступен: `deno test --allow-env supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts`
+9. После форматирования ещё раз проверь diff: никаких посторонних изменений.
+10. В commit включи только два файла задачи. AGENTS.md не трогай и не включай.
+11. Сделай commit с понятным сообщением и push в origin/main.
+12. После успешного push задеплой Edge Function `sync-delivery-tracking` в связанный Supabase-проект, потому что изменён код функции.
+13. Миграции НЕ выполнять: Patch 37 не меняет базу данных.
+14. В отчёте укажи: результат `git apply --check`, изменённые файлы, результаты проверок/теста, commit SHA, push, deploy `sync-delivery-tracking` и итоговый `git status --short`.
