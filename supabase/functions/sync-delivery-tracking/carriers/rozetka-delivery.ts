@@ -11,7 +11,7 @@ function rozetkaReadableStatus(source: string, code: string) {
   if (/поверта(?:ється|вся)|returning/i.test(source)) {
     return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
   }
-  if (/\bу\s+відділенн/i.test(source)) {
+  if (/(?:^|\s)у\s+відділенн/i.test(source)) {
     return {
       status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup',
     }
