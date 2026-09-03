@@ -1,0 +1,16 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -3378,9 +3378,10 @@ function orderStatusTone(order: Order): OrderStatusTone {
+   const carrierConfirmsShipment =
+     ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
+-    /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
+-      trackingStatus,
+-    )
++    (!trackingNormalized &&
++      /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
++        trackingStatus,
++      ))
+ 
+   if (
+     carrierConfirmsShipment ||
