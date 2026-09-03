@@ -1,0 +1,402 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -150,2 +150,4 @@
+ const isApplyingPromRegistry = ref(false)
++const isConfirmingPromDelivered = ref(false)
++const selectedPromDeliveredOrderIds = ref(new Set<string>())
+ const syncEpicentrMessage = ref('')
+@@ -445,4 +445,4 @@
+   Каста: ['Новый', 'Принято', 'В дороге', 'Закрыт', 'Скасовано', 'Возврат'],
+-  'Р/С': ['В дороге', 'Закрыт', 'Возврат'],
+-  Сайт: ['В дороге', 'Закрыт', 'Возврат'],
++  'Р/С': ['Новый', 'В дороге', 'Закрыт', 'Возврат'],
++  Сайт: ['Новый', 'В дороге', 'Закрыт', 'Возврат'],
+ }
+@@ -1320,4 +1320,20 @@
+ const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
++const promDeliveredConfirmationOrders = computed(() =>
++  orders.value.filter((order) => {
++    if (order.platform !== 'Пром' || !order.externalId) return false
++    if (order.delivery.trackingNormalizedStatus?.trim().toLowerCase() !== 'delivered') return false
++    const status = displayOrderStatus(order.status).toLowerCase()
++    return !/виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
++      status,
++    )
++  }),
++)
++const selectedPromDeliveredOrders = computed(() =>
++  promDeliveredConfirmationOrders.value.filter((order) =>
++    selectedPromDeliveredOrderIds.value.has(String(order.id)),
++  ),
++)
++const selectedPromDeliveredOrdersCount = computed(() => selectedPromDeliveredOrders.value.length)
+ const promRegistryOrders = computed(() =>
+   orders.value.filter((order) => promRegistryMatchIndex.value.entryByOrderId.has(order.id)),
+ )
+@@ -1780,3 +1780,3 @@
+     platform: 'Р/С',
+-    status: 'В дороге',
++    status: 'Новый',
+     products: [createProduct()],
+@@ -2140,4 +2140,66 @@
+   await refreshOrdersAfterMarketplaceSync(data)
+ }
+ 
++function isPromDeliveredOrderSelected(order: Order) {
++  return selectedPromDeliveredOrderIds.value.has(String(order.id))
++}
++
++function togglePromDeliveredOrder(order: Order, checked: boolean) {
++  const next = new Set(selectedPromDeliveredOrderIds.value)
++  const id = String(order.id)
++  if (checked) next.add(id)
++  else next.delete(id)
++  selectedPromDeliveredOrderIds.value = next
++}
++
++function selectAllPromDeliveredOrders() {
++  selectedPromDeliveredOrderIds.value = new Set(
++    promDeliveredConfirmationOrders.value.map((order) => String(order.id)),
++  )
++}
++
++async function confirmPromDeliveredOrders() {
++  if (!supabase || isGuest.value || isConfirmingPromDelivered.value) return
++  const selectedOrders = selectedPromDeliveredOrders.value
++  if (!selectedOrders.length) return
++  if (
++    !window.confirm(
++      `Перевести ${selectedOrders.length} заказов Prom в статус «Виконано»?`,
++    )
++  )
++    return
++
++  const completeExternalIds = selectedOrders
++    .map((order) => order.externalId)
++    .filter((value): value is string => typeof value === 'string' && value.length > 0)
++  if (completeExternalIds.length !== selectedOrders.length) {
++    showSyncError('Не удалось определить ID всех выбранных заказов Prom.')
++    return
++  }
++
++  isConfirmingPromDelivered.value = true
++  try {
++    const { data, error } = await supabase.functions.invoke<{
++      ok?: boolean
++      message?: string
++      completed?: number
++      changedOrderIds?: string[]
++    }>('sync-prom-orders', {
++      method: 'POST',
++      body: { completeExternalIds },
++    })
++    if (error || !data?.ok) {
++      showSyncError(data?.message ?? error?.message ?? 'Не удалось изменить статусы заказов Prom.')
++      return
++    }
++    selectedPromDeliveredOrderIds.value = new Set()
++    await refreshOrdersAfterMarketplaceSync(data)
++    showSyncMessage(
++      `Prom: подтверждено выполненных заказов — ${data.completed ?? selectedOrders.length}.`,
++    )
++  } finally {
++    isConfirmingPromDelivered.value = false
++  }
++}
++
+ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
+@@ -3277,4 +3277,70 @@
+   return displayDeliveryStatus(order.delivery.status)
+ }
+ 
++type OrderStatusTone = 'blue' | 'green' | 'orange' | 'red'
++
++function orderStatusTone(order: Order): OrderStatusTone {
++  const status = displayOrderStatus(order.status).trim().toLowerCase()
++  const trackingNormalized =
++    order.delivery.trackingNormalizedStatus?.trim().toLowerCase() ?? ''
++  const trackingStatus = order.delivery.trackingStatus?.trim().toLowerCase() ?? ''
++  const deliveryStatus = order.delivery.status?.trim().toLowerCase() ?? ''
++
++  if (
++    ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
++    /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
++    /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(trackingStatus) ||
++    /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(deliveryStatus)
++  )
++    return 'red'
++
++  if (
++    (order.platform === 'Пром' && /виконан|заверш|delivered|completed/.test(status)) ||
++    (order.platform === 'Эпицентр' && /заверш|закрит|closed|finished|completed/.test(status)) ||
++    (['Каста', 'Р/С', 'Сайт'].includes(order.platform) &&
++      /закрыт|закрит|closed|finished|completed/.test(status))
++  )
++    return 'orange'
++
++  const carrierConfirmsShipment =
++    ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
++    /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
++      trackingStatus,
++    )
++
++  if (
++    carrierConfirmsShipment ||
++    (['Каста', 'Р/С', 'Сайт'].includes(order.platform) && /в дороге/.test(status))
++  )
++    return 'green'
++
++  return 'blue'
++}
++
++function statusBadgeClass(order: Order) {
++  switch (orderStatusTone(order)) {
++    case 'green':
++      return 'bg-green-100 text-green-800'
++    case 'orange':
++      return 'bg-orange-100 text-orange-800'
++    case 'red':
++      return 'bg-red-100 text-red-800'
++    default:
++      return 'bg-blue-100 text-blue-800'
++  }
++}
++
++function statusSelectClass(order: Order) {
++  switch (orderStatusTone(order)) {
++    case 'green':
++      return 'border-green-300 bg-green-50 text-green-800'
++    case 'orange':
++      return 'border-orange-300 bg-orange-50 text-orange-800'
++    case 'red':
++      return 'border-red-300 bg-red-50 text-red-800'
++    default:
++      return 'border-blue-300 bg-blue-50 text-blue-800'
++  }
++}
++
+ function statusOptionsForOrder(order: Order) {
+@@ -3964,4 +3964,63 @@
+         {{ promRegistryError }}
+       </p>
+       <section
++        v-if="!isGuest && promDeliveredConfirmationOrders.length"
++        class="mt-5 rounded-2xl border border-green-300 bg-green-50 p-4 shadow-sm"
++      >
++        <div class="flex flex-wrap items-start justify-between gap-3">
++          <div>
++            <p class="font-semibold text-green-950">Получены перевозчиком — подтвердить в Prom</p>
++            <p class="mt-1 text-sm text-green-800">
++              До подтверждения заказы остаются зелёными. После успешного изменения Prom на
++              «Виконано» — оранжевыми.
++            </p>
++          </div>
++          <button
++            class="rounded-lg border border-green-300 bg-white px-3 py-1.5 text-sm font-semibold text-green-800 hover:bg-green-100"
++            type="button"
++            @click="selectAllPromDeliveredOrders"
++          >
++            Выбрать все
++          </button>
++        </div>
++        <div class="mt-3 grid gap-2">
++          <label
++            v-for="order in promDeliveredConfirmationOrders"
++            :key="`prom-complete:${order.id}`"
++            class="flex items-center gap-3 rounded-xl border border-green-200 bg-white px-3 py-2 text-sm"
++          >
++            <input
++              :checked="isPromDeliveredOrderSelected(order)"
++              class="size-4 accent-green-700"
++              type="checkbox"
++              @change="
++                togglePromDeliveredOrder(order, ($event.target as HTMLInputElement).checked)
++              "
++            />
++            <span class="min-w-0 flex-1">
++              <strong>№{{ order.displayNumber ?? order.id }}</strong> · {{ order.customer }}
++            </span>
++            <span
++              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
++              :class="statusBadgeClass(order)"
++              >{{ deliveryStatusForOrder(order) }}</span
++            >
++          </label>
++        </div>
++        <div class="mt-3 flex justify-end">
++          <button
++            class="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-wait disabled:opacity-50"
++            :disabled="isConfirmingPromDelivered || selectedPromDeliveredOrdersCount === 0"
++            type="button"
++            @click="confirmPromDeliveredOrders"
++          >
++            {{
++              isConfirmingPromDelivered
++                ? 'Подтверждаем…'
++                : `Подтвердить в Prom (${selectedPromDeliveredOrdersCount})`
++            }}
++          </button>
++        </div>
++      </section>
++      <section
+         v-if="isPromRegistryView"
+@@ -4420,3 +4420,4 @@
+               ><span
+-                class="block w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
++                class="block w-fit rounded-full px-2 py-0.5 text-xs font-semibold"
++                :class="statusBadgeClass(order)"
+                 >{{ displayOrderStatus(order.status) }}</span
+@@ -4490,3 +4490,4 @@
+               ><span
+-                class="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 lg:w-full lg:line-clamp-2 lg:leading-5"
++                class="w-fit rounded-full px-2.5 py-1 text-xs font-semibold lg:w-full lg:line-clamp-2 lg:leading-5"
++                :class="statusBadgeClass(order)"
+                 >{{ deliveryStatusForOrder(order) }}</span
+@@ -4610,4 +4610,5 @@
+                     >Статус<select
+                       :value="displayOrderStatus(order.status)"
+-                      class="rounded-lg border border-emerald-200 bg-white px-2 py-1 font-semibold text-emerald-800"
++                      class="rounded-lg border px-2 py-1 font-semibold"
++                      :class="statusSelectClass(order)"
+                       @change="updateOrderStatus(order, ($event.target as HTMLSelectElement).value)"
+@@ -5200,3 +5200,4 @@
+                 <span
+-                  class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700"
++                  class="rounded-full px-2.5 py-1 text-xs font-semibold"
++                  :class="statusBadgeClass(order)"
+                   >{{ deliveryStatusForOrder(order) }}</span
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -605,4 +605,129 @@
+-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
++  const body = await request.json().catch(() => ({})) as {
++    externalId?: unknown
++    full?: unknown
++    manual?: unknown
++    completeExternalIds?: unknown
++  }
++  if (body.completeExternalIds !== undefined && !Array.isArray(body.completeExternalIds)) {
++    return Response.json(
++      { ok: false, message: 'Неверный список заказов Prom для подтверждения.' },
++      { status: 400, headers: corsHeaders },
++    )
++  }
++  const requestedCompletionIds = Array.isArray(body.completeExternalIds)
++    ? [
++        ...new Set(
++          body.completeExternalIds
++            .map(text)
++            .map((id) => id.replace(/^prom:/, '').trim())
++            .filter(Boolean),
++        ),
++      ]
++    : []
++  if (requestedCompletionIds.length) {
++    if (isScheduledRequest) {
++      return Response.json(
++        { ok: false, message: 'Подтверждение статусов Prom доступно только пользователю CRM.' },
++        { status: 403, headers: corsHeaders },
++      )
++    }
++    if (
++      requestedCompletionIds.length > 100 ||
++      requestedCompletionIds.some((id) => !/^\d+$/.test(id))
++    ) {
++      return Response.json(
++        { ok: false, message: 'Неверные ID заказов Prom для подтверждения.' },
++        { status: 400, headers: corsHeaders },
++      )
++    }
++
++    const crmExternalIds = requestedCompletionIds.map((id) => `prom:${id}`)
++    const { data: crmOrders, error: crmOrdersError } = await admin
++      .from('crm_orders')
++      .select('id, external_id, status, delivery')
++      .eq('platform', 'Пром')
++      .in('external_id', crmExternalIds)
++    if (crmOrdersError) {
++      return Response.json(
++        { ok: false, message: crmOrdersError.message },
++        { status: 500, headers: corsHeaders },
++      )
++    }
++
++    const byExternalId = new Map((crmOrders ?? []).map((order) => [order.external_id, order]))
++    const invalidIds = requestedCompletionIds.filter((id) => {
++      const order = byExternalId.get(`prom:${id}`)
++      if (!order) return true
++      const delivery = asRecord(order.delivery)
++      const trackingStatus = text(delivery.trackingNormalizedStatus).trim().toLowerCase()
++      const status = text(order.status).trim().toLowerCase()
++      return (
++        trackingStatus !== 'delivered' ||
++        /виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
++          status,
++        )
++      )
++    })
++    if (invalidIds.length) {
++      return Response.json(
++        {
++          ok: false,
++          message: `Нельзя подтвердить заказ(ы) Prom: ${invalidIds.join(', ')}. Проверьте актуальный статус доставки.`,
++        },
++        { status: 409, headers: corsHeaders },
++      )
++    }
++
++    const promResponse = await fetch('https://my.prom.ua/api/v1/orders/set_status', {
++      method: 'POST',
++      headers: {
++        Authorization: `Bearer ${promToken}`,
++        Accept: 'application/json',
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({
++        status: 'delivered',
++        ids: requestedCompletionIds.map(Number),
++      }),
++    })
++    if (!promResponse.ok) {
++      return Response.json(
++        {
++          ok: false,
++          message: `Prom не изменил статус заказов (HTTP ${promResponse.status}).`,
++        },
++        { status: 502, headers: corsHeaders },
++      )
++    }
++
++    const { data: updatedOrders, error: updateError } = await admin
++      .from('crm_orders')
++      .update({ status: 'Виконано' })
++      .eq('platform', 'Пром')
++      .in('external_id', crmExternalIds)
++      .select('id')
++    const updatedOrderRows = updatedOrders ?? []
++    if (updateError || updatedOrderRows.length !== requestedCompletionIds.length) {
++      return Response.json(
++        {
++          ok: false,
++          message:
++            'Prom изменил статус, но CRM не смогла полностью сохранить «Виконано». Запустите синхронизацию Prom.',
++        },
++        { status: 500, headers: corsHeaders },
++      )
++    }
++
++    return Response.json(
++      {
++        ok: true,
++        completed: updatedOrderRows.length,
++        changedOrderIds: updatedOrderRows.map((order) => order.id),
++      },
++      { headers: corsHeaders },
++    )
++  }
++
+   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+   const fullSync = body.full === true
+   const manual = asRecord(body.manual)
