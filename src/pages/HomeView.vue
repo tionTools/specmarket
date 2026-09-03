@@ -609,10 +609,46 @@ function normalizeRegistryKey(value: unknown, preserveLetters = registrySource.v
 
 const registrySourceLabel = computed(() => registrySource.value ?? 'реестр')
 
-function registryKeyForOrder(order: Order) {
-  return registryKeyType.value === 'ttn'
-    ? normalizeRegistryKey(order.delivery.ttn)
-    : normalizeRegistryKey(order.displayNumber ?? order.id)
+function registryKeysForOrder(order: Order) {
+  if (registryKeyType.value !== 'ttn') {
+    const key = normalizeRegistryKey(order.displayNumber ?? order.id)
+    return key ? [key] : []
+  }
+  return deliveryTtns(order.delivery)
+    .map((ttn) => normalizeRegistryKey(ttn))
+    .filter((key, index, keys) => Boolean(key) && keys.indexOf(key) === index)
+}
+
+function buildRegistryMatchIndex(entries: PromRegistryEntry[]) {
+  const entriesByKey = new Map(entries.map((entry) => [entry.orderNumber, entry]))
+  const orderIdsByEntryKey = new Map<string, Array<string | number>>()
+  const matchingEntriesByOrderId = new Map<string | number, PromRegistryEntry[]>()
+
+  for (const order of orders.value) {
+    const matchingEntries = registryKeysForOrder(order)
+      .map((key) => entriesByKey.get(key))
+      .filter((entry): entry is PromRegistryEntry => Boolean(entry))
+      .filter((entry, index, matches) => matches.indexOf(entry) === index)
+    matchingEntriesByOrderId.set(order.id, matchingEntries)
+    for (const entry of matchingEntries) {
+      const orderIds = orderIdsByEntryKey.get(entry.orderNumber) ?? []
+      if (!orderIds.includes(order.id)) orderIds.push(order.id)
+      orderIdsByEntryKey.set(entry.orderNumber, orderIds)
+    }
+  }
+
+  const entryByOrderId = new Map<string | number, PromRegistryEntry>()
+  const matchedEntryKeys = new Set<string>()
+  for (const order of orders.value) {
+    const matchingEntries = matchingEntriesByOrderId.get(order.id) ?? []
+    if (matchingEntries.length !== 1) continue
+    const entry = matchingEntries[0]!
+    if ((orderIdsByEntryKey.get(entry.orderNumber)?.length ?? 0) !== 1) continue
+    entryByOrderId.set(order.id, entry)
+    matchedEntryKeys.add(entry.orderNumber)
+  }
+
+  return { entryByOrderId, matchedEntryKeys }
 }
 
 function getRegistryPaymentAmount(order: Order, entry: PromRegistryEntry) {
@@ -716,13 +752,13 @@ function restoreRegistryDraftNavigation() {
 
 function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   restorePromRegistryFinancials()
-  const entriesByOrder = new Map(entries.map((entry) => [entry.orderNumber, entry]))
+  const matchIndex = buildRegistryMatchIndex(entries)
   const newFields = new Set<string>()
   const mismatchedFields = new Set<string>()
   let complete = 0
   let partial = 0
   for (const order of orders.value) {
-    const entry = entriesByOrder.get(registryKeyForOrder(order))
+    const entry = matchIndex.entryByOrderId.get(order.id)
     if (!entry) continue
     const financialEditKeys = [
       `${order.id}-payment-amount`,
@@ -842,7 +878,7 @@ function applyPromRegistryPreview(entries: PromRegistryEntry[]) {
   promRegistryMismatchedFields.value = mismatchedFields
   promRegistryExistingFinancials.value = { complete, partial }
   expandedRegistryOrderIds.value = orders.value
-    .filter((order) => entriesByOrder.has(registryKeyForOrder(order)))
+    .filter((order) => matchIndex.entryByOrderId.has(order.id))
     .map((order) => order.id)
 }
 
@@ -853,7 +889,7 @@ function isPromRegistryNewField(order: Order, field: 'paymentAmount' | 'acquirin
 function isPromRegistryFieldMismatch(order: Order, field: 'paymentAmount' | 'acquiring') {
   if (!isPromRegistryDraft.value) return false
   if (promRegistryMismatchedFields.value.has(`${order.id}-${field}`)) return true
-  const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
+  const entry = promRegistryMatchIndex.value.entryByOrderId.get(order.id)
   if (!entry) return false
   if (field === 'acquiring' && !entry.hasAcquiring) return false
   const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
@@ -868,7 +904,7 @@ function promRegistryFieldClass(order: Order, field: 'paymentAmount' | 'acquirin
   if (isPromRegistryFieldMismatch(order, field)) {
     return 'border-amber-400 bg-amber-100 text-amber-950'
   }
-  const entry = promRegistryEntriesByOrder.value.get(registryKeyForOrder(order))
+  const entry = promRegistryMatchIndex.value.entryByOrderId.get(order.id)
   const actual = field === 'paymentAmount' ? (order.paymentAmount ?? 0) : order.acquiring
   const expected =
     field === 'paymentAmount' && entry
@@ -1262,9 +1298,7 @@ const orderListPeriodLabel = computed(() => {
   if (from.getTime() === to.getTime()) return formatter.format(from)
   return `${formatter.format(from)}–${formatter.format(to)}`
 })
-const promRegistryEntriesByOrder = computed(
-  () => new Map(promRegistryEntries.value.map((entry) => [entry.orderNumber, entry])),
-)
+const promRegistryMatchIndex = computed(() => buildRegistryMatchIndex(promRegistryEntries.value))
 const promRegistryMismatchCount = computed(() =>
   orders.value.reduce(
     (count, order) =>
@@ -1276,11 +1310,11 @@ const promRegistryMismatchCount = computed(() =>
 )
 const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
 const promRegistryOrders = computed(() =>
-  orders.value.filter((order) => promRegistryEntriesByOrder.value.has(registryKeyForOrder(order))),
+  orders.value.filter((order) => promRegistryMatchIndex.value.entryByOrderId.has(order.id)),
 )
 const unmatchedPromRegistryEntries = computed(() =>
   promRegistryEntries.value.filter(
-    (entry) => !orders.value.some((order) => registryKeyForOrder(order) === entry.orderNumber),
+    (entry) => !promRegistryMatchIndex.value.matchedEntryKeys.has(entry.orderNumber),
   ),
 )
 const unmatchedPromRegistryOrderNumbers = computed(() =>
