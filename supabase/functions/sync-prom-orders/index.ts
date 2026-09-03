@@ -235,6 +235,49 @@ function customerName(order: RecordValue) {
     .filter(Boolean).join(' ') || text(order.name) || 'Покупатель Prom'
 }
 
+function promClientName(client: RecordValue) {
+  return [
+    text(pick(client, 'client_last_name', 'last_name', 'lastName', 'surname')),
+    text(pick(client, 'client_first_name', 'first_name', 'firstName', 'name_first')),
+    text(pick(client, 'client_second_name', 'middle_name', 'middleName', 'second_name', 'patronymic')),
+  ].filter(Boolean).join(' ') || readable(pick(client, 'full_name', 'fullName', 'name'))
+}
+
+function promClientPhone(client: RecordValue) {
+  return text(pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'))
+}
+
+function promClientEmail(client: RecordValue) {
+  return text(pick(client, 'email', 'client_email', 'email_address', 'emailAddress'))
+}
+
+async function promClientById(
+  clientId: string,
+  promToken: string,
+  cache: Map<string, Promise<RecordValue | null>>,
+): Promise<RecordValue | null> {
+  if (!clientId) return null
+  const cached = cache.get(clientId)
+  if (cached) return cached
+
+  const pending = (async () => {
+    try {
+      const response = await fetch(`https://my.prom.ua/api/v1/clients/${encodeURIComponent(clientId)}`, {
+        headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+      })
+      if (!response.ok) return null
+      const payload = asRecord(await response.json())
+      const client = asRecord(payload.client ?? payload.data ?? payload)
+      return Object.keys(client).length ? client : null
+    } catch {
+      return null
+    }
+  })()
+
+  cache.set(clientId, pending)
+  return pending
+}
+
 function recipientName(value: unknown): string {
   const record = asRecord(value)
   const fullName = [
@@ -606,11 +649,24 @@ Deno.serve(async (request) => {
   const changedOrderIds: string[] = []
   const productSizeCache = new Map<string, string>()
   const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
+  const promClientCache = new Map<string, Promise<RecordValue | null>>()
   for (const order of candidates) {
     const promId = text(order.id)
     if (!promId) continue
     const externalId = `prom:${promId}`
     const existing = existingByExternalId.get(externalId) ?? null
+    const existingOrder = asRecord(existing)
+    const clientId = text(pick(order, 'client_id', 'clientId')).trim()
+    const shouldResolvePromClient = Boolean(clientId) && (!existing || Boolean(requestedExternalId))
+    const promClient = shouldResolvePromClient
+      ? await promClientById(clientId, promToken, promClientCache)
+      : null
+    const orderCustomer = customerName(order)
+    const orderPhone = text(order.phone) || text(order.client_phone)
+    const orderEmail = text(order.email) || text(order.client_email)
+    const buyerName = promClientName(promClient ?? {}) || (clientId ? text(existingOrder.customer) : '') || orderCustomer
+    const buyerPhone = promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
+    const buyerEmail = promClientEmail(promClient ?? {}) || (clientId ? text(existingOrder.customer_email) : '') || orderEmail
     // Массовая кнопка ищет только новые заказы. Старые обновляются только
     // отдельной кнопкой в карточке конкретного заказа.
     const previousDelivery = asRecord(existing?.delivery)
@@ -692,8 +748,8 @@ Deno.serve(async (request) => {
     const data = {
       external_id: externalId,
       order_number: number(order.id), order_date: date, order_time: time,
-      customer: customerName(order), phone: text(order.phone) || text(order.client_phone),
-      customer_email: text(order.email) || text(order.client_email) || null,
+      customer: buyerName, phone: buyerPhone,
+      customer_email: buyerEmail || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: orderStatus,
       shipping: hasManualShipping
