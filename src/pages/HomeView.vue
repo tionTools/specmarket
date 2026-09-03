@@ -3548,6 +3548,14 @@ async function copyTtn(delivery: Delivery, orderId: Order['id']) {
   } catch {}
 }
 
+async function copyHistoricalTtn(delivery: Delivery, ttn: string, noticeKey: string) {
+  if (!ttn || !isClipboardSupported.value) return
+  try {
+    await copy(deliveryTtnForClipboard(delivery.carrier, ttn).replace(/\s+/g, ''))
+    if (copied.value) showInlineActionNotice(noticeKey, 'Скопировано')
+  } catch {}
+}
+
 async function copyOneCTemplate(delivery: Delivery, orderId: Order['id']) {
   if (!isClipboardSupported.value) return
   const text = oneCClipboardText(delivery)
@@ -5229,6 +5237,29 @@ function orderDateTime(order: Order) {
                           <span class="font-semibold text-slate-800">{{
                             formatDeliveryTtn(order.delivery.carrier, entry.ttn)
                           }}</span>
+                          <button
+                            class="relative grid size-5 shrink-0 place-items-center rounded text-violet-600 hover:bg-violet-100 hover:text-violet-800"
+                            type="button"
+                            title="Скопировать ТТН без пробелов"
+                            aria-label="Скопировать предыдущую ТТН без пробелов"
+                            @click.stop="
+                              copyHistoricalTtn(
+                                order.delivery,
+                                entry.ttn,
+                                `copy-history-ttn:${order.id}:${historyIndex}`,
+                              )
+                            "
+                          >
+                            <Copy class="size-3.5" aria-hidden="true" />
+                            <span
+                              v-if="
+                                inlineActionNotice?.key ===
+                                `copy-history-ttn:${order.id}:${historyIndex}`
+                              "
+                              class="pointer-events-none absolute top-full left-1/2 z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                              >Скопировано</span
+                            >
+                          </button>
                           <span
                             class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase"
                             >{{ shipmentRelationLabel(entry.relation) }}</span
