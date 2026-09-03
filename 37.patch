@@ -1,0 +1,33 @@
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts b/supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/rozetka-delivery.ts
+@@ -10,6 +10,11 @@ function rozetkaReadableStatus(source: string, code: string) {
+   if (/поверта(?:ється|вся)|returning/i.test(source)) {
+     return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
+   }
++  if (/\bу\s+відділенн/i.test(source)) {
++    return {
++      status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup',
++    }
++  }
+   return readableStatus(source, code)
+ }
+ 
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+@@ -55,3 +55,15 @@ Deno.test('Rozetka Delivery keeps using public tracking', async () => {
+     assert(trackingChanged({ ttn: 'R' }, result), 'ordinary Rozetka result no longer updates a legacy order')
+   })
+ })
++
++Deno.test('Rozetka Delivery maps У відділенні to ready for pickup', async () => {
++  await withCarrierResponse({}, { data: {
++    last_status: { id: 'in-branch', name: 'У відділенні', date: '2026-09-03 20:00:00' }, status_groups: [],
++  } }, async () => {
++    const result = await rozetkaStatus('R-READY')
++    assert(result.normalizedStatus === 'ready_for_pickup', 'Rozetka in-branch status must be ready_for_pickup')
++    assert(result.final === false, 'Rozetka in-branch status must remain non-final')
++    assert(result.status === 'У відділенні', 'Rozetka source status should stay visible')
++  })
++})
