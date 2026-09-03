@@ -3375,6 +3375,14 @@ function orderStatusTone(order: Order): OrderStatusTone {
   )
     return 'orange'
 
+  const carrierConfirmsDelivery =
+    trackingNormalized === 'delivered' ||
+    ((!trackingNormalized || trackingNormalized === 'unknown') &&
+      /получ|отрим|доставлен|доставлено|вруч|delivered|received/.test(trackingStatus))
+
+  // Prom stays green after carrier delivery until the user confirms completion in Prom.
+  if (order.platform !== 'Пром' && carrierConfirmsDelivery) return 'orange'
+
   const carrierConfirmsShipment =
     ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
     (!trackingNormalized &&
