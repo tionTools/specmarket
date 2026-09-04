@@ -1844,6 +1844,7 @@ function createOrderDraft(): Order {
       address: '',
       status: 'Запланировано',
       payer: 'Получатель',
+      paymentMethod: '',
     },
   }
 }
@@ -2915,6 +2916,7 @@ function validateOrderDraft(order: Order) {
   if (!order.customer) return 'Укажите покупателя.'
   if (!order.phone) return 'Укажите телефон покупателя.'
   if (!order.date) return 'Укажите дату заказа.'
+  if (!order.delivery.paymentMethod?.trim()) return 'Выберите способ оплаты.'
   if (!order.products.length) return 'Добавьте хотя бы один товар.'
   if (order.products.some((product) => !product.name)) return 'Укажите название каждого товара.'
   if (order.products.some((product) => !Number.isInteger(product.quantity) || product.quantity < 1))
@@ -5787,7 +5789,18 @@ function orderDateTime(order: Order) {
                 </select>
               </label>
               <label class="text-sm font-medium text-slate-700">
-                Дата заказа *
+                Оплата *
+                <select
+                  v-model="orderDraft.delivery.paymentMethod"
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                >
+                  <option disabled value="">Выберите способ оплаты</option>
+                  <option value="prepayment">Предоплата</option>
+                  <option value="pay_on_delivery">Наложенный платёж</option>
+                </select>
+              </label>
+              <label class="text-sm font-medium text-slate-700">
+                Дата заказа
                 <input
                   v-model="orderDraft.date"
                   class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
