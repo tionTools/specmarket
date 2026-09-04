@@ -2781,7 +2781,7 @@ onScopeDispose(() => {
 })
 
 function cloneOrder(order: Order) {
-  return structuredClone(toRaw(order))
+  return JSON.parse(JSON.stringify(toRaw(order))) as Order
 }
 
 function openNewOrderDialog() {
