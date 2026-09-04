@@ -1,0 +1,29 @@
+Patch 39 — исправить создание/редактирование ручного заказа: structuredClone падает на Vue-reactive данных
+
+База для патча: актуальный main. На момент подготовки main = c135b54363bec2fa185d0180c803b2d74f5df494.
+
+Проблема:
+При нажатии «Создать заказ» в ручном заказе CRM показывает:
+Failed to execute 'structuredClone' on 'Window': #<Object> could not be cloned.
+Ошибка возникает в cloneOrder(), который вызывается из normalizedOrderDraft(). Текущий код использует structuredClone(toRaw(order)); structuredClone может падать на вложенных Vue-reactive/proxy значениях.
+
+Что сделать:
+1. Перейди в локальный проект C:\Users\Вадим\Documents\CRM моя\specmarket и синхронизируйся с origin/main без изменения пользовательского AGENTS.md.
+2. Получи 39.patch из ветки chatgpt-patches.
+3. Выполни git apply --check для 39.patch, затем примени патч.
+4. Изменение должно быть только в src/pages/HomeView.vue:
+   - в cloneOrder() заменить structuredClone(toRaw(order)) на JSON-сериализуемый глубокий клон:
+     return JSON.parse(JSON.stringify(toRaw(order))) as Order
+   - не менять остальную логику ручного заказа.
+5. Проверь, что создание нового ручного заказа больше не может упасть именно с DataCloneError/structuredClone. Если доступна UI-проверка, открой форму нового заказа, заполни обязательные поля и создай заказ. Если UI недоступен, дополнительно статически проверь, что normalizedOrderDraft() по-прежнему использует cloneOrder(), а cloneOrder() больше не вызывает structuredClone.
+6. Выполни проверки:
+   - pnpm format
+   - pnpm type-check
+   - pnpm lint
+   - pnpm build
+   - git diff --check
+7. В commit включи только файл задачи src/pages/HomeView.vue. AGENTS.md не изменять, не индексировать и не коммитить.
+8. Сделай commit с понятным сообщением, например: Fix manual order cloning.
+9. Push в origin/main.
+10. Миграции не выполнять. Supabase Edge Functions не деплоить: изменение только frontend.
+11. В отчёте укажи git apply --check, список изменённых файлов, результаты всех проверок, commit SHA, push и итоговый git status --short.
