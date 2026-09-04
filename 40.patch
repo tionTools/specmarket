@@ -1,0 +1,330 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -68,5 +68,7 @@
+ const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
+ const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
+ const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
++const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
++const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
+ const route = useRoute()
+ const router = useRouter()
+@@ -170,7 +170,19 @@
+ type UnopenedNewOrder = {
+   remoteId: string
+   orderId: string
+   platform: Platform
+ }
++type ManualOrderPriceDraftState = {
++  draft: Order
++  editingId: string | number | null
++  productId: string
++}
++type ManualOrderPriceSelection = {
++  productId: string
++  priceItemId: string
++  name: string
++  costUsd: number
++  costUah: number
++}
+ type OrderItemReturn = {
+   order_id: string
+@@ -2750,13 +2750,24 @@
+   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
+   const returnSearch = route.query.returnSearch
++  const restoreManualDraft =
++    route.query.returnManualDraft === '1' && restoreManualOrderDraftFromPriceSelection()
+   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
+   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
++  if (restoreManualDraft) {
++    await nextTick()
++    orderDialog.value?.showModal()
++  }
+   if (returnOrder && orders.value.some((order) => String(order.id) === returnOrder)) {
+     expandedOrderId.value = returnOrder
+     await nextTick()
+     document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
+   }
+   // This is a one-time return from the price list, not a permanent open-order state.
+-  if (route.query.returnOrder || route.query.returnSearch || route.query.returnRegistry)
++  if (
++    route.query.returnOrder ||
++    route.query.returnSearch ||
++    route.query.returnRegistry ||
++    route.query.returnManualDraft
++  )
+     await router.replace({ query: {} })
+ })
+@@ -2803,8 +2803,59 @@
+ function removeProduct(productId: string) {
+   if (isGuest.value) return
+   if (orderDraft.value.products.length > 1) {
+     orderDraft.value.products = orderDraft.value.products.filter(
+       (product) => product.id !== productId,
+     )
+   }
+ }
++
++async function openDraftPricePicker(product: OrderProduct) {
++  if (isGuest.value) return
++  const state: ManualOrderPriceDraftState = {
++    draft: JSON.parse(JSON.stringify(toRaw(orderDraft.value))) as Order,
++    editingId: editingManualOrderId.value,
++    productId: product.id,
++  }
++  window.sessionStorage.setItem(manualOrderPriceDraftStorageKey, JSON.stringify(state))
++  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
++  orderDialog.value?.close()
++  await router.push({
++    path: '/prices',
++    query: { manualSelect: '1', manualProductId: product.id },
++  })
++}
++
++function restoreManualOrderDraftFromPriceSelection() {
++  const rawDraft = window.sessionStorage.getItem(manualOrderPriceDraftStorageKey)
++  if (!rawDraft) return false
++  try {
++    const state = JSON.parse(rawDraft) as Partial<ManualOrderPriceDraftState>
++    if (!state.draft || !Array.isArray(state.draft.products)) return false
++    orderDraft.value = state.draft
++    editingManualOrderId.value = state.editingId ?? null
++    orderDraftError.value = ''
++
++    const rawSelection = window.sessionStorage.getItem(manualOrderPriceSelectionStorageKey)
++    if (rawSelection) {
++      const selection = JSON.parse(rawSelection) as Partial<ManualOrderPriceSelection>
++      const productId = selection.productId || state.productId
++      const product = orderDraft.value.products.find((item) => item.id === productId)
++      if (product && selection.priceItemId) {
++        const costUsd = Number(selection.costUsd ?? 0)
++        const costUah = Number(selection.costUah ?? 0)
++        product.name = selection.name?.trim() || product.name
++        product.priceItemId = selection.priceItemId
++        if (Number.isFinite(costUsd)) product.costUsd = costUsd
++        if (Number.isFinite(costUah)) product.cost = costUah
++        product.costManual = false
++      }
++    }
++    return true
++  } catch (error) {
++    console.error('Не удалось восстановить ручной заказ после выбора цены:', error)
++    return false
++  } finally {
++    window.sessionStorage.removeItem(manualOrderPriceDraftStorageKey)
++    window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
++  }
++}
+@@ -5730,13 +5730,23 @@
+                 <div class="mb-3 flex items-center justify-between">
+                   <span class="text-sm font-semibold text-slate-700"
+                     >Товар {{ productIndex + 1 }}</span
+                   >
+-                  <button
+-                    v-if="orderDraft.products.length > 1"
+-                    class="rounded-lg px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
+-                    type="button"
+-                    @click="removeProduct(product.id)"
+-                  >
+-                    <Trash2 class="mr-1 inline size-4" aria-hidden="true" /> Удалить товар
+-                  </button>
++                  <div class="flex flex-wrap items-center justify-end gap-2">
++                    <button
++                      class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
++                      type="button"
++                      @click="openDraftPricePicker(product)"
++                    >
++                      <Link2 class="mr-1 inline size-4" aria-hidden="true" />
++                      {{ product.priceItemId ? 'Сменить из цен' : 'Выбрать из цен' }}
++                    </button>
++                    <button
++                      v-if="orderDraft.products.length > 1"
++                      class="rounded-lg px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
++                      type="button"
++                      @click="removeProduct(product.id)"
++                    >
++                      <Trash2 class="mr-1 inline size-4" aria-hidden="true" /> Удалить товар
++                    </button>
++                  </div>
+                 </div>
+diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
+--- a/src/pages/PricesView.vue
++++ b/src/pages/PricesView.vue
+@@ -76,6 +76,11 @@
+ const linkTitle = computed(() => queryText(route.query.linkTitle))
+ const linkSize = computed(() => queryText(route.query.linkSize))
+ const linkMode = computed(
+   () => route.query.linkMode === '1' && Boolean(linkPlatform.value && linkProductKey.value),
+ )
++const manualProductId = computed(() => queryText(route.query.manualProductId))
++const manualSelectMode = computed(
++  () => route.query.manualSelect === '1' && Boolean(manualProductId.value),
++)
++const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
+ const linkedPriceItemId = ref<string | null>(null)
+@@ -224,7 +224,40 @@
+ function returnQuery() {
++  if (manualSelectMode.value) return { returnManualDraft: '1' }
+   return {
+     ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+     ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+     ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
+   }
+ }
++
++async function selectManualPriceItem(item: PriceItem) {
++  if (
++    isGuest.value ||
++    item.kind === 'group' ||
++    !item.remoteId ||
++    !manualSelectMode.value ||
++    !manualProductId.value
++  )
++    return
++  const costUsd = item.usd ?? 0
++  const costUah = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
++  window.sessionStorage.setItem(
++    manualOrderPriceSelectionStorageKey,
++    JSON.stringify({
++      productId: manualProductId.value,
++      priceItemId: item.remoteId,
++      name: item.name,
++      costUsd,
++      costUah,
++    }),
++  )
++  await router.push({ path: '/', query: { returnManualDraft: '1' } })
++}
++
++function handlePriceItemAction(item: PriceItem) {
++  if (manualSelectMode.value) {
++    void selectManualPriceItem(item)
++    return
++  }
++  void linkPriceItem(item)
++}
+@@ -466,11 +466,4 @@
+     <RouterLink
+       class="fixed left-0 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-r-xl border border-l-0 border-blue-200 bg-white px-2 py-3 text-xs font-bold leading-4 text-blue-700 shadow-lg transition hover:bg-blue-50"
+-      :to="{
+-        path: '/',
+-        query: {
+-          ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+-          ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+-          ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
+-        },
+-      }"
++      :to="{ path: '/', query: returnQuery() }"
+       title="Вернуться к заказам"
+@@ -482,13 +482,4 @@
+           <RouterLink
+             class="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+-            :to="{
+-              path: '/',
+-              query: {
+-                ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
+-                ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
+-                ...(route.query.returnRegistry
+-                  ? { returnRegistry: route.query.returnRegistry }
+-                  : {}),
+-              },
+-            }"
++            :to="{ path: '/', query: returnQuery() }"
+           >
+@@ -620,17 +620,24 @@
+       </p>
+       <section
+-        v-if="user && linkMode"
++        v-if="user && (linkMode || manualSelectMode)"
+         class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-950 shadow-sm"
+       >
+         <div class="flex items-start gap-3">
+           <Link2 class="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true" />
+           <div>
+-            <p class="font-semibold">
++            <p v-if="manualSelectMode" class="font-semibold">
++              Выберите позицию из «Цен» для ручного заказа.
++            </p>
++            <p v-else class="font-semibold">
+               Привязать товар: <strong>{{ linkTitle || 'Без названия' }}</strong>
+               <span v-if="linkSize"> · размер {{ linkSize }}</span>
+               <span v-if="linkPlatform"> · {{ linkPlatform }}</span>
+             </p>
+             <p class="mt-1 text-xs text-emerald-800">
+-              Найдите эталонную строку себестоимости и нажмите «Привязать».
++              {{
++                manualSelectMode
++                  ? 'Название и себестоимость подтянутся в форму заказа; количество и цену продажи вы задаёте сами.'
++                  : 'Найдите эталонную строку себестоимости и нажмите «Привязать».'
++              }}
+             </p>
+             <p v-if="linkError" class="mt-2 text-sm font-semibold text-rose-700">{{ linkError }}</p>
+@@ -690,13 +690,14 @@
+           :editing-cell="editingCell"
+           :guest="isGuest"
+           :link-mode="linkMode"
++          :select-mode="manualSelectMode"
+           :linked-price-item-id="linkedPriceItemId"
+           @start-dragging="startDragging"
+           @move-item="moveItem"
+           @insert-item-after="insertItemAfter"
+           @confirm-delete="confirmDelete"
+           @toggle-name-edit="toggleNameEdit"
+           @toggle-price-edit="togglePriceEdit"
+           @finish-edit="finishEdit"
+-          @link-item="linkPriceItem"
++          @link-item="handlePriceItemAction"
+         />
+diff --git a/src/features/prices/PricesTable.vue b/src/features/prices/PricesTable.vue
+--- a/src/features/prices/PricesTable.vue
++++ b/src/features/prices/PricesTable.vue
+@@ -21,6 +21,7 @@
+   editingCell: string | null
+   guest: boolean
+   linkMode?: boolean
++  selectMode?: boolean
+   linkedPriceItemId?: string | null
+   initialSearch?: string
+ }>()
+@@ -137,24 +137,28 @@
+   {
+     id: 'actions',
+     header: () => h('span', { class: 'sr-only' }, 'Действия'),
+     cell: ({ row }: { row: { original: PriceItem } }) => {
+-      const linked = row.original.remoteId === props.linkedPriceItemId
+-      return props.linkMode
++      const linked = props.linkMode && row.original.remoteId === props.linkedPriceItemId
++      return props.linkMode || props.selectMode
+         ? h(
+             'button',
+             {
+               class: `inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold disabled:opacity-40 ${
+                 linked
+                   ? 'border-emerald-500 bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300'
+                   : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+               }`,
+               disabled: !row.original.remoteId,
+-              title: linked ? 'Текущая привязка' : 'Привязать эту позицию',
++              title: props.selectMode
++                ? 'Выбрать эту позицию'
++                : linked
++                  ? 'Текущая привязка'
++                  : 'Привязать эту позицию',
+               type: 'button',
+               onClick: () => emit('linkItem', row.original),
+             },
+             [
+               h(Link2, { class: 'size-4', 'aria-hidden': 'true' }),
+-              h('span', linked ? 'Привязано' : 'Привязать'),
++              h('span', props.selectMode ? 'Выбрать' : linked ? 'Привязано' : 'Привязать'),
+             ],
+           )
+@@ -300,6 +300,6 @@
+               'text-blue-700': header.column.id === 'prom',
+               'text-emerald-700': header.column.id === 'epic',
+               'w-[4.5rem] text-center text-orange-600': header.column.id.startsWith('kasta'),
+-              'w-28': header.column.id === 'actions' && linkMode,
+-              'w-10': header.column.id === 'actions' && !linkMode,
++              'w-28': header.column.id === 'actions' && (linkMode || selectMode),
++              'w-10': header.column.id === 'actions' && !(linkMode || selectMode),
+             }"
