@@ -1,0 +1,7 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -2783,3 +2783,3 @@ function cloneOrder(order: Order) {
+-  return structuredClone(toRaw(order))
++  return JSON.parse(JSON.stringify(toRaw(order))) as Order
+ }
