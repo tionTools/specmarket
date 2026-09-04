@@ -1,0 +1,35 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -1834,6 +1834,7 @@ function createOrderDraft(): Order {
+       address: '',
+       status: 'Запланировано',
+       payer: 'Получатель',
++      paymentMethod: '',
+     },
+   }
+ }
+@@ -2914,4 +2915,5 @@ function validateOrderDraft(order: Order) {
+   if (!order.customer) return 'Укажите покупателя.'
+   if (!order.phone) return 'Укажите телефон покупателя.'
+   if (!order.date) return 'Укажите дату заказа.'
++  if (!order.delivery.paymentMethod?.trim()) return 'Выберите способ оплаты.'
+   if (!order.products.length) return 'Добавьте хотя бы один товар.'
+@@ -5780,5 +5782,16 @@
+                 </select>
+               </label>
+               <label class="text-sm font-medium text-slate-700">
+-                Дата заказа *
++                Оплата *
++                <select
++                  v-model="orderDraft.delivery.paymentMethod"
++                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
++                >
++                  <option disabled value="">Выберите способ оплаты</option>
++                  <option value="prepayment">Предоплата</option>
++                  <option value="pay_on_delivery">Наложенный платёж</option>
++                </select>
++              </label>
++              <label class="text-sm font-medium text-slate-700">
++                Дата заказа
+                 <input
