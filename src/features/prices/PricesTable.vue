@@ -23,6 +23,7 @@ const props = defineProps<{
   editingCell: string | null
   guest: boolean
   linkMode?: boolean
+  selectMode?: boolean
   linkedPriceItemId?: string | null
   initialSearch?: string
 }>()
@@ -179,8 +180,8 @@ const columns = [
     id: 'actions',
     header: () => h('span', { class: 'sr-only' }, 'Действия'),
     cell: ({ row }: { row: { original: PriceItem } }) => {
-      const linked = row.original.remoteId === props.linkedPriceItemId
-      return props.linkMode
+      const linked = props.linkMode && row.original.remoteId === props.linkedPriceItemId
+      return props.linkMode || props.selectMode
         ? h(
             'button',
             {
@@ -189,14 +190,19 @@ const columns = [
                   ? 'border-emerald-500 bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
               }`,
-              disabled: !row.original.remoteId,
-              title: linked ? 'Текущая привязка' : 'Привязать эту позицию',
+              disabled:
+                !row.original.remoteId || (props.selectMode && row.original.kind === 'group'),
+              title: props.selectMode
+                ? 'Выбрать эту позицию'
+                : linked
+                  ? 'Текущая привязка'
+                  : 'Привязать эту позицию',
               type: 'button',
               onClick: () => emit('linkItem', row.original),
             },
             [
               h(Link2, { class: 'size-4', 'aria-hidden': 'true' }),
-              h('span', linked ? 'Привязано' : 'Привязать'),
+              h('span', props.selectMode ? 'Выбрать' : linked ? 'Привязано' : 'Привязать'),
             ],
           )
         : h(
@@ -304,8 +310,8 @@ defineExpose({ focusSearch })
               'text-blue-700': header.column.id === 'prom',
               'text-emerald-700': header.column.id === 'epic',
               'w-[4.5rem] text-center text-orange-600': header.column.id.startsWith('kasta'),
-              'w-28': header.column.id === 'actions' && linkMode,
-              'w-10': header.column.id === 'actions' && !linkMode,
+              'w-28': header.column.id === 'actions' && (linkMode || selectMode),
+              'w-10': header.column.id === 'actions' && !(linkMode || selectMode),
             }"
           >
             <FlexRender v-if="!header.isPlaceholder" :header="header" />

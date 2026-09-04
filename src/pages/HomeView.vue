@@ -71,6 +71,8 @@ const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
 const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
+const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
+const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
@@ -192,6 +194,18 @@ type UnopenedNewOrder = {
   remoteId: string
   orderId: string
   platform: Platform
+}
+type ManualOrderPriceDraftState = {
+  draft: Order
+  editingId: string | number | null
+  productId: string
+}
+type ManualOrderPriceSelection = {
+  productId: string
+  priceItemId: string
+  name: string
+  costUsd: number
+  costUah: number
 }
 type OrderItemReturn = {
   order_id: string
@@ -2757,15 +2771,26 @@ onMounted(async () => {
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
+  const restoreManualDraft =
+    route.query.returnManualDraft === '1' && restoreManualOrderDraftFromPriceSelection()
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
+  if (restoreManualDraft) {
+    await nextTick()
+    orderDialog.value?.showModal()
+  }
   if (returnOrder && orders.value.some((order) => String(order.id) === returnOrder)) {
     expandedOrderId.value = returnOrder
     await nextTick()
     document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
   }
   // This is a one-time return from the price list, not a permanent open-order state.
-  if (route.query.returnOrder || route.query.returnSearch || route.query.returnRegistry)
+  if (
+    route.query.returnOrder ||
+    route.query.returnSearch ||
+    route.query.returnRegistry ||
+    route.query.returnManualDraft
+  )
     await router.replace({ query: {} })
 })
 
@@ -2811,6 +2836,57 @@ function removeProduct(productId: string) {
     orderDraft.value.products = orderDraft.value.products.filter(
       (product) => product.id !== productId,
     )
+  }
+}
+
+async function openDraftPricePicker(product: OrderProduct) {
+  if (isGuest.value) return
+  const state: ManualOrderPriceDraftState = {
+    draft: JSON.parse(JSON.stringify(toRaw(orderDraft.value))) as Order,
+    editingId: editingManualOrderId.value,
+    productId: product.id,
+  }
+  window.sessionStorage.setItem(manualOrderPriceDraftStorageKey, JSON.stringify(state))
+  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
+  orderDialog.value?.close()
+  await router.push({
+    path: '/prices',
+    query: { manualSelect: '1', manualProductId: product.id },
+  })
+}
+
+function restoreManualOrderDraftFromPriceSelection() {
+  const rawDraft = window.sessionStorage.getItem(manualOrderPriceDraftStorageKey)
+  if (!rawDraft) return false
+  try {
+    const state = JSON.parse(rawDraft) as Partial<ManualOrderPriceDraftState>
+    if (!state.draft || !Array.isArray(state.draft.products)) return false
+    orderDraft.value = state.draft
+    editingManualOrderId.value = state.editingId ?? null
+    orderDraftError.value = ''
+
+    const rawSelection = window.sessionStorage.getItem(manualOrderPriceSelectionStorageKey)
+    if (rawSelection) {
+      const selection = JSON.parse(rawSelection) as Partial<ManualOrderPriceSelection>
+      const productId = selection.productId || state.productId
+      const product = orderDraft.value.products.find((item) => item.id === productId)
+      if (product && selection.priceItemId) {
+        const costUsd = Number(selection.costUsd ?? 0)
+        const costUah = Number(selection.costUah ?? 0)
+        product.name = selection.name?.trim() || product.name
+        product.priceItemId = selection.priceItemId
+        if (Number.isFinite(costUsd)) product.costUsd = costUsd
+        if (Number.isFinite(costUah)) product.cost = costUah
+        product.costManual = false
+      }
+    }
+    return true
+  } catch (error) {
+    console.error('Не удалось восстановить ручной заказ после выбора цены:', error)
+    return false
+  } finally {
+    window.sessionStorage.removeItem(manualOrderPriceDraftStorageKey)
+    window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
   }
 }
 
@@ -5756,14 +5832,24 @@ function orderDateTime(order: Order) {
                   <span class="text-sm font-semibold text-slate-700"
                     >Товар {{ productIndex + 1 }}</span
                   >
-                  <button
-                    v-if="orderDraft.products.length > 1"
-                    class="rounded-lg px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
-                    type="button"
-                    @click="removeProduct(product.id)"
-                  >
-                    <Trash2 class="mr-1 inline size-4" aria-hidden="true" /> Удалить товар
-                  </button>
+                  <div class="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                      type="button"
+                      @click="openDraftPricePicker(product)"
+                    >
+                      <Link2 class="mr-1 inline size-4" aria-hidden="true" />
+                      {{ product.priceItemId ? 'Сменить из цен' : 'Выбрать из цен' }}
+                    </button>
+                    <button
+                      v-if="orderDraft.products.length > 1"
+                      class="rounded-lg px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
+                      type="button"
+                      @click="removeProduct(product.id)"
+                    >
+                      <Trash2 class="mr-1 inline size-4" aria-hidden="true" /> Удалить товар
+                    </button>
+                  </div>
                 </div>
                 <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   <label class="text-sm font-medium text-slate-700 lg:col-span-2">

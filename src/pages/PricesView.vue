@@ -95,6 +95,11 @@ const linkSize = computed(() => queryText(route.query.linkSize))
 const linkMode = computed(
   () => route.query.linkMode === '1' && Boolean(linkPlatform.value && linkProductKey.value),
 )
+const manualProductId = computed(() => queryText(route.query.manualProductId))
+const manualSelectMode = computed(
+  () => route.query.manualSelect === '1' && Boolean(manualProductId.value),
+)
+const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
 const linkedPriceItemId = ref<string | null>(null)
 const linkedPriceItem = computed(
   () => items.value.find((item) => item.remoteId === linkedPriceItemId.value) ?? null,
@@ -233,11 +238,44 @@ async function loadCurrentPriceLink() {
 }
 
 function returnQuery() {
+  if (manualSelectMode.value) return { returnManualDraft: '1' }
   return {
     ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
     ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
     ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
   }
+}
+
+async function selectManualPriceItem(item: PriceItem) {
+  if (
+    isGuest.value ||
+    item.kind === 'group' ||
+    !item.remoteId ||
+    !manualSelectMode.value ||
+    !manualProductId.value
+  )
+    return
+  const costUsd = item.usd ?? 0
+  const costUah = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
+  window.sessionStorage.setItem(
+    manualOrderPriceSelectionStorageKey,
+    JSON.stringify({
+      productId: manualProductId.value,
+      priceItemId: item.remoteId,
+      name: item.name,
+      costUsd,
+      costUah,
+    }),
+  )
+  await router.push({ path: '/', query: { returnManualDraft: '1' } })
+}
+
+function handlePriceItemAction(item: PriceItem) {
+  if (manualSelectMode.value) {
+    void selectManualPriceItem(item)
+    return
+  }
+  void linkPriceItem(item)
 }
 
 async function linkPriceItem(item: PriceItem) {
@@ -541,14 +579,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
   <div class="min-h-screen bg-slate-50 text-slate-900">
     <RouterLink
       class="fixed left-0 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-r-xl border border-l-0 border-blue-200 bg-white px-2 py-3 text-xs font-bold leading-4 text-blue-700 shadow-lg transition hover:bg-blue-50"
-      :to="{
-        path: '/',
-        query: {
-          ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
-          ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
-          ...(route.query.returnRegistry ? { returnRegistry: route.query.returnRegistry } : {}),
-        },
-      }"
+      :to="{ path: '/', query: returnQuery() }"
       title="Вернуться к заказам"
       ><span>К</span><span class="h-2" aria-hidden="true"></span><span>З</span><span>А</span
       ><span>К</span><span>А</span><span>З</span><span>А</span><span>М</span></RouterLink
@@ -558,16 +589,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         <div>
           <RouterLink
             class="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-            :to="{
-              path: '/',
-              query: {
-                ...(route.query.returnOrder ? { returnOrder: route.query.returnOrder } : {}),
-                ...(route.query.returnSearch ? { returnSearch: route.query.returnSearch } : {}),
-                ...(route.query.returnRegistry
-                  ? { returnRegistry: route.query.returnRegistry }
-                  : {}),
-              },
-            }"
+            :to="{ path: '/', query: returnQuery() }"
           >
             <ArrowLeft class="mr-1 inline size-4" aria-hidden="true" /> К заказам
           </RouterLink>
@@ -672,19 +694,26 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         Гостевой режим: доступен только просмотр цен и себестоимости.
       </p>
       <section
-        v-if="user && linkMode"
+        v-if="user && (linkMode || manualSelectMode)"
         class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-950 shadow-sm"
       >
         <div class="flex items-start gap-3">
           <Link2 class="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true" />
           <div>
-            <p class="font-semibold">
+            <p v-if="manualSelectMode" class="font-semibold">
+              Выберите позицию из «Цен» для ручного заказа.
+            </p>
+            <p v-else class="font-semibold">
               Привязать товар: <strong>{{ linkTitle || 'Без названия' }}</strong>
               <span v-if="linkSize"> · размер {{ linkSize }}</span>
               <span v-if="linkPlatform"> · {{ linkPlatform }}</span>
             </p>
             <p class="mt-1 text-xs text-emerald-800">
-              Найдите эталонную строку себестоимости и нажмите «Привязать».
+              {{
+                manualSelectMode
+                  ? 'Название и себестоимость подтянутся в форму заказа; количество и цену продажи вы задаёте сами.'
+                  : 'Найдите эталонную строку себестоимости и нажмите «Привязать».'
+              }}
             </p>
             <p v-if="linkError" class="mt-2 text-sm font-semibold text-rose-700">{{ linkError }}</p>
           </div>
@@ -723,6 +752,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           :editing-cell="editingCell"
           :guest="isGuest"
           :link-mode="linkMode"
+          :select-mode="manualSelectMode"
           :linked-price-item-id="linkedPriceItemId"
           @start-dragging="startDragging"
           @move-item="moveItem"
@@ -731,7 +761,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           @toggle-name-edit="toggleNameEdit"
           @toggle-price-edit="togglePriceEdit"
           @finish-edit="finishEdit"
-          @link-item="linkPriceItem"
+          @link-item="handlePriceItemAction"
         />
       </section>
       <p class="mt-3 text-xs text-slate-500">
