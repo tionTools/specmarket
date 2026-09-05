@@ -1,0 +1,352 @@
+diff --git a/supabase/functions/_shared/price-link-family.ts b/supabase/functions/_shared/price-link-family.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/price-link-family.ts
+@@ -0,0 +1,112 @@
++const supportedPlatforms = new Set(['Пром', 'Эпицентр'])
++const genericSizePattern =
++  '(?:5xl|4xl|xxxl|xxl|xl|xxs|xs|s|m|l|\\d{1,2}(?:[.,]\\d+)?)'
++
++function escapeRegex(value: string) {
++  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
++}
++
++function normalizeSize(value: string) {
++  const normalized = value.trim().toLocaleLowerCase('uk-UA').replace(',', '.')
++  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return normalized
++  const numeric = Number(normalized)
++  return Number.isFinite(numeric) ? String(numeric) : normalized
++}
++
++function exactSizePattern(value: string) {
++  const normalized = normalizeSize(value)
++  if (/^\d+$/.test(normalized)) return `0*${String(Number(normalized))}`
++  const decimal = normalized.match(/^(\d+)\.(\d+)$/)
++  if (decimal) return `0*${String(Number(decimal[1]))}[.,]${escapeRegex(decimal[2] ?? '')}`
++  return escapeRegex(normalized)
++}
++
++function normalizeFamilyText(value: string) {
++  return value
++    .toLocaleLowerCase('uk-UA')
++    .replace(/[–—]/g, '-')
++    .replace(/[’'`\"]/g, '')
++    .replace(/[()[\],.:;]+/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim()
++}
++
++export function inferPriceLinkSizeFromTitle(productTitle: string) {
++  const labelled = productTitle.match(
++    new RegExp(
++      `(?:розмір|размер|size|р\\.)\\s*[:№-]?\\s*(${genericSizePattern})`,
++      'i',
++    ),
++  )?.[1]
++  if (labelled) return normalizeSize(labelled)
++
++  const trailing = productTitle.match(
++    new RegExp(
++      `(?:^|[\\s,])(${genericSizePattern})(?=\\s*(?:\\([^)]*\\))?\\s*$)`,
++      'i',
++    ),
++  )?.[1]
++  return trailing ? normalizeSize(trailing) : ''
++}
++
++function productFamilyTitle(productTitle: string, size: string) {
++  if (!productTitle.trim() || !size) return ''
++  const sizePattern = exactSizePattern(size)
++  let familyTitle = productTitle
++    .replace(
++      new RegExp(`(?:розмір|размер|size|р\\.)\\s*[:№-]?\\s*${sizePattern}\\b`, 'gi'),
++      ' ',
++    )
++    .replace(
++      new RegExp(
++        `([\\s,/_-])${sizePattern}(?=\\s*(?:\\([^)]*\\))?\\s*$)`,
++        'i',
++      ),
++      ' ',
++    )
++    .replace(new RegExp(`([/_-])${sizePattern}(?=\\))`, 'gi'), '')
++  familyTitle = normalizeFamilyText(familyTitle)
++  return familyTitle
++}
++
++function productFamilyCode(platform: string, marketplaceProductKey: string, size: string) {
++  const separator = marketplaceProductKey.indexOf(':')
++  if (separator <= 0 || !size) return ''
++  const kind = marketplaceProductKey.slice(0, separator)
++  const rawCode = marketplaceProductKey.slice(separator + 1).trim()
++  const allowed =
++    platform === 'Пром'
++      ? kind === 'sku' || kind === 'external'
++      : platform === 'Эпицентр'
++        ? kind === 'offer'
++        : false
++  if (!allowed || !rawCode) return ''
++
++  const match = rawCode.match(
++    new RegExp(`^(.+?)[\\s._/-]+${exactSizePattern(size)}$`, 'i'),
++  )
++  const base = match?.[1]?.trim()
++  if (!base) return ''
++  return `family:code:${kind}:${base.toLocaleLowerCase('uk-UA').replace(/\\s+/g, '')}`
++}
++
++export function priceLinkFamilyAliases(
++  platform: string,
++  marketplaceProductKey: string,
++  productTitle: string,
++  size: string,
++) {
++  if (!supportedPlatforms.has(platform)) return []
++
++  const resolvedSize = normalizeSize(size) || inferPriceLinkSizeFromTitle(productTitle)
++  if (!resolvedSize) return []
++
++  const aliases = new Set<string>()
++  const familyCode = productFamilyCode(platform, marketplaceProductKey, resolvedSize)
++  if (familyCode) aliases.add(familyCode)
++
++  const familyTitle = productFamilyTitle(productTitle, resolvedSize)
++  if (familyTitle) aliases.add(`family:title:${familyTitle}`)
++
++  return [...aliases]
++}
+diff --git a/supabase/functions/_shared/price-cost.ts b/supabase/functions/_shared/price-cost.ts
+--- a/supabase/functions/_shared/price-cost.ts
++++ b/supabase/functions/_shared/price-cost.ts
+@@ -1,9 +1,15 @@
+ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
++import { priceLinkFamilyAliases } from './price-link-family.ts'
+ 
+ export type PriceCostSnapshot = {
+   priceItemId: string
+   cost: number
+   costUsd: number
++}
++
++export type PriceCostMatch = {
++  snapshot: PriceCostSnapshot
++  matchedKey: string
+ }
+ 
+ type RecordValue = Record<string, unknown>
+@@ -20,7 +26,7 @@
+     await Promise.all([
+       admin
+         .from('crm_product_price_links')
+-        .select('marketplace_product_key, price_item_id')
++        .select('marketplace_product_key, price_item_id, product_title, size')
+         .eq('platform', platform),
+       admin.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
+     ])
+@@ -45,19 +51,58 @@
+   const usdRate = number(rateSetting?.numeric_value)
+   const priceItemById = new Map((priceItems ?? []).map((item) => [text(item.id), item]))
+   const snapshots = new Map<string, PriceCostSnapshot>()
++  const familySnapshots = new Map<string, PriceCostSnapshot | null>()
+   for (const link of links ?? []) {
+     const marketplaceProductKey = text(link.marketplace_product_key)
+     const priceItemId = text(link.price_item_id)
+     const priceItem = priceItemById.get(priceItemId)
+     if (!marketplaceProductKey || !priceItem) continue
+     const usd = priceItem.usd === null || priceItem.usd === undefined ? null : number(priceItem.usd)
+-    snapshots.set(marketplaceProductKey, {
++    const snapshot = {
+       priceItemId,
+       costUsd: usd ?? 0,
+       cost: usd === null ? number(priceItem.cost_uah) : usd * usdRate,
+-    })
++    }
++    snapshots.set(marketplaceProductKey, snapshot)
++
++    for (const alias of priceLinkFamilyAliases(
++      platform,
++      marketplaceProductKey,
++      text(link.product_title),
++      text(link.size),
++    )) {
++      const current = familySnapshots.get(alias)
++      if (current === undefined) familySnapshots.set(alias, snapshot)
++      else if (current && current.priceItemId !== snapshot.priceItemId)
++        familySnapshots.set(alias, null)
++    }
++  }
++  for (const [alias, snapshot] of familySnapshots) {
++    if (snapshot) snapshots.set(alias, snapshot)
+   }
+   return snapshots
++}
++
++export function findPlatformPriceCostSnapshot(
++  snapshots: Map<string, PriceCostSnapshot>,
++  platform: string,
++  marketplaceProductKey: string,
++  productTitle: string,
++  size: string,
++): PriceCostMatch | undefined {
++  const direct = snapshots.get(marketplaceProductKey)
++  if (direct) return { snapshot: direct, matchedKey: marketplaceProductKey }
++
++  for (const alias of priceLinkFamilyAliases(
++    platform,
++    marketplaceProductKey,
++    productTitle,
++    size,
++  )) {
++    const snapshot = snapshots.get(alias)
++    if (snapshot) return { snapshot, matchedKey: alias }
++  }
++  return undefined
+ }
+ 
+ export async function promoteLegacyPriceLink(
+@@ -67,6 +112,7 @@
+   canonicalKey: string,
+   snapshot: PriceCostSnapshot | undefined,
+   productTitle?: string,
++  size?: string,
+ ): Promise<boolean> {
+   if (!legacyKey || !canonicalKey || legacyKey === canonicalKey || !snapshot) return false
+ 
+@@ -75,7 +121,7 @@
+     marketplace_product_key: canonicalKey,
+     price_item_id: snapshot.priceItemId,
+     product_title: productTitle || null,
+-    size: null,
++    size: size || null,
+   })
+   if (!error) return true
+   if (error.code === '23505') return false
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -1,4 +1,4 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+-import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
++import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
+@@ -995,7 +995,32 @@
+         previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
+       )
+       const resolvedMarketplaceProductKey = marketplaceProductKey || previousMarketplaceProductKey
+-      let linkedPriceCost = priceCostSnapshots.get(resolvedMarketplaceProductKey)
++      const priceCostMatch = findPlatformPriceCostSnapshot(
++        priceCostSnapshots,
++        'Пром',
++        resolvedMarketplaceProductKey,
++        name,
++        size,
++      )
++      let linkedPriceCost = priceCostMatch?.snapshot
++      if (
++        priceCostMatch &&
++        linkedPriceCost &&
++        resolvedMarketplaceProductKey &&
++        priceCostMatch.matchedKey !== resolvedMarketplaceProductKey &&
++        !priceCostSnapshots.has(resolvedMarketplaceProductKey)
++      ) {
++        const promoted = await promoteLegacyPriceLink(
++          admin,
++          'Пром',
++          priceCostMatch.matchedKey,
++          resolvedMarketplaceProductKey,
++          linkedPriceCost,
++          name,
++          size,
++        )
++        if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, linkedPriceCost)
++      }
+       if (
+         !linkedPriceCost &&
+         resolvedMarketplaceProductKey &&
+@@ -1011,6 +1036,7 @@
+             resolvedMarketplaceProductKey,
+             legacyPriceCost,
+             name,
++            size,
+           )
+           if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, legacyPriceCost)
+           linkedPriceCost = legacyPriceCost
+diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+--- a/supabase/functions/sync-epicentr-orders/index.ts
++++ b/supabase/functions/sync-epicentr-orders/index.ts
+@@ -1,4 +1,4 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+-import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
++import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
+@@ -620,10 +620,36 @@
+         const automaticRoyaltyPercent = mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw)
++        const size = itemSize(item.raw) || readableText(currentItem?.size)
+         const previousMarketplaceProductKey = readableText(
+           currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey,
+         )
+         const marketplaceProductKey =
+           epicentrProductKey(item.raw) || previousMarketplaceProductKey
+-        let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
++        const priceCostMatch = findPlatformPriceCostSnapshot(
++          priceCostSnapshots,
++          'Эпицентр',
++          marketplaceProductKey,
++          item.title,
++          size,
++        )
++        let linkedPriceCost = priceCostMatch?.snapshot
++        if (
++          priceCostMatch &&
++          linkedPriceCost &&
++          marketplaceProductKey &&
++          priceCostMatch.matchedKey !== marketplaceProductKey &&
++          !priceCostSnapshots.has(marketplaceProductKey)
++        ) {
++          const promoted = await promoteLegacyPriceLink(
++            admin,
++            'Эпицентр',
++            priceCostMatch.matchedKey,
++            marketplaceProductKey,
++            linkedPriceCost,
++            item.title,
++            size,
++          )
++          if (promoted) priceCostSnapshots.set(marketplaceProductKey, linkedPriceCost)
++        }
+         if (
+           !linkedPriceCost &&
+           marketplaceProductKey &&
+@@ -639,6 +665,7 @@
+               marketplaceProductKey,
+               legacyPriceCost,
+               item.title,
++              size,
+             )
+             if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+             linkedPriceCost = legacyPriceCost
+@@ -649,4 +676,4 @@
+           order_id: orderId,
+           position,
+           product_name: item.title,
+-          size: itemSize(item.raw) || readableText(currentItem?.size),
++          size,
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -1710,4 +1710,5 @@
+ function isProductPriceLinked(order: Order, product: OrderProduct) {
++  if (product.priceItemId) return true
+   return Boolean(
+     product.marketplaceProductKey &&
+     linkedPriceProductKeys.value.has(
+diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
+--- a/src/pages/PricesView.vue
++++ b/src/pages/PricesView.vue
+@@ -340,3 +340,3 @@
+       product_title: linkTitle.value || null,
+-      size: null,
++      size: linkSize.value || null,
+       updated_at: now,
