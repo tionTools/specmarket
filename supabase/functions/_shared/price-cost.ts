@@ -1,5 +1,4 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { priceLinkFamilyAliases } from './price-link-family.ts'
 
 export type PriceCostSnapshot = {
   priceItemId: string
@@ -51,7 +50,6 @@ export async function loadPlatformPriceCostSnapshots(
   const usdRate = number(rateSetting?.numeric_value)
   const priceItemById = new Map((priceItems ?? []).map((item) => [text(item.id), item]))
   const snapshots = new Map<string, PriceCostSnapshot>()
-  const familySnapshots = new Map<string, PriceCostSnapshot | null>()
   for (const link of links ?? []) {
     const marketplaceProductKey = text(link.marketplace_product_key)
     const priceItemId = text(link.price_item_id)
@@ -64,45 +62,19 @@ export async function loadPlatformPriceCostSnapshots(
       cost: usd === null ? number(priceItem.cost_uah) : usd * usdRate,
     }
     snapshots.set(marketplaceProductKey, snapshot)
-
-    for (const alias of priceLinkFamilyAliases(
-      platform,
-      marketplaceProductKey,
-      text(link.product_title),
-      text(link.size),
-    )) {
-      const current = familySnapshots.get(alias)
-      if (current === undefined) familySnapshots.set(alias, snapshot)
-      else if (current && current.priceItemId !== snapshot.priceItemId)
-        familySnapshots.set(alias, null)
-    }
-  }
-  for (const [alias, snapshot] of familySnapshots) {
-    if (snapshot) snapshots.set(alias, snapshot)
   }
   return snapshots
 }
 
 export function findPlatformPriceCostSnapshot(
   snapshots: Map<string, PriceCostSnapshot>,
-  platform: string,
+  _platform: string,
   marketplaceProductKey: string,
-  productTitle: string,
-  size: string,
+  _productTitle: string,
+  _size: string,
 ): PriceCostMatch | undefined {
   const direct = snapshots.get(marketplaceProductKey)
-  if (direct) return { snapshot: direct, matchedKey: marketplaceProductKey }
-
-  for (const alias of priceLinkFamilyAliases(
-    platform,
-    marketplaceProductKey,
-    productTitle,
-    size,
-  )) {
-    const snapshot = snapshots.get(alias)
-    if (snapshot) return { snapshot, matchedKey: alias }
-  }
-  return undefined
+  return direct ? { snapshot: direct, matchedKey: marketplaceProductKey } : undefined
 }
 
 export async function promoteLegacyPriceLink(

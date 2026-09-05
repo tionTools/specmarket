@@ -1,5 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import {
+  loadMarketplaceFamilyMappings,
+  mappedFamilyKey,
+  mappedLegacyKeys,
+  promLegacyProductKeys,
+  promVariationFamilyKey,
+  promoteFamilyPriceLink,
+  rememberMarketplaceFamily,
+  type MarketplaceFamilyIdentity,
+} from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 
@@ -26,8 +36,7 @@ const same = (left: unknown, right: unknown) => stableStringify(left) === stable
 const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
 const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
 function promProductKey(item: RecordValue) {
-  // Себестоимость привязывается к товару, а не к размерной вариации.
-  // SKU в заказах Prom — артикул; rzid/variation_id/id — идентификатор варианта и здесь не используется.
+  // Legacy fallback only. Canonical cost identity is variation_group:<id>.
   const sku = text(item.sku).trim()
   if (sku) return `sku:${sku}`
   const externalId = text(item.external_id).trim()
@@ -35,6 +44,58 @@ function promProductKey(item: RecordValue) {
   const productId = text(pick(item, 'product_id', 'productId')).trim()
   if (productId) return `product:${productId}`
   return ''
+}
+
+type PromProductCache = Map<string, Promise<RecordValue | null>>
+
+async function promProductById(
+  productId: string,
+  promToken: string,
+  cache: PromProductCache,
+): Promise<RecordValue | null> {
+  if (!productId) return null
+  const cached = cache.get(productId)
+  if (cached) return cached
+
+  const pending = (async () => {
+    try {
+      const response = await fetch(`https://my.prom.ua/api/v1/products/${encodeURIComponent(productId)}`, {
+        headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+      })
+      if (!response.ok) return null
+      const payload = asRecord(await response.json())
+      const product = asRecord(payload.product ?? payload.data ?? payload)
+      return Object.keys(product).length ? product : null
+    } catch {
+      return null
+    }
+  })()
+
+  cache.set(productId, pending)
+  return pending
+}
+
+async function resolvedPromFamilyIdentity(
+  item: RecordValue,
+  promToken: string,
+  mappings: Map<string, string>,
+  productCache: PromProductCache,
+): Promise<MarketplaceFamilyIdentity> {
+  const orderLegacyKeys = promLegacyProductKeys(item)
+  const knownFamily = mappedFamilyKey(mappings, orderLegacyKeys)
+  if (knownFamily) return { familyKey: knownFamily, legacyKeys: orderLegacyKeys }
+
+  const productId = text(pick(item, 'rzid', 'variation_id', 'id', 'product_id', 'productId')).trim()
+  if (!productId) return { familyKey: '', legacyKeys: orderLegacyKeys }
+
+  const product = await promProductById(productId, promToken, productCache)
+  if (!product) return { familyKey: '', legacyKeys: orderLegacyKeys }
+
+  const legacyKeys = promLegacyProductKeys(item, product)
+  return {
+    familyKey: promVariationFamilyKey(product) || mappedFamilyKey(mappings, legacyKeys),
+    legacyKeys,
+  }
 }
 function preserveTracking(
   delivery: RecordValue,
@@ -491,7 +552,7 @@ async function resolvedProductSize(
   name: string,
   promToken: string,
   feedProducts: PromFeedProducts,
-  productCache: Map<string, string>,
+  productCache: PromProductCache,
   useProductFallback: boolean,
 ) {
   const fromOrder = productSize(item, name)
@@ -500,25 +561,13 @@ async function resolvedProductSize(
   const fromFeed = productFromPromFeed(item, feedProducts)?.size
   if (fromFeed) return fromFeed
 
-  // Product API fallback is reserved for an individual order refresh, so a bulk
-  // "new orders" scan does not make one extra request per item.
-  const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
-  if (!rzid || !useProductFallback) return ''
-  if (productCache.has(rzid)) return productCache.get(rzid) ?? ''
+  const rzid = text(pick(item, 'rzid', 'variation_id', 'id')).trim()
+  if (!rzid) return ''
 
-  try {
-    const response = await fetch(`https://my.prom.ua/api/v1/products/${encodeURIComponent(rzid)}`, {
-      headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
-    })
-    if (!response.ok) return ''
-    const payload = asRecord(await response.json())
-    const product = asRecord(payload.product ?? payload.data ?? payload)
-    const resolved = productSize(product, text(product.name) || name)
-    productCache.set(rzid, resolved)
-    return resolved
-  } catch {
-    return ''
-  }
+  const cached = productCache.get(rzid)
+  if (!cached && !useProductFallback) return ''
+  const product = cached ? await cached : await promProductById(rzid, promToken, productCache)
+  return product ? productSize(product, text(product.name) || name) : ''
 }
 
 function isSizeParameter(name: string) {
@@ -762,8 +811,12 @@ Deno.serve(async (request) => {
   const itemsByOrder = new Map<string, RecordValue[]>()
   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
   try {
-    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Пром')
+    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([
+      loadPlatformPriceCostSnapshots(admin, 'Пром'),
+      loadMarketplaceFamilyMappings(admin, 'Пром'),
+    ])
   } catch (error) {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
   }
@@ -772,7 +825,7 @@ Deno.serve(async (request) => {
   let updated = 0
   const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
-  const productSizeCache = new Map<string, string>()
+  const productDetailsCache: PromProductCache = new Map()
   const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
   const promClientCache = new Map<string, Promise<RecordValue | null>>()
   for (const order of candidates) {
@@ -941,6 +994,41 @@ Deno.serve(async (request) => {
     const orderCommission = number(asRecord(order.cpa_commission).amount)
     let needsTranslationRetry = false
     if (items.length) {
+      const familyIdentities = await Promise.all(
+        items.map((item) =>
+          resolvedPromFamilyIdentity(item, promToken, productFamilyMappings, productDetailsCache)
+        ),
+      )
+      const familyConflicts = new Set<string>()
+      for (const identity of familyIdentities) {
+        if (!identity.familyKey) continue
+        const remembered = await rememberMarketplaceFamily(
+          admin,
+          'Пром',
+          identity.familyKey,
+          identity.legacyKeys,
+          productFamilyMappings,
+        )
+        if (!remembered) familyConflicts.add(identity.familyKey)
+      }
+      for (const familyKey of new Set(familyIdentities.map((identity) => identity.familyKey).filter(Boolean))) {
+        if (familyConflicts.has(familyKey)) continue
+        const representativePosition = familyIdentities.findIndex((identity) => identity.familyKey === familyKey)
+        const representative = items[representativePosition]
+        const representativeName =
+          text(representative?.name) || text(representative?.product_name) || 'Товар Prom'
+        const promotion = await promoteFamilyPriceLink(
+          admin,
+          'Пром',
+          familyKey,
+          mappedLegacyKeys(productFamilyMappings, familyKey),
+          priceCostSnapshots,
+          representativeName,
+          representative ? productSize(representative, representativeName) : '',
+        )
+        if (promotion.conflict) familyConflicts.add(familyKey)
+      }
+
       const itemRows = await Promise.all(items.map(async (item, position) => {
       const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
       const localizedName = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
@@ -953,27 +1041,42 @@ Deno.serve(async (request) => {
         sourceName,
         promToken,
         feedProducts,
-        productSizeCache,
+        productDetailsCache,
         Boolean(requestedExternalId),
       )
-      const marketplaceProductKey = promProductKey(item)
-      const currentVariantKey = variantKey(marketplaceProductKey, apiSize)
+      const identity = familyIdentities[position]
+      const legacyMarketplaceProductKey = promProductKey(item)
+      const canonicalMarketplaceProductKey =
+        identity?.familyKey && !familyConflicts.has(identity.familyKey) ? identity.familyKey : ''
+      const candidateMarketplaceKeys = [
+        identity?.familyKey ?? '',
+        legacyMarketplaceProductKey,
+        ...(identity?.legacyKeys ?? []),
+      ].filter(Boolean)
+      const currentVariant = candidateMarketplaceKeys
+        .map((key) => byVariant.get(variantKey(key, apiSize)))
+        .find(Boolean)
+      const manualVariant = candidateMarketplaceKeys
+        .map((key) => manualByVariant.get(variantKey(key, apiSize)))
+        .find(Boolean)
       const manualItem =
-        (currentVariantKey ? manualByVariant.get(currentVariantKey) : undefined) ??
+        manualVariant ??
         manualItems.find(
           (candidate) =>
             text(candidate.name) === name && (!apiSize || text(candidate.size) === apiSize),
         )
-      const matchesCurrentVariant = (candidate: RecordValue | undefined) =>
-        Boolean(candidate) &&
-        (!marketplaceProductKey ||
-          text(candidate?.marketplace_product_key ?? candidate?.marketplaceProductKey) ===
-            marketplaceProductKey) &&
-        (!apiSize || text(candidate?.size) === apiSize)
+      const matchesCurrentVariant = (candidate: RecordValue | undefined) => {
+        if (!candidate || (apiSize && text(candidate.size) !== apiSize)) return false
+        if (!candidateMarketplaceKeys.length) return true
+        const candidateKey = text(
+          candidate.marketplace_product_key ?? candidate.marketplaceProductKey,
+        )
+        return candidateMarketplaceKeys.includes(candidateKey)
+      }
       const namePrevious = byName.get(name)
       const positionPrevious = byPosition.get(position)
       const previous =
-        (currentVariantKey ? byVariant.get(currentVariantKey) : undefined) ??
+        currentVariant ??
         (matchesCurrentVariant(namePrevious) ? namePrevious : undefined) ??
         (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
       const itemCommission = commissionAmount(item)
@@ -1004,7 +1107,10 @@ Deno.serve(async (request) => {
       const previousMarketplaceProductKey = text(
         previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
       )
-      const resolvedMarketplaceProductKey = marketplaceProductKey || previousMarketplaceProductKey
+      const resolvedMarketplaceProductKey =
+        canonicalMarketplaceProductKey ||
+        legacyMarketplaceProductKey ||
+        previousMarketplaceProductKey
       const priceCostMatch = findPlatformPriceCostSnapshot(
         priceCostSnapshots,
         'Пром',
@@ -1012,46 +1118,7 @@ Deno.serve(async (request) => {
         name,
         size,
       )
-      let linkedPriceCost = priceCostMatch?.snapshot
-      if (
-        priceCostMatch &&
-        linkedPriceCost &&
-        resolvedMarketplaceProductKey &&
-        priceCostMatch.matchedKey !== resolvedMarketplaceProductKey &&
-        !priceCostSnapshots.has(resolvedMarketplaceProductKey)
-      ) {
-        const promoted = await promoteLegacyPriceLink(
-          admin,
-          'Пром',
-          priceCostMatch.matchedKey,
-          resolvedMarketplaceProductKey,
-          linkedPriceCost,
-          name,
-          size,
-        )
-        if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, linkedPriceCost)
-      }
-      if (
-        !linkedPriceCost &&
-        resolvedMarketplaceProductKey &&
-        previousMarketplaceProductKey &&
-        resolvedMarketplaceProductKey !== previousMarketplaceProductKey
-      ) {
-        const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
-        if (legacyPriceCost) {
-          const promoted = await promoteLegacyPriceLink(
-            admin,
-            'Пром',
-            previousMarketplaceProductKey,
-            resolvedMarketplaceProductKey,
-            legacyPriceCost,
-            name,
-            size,
-          )
-          if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, legacyPriceCost)
-          linkedPriceCost = legacyPriceCost
-        }
-      }
+      const linkedPriceCost = priceCostMatch?.snapshot
       const imageUrl =
         productFromPromFeed(item, feedProducts)?.imageUrl ||
         text(pick(item, 'image', 'image_url', 'imageUrl')) ||

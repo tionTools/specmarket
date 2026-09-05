@@ -1,5 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import {
+  epicentrFamilyIdentity,
+  loadMarketplaceFamilyMappings,
+  mappedLegacyKeys,
+  promoteFamilyPriceLink,
+  rememberMarketplaceFamily,
+} from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 
@@ -216,15 +223,8 @@ function epicentrOfferId(item: Record<string, unknown>) {
 }
 
 function epicentrProductKey(item: Record<string, unknown>) {
-  // Для себестоимости используем ID карточки товара, а не размерный offerId.
-  const product = asRecord(item.product)
-  const productId = readableText(
-    item.productId ?? item.product_id ?? product.id ?? product.productId ?? product.product_id,
-  )
-  if (productId) return `product:${productId}`
-  const offerId = readableText(item.offerId ?? item.offer_id)
-  if (offerId) return `offer:${offerId}`
-  return ''
+  const identity = epicentrFamilyIdentity(item)
+  return identity.familyKey || identity.legacyKeys[0] || ''
 }
 
 function normalizeItems(order: unknown): NormalizedItem[] {
@@ -388,8 +388,12 @@ Deno.serve(async (request) => {
   const itemsByOrder = new Map<string, Record<string, unknown>[]>()
   for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
   try {
-    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Эпицентр')
+    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([
+      loadPlatformPriceCostSnapshots(admin, 'Эпицентр'),
+      loadMarketplaceFamilyMappings(admin, 'Эпицентр'),
+    ])
   } catch (error) {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Эпицентра: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
   }
@@ -608,6 +612,35 @@ Deno.serve(async (request) => {
     )
     if (validItems.length) {
       for (const item of validItems) await ensureDetectedCategory(item.raw)
+      const familyIdentities = validItems.map((item) => epicentrFamilyIdentity(item.raw))
+      const familyConflicts = new Set<string>()
+      for (const identity of familyIdentities) {
+        if (!identity.familyKey) continue
+        const remembered = await rememberMarketplaceFamily(
+          admin,
+          'Эпицентр',
+          identity.familyKey,
+          identity.legacyKeys,
+          productFamilyMappings,
+        )
+        if (!remembered) familyConflicts.add(identity.familyKey)
+      }
+      for (const familyKey of new Set(familyIdentities.map((identity) => identity.familyKey).filter(Boolean))) {
+        if (familyConflicts.has(familyKey)) continue
+        const representativePosition = familyIdentities.findIndex((identity) => identity.familyKey === familyKey)
+        const representative = validItems[representativePosition]
+        const promotion = await promoteFamilyPriceLink(
+          admin,
+          'Эпицентр',
+          familyKey,
+          mappedLegacyKeys(productFamilyMappings, familyKey),
+          priceCostSnapshots,
+          representative?.title,
+          representative ? itemSize(representative.raw) : '',
+        )
+        if (promotion.conflict) familyConflicts.add(familyKey)
+      }
+
       const savedItems = await Promise.all(validItems.map(async (item, position) => {
         const snapshotItem = manualItems[position]
         // В ручной синхронизации снимок позиции приоритетнее: API иногда
@@ -621,8 +654,11 @@ Deno.serve(async (request) => {
         const previousMarketplaceProductKey = readableText(
           currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey,
         )
+        const identity = familyIdentities[position]
         const marketplaceProductKey =
-          epicentrProductKey(item.raw) || previousMarketplaceProductKey
+          identity?.familyKey && !familyConflicts.has(identity.familyKey)
+            ? identity.familyKey
+            : identity?.legacyKeys[0] || epicentrProductKey(item.raw) || previousMarketplaceProductKey
         const priceCostMatch = findPlatformPriceCostSnapshot(
           priceCostSnapshots,
           'Эпицентр',
@@ -630,46 +666,7 @@ Deno.serve(async (request) => {
           item.title,
           size,
         )
-        let linkedPriceCost = priceCostMatch?.snapshot
-        if (
-          priceCostMatch &&
-          linkedPriceCost &&
-          marketplaceProductKey &&
-          priceCostMatch.matchedKey !== marketplaceProductKey &&
-          !priceCostSnapshots.has(marketplaceProductKey)
-        ) {
-          const promoted = await promoteLegacyPriceLink(
-            admin,
-            'Эпицентр',
-            priceCostMatch.matchedKey,
-            marketplaceProductKey,
-            linkedPriceCost,
-            item.title,
-            size,
-          )
-          if (promoted) priceCostSnapshots.set(marketplaceProductKey, linkedPriceCost)
-        }
-        if (
-          !linkedPriceCost &&
-          marketplaceProductKey &&
-          previousMarketplaceProductKey &&
-          marketplaceProductKey !== previousMarketplaceProductKey
-        ) {
-          const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
-          if (legacyPriceCost) {
-            const promoted = await promoteLegacyPriceLink(
-              admin,
-              'Эпицентр',
-              previousMarketplaceProductKey,
-              marketplaceProductKey,
-              legacyPriceCost,
-              item.title,
-              size,
-            )
-            if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
-            linkedPriceCost = legacyPriceCost
-          }
-        }
+        const linkedPriceCost = priceCostMatch?.snapshot
         const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost)
         return {
           order_id: orderId,
