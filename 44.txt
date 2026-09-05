@@ -1,6 +1,8 @@
 Patch 44 — canonical family ID для себестоимости Prom и Epicentr
 
-База для подготовки: актуальный main на момент создания Patch 44 = 3f35ee7d6e6e6d1feadb462e7c42f34fe10facab (`Backfill price link sizes`).
+База для подготовки: актуальный main на момент создания Patch 44 = 3f35ee7d6e6d1feadb462e7c42f34fe10facab (`Backfill price link sizes`).
+
+Ревизия 2: `44.patch` пересобран по точным контекстам файлов из commit `3f35ee7`; предыдущая несовместимая версия не использовать. Исправленная версия дополнительно проверена локальным `git apply --check` на тех же точных контекстах hunks.
 
 Подтверждено реальными production API-ответами:
 - Epicentr, заказ №57689757:
@@ -38,7 +40,7 @@ Patch содержит:
 1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
 2. Синхронизируй локальный `main` с `origin/main`. Убедись, что main всё ещё основан на `3f35ee7d6e6e6d1feadb462e7c42f34fe10facab` либо аккуратно проверь совместимость, если main уже продвинулся.
 3. Пользовательский `AGENTS.md` НЕ ИЗМЕНЯТЬ, НЕ STAGE, НЕ COMMIT. Уже существующий `M AGENTS.md` оставить как есть.
-4. Получи `44.patch` и `44.txt` из `origin/chatgpt-patches`.
+4. Получи актуальные `44.patch` и `44.txt` из `origin/chatgpt-patches`; убедись, что в `44.txt` есть строка `Ревизия 2`.
 5. Выполни `git apply --check 44.patch`. Если check не проходит, не применяй частично и не делай произвольную ручную реализацию: сначала установи точную причину несовместимости с текущим main и сообщи её.
 6. Примени `44.patch`.
 7. После применения внимательно проверь реализацию, особенно TypeScript/Deno-типы. Разрешены только минимальные технические исправления форматирования/типов/явной ошибки Patch 44, не меняющие подтверждённую архитектуру canonical IDs.
@@ -52,22 +54,25 @@ Patch содержит:
    - `product.modelId` имеет приоритет и даёт `model:<id>`;
    - `productId`/`offerId` остаются legacy aliases для безопасного promotion;
    - если modelId отсутствует, старый variant key остаётся fallback;
-   - в одном заказе несколько размеров сначала должны зарегистрировать mappings/promote family link, и только потом рассчитываться item rows, чтобы кейс р.44 + р.46 заполнялся за ОДНУ синхронизацию.
+   - для всех позиций заказа сначала зарегистрировать ВСЕ variant -> family mappings, затем проверить conflicts/promote canonical family links, и только после этого рассчитывать item rows; кейс р.44 + р.46 должен заполняться за ОДНУ синхронизацию.
 11. Проверь Prom:
    - сначала используется persistent mapping, если он уже известен;
    - только для неизвестного варианта вызывается `GET /api/v1/products/{id}`;
-   - Product API cache общий внутри одного запуска функции;
+   - Product API cache общий внутри одного запуска функции и также переиспользуется size fallback;
    - canonical key только `variation_group:<variation_group_id>`;
    - `group.id` не используется;
+   - для всех позиций заказа сначала зарегистрировать ВСЕ подтверждённые mappings, затем проверить conflicts/promote canonical family links, и только после этого рассчитывать item rows;
    - при недоступности Product API или отсутствии variation_group_id функция безопасно остаётся на legacy key и не теряет старые финансы.
 12. Проверь conflict logic:
-   - если все legacy links family указывают на один `price_item_id`, canonical link можно создать;
-   - если есть два разных `price_item_id`, canonical link НЕ создавать и не выбирать один произвольно;
-   - существующие nonzero cost/cost_usd и manual flags не затирать.
+   - если все известные legacy links family указывают на один `price_item_id`, canonical link можно создать;
+   - если есть два разных `price_item_id`, canonical link НЕ создавать и НЕ использовать; не выбирать один произвольно;
+   - существующие nonzero cost/cost_usd и manual flags не затирать;
+   - ранее сохранённый canonical item должен корректно матчиться при следующей синхронизации и не терять финансы.
 13. Запусти тест `supabase/functions/_shared/marketplace-family_test.ts` штатным Deno-способом проекта. Добавь при необходимости минимальные дополнительные тесты на:
    - Epicentr: два разных productId -> один model key;
    - Prom: два разных sku/id -> один variation_group key;
-   - ambiguous mapping/conflict не склеивается.
+   - ambiguous mapping/conflict не склеивается;
+   - существующая ненулевая `cost` не перезаписывается новым linked cost, при этом допустимо заполнить `price_item_id`.
 14. Запусти обычные проверки:
    - `pnpm format`
    - `pnpm type-check`
