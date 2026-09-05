@@ -219,22 +219,100 @@ async function loadCatalog() {
   await loadCurrentPriceLink()
 }
 
+function isCanonicalPriceFamilyKey(platform: LinkPlatform, key: string) {
+  return (
+    (platform === 'Пром' && key.startsWith('variation_group:')) ||
+    (platform === 'Эпицентр' && key.startsWith('model:'))
+  )
+}
+
+async function resolvePriceLinkTargetKey(platform: LinkPlatform, key: string) {
+  if (!supabase || platform === 'Каста' || isCanonicalPriceFamilyKey(platform, key)) return key
+
+  const { data, error } = await supabase
+    .from('crm_marketplace_product_families')
+    .select('family_key')
+    .eq('platform', platform)
+    .eq('marketplace_product_key', key)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+
+  return String(data?.family_key ?? '').trim() || key
+}
+
+async function priceLinkRowsForTarget(
+  platform: LinkPlatform,
+  targetKey: string,
+  priceItemId: string,
+  now: string,
+) {
+  const canonicalRow = {
+    platform,
+    marketplace_product_key: targetKey,
+    price_item_id: priceItemId,
+    product_title: linkTitle.value || null,
+    size: linkSize.value || null,
+    updated_at: now,
+  }
+  if (!supabase || !isCanonicalPriceFamilyKey(platform, targetKey)) return [canonicalRow]
+
+  const { data: familyMappings, error: familyError } = await supabase
+    .from('crm_marketplace_product_families')
+    .select('marketplace_product_key')
+    .eq('platform', platform)
+    .eq('family_key', targetKey)
+  if (familyError) throw new Error(familyError.message)
+
+  const legacyKeys = [
+    ...new Set(
+      (familyMappings ?? [])
+        .map((mapping) => String(mapping.marketplace_product_key ?? '').trim())
+        .filter((key) => key && key !== targetKey),
+    ),
+  ]
+  if (!legacyKeys.length) return [canonicalRow]
+
+  const { data: legacyLinks, error: legacyError } = await supabase
+    .from('crm_product_price_links')
+    .select('marketplace_product_key, product_title, size')
+    .eq('platform', platform)
+    .in('marketplace_product_key', legacyKeys)
+  if (legacyError) throw new Error(legacyError.message)
+
+  return [
+    canonicalRow,
+    ...(legacyLinks ?? []).map((link) => ({
+      platform,
+      marketplace_product_key: String(link.marketplace_product_key),
+      price_item_id: priceItemId,
+      product_title: link.product_title ?? null,
+      size: link.size ?? null,
+      updated_at: now,
+    })),
+  ]
+}
+
 async function loadCurrentPriceLink() {
   linkedPriceItemId.value = null
   linkError.value = ''
   if (!supabase || !user.value || !linkMode.value || !linkPlatform.value || !linkProductKey.value)
     return
-  const { data, error } = await supabase
-    .from('crm_product_price_links')
-    .select('price_item_id')
-    .eq('platform', linkPlatform.value)
-    .eq('marketplace_product_key', linkProductKey.value)
-    .maybeSingle()
-  if (error) {
-    linkError.value = `Не удалось загрузить текущую привязку: ${error.message}`
-    return
+
+  try {
+    const targetKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
+    const { data, error } = await supabase
+      .from('crm_product_price_links')
+      .select('price_item_id')
+      .eq('platform', linkPlatform.value)
+      .eq('marketplace_product_key', targetKey)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    linkedPriceItemId.value = data?.price_item_id ?? null
+  } catch (error) {
+    linkError.value = `Не удалось загрузить текущую привязку: ${
+      error instanceof Error ? error.message : String(error)
+    }`
   }
-  linkedPriceItemId.value = data?.price_item_id ?? null
 }
 
 function returnQuery() {
@@ -294,6 +372,17 @@ async function linkPriceItem(item: PriceItem) {
 
   linkError.value = ''
   isLinking.value = true
+  let targetLinkProductKey = linkProductKey.value
+  try {
+    targetLinkProductKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
+  } catch (error) {
+    isLinking.value = false
+    linkError.value = `Не удалось определить семейную привязку товара: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+    return
+  }
+
   let currentOrderItem: {
     id: string
     cost_manual: boolean
@@ -315,7 +404,9 @@ async function linkPriceItem(item: PriceItem) {
     const currentMarketplaceProductKey = String(data.marketplace_product_key ?? '').trim()
     const currentProductName = String(data.product_name ?? '')
     if (
-      (currentMarketplaceProductKey && currentMarketplaceProductKey !== linkProductKey.value) ||
+      (currentMarketplaceProductKey &&
+        currentMarketplaceProductKey !== linkProductKey.value &&
+        currentMarketplaceProductKey !== targetLinkProductKey) ||
       (!currentMarketplaceProductKey && linkTitle.value && currentProductName !== linkTitle.value)
     ) {
       isLinking.value = false
@@ -332,17 +423,25 @@ async function linkPriceItem(item: PriceItem) {
   }
 
   const now = new Date().toISOString()
-  const { error: mappingError } = await supabase.from('crm_product_price_links').upsert(
-    {
-      platform: linkPlatform.value,
-      marketplace_product_key: linkProductKey.value,
-      price_item_id: item.remoteId,
-      product_title: linkTitle.value || null,
-      size: linkSize.value || null,
-      updated_at: now,
-    },
-    { onConflict: 'platform,marketplace_product_key' },
-  )
+  let mappingRows: Awaited<ReturnType<typeof priceLinkRowsForTarget>>
+  try {
+    mappingRows = await priceLinkRowsForTarget(
+      linkPlatform.value,
+      targetLinkProductKey,
+      item.remoteId,
+      now,
+    )
+  } catch (error) {
+    isLinking.value = false
+    linkError.value = `Не удалось подготовить семейную перепривязку: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+    return
+  }
+
+  const { error: mappingError } = await supabase
+    .from('crm_product_price_links')
+    .upsert(mappingRows, { onConflict: 'platform,marketplace_product_key' })
   if (mappingError) {
     isLinking.value = false
     linkError.value = `Не удалось сохранить привязку: ${mappingError.message}`
@@ -354,7 +453,7 @@ async function linkPriceItem(item: PriceItem) {
     const costUsd = item.usd ?? 0
     const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
     const updatePayload: Record<string, unknown> = {
-      marketplace_product_key: linkProductKey.value,
+      marketplace_product_key: targetLinkProductKey,
       price_item_id: item.remoteId,
     }
     const mayAutofillCost =
