@@ -1,0 +1,44 @@
+diff --git a/supabase/migrations/20260905180000_backfill_price_link_sizes.sql b/supabase/migrations/20260905180000_backfill_price_link_sizes.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260905180000_backfill_price_link_sizes.sql
+@@ -0,0 +1,43 @@
++with ranked_link_items as (
++  select
++    link.id as link_id,
++    item.size,
++    item.product_name,
++    row_number() over (
++      partition by link.id
++      order by item.id
++    ) as row_number
++  from public.crm_product_price_links as link
++  join public.crm_orders as crm_order
++    on crm_order.platform = link.platform
++  join public.crm_order_items as item
++    on item.order_id = crm_order.id
++   and item.marketplace_product_key = link.marketplace_product_key
++   and item.price_item_id = link.price_item_id
++  where link.platform in ('Пром', 'Эпицентр')
++    and coalesce(trim(link.size), '') = ''
++    and coalesce(trim(item.size), '') <> ''
++    and (
++      (link.platform = 'Пром' and (
++        link.marketplace_product_key like 'sku:%'
++        or link.marketplace_product_key like 'external:%'
++      ))
++      or
++      (link.platform = 'Эпицентр' and link.marketplace_product_key like 'offer:%')
++    )
++)
++update public.crm_product_price_links as link
++set
++  size = ranked.size,
++  product_title = coalesce(
++    nullif(trim(link.product_title), ''),
++    ranked.product_name
++  ),
++  updated_at = now()
++from ranked_link_items as ranked
++where ranked.link_id = link.id
++  and ranked.row_number = 1;
