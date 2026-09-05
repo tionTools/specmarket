@@ -1,0 +1,102 @@
+Patch 44 — canonical family ID для себестоимости Prom и Epicentr
+
+База для подготовки: актуальный main на момент создания Patch 44 = 3f35ee7d6e6e6d1feadb462e7c42f34fe10facab (`Backfill price link sizes`).
+
+Подтверждено реальными production API-ответами:
+- Epicentr, заказ №57689757:
+  - р.46: productId 29688740, offerId 3e7c6649-106a-48fc-8d47-b58104919f7e;
+  - р.44: productId 29688518, offerId a27f969a-3c31-433c-814b-f1961a6167d9;
+  - общий family ID: `product.modelId = 8869122`.
+  - canonical key: `model:8869122`.
+- Prom, заказ №425183481:
+  - sku 712-24-M, id 2999555219;
+  - sku 712-24, id 2999534237;
+  - общий family ID: `variation_group_id = 653957377`.
+  - canonical key: `variation_group:653957377`.
+- `group.id` Prom = категория, его использовать как family ID НЕЛЬЗЯ.
+- Kasta уже использует общий `supplier_code` и Patch 44 её не меняет.
+
+Цель Patch 44:
+1. Полностью убрать runtime-склейку себестоимости Prom/Epicentr по названию/размеру/эвристическому коду.
+2. Epicentr связывать по реальному `product.modelId`.
+3. Prom связывать по реальному `variation_group_id` из Product API.
+4. Сохранять persistent mapping старого variant key -> canonical family key, чтобы Prom Product API не вызывался заново для уже изученного варианта.
+5. Старые ручные link-строки (`product:*`, `offer:*`, `sku:*`, `external:*`) не удалять и не менять; при подтверждённом family ID безопасно создавать canonical family link с тем же `price_item_id`.
+6. Если внутри одного family обнаружены старые links на РАЗНЫЕ `price_item_id`, автоматически family link не создавать/не использовать. Сохранить variant-level поведение и не перезаписывать себестоимость.
+7. Существующую ненулевую стоимость и `cost_manual` не перезаписывать.
+8. Новые/обновлённые order items после успешного family resolution должны хранить canonical key.
+
+Patch содержит:
+- `supabase/migrations/20260905200000_marketplace_product_families.sql`
+- `supabase/functions/_shared/marketplace-family.ts`
+- `supabase/functions/_shared/marketplace-family_test.ts`
+- изменения `supabase/functions/_shared/price-cost.ts`
+- изменения `supabase/functions/sync-epicentr-orders/index.ts`
+- изменения `supabase/functions/sync-prom-orders/index.ts`
+
+Порядок выполнения:
+1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Синхронизируй локальный `main` с `origin/main`. Убедись, что main всё ещё основан на `3f35ee7d6e6e6d1feadb462e7c42f34fe10facab` либо аккуратно проверь совместимость, если main уже продвинулся.
+3. Пользовательский `AGENTS.md` НЕ ИЗМЕНЯТЬ, НЕ STAGE, НЕ COMMIT. Уже существующий `M AGENTS.md` оставить как есть.
+4. Получи `44.patch` и `44.txt` из `origin/chatgpt-patches`.
+5. Выполни `git apply --check 44.patch`. Если check не проходит, не применяй частично и не делай произвольную ручную реализацию: сначала установи точную причину несовместимости с текущим main и сообщи её.
+6. Примени `44.patch`.
+7. После применения внимательно проверь реализацию, особенно TypeScript/Deno-типы. Разрешены только минимальные технические исправления форматирования/типов/явной ошибки Patch 44, не меняющие подтверждённую архитектуру canonical IDs.
+8. Проверь, что runtime `price-cost.ts` больше не использует `priceLinkFamilyAliases` для поиска себестоимости. Старый `price-link-family.ts` можно оставить для истории/migration helper, но он не должен участвовать в runtime matching Prom/Epicentr.
+9. Проверь migration:
+   - новая таблица только для `Пром` и `Эпицентр`;
+   - unique/PK по `(platform, marketplace_product_key)`;
+   - индекс по `(platform, family_key)`;
+   - существующие `crm_product_price_links` migration не переписывает.
+10. Проверь Epicentr:
+   - `product.modelId` имеет приоритет и даёт `model:<id>`;
+   - `productId`/`offerId` остаются legacy aliases для безопасного promotion;
+   - если modelId отсутствует, старый variant key остаётся fallback;
+   - в одном заказе несколько размеров сначала должны зарегистрировать mappings/promote family link, и только потом рассчитываться item rows, чтобы кейс р.44 + р.46 заполнялся за ОДНУ синхронизацию.
+11. Проверь Prom:
+   - сначала используется persistent mapping, если он уже известен;
+   - только для неизвестного варианта вызывается `GET /api/v1/products/{id}`;
+   - Product API cache общий внутри одного запуска функции;
+   - canonical key только `variation_group:<variation_group_id>`;
+   - `group.id` не используется;
+   - при недоступности Product API или отсутствии variation_group_id функция безопасно остаётся на legacy key и не теряет старые финансы.
+12. Проверь conflict logic:
+   - если все legacy links family указывают на один `price_item_id`, canonical link можно создать;
+   - если есть два разных `price_item_id`, canonical link НЕ создавать и не выбирать один произвольно;
+   - существующие nonzero cost/cost_usd и manual flags не затирать.
+13. Запусти тест `supabase/functions/_shared/marketplace-family_test.ts` штатным Deno-способом проекта. Добавь при необходимости минимальные дополнительные тесты на:
+   - Epicentr: два разных productId -> один model key;
+   - Prom: два разных sku/id -> один variation_group key;
+   - ambiguous mapping/conflict не склеивается.
+14. Запусти обычные проверки:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+   - Deno check/test изменённых Edge Function/shared файлов, если доступно в окружении.
+15. Примени migration `20260905200000_marketplace_product_families.sql` к связанному production Supabase ДО деплоя функций.
+16. Задеплой только изменённые Edge Functions:
+   - `sync-epicentr-orders`
+   - `sync-prom-orders`
+17. Не деплой Kasta и не менять её код.
+18. После deploy выполни безопасную production-проверку, если есть штатный авторизованный способ:
+   - точечная синхронизация Epicentr заказа UUID `f843556a-7dd3-4318-aebf-87220c197e3d` / №57689757;
+   - убедиться, что mapping содержит оба старых Epicentr variant keys -> `model:8869122`;
+   - canonical `crm_product_price_links` для `model:8869122` указывает на тот же `price_item_id`, который ранее был у р.46;
+   - р.44 и р.46 после синхронизации имеют canonical `marketplace_product_key = model:8869122` и одинаковый `price_item_id`, при этом существующие ручные/nonzero cost не перезаписаны.
+   - для Prom №425183481 проверить, что оба variant keys отображаются на `variation_group:653957377`; если у этой семьи нет ручного price link, не создавать искусственный link только ради теста.
+   Если штатного авторизованного способа точечной синхронизации нет, НЕ создавай временные диагностические функции повторно; просто укажи, что пользователь должен нажать точечную синхронизацию после deploy.
+19. Проверь production на конфликты новых family mappings/links. Если найден family с несколькими разными `price_item_id`, ничего автоматически не исправлять — перечислить конфликт в отчёте.
+20. Commit должен включать только файлы Patch 44 и минимальные исправления/тесты этой задачи. `AGENTS.md` не включать.
+21. Commit message: `Use canonical marketplace product families`.
+22. Push в `origin/main`.
+23. В финальном отчёте указать:
+   - `git apply --check`;
+   - migration deploy;
+   - Edge Functions deploy;
+   - результаты тестов/pnpm/git diff --check;
+   - production-проверку Epicentr/Prom или точное ограничение, почему её нельзя было выполнить;
+   - найденные conflicts, если есть;
+   - полный commit SHA и push;
+   - итоговый `git status --short`, где допустим только ранее существовавший `M AGENTS.md`.
