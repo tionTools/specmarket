@@ -1,0 +1,61 @@
+Patch 46 — синхронная перепривязка canonical family и legacy price links
+
+База: актуальный main = 4af3f25fa6b4958444facdffb99101ee4967e465 (`Allow canonical price relinking keys`).
+
+Причина:
+Patch 44 ввёл canonical family keys (`model:*` для Epicentr и `variation_group:*` для Prom) и сохранил старые variant-level links. Patch 45 разрешил открывать canonical key через кнопку «перепривязать». Но текущий `PricesView.vue` при перепривязке меняет только строку canonical key. Старые `product:*` / `offer:*` / `sku:*` / `external:*` links этой же семьи могут остаться на старом `price_item_id`. Следующая синхронизация тогда видит разные `price_item_id` внутри одной семьи и правильно объявляет conflict, из-за чего canonical family перестаёт использоваться.
+
+Цель Patch 46:
+1. Явная перепривязка товара на новую строку прайса должна переводить на тот же `price_item_id` canonical family link и ВСЕ уже существующие legacy price-link строки этой подтверждённой семьи.
+2. Новые legacy price-link строки для вариантов, у которых их раньше не было, НЕ создавать.
+3. Сохранить у старых legacy rows их собственные `product_title` и `size`; менять только `price_item_id` и `updated_at`.
+4. Если пользователь открыл перепривязку из старого legacy key, но в `crm_marketplace_product_families` уже есть variant -> family mapping, операция должна автоматически работать через canonical family key.
+5. Текущая позиция заказа после такой перепривязки должна хранить canonical key.
+6. Kasta и legacy key без известного family mapping должны работать как раньше.
+7. Не менять правило себестоимости текущего заказа: ненулевая или ручная `cost/cost_usd` не перезаписывается; новая стоимость автозаполняется только если обе стоимости нулевые и `cost_manual=false`.
+
+Patch меняет только:
+- `src/pages/PricesView.vue`
+
+Порядок выполнения:
+1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Синхронизируй локальный `main` с `origin/main`. Убедись, что он основан на `4af3f25fa6b4958444facdffb99101ee4967e465`; если main уже продвинулся, сначала проверь совместимость.
+3. Пользовательский `AGENTS.md` НЕ ИЗМЕНЯТЬ, НЕ STAGE, НЕ COMMIT. Уже существующий `M AGENTS.md` оставить как есть.
+4. Получи `46.patch` и `46.txt` из `origin/chatgpt-patches`.
+5. Выполни `git apply --check 46.patch`. Если check не проходит, не применяй частично: установи причину. Допускается минимально адаптировать только контекст hunk к фактическому current main без изменения описанной логики.
+6. Примени `46.patch`.
+7. Проверь реализацию в `PricesView.vue`:
+   - canonical Prom key = `variation_group:*`;
+   - canonical Epicentr key = `model:*`;
+   - для старого Prom/Epicentr legacy key сначала читается `crm_marketplace_product_families` по `(platform, marketplace_product_key)` и при наличии mapping выбирается `family_key`;
+   - загрузка текущей привязки в `/prices` также должна читать canonical link, если вход был через legacy key с известным mapping;
+   - при canonical relink из `crm_marketplace_product_families` собираются все legacy keys семьи;
+   - затем из `crm_product_price_links` берутся только реально существующие legacy link rows;
+   - один multi-row `upsert` должен одновременно записать canonical row и обновить эти существующие legacy rows на выбранный `price_item_id`; это нужно, чтобы не оставлять временный canonical/legacy conflict между отдельными запросами;
+   - legacy rows сохраняют свои `product_title` и `size`;
+   - mapped variant без существующего `crm_product_price_links` не должен получить новую legacy row;
+   - текущая `crm_order_items.marketplace_product_key` после relink становится canonical key, если family известна;
+   - validation текущей позиции должна принимать как исходный legacy key из URL, так и уже успевший появиться canonical key, чтобы realtime/sync не создавал ложное «позиция изменилась»;
+   - Kasta не читает таблицу family mappings и остаётся без изменений.
+8. Не менять `supabase/functions/*`, migrations, таблицу mappings или runtime sync-архитектуру Patch 44.
+9. Если при проверке TypeScript обнаружится только очевидная проблема типов/форматирования в Patch 46, исправь минимально, не меняя архитектуру.
+10. Запусти проверки:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+11. Дополнительно статически проверь три сценария:
+   A. Epicentr: `model:8869122` и старый `product:29688740` оба были на price A; пользователь перепривязывает `model:8869122` на price B -> обе существующие строки становятся price B, следующий family conflict не возникает.
+   B. Старый Epicentr order item ещё хранит `product:29688740`, но mapping уже `product:29688740 -> model:8869122` -> кнопка открывает/сохраняет через `model:8869122`, текущая позиция становится canonical.
+   C. Prom: аналогично для `sku:*` -> `variation_group:*`; Kasta остаётся прежней.
+12. Browser/production вручную не открывать и логин не обходить. Миграций и Edge Function deploy в Patch 46 НЕТ.
+13. Commit должен включать только `src/pages/PricesView.vue` и только минимальные технические исправления этой задачи. `AGENTS.md` не включать.
+14. Commit message: `Keep family price relinks consistent`.
+15. Push в `origin/main`.
+16. В финальном отчёте указать:
+   - результат `git apply --check`;
+   - какие сценарии relink проверены статически;
+   - результаты format/type-check/lint/build/diff-check;
+   - полный commit SHA и push;
+   - итоговый `git status --short`, где допустим только прежний `M AGENTS.md`.
