@@ -1,0 +1,35 @@
+Patch 45 — восстановить кнопку перепривязки цены для canonical family keys
+
+База: актуальный main после Patch 44 = aa6c75857cb7403431c167552a0c6bd03eaa22d3 (`Use canonical marketplace product families`).
+
+Причина бага подтверждена в `src/pages/HomeView.vue`:
+- после Patch 44 Epicentr хранит canonical key вида `model:<id>`;
+- Prom хранит canonical key вида `variation_group:<id>`;
+- `openProductPriceLink()` пропускает переход только если `isFamilyPriceLinkKey()` считает ключ допустимым;
+- текущая функция знает только старые Epicentr `product:/offer:` и Prom `sku:/external:/product:`. Поэтому canonical ключи Patch 44 отбрасываются и кнопка визуально есть, но переход на перепривязку не происходит.
+- остальные площадки/старые заказы работают, потому что их ключи соответствуют старым допустимым префиксам.
+
+Что сделать:
+1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Синхронизируй локальный `main` с `origin/main`. Убедись, что база включает commit `aa6c75857cb7403431c167552a0c6bd03eaa22d3`.
+3. `AGENTS.md` НЕ ИЗМЕНЯТЬ, НЕ STAGE, НЕ COMMIT. Существующий `M AGENTS.md` оставить как есть.
+4. Получи `45.patch` и `45.txt` из `origin/chatgpt-patches`.
+5. Выполни `git apply --check 45.patch`, затем примени `45.patch`.
+6. Изменение должно быть только в `src/pages/HomeView.vue`:
+   - для Prom разрешить canonical prefix `variation_group:` вместе с legacy `sku:`, `external:`, `product:`;
+   - для Epicentr разрешить canonical prefix `model:` вместе с legacy `product:`, `offer:`;
+   - Kasta не менять.
+7. Проверь, что `openProductPriceLink()` теперь сразу принимает canonical key и открывает `/prices` в `linkMode=1`, без лишней синхронизации и без изменения самого family key.
+8. Не менять Patch 44 architecture, Edge Functions, migrations или Supabase schema.
+9. Запусти:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+10. Если в проекте есть подходящий штатный тест для этой логики, запусти его; не добавляй тяжёлую тестовую инфраструктуру ради двух regex-prefixes.
+11. Commit должен включать только `src/pages/HomeView.vue`. `AGENTS.md` не включать.
+12. Commit message: `Allow canonical price relinking keys`.
+13. Push в `origin/main`.
+14. Никаких Supabase migrations/deploy Edge Functions для Patch 45 не требуется.
+15. В финальном отчёте указать результаты `git apply --check`, format/type-check/lint/build/diff-check, commit SHA, push и итоговый `git status --short` (допустим только прежний `M AGENTS.md`).
