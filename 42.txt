@@ -1,0 +1,117 @@
+Patch 42 — привязка себестоимости без зависимости от размера для Prom и Эпицентра
+
+База для подготовки: актуальный main на момент создания Patch 42 = 3970928766539b7ca1c96e49f63bdfa246a3b2ec.
+
+Цель:
+1. Одна ручная привязка товара к строке «Цен» должна работать для всех размеров того же товара на Prom и Эпицентре.
+2. Размер остаётся частью позиции заказа для отображения и сопоставления конкретной вариации, но не должен создавать отдельную привязку себестоимости.
+3. Существующие привязки и ручные значения себестоимости нельзя потерять или массово перепривязать.
+
+Почему исправление нужно:
+- Сейчас crm_product_price_links хранит точный marketplace_product_key.
+- У разных размерных вариаций площадка может вернуть разные ключи: например offerId на Эпицентре или SKU/external_id на Prom.
+- Поэтому точный lookup не всегда находит уже созданную привязку другого размера.
+- Повторная точечная синхронизация сама по себе это не исправляет, если ключи вариантов различаются.
+
+Требуемая логика Patch 42:
+1. Сохранить точный marketplace_product_key как основной и наиболее безопасный способ поиска.
+2. Для Prom и Эпицентра добавить второй, size-independent lookup по «семейству товара».
+3. Семейные алиасы формировать только когда размер известен:
+   - размер берётся из уже вычисленного size позиции;
+   - для старых link-строк, где size исторически NULL, разрешается безопасно вывести размер из product_title по тем же типовым форматам: маркированный «розмір/размер/size/р.» либо отдельный размер в конце названия перед необязательным блоком в скобках;
+   - 3-значные числа не считать автоматически размером, чтобы не превращать номер модели вроде 720 в размер.
+4. Для семейства использовать два независимых алиаса:
+   - кодовый: только когда точный merchant-код заканчивается на реально определённый размер через разделитель. Для Prom это sku:/external:, для Эпицентра offer:. Пример: offer:717-720-L и offer:717-720-XL -> один family code 717-720;
+   - текстовый: нормализованное название товара, из которого удаляется только реально определённый размер, включая размерный суффикс внутри финального артикула в скобках. Пример: «Reis Foreco-TS L (717-720-L)» и «Reis Foreco-TS XL (717-720-XL)» -> один family title.
+5. Не использовать общий family lookup для Kasta. Её существующую логику не менять.
+6. Защита от ложной склейки обязательна:
+   - точные link-ключи имеют приоритет;
+   - семейный алиас активен только если все существующие link-строки, породившие этот алиас, указывают на один и тот же price_item_id;
+   - если под одним family alias обнаружены разные price_item_id, этот алиас считать неоднозначным и НЕ использовать автоматически.
+7. Когда синхронизация второго размера нашла себестоимость через семейный алиас:
+   - применить тот же price_item_id к позиции;
+   - если себестоимость позиции допускает существующий autofill, подтянуть стоимость по прежним правилам resolvedOrderItemCost();
+   - создать/«продвинуть» точную crm_product_price_links запись для фактического marketplace_product_key этого размера, чтобы следующий lookup был прямым;
+   - при создании такой точной записи сохранить product_title и фактический size.
+8. Существующий legacy-переход со старого точного marketplace_product_key на новый точный ключ сохранить; при promotion также сохранять size.
+9. При ручной привязке в PricesView больше не писать size=NULL: сохранить linkSize как метаданные. Это НЕ означает привязку по размеру — size нужен только для безопасного построения семейного алиаса.
+10. В HomeView считать позицию привязанной, если у неё уже есть priceItemId, даже если локальный список crm_product_price_links ещё не успел перечитаться после семейного fallback/promotion.
+11. Не менять resolvedOrderItemCost() семантически:
+   - ручная себестоимость остаётся приоритетной;
+   - Patch 42 не должен молча перезаписывать уже существующую ненулевую себестоимость;
+   - задача — привязать price_item_id и использовать существующие правила autofill.
+12. Новую миграцию БД не создавать: текущие поля crm_product_price_links (marketplace_product_key, price_item_id, product_title, size) достаточны.
+
+Файлы Patch 42:
+- supabase/functions/_shared/price-link-family.ts — новый чистый helper построения size-independent family aliases.
+- supabase/functions/_shared/price-cost.ts — загрузка точных + однозначных семейных snapshot, lookup и сохранение size при promotion.
+- supabase/functions/sync-prom-orders/index.ts — family fallback для Prom + promotion точного ключа варианта.
+- supabase/functions/sync-epicentr-orders/index.ts — family fallback для Эпицентра + promotion точного ключа варианта.
+- src/pages/PricesView.vue — сохранять linkSize в crm_product_price_links.size.
+- src/pages/HomeView.vue — priceItemId также означает, что позиция привязана.
+
+Порядок выполнения:
+1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Переключись на локальный `main`, синхронизируй его с `origin/main`. Пользовательский `AGENTS.md` не изменять, не индексировать и не коммитить.
+3. Прочитай repo-local `.agents/skills/frontend/SKILL.md` перед изменением Vue-файлов и соблюдай AGENTS.md.
+4. Получи Patch 42 только из удалённой ветки:
+   - `git fetch origin chatgpt-patches`
+   - `git show origin/chatgpt-patches:42.txt`
+   - `git show origin/chatgpt-patches:42.patch > 42.patch`
+5. Убедись, что база Patch 42 соответствует ожидаемому main `3970928766539b7ca1c96e49f63bdfa246a3b2ec`. Если main уже продвинулся, сначала сравни изменения и не затирай новые правки.
+6. Выполни `git apply --check 42.patch`. Если check не проходит из-за реального изменения main, адаптируй Patch 42 минимально к текущему коду, сохранив описанную семантику; не делай посторонних рефакторингов.
+7. Примени Patch 42.
+8. Проверь статически:
+   - точный marketplace_product_key по-прежнему имеет приоритет;
+   - family aliases создаются только для Prom/Эпицентра и только при известном размере;
+   - Prom code-family использует только sku:/external:, Эпицентр — только offer:;
+   - product: ключи не обрезаются эвристически;
+   - title-family удаляет только фактический размер, а не произвольные числа модели;
+   - неоднозначный family alias с разными price_item_id не попадает в lookup map;
+   - Kasta не изменилась;
+   - существующий legacy exact-key promotion сохранён;
+   - promotion family -> exact сохраняет product_title и size;
+   - PricesView сохраняет `size: linkSize.value || null`;
+   - HomeView считает `product.priceItemId` достаточным признаком привязки;
+   - `resolvedOrderItemCost()` не изменён по смыслу.
+9. Выполни focused runtime-проверку helper без сети/БД. Допустим вариант через установленный Node 24+:
+   `node --experimental-strip-types --input-type=module -e "const m=await import('./supabase/functions/_shared/price-link-family.ts'); const a=m.priceLinkFamilyAliases('Эпицентр','offer:717-720-L','Reis Foreco-TS L (717-720-L)','L'); const b=m.priceLinkFamilyAliases('Эпицентр','offer:717-720-XL','Reis Foreco-TS XL (717-720-XL)','XL'); const c=m.priceLinkFamilyAliases('Пром','sku:ABC-42','Черевики Bsport 42','42'); const d=m.priceLinkFamilyAliases('Пром','sku:ABC-43','Черевики Bsport 43','43'); if(!a.some(x=>b.includes(x))||!c.some(x=>d.includes(x))) process.exit(1); console.log('PRICE_FAMILY_OK')"`
+   Ожидаемый результат: `PRICE_FAMILY_OK`.
+10. Если есть безопасный доступ к уже авторизованной CRM, проверь на реальном кейсе Эпицентра:
+   - один размер уже привязан;
+   - другой размер того же товара до синхронизации может быть без priceItemId;
+   - после точечной синхронизации второго заказа/позиции он получает тот же priceItemId;
+   - стоимость подтягивается только по действующим правилам autofill;
+   - после refresh UI показывает позицию привязанной.
+   Аналогично, если есть подходящий заказ Prom с двумя размерами, проверь Prom. Не создавай фиктивные production-заказы ради теста.
+11. Запусти в порядке:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+12. После `pnpm format` ещё раз убедись, что изменения ограничены файлами Patch 42 и formatter не затронул посторонние пользовательские файлы. Не использовать `git add`; сформируй commit только из файлов задачи допустимым способом без staging пользовательского `AGENTS.md`.
+13. В commit включи только:
+   - `supabase/functions/_shared/price-link-family.ts`
+   - `supabase/functions/_shared/price-cost.ts`
+   - `supabase/functions/sync-prom-orders/index.ts`
+   - `supabase/functions/sync-epicentr-orders/index.ts`
+   - `src/pages/PricesView.vue`
+   - `src/pages/HomeView.vue`
+   `AGENTS.md` не трогать.
+14. Commit с понятным сообщением, например `Link product costs across sizes`.
+15. Push в `origin/main`.
+16. Поскольку изменены Edge Functions, после успешных локальных проверок задеплой в связанный Supabase-проект:
+   - `pnpm exec supabase functions deploy sync-prom-orders`
+   - `pnpm exec supabase functions deploy sync-epicentr-orders`
+   Общий `_shared/price-link-family.ts` и `_shared/price-cost.ts` попадут в bundle обеих функций автоматически.
+17. Если deploy одной функции завершился ошибкой компиляции/бандлинга, не объявляй задачу завершённой: исправь только причину Patch 42, повтори проверки, новый commit/push и deploy обеих затронутых функций.
+18. В итоговом отчёте укажи:
+   - результат `git apply --check`;
+   - изменённые файлы;
+   - `PRICE_FAMILY_OK`;
+   - результаты статической и, если была доступна, UI-проверки;
+   - результаты `pnpm format`, `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check`;
+   - commit SHA и push в main;
+   - результат deploy `sync-prom-orders` и `sync-epicentr-orders`;
+   - итоговый `git status --short`.
