@@ -1,9 +1,15 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { priceLinkFamilyAliases } from './price-link-family.ts'
 
 export type PriceCostSnapshot = {
   priceItemId: string
   cost: number
   costUsd: number
+}
+
+export type PriceCostMatch = {
+  snapshot: PriceCostSnapshot
+  matchedKey: string
 }
 
 type RecordValue = Record<string, unknown>
@@ -20,7 +26,7 @@ export async function loadPlatformPriceCostSnapshots(
     await Promise.all([
       admin
         .from('crm_product_price_links')
-        .select('marketplace_product_key, price_item_id')
+        .select('marketplace_product_key, price_item_id, product_title, size')
         .eq('platform', platform),
       admin.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
     ])
@@ -45,19 +51,58 @@ export async function loadPlatformPriceCostSnapshots(
   const usdRate = number(rateSetting?.numeric_value)
   const priceItemById = new Map((priceItems ?? []).map((item) => [text(item.id), item]))
   const snapshots = new Map<string, PriceCostSnapshot>()
+  const familySnapshots = new Map<string, PriceCostSnapshot | null>()
   for (const link of links ?? []) {
     const marketplaceProductKey = text(link.marketplace_product_key)
     const priceItemId = text(link.price_item_id)
     const priceItem = priceItemById.get(priceItemId)
     if (!marketplaceProductKey || !priceItem) continue
     const usd = priceItem.usd === null || priceItem.usd === undefined ? null : number(priceItem.usd)
-    snapshots.set(marketplaceProductKey, {
+    const snapshot = {
       priceItemId,
       costUsd: usd ?? 0,
       cost: usd === null ? number(priceItem.cost_uah) : usd * usdRate,
-    })
+    }
+    snapshots.set(marketplaceProductKey, snapshot)
+
+    for (const alias of priceLinkFamilyAliases(
+      platform,
+      marketplaceProductKey,
+      text(link.product_title),
+      text(link.size),
+    )) {
+      const current = familySnapshots.get(alias)
+      if (current === undefined) familySnapshots.set(alias, snapshot)
+      else if (current && current.priceItemId !== snapshot.priceItemId)
+        familySnapshots.set(alias, null)
+    }
+  }
+  for (const [alias, snapshot] of familySnapshots) {
+    if (snapshot) snapshots.set(alias, snapshot)
   }
   return snapshots
+}
+
+export function findPlatformPriceCostSnapshot(
+  snapshots: Map<string, PriceCostSnapshot>,
+  platform: string,
+  marketplaceProductKey: string,
+  productTitle: string,
+  size: string,
+): PriceCostMatch | undefined {
+  const direct = snapshots.get(marketplaceProductKey)
+  if (direct) return { snapshot: direct, matchedKey: marketplaceProductKey }
+
+  for (const alias of priceLinkFamilyAliases(
+    platform,
+    marketplaceProductKey,
+    productTitle,
+    size,
+  )) {
+    const snapshot = snapshots.get(alias)
+    if (snapshot) return { snapshot, matchedKey: alias }
+  }
+  return undefined
 }
 
 export async function promoteLegacyPriceLink(
@@ -67,6 +112,7 @@ export async function promoteLegacyPriceLink(
   canonicalKey: string,
   snapshot: PriceCostSnapshot | undefined,
   productTitle?: string,
+  size?: string,
 ): Promise<boolean> {
   if (!legacyKey || !canonicalKey || legacyKey === canonicalKey || !snapshot) return false
 
@@ -75,7 +121,7 @@ export async function promoteLegacyPriceLink(
     marketplace_product_key: canonicalKey,
     price_item_id: snapshot.priceItemId,
     product_title: productTitle || null,
-    size: null,
+    size: size || null,
   })
   if (!error) return true
   if (error.code === '23505') return false

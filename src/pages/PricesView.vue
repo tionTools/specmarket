@@ -338,7 +338,7 @@ async function linkPriceItem(item: PriceItem) {
       marketplace_product_key: linkProductKey.value,
       price_item_id: item.remoteId,
       product_title: linkTitle.value || null,
-      size: null,
+      size: linkSize.value || null,
       updated_at: now,
     },
     { onConflict: 'platform,marketplace_product_key' },

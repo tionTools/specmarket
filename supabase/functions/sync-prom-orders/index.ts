@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 
@@ -1005,7 +1005,32 @@ Deno.serve(async (request) => {
         previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
       )
       const resolvedMarketplaceProductKey = marketplaceProductKey || previousMarketplaceProductKey
-      let linkedPriceCost = priceCostSnapshots.get(resolvedMarketplaceProductKey)
+      const priceCostMatch = findPlatformPriceCostSnapshot(
+        priceCostSnapshots,
+        'Пром',
+        resolvedMarketplaceProductKey,
+        name,
+        size,
+      )
+      let linkedPriceCost = priceCostMatch?.snapshot
+      if (
+        priceCostMatch &&
+        linkedPriceCost &&
+        resolvedMarketplaceProductKey &&
+        priceCostMatch.matchedKey !== resolvedMarketplaceProductKey &&
+        !priceCostSnapshots.has(resolvedMarketplaceProductKey)
+      ) {
+        const promoted = await promoteLegacyPriceLink(
+          admin,
+          'Пром',
+          priceCostMatch.matchedKey,
+          resolvedMarketplaceProductKey,
+          linkedPriceCost,
+          name,
+          size,
+        )
+        if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, linkedPriceCost)
+      }
       if (
         !linkedPriceCost &&
         resolvedMarketplaceProductKey &&
@@ -1021,6 +1046,7 @@ Deno.serve(async (request) => {
             resolvedMarketplaceProductKey,
             legacyPriceCost,
             name,
+            size,
           )
           if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, legacyPriceCost)
           linkedPriceCost = legacyPriceCost

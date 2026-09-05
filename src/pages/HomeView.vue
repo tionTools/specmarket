@@ -1713,6 +1713,7 @@ function canLinkProductPrice(order: Order, product: OrderProduct) {
 }
 
 function isProductPriceLinked(order: Order, product: OrderProduct) {
+  if (product.priceItemId) return true
   return Boolean(
     product.marketplaceProductKey &&
     linkedPriceProductKeys.value.has(

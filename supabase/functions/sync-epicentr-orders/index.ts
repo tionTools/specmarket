@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 
@@ -617,12 +617,38 @@ Deno.serve(async (request) => {
         const savedRoyaltyPercent = currentItem?.royalty_percent ?? currentItem?.royaltyPercent
         const royaltyManual = currentItem?.royalty_manual === true || currentItem?.royaltyManual === true || storedItem?.royalty_manual === true
         const automaticRoyaltyPercent = mappedRoyaltyPercent(item.raw, source.createdAt) ?? categoryRoyaltyPercent(item.raw)
+        const size = itemSize(item.raw) || readableText(currentItem?.size)
         const previousMarketplaceProductKey = readableText(
           currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey,
         )
         const marketplaceProductKey =
           epicentrProductKey(item.raw) || previousMarketplaceProductKey
-        let linkedPriceCost = priceCostSnapshots.get(marketplaceProductKey)
+        const priceCostMatch = findPlatformPriceCostSnapshot(
+          priceCostSnapshots,
+          'Эпицентр',
+          marketplaceProductKey,
+          item.title,
+          size,
+        )
+        let linkedPriceCost = priceCostMatch?.snapshot
+        if (
+          priceCostMatch &&
+          linkedPriceCost &&
+          marketplaceProductKey &&
+          priceCostMatch.matchedKey !== marketplaceProductKey &&
+          !priceCostSnapshots.has(marketplaceProductKey)
+        ) {
+          const promoted = await promoteLegacyPriceLink(
+            admin,
+            'Эпицентр',
+            priceCostMatch.matchedKey,
+            marketplaceProductKey,
+            linkedPriceCost,
+            item.title,
+            size,
+          )
+          if (promoted) priceCostSnapshots.set(marketplaceProductKey, linkedPriceCost)
+        }
         if (
           !linkedPriceCost &&
           marketplaceProductKey &&
@@ -638,6 +664,7 @@ Deno.serve(async (request) => {
               marketplaceProductKey,
               legacyPriceCost,
               item.title,
+              size,
             )
             if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
             linkedPriceCost = legacyPriceCost
@@ -648,7 +675,7 @@ Deno.serve(async (request) => {
           order_id: orderId,
           position,
           product_name: item.title,
-          size: itemSize(item.raw) || readableText(currentItem?.size),
+          size,
           image_url: readableText(item.raw.image) || readableText(item.raw.imageUrl) || readableText(asRecord(item.raw.product).image),
           quantity: item.quantity,
           price: item.price,
