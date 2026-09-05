@@ -1,15 +1,23 @@
 diff --git a/supabase/functions/_shared/price-cost.ts b/supabase/functions/_shared/price-cost.ts
 --- a/supabase/functions/_shared/price-cost.ts
 +++ b/supabase/functions/_shared/price-cost.ts
-@@ -1,3 +1,2 @@
+@@ -1,5 +1,4 @@
  import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 -import { priceLinkFamilyAliases } from './price-link-family.ts'
  
-@@ -12,3 +11,2 @@
+ export type PriceCostSnapshot = {
+   priceItemId: string
+@@ -51,7 +50,6 @@
+   const usdRate = number(rateSetting?.numeric_value)
+   const priceItemById = new Map((priceItems ?? []).map((item) => [text(item.id), item]))
    const snapshots = new Map<string, PriceCostSnapshot>()
 -  const familySnapshots = new Map<string, PriceCostSnapshot | null>()
    for (const link of links ?? []) {
-@@ -25,17 +23,2 @@
+     const marketplaceProductKey = text(link.marketplace_product_key)
+     const priceItemId = text(link.price_item_id)
+@@ -64,45 +62,19 @@
+       cost: usd === null ? number(priceItem.cost_uah) : usd * usdRate,
+     }
      snapshots.set(marketplaceProductKey, snapshot)
 -
 -    for (const alias of priceLinkFamilyAliases(
@@ -27,7 +35,10 @@ diff --git a/supabase/functions/_shared/price-cost.ts b/supabase/functions/_shar
 -  for (const [alias, snapshot] of familySnapshots) {
 -    if (snapshot) snapshots.set(alias, snapshot)
    }
-@@ -46,20 +29,9 @@
+   return snapshots
+ }
+ 
+ export function findPlatformPriceCostSnapshot(
    snapshots: Map<string, PriceCostSnapshot>,
 -  platform: string,
 +  _platform: string,
@@ -52,12 +63,13 @@ diff --git a/supabase/functions/_shared/price-cost.ts b/supabase/functions/_shar
 -  return undefined
 +  return direct ? { snapshot: direct, matchedKey: marketplaceProductKey } : undefined
  }
-
-diff --git a/supabase/functions/_shared/marketplace-family.ts b/supabase/functions/_shared/marketplace-family.ts
+ 
+ export async function promoteLegacyPriceLink(
+ diff --git a/supabase/functions/_shared/marketplace-family.ts b/supabase/functions/_shared/marketplace-family.ts
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/_shared/marketplace-family.ts
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,184 @@
 +import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 +import { promoteLegacyPriceLink, type PriceCostSnapshot } from './price-cost.ts'
 +
@@ -79,13 +91,15 @@ new file mode 100644
 +export function epicentrFamilyIdentity(item: RecordValue): MarketplaceFamilyIdentity {
 +  const product = asRecord(item.product)
 +  const modelId = text(pick(product, 'modelId', 'model_id'))
-+  const productId =
-+    text(pick(item, 'productId', 'product_id')) || text(pick(product, 'id', 'productId', 'product_id'))
++  const productIds = unique([
++    text(pick(item, 'productId', 'product_id')),
++    text(pick(product, 'id', 'productId', 'product_id')),
++  ])
 +  const offerId = text(pick(item, 'offerId', 'offer_id'))
 +  return {
 +    familyKey: modelId ? `model:${modelId}` : '',
 +    legacyKeys: unique([
-+      productId ? `product:${productId}` : '',
++      ...productIds.map((productId) => `product:${productId}`),
 +      offerId ? `offer:${offerId}` : '',
 +    ]),
 +  }
@@ -94,14 +108,17 @@ new file mode 100644
 +export function promLegacyProductKeys(item: RecordValue, productValue?: unknown) {
 +  const product = asRecord(productValue)
 +  const sku = text(pick(item, 'sku')) || text(pick(product, 'sku'))
-+  const externalId = text(pick(item, 'external_id', 'externalId')) || text(pick(product, 'external_id', 'externalId'))
-+  const productId =
-+    text(pick(item, 'product_id', 'productId')) ||
-+    text(pick(product, 'id', 'product_id', 'productId'))
++  const externalId =
++    text(pick(item, 'external_id', 'externalId')) ||
++    text(pick(product, 'external_id', 'externalId'))
++  const productIds = unique([
++    text(pick(item, 'product_id', 'productId')),
++    text(pick(product, 'id', 'product_id', 'productId')),
++  ])
 +  return unique([
 +    sku ? `sku:${sku}` : '',
 +    externalId ? `external:${externalId}` : '',
-+    productId ? `product:${productId}` : '',
++    ...productIds.map((productId) => `product:${productId}`),
 +  ])
 +}
 +
@@ -120,6 +137,7 @@ new file mode 100644
 +    .select('marketplace_product_key, family_key')
 +    .eq('platform', platform)
 +  if (error) throw error
++
 +  return new Map(
 +    (data ?? [])
 +      .map((row) => [text(row.marketplace_product_key), text(row.family_key)] as const)
@@ -153,6 +171,7 @@ new file mode 100644
 +): Promise<boolean> {
 +  if (!familyKey) return false
 +  const keys = unique(legacyKeys).filter((key) => key !== familyKey)
++  if (!keys.length) return true
 +  if (keys.some((key) => mappings.has(key) && mappings.get(key) !== familyKey)) return false
 +
 +  const missingKeys = keys.filter((key) => !mappings.has(key))
@@ -168,6 +187,22 @@ new file mode 100644
 +    )
 +    if (error) throw error
 +  }
++
++  const { data: stored, error: storedError } = await admin
++    .from('crm_marketplace_product_families')
++    .select('marketplace_product_key, family_key')
++    .eq('platform', platform)
++    .in('marketplace_product_key', keys)
++  if (storedError) throw storedError
++
++  const storedMappings = new Map(
++    (stored ?? []).map((row) => [
++      text(row.marketplace_product_key),
++      text(row.family_key),
++    ] as const),
++  )
++  if (keys.some((key) => storedMappings.get(key) !== familyKey)) return false
++
 +  for (const key of keys) mappings.set(key, familyKey)
 +  return true
 +}
@@ -182,17 +217,20 @@ new file mode 100644
 +  size?: string,
 +): Promise<{ snapshot?: PriceCostSnapshot; conflict: boolean }> {
 +  if (!familyKey) return { conflict: false }
++
 +  const candidateKeys = unique([familyKey, ...legacyKeys])
 +  const candidates = candidateKeys
 +    .map((key) => snapshots.get(key))
 +    .filter((snapshot): snapshot is PriceCostSnapshot => Boolean(snapshot))
 +  const priceItemIds = unique(candidates.map((snapshot) => snapshot.priceItemId))
 +  if (priceItemIds.length > 1) return { conflict: true }
++
 +  const snapshot = candidates[0]
 +  if (!snapshot) return { conflict: false }
 +  if (snapshots.has(familyKey)) return { snapshot, conflict: false }
 +
-+  const legacyKey = candidateKeys.find((key) => snapshots.get(key)?.priceItemId === snapshot.priceItemId) ?? ''
++  const legacyKey =
++    candidateKeys.find((key) => snapshots.get(key)?.priceItemId === snapshot.priceItemId) ?? ''
 +  const promoted = await promoteLegacyPriceLink(
 +    admin,
 +    platform,
@@ -212,15 +250,16 @@ new file mode 100644
 +    if (error) throw error
 +    if (text(data?.price_item_id) !== snapshot.priceItemId) return { conflict: true }
 +  }
++
 +  snapshots.set(familyKey, snapshot)
 +  return { snapshot, conflict: false }
 +}
-
 diff --git a/supabase/functions/_shared/marketplace-family_test.ts b/supabase/functions/_shared/marketplace-family_test.ts
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/_shared/marketplace-family_test.ts
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,89 @@
++import { resolvedOrderItemCost } from './price-cost.ts'
 +import {
 +  epicentrFamilyIdentity,
 +  mappedFamilyKey,
@@ -255,7 +294,10 @@ new file mode 100644
 +  'Prom variation family key',
 +)
 +assertEquals(
-+  promLegacyProductKeys({ sku: '712-24-M', product_id: 2999555219 }),
++  promLegacyProductKeys(
++    { sku: '712-24-M', product_id: 2999555219 },
++    { id: 2999555219, variation_group_id: 653957377 },
++  ),
 +  ['sku:712-24-M', 'product:2999555219'],
 +  'Prom legacy keys',
 +)
@@ -274,12 +316,45 @@ new file mode 100644
 +  ['sku:712-24', 'sku:712-24-M'].sort(),
 +  'Mapped Prom siblings',
 +)
-
++
++assertEquals(
++  mappedFamilyKey(
++    new Map([
++      ['sku:a', 'variation_group:1'],
++      ['product:2', 'variation_group:2'],
++    ]),
++    ['sku:a', 'product:2'],
++  ),
++  '',
++  'Conflicting mappings must not pick a family',
++)
++
++const preserved = resolvedOrderItemCost(
++  {
++    cost: 429,
++    cost_usd: 0,
++    cost_manual: false,
++    price_item_id: null,
++  },
++  {
++    priceItemId: '0e9b6a46-2cf8-4ed7-9683-28682c7278a2',
++    cost: 500,
++    costUsd: 0,
++  },
++)
++assertEquals(preserved.cost, 429, 'Existing nonzero cost must not be overwritten')
++assertEquals(
++  preserved.priceItemId,
++  '0e9b6a46-2cf8-4ed7-9683-28682c7278a2',
++  'Canonical price link may fill price_item_id without overwriting nonzero cost',
++)
 diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
 --- a/supabase/functions/sync-epicentr-orders/index.ts
 +++ b/supabase/functions/sync-epicentr-orders/index.ts
-@@ -2,2 +2,9 @@
- import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+@@ -1,5 +1,12 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+-import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
++import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 +import {
 +  epicentrFamilyIdentity,
 +  loadMarketplaceFamilyMappings,
@@ -288,7 +363,11 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
 +  rememberMarketplaceFamily,
 +} from '../_shared/marketplace-family.ts'
  import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
-@@ -7,11 +14,4 @@
+ import { paymentDetails } from '../_shared/payment-details.ts'
+ 
+@@ -216,15 +223,8 @@
+ }
+ 
  function epicentrProductKey(item: Record<string, unknown>) {
 -  // Для себестоимости используем ID карточки товара, а не размерный offerId.
 -  const product = asRecord(item.product)
@@ -302,7 +381,11 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
 +  const identity = epicentrFamilyIdentity(item)
 +  return identity.familyKey || identity.legacyKeys[0] || ''
  }
-@@ -21,4 +21,8 @@
+ 
+ function normalizeItems(order: unknown): NormalizedItem[] {
+@@ -388,8 +388,12 @@
+   const itemsByOrder = new Map<string, Record<string, unknown>[]>()
+   for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
    let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
 +  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
    try {
@@ -312,11 +395,16 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
 +      loadMarketplaceFamilyMappings(admin, 'Эпицентр'),
 +    ])
    } catch (error) {
-@@ -32,2 +36,26 @@
+     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Эпицентра: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+   }
+@@ -608,6 +612,44 @@
+     )
+     if (validItems.length) {
        for (const item of validItems) await ensureDetectedCategory(item.raw)
++      const familyIdentities = validItems.map((item) => epicentrFamilyIdentity(item.raw))
 +      const familyConflicts = new Set<string>()
-+      for (const item of validItems) {
-+        const identity = epicentrFamilyIdentity(item.raw)
++      const blockedFamilies = new Set<string>()
++      for (const identity of familyIdentities) {
 +        if (!identity.familyKey) continue
 +        const remembered = await rememberMarketplaceFamily(
 +          admin,
@@ -325,35 +413,104 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
 +          identity.legacyKeys,
 +          productFamilyMappings,
 +        )
-+        const promotion = remembered
-+          ? await promoteFamilyPriceLink(
-+              admin,
-+              'Эпицентр',
-+              identity.familyKey,
-+              mappedLegacyKeys(productFamilyMappings, identity.familyKey, identity.legacyKeys),
-+              priceCostSnapshots,
-+              item.title,
-+              itemSize(item.raw),
-+            )
-+          : { conflict: true }
-+        if (promotion.conflict) familyConflicts.add(identity.familyKey)
++        if (!remembered) blockedFamilies.add(identity.familyKey)
 +      }
++      const familyKeys = [
++        ...new Set(familyIdentities.map((identity) => identity.familyKey).filter(Boolean)),
++      ]
++      for (const familyKey of familyKeys) {
++        if (blockedFamilies.has(familyKey)) {
++          familyConflicts.add(familyKey)
++          continue
++        }
++        const representativeIndex = familyIdentities.findIndex(
++          (identity) => identity.familyKey === familyKey,
++        )
++        const representative = validItems[representativeIndex]
++        const promotion = await promoteFamilyPriceLink(
++          admin,
++          'Эпицентр',
++          familyKey,
++          mappedLegacyKeys(productFamilyMappings, familyKey),
++          priceCostSnapshots,
++          representative?.title,
++          representative ? itemSize(representative.raw) : '',
++        )
++        if (promotion.conflict) familyConflicts.add(familyKey)
++      }
++
        const savedItems = await Promise.all(validItems.map(async (item, position) => {
-@@ -40,4 +68,6 @@
+         const snapshotItem = manualItems[position]
+         // В ручной синхронизации снимок позиции приоритетнее: API иногда
+@@ -621,8 +663,12 @@
+         const previousMarketplaceProductKey = readableText(
+           currentItem?.marketplace_product_key ?? currentItem?.marketplaceProductKey,
          )
--        const marketplaceProductKey =
++        const identity = familyIdentities[position]
++        const familyKey =
++          identity?.familyKey && !familyConflicts.has(identity.familyKey) ? identity.familyKey : ''
+         const marketplaceProductKey =
 -          epicentrProductKey(item.raw) || previousMarketplaceProductKey
-+        const identity = epicentrFamilyIdentity(item.raw)
-+        const marketplaceProductKey = identity.familyKey && familyConflicts.has(identity.familyKey)
-+          ? identity.legacyKeys[0] || previousMarketplaceProductKey
-+          : epicentrProductKey(item.raw) || previousMarketplaceProductKey
++          familyKey || identity?.legacyKeys[0] || previousMarketplaceProductKey ||
++          epicentrProductKey(item.raw)
          const priceCostMatch = findPlatformPriceCostSnapshot(
-
+           priceCostSnapshots,
+           'Эпицентр',
+@@ -630,46 +676,7 @@
+           item.title,
+           size,
+         )
+-        let linkedPriceCost = priceCostMatch?.snapshot
+-        if (
+-          priceCostMatch &&
+-          linkedPriceCost &&
+-          marketplaceProductKey &&
+-          priceCostMatch.matchedKey !== marketplaceProductKey &&
+-          !priceCostSnapshots.has(marketplaceProductKey)
+-        ) {
+-          const promoted = await promoteLegacyPriceLink(
+-            admin,
+-            'Эпицентр',
+-            priceCostMatch.matchedKey,
+-            marketplaceProductKey,
+-            linkedPriceCost,
+-            item.title,
+-            size,
+-          )
+-          if (promoted) priceCostSnapshots.set(marketplaceProductKey, linkedPriceCost)
+-        }
+-        if (
+-          !linkedPriceCost &&
+-          marketplaceProductKey &&
+-          previousMarketplaceProductKey &&
+-          marketplaceProductKey !== previousMarketplaceProductKey
+-        ) {
+-          const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
+-          if (legacyPriceCost) {
+-            const promoted = await promoteLegacyPriceLink(
+-              admin,
+-              'Эпицентр',
+-              previousMarketplaceProductKey,
+-              marketplaceProductKey,
+-              legacyPriceCost,
+-              item.title,
+-              size,
+-            )
+-            if (promoted) priceCostSnapshots.set(marketplaceProductKey, legacyPriceCost)
+-            linkedPriceCost = legacyPriceCost
+-          }
+-        }
++        const linkedPriceCost = priceCostMatch?.snapshot
+         const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost)
+         return {
+           order_id: orderId,
 diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
 --- a/supabase/functions/sync-prom-orders/index.ts
 +++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -2,2 +2,12 @@
- import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+@@ -1,5 +1,15 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+-import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
++import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 +import {
 +  loadMarketplaceFamilyMappings,
 +  mappedFamilyKey,
@@ -365,8 +522,24 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +  type MarketplaceFamilyIdentity,
 +} from '../_shared/marketplace-family.ts'
  import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
-@@ -12,2 +22,49 @@
+ import { paymentDetails } from '../_shared/payment-details.ts'
  
+@@ -26,15 +36,61 @@
+ const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
+ const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+ function promProductKey(item: RecordValue) {
+-  // Себестоимость привязывается к товару, а не к размерной вариации.
+-  // SKU в заказах Prom — артикул; rzid/variation_id/id — идентификатор варианта и здесь не используется.
+-  const sku = text(item.sku).trim()
+-  if (sku) return `sku:${sku}`
+-  const externalId = text(item.external_id).trim()
+-  if (externalId) return `external:${externalId}`
+-  const productId = text(pick(item, 'product_id', 'productId')).trim()
+-  if (productId) return `product:${productId}`
+-  return ''
++  return promLegacyProductKeys(item)[0] ?? ''
++}
++
 +type PromProductCache = Map<string, Promise<RecordValue | null>>
 +
 +async function promProductById(
@@ -377,6 +550,7 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +  if (!productId) return null
 +  const cached = cache.get(productId)
 +  if (cached) return cached
++
 +  const pending = (async () => {
 +    try {
 +      const response = await fetch(`https://my.prom.ua/api/v1/products/${encodeURIComponent(productId)}`, {
@@ -384,11 +558,13 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +      })
 +      if (!response.ok) return null
 +      const payload = asRecord(await response.json())
-+      return asRecord(payload.product ?? payload.data ?? payload)
++      const product = asRecord(payload.product ?? payload.data ?? payload)
++      return Object.keys(product).length ? product : null
 +    } catch {
 +      return null
 +    }
 +  })()
++
 +  cache.set(productId, pending)
 +  return pending
 +}
@@ -400,34 +576,42 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +  productCache: PromProductCache,
 +): Promise<MarketplaceFamilyIdentity> {
 +  const orderLegacyKeys = promLegacyProductKeys(item)
-+  const mapped = mappedFamilyKey(mappings, orderLegacyKeys)
-+  if (mapped) return { familyKey: mapped, legacyKeys: orderLegacyKeys }
++  const knownFamilyKey = mappedFamilyKey(mappings, orderLegacyKeys)
++  if (knownFamilyKey) return { familyKey: knownFamilyKey, legacyKeys: orderLegacyKeys }
 +
-+  const productId = text(pick(item, 'rzid', 'variation_id', 'id', 'product_id', 'productId')).trim()
++  const productId = text(
++    pick(item, 'rzid', 'variation_id', 'id', 'product_id', 'productId'),
++  ).trim()
 +  if (!productId) return { familyKey: '', legacyKeys: orderLegacyKeys }
++
 +  const product = await promProductById(productId, promToken, productCache)
 +  if (!product) return { familyKey: '', legacyKeys: orderLegacyKeys }
++
 +  const legacyKeys = promLegacyProductKeys(item, product)
 +  return {
 +    familyKey: promVariationFamilyKey(product) || mappedFamilyKey(mappings, legacyKeys),
 +    legacyKeys,
 +  }
-+}
-+
- async function ukrainianProductNameById(
-@@ -21,3 +78,3 @@
+ }
+ function preserveTracking(
+   delivery: RecordValue,
+@@ -491,7 +547,7 @@
+   name: string,
+   promToken: string,
    feedProducts: PromFeedProducts,
 -  productCache: Map<string, string>,
 +  productCache: PromProductCache,
    useProductFallback: boolean,
-@@ -30,21 +87,8 @@
+ ) {
+   const fromOrder = productSize(item, name)
+@@ -500,25 +556,12 @@
+   const fromFeed = productFromPromFeed(item, feedProducts)?.size
+   if (fromFeed) return fromFeed
  
 -  // Product API fallback is reserved for an individual order refresh, so a bulk
 -  // "new orders" scan does not make one extra request per item.
-+  // Product API fallback is reserved for an individual order refresh. The same
-+  // product cache is also used for canonical variation_group resolution.
-   const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
-   if (!rzid || !useProductFallback) return ''
+-  const rzid = text(pick(item, 'rzid', 'variation_id', 'id'))
+-  if (!rzid || !useProductFallback) return ''
 -  if (productCache.has(rzid)) return productCache.get(rzid) ?? ''
 -
 -  try {
@@ -443,10 +627,18 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 -  } catch {
 -    return ''
 -  }
++  const rzid = text(pick(item, 'rzid', 'variation_id', 'id')).trim()
++  if (!rzid) return ''
++  if (!productCache.has(rzid) && !useProductFallback) return ''
++
 +  const product = await promProductById(rzid, promToken, productCache)
 +  return product ? productSize(product, text(product.name) || name) : ''
  }
-@@ -54,4 +98,8 @@
+ 
+ function isSizeParameter(name: string) {
+@@ -762,8 +805,12 @@
+   const itemsByOrder = new Map<string, RecordValue[]>()
+   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
    let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
 +  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
    try {
@@ -456,12 +648,20 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +      loadMarketplaceFamilyMappings(admin, 'Пром'),
 +    ])
    } catch (error) {
-@@ -64,3 +112,3 @@
+     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+   }
+@@ -772,7 +819,7 @@
+   let updated = 0
+   const skipped = skippedUnchanged
    const changedOrderIds: string[] = []
 -  const productSizeCache = new Map<string, string>()
 +  const productDetailsCache: PromProductCache = new Map()
    const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
-@@ -71,2 +119,32 @@
+   const promClientCache = new Map<string, Promise<RecordValue | null>>()
+   for (const order of candidates) {
+@@ -941,6 +988,50 @@
+     const orderCommission = number(asRecord(order.cpa_commission).amount)
+     let needsTranslationRetry = false
      if (items.length) {
 +      const familyIdentities = await Promise.all(
 +        items.map((item) =>
@@ -469,9 +669,9 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +        ),
 +      )
 +      const familyConflicts = new Set<string>()
-+      for (let position = 0; position < items.length; position += 1) {
-+        const identity = familyIdentities[position]
-+        if (!identity?.familyKey) continue
++      const blockedFamilies = new Set<string>()
++      for (const identity of familyIdentities) {
++        if (!identity.familyKey) continue
 +        const remembered = await rememberMarketplaceFamily(
 +          admin,
 +          'Пром',
@@ -479,22 +679,40 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +          identity.legacyKeys,
 +          productFamilyMappings,
 +        )
-+        const sourceName = text(items[position].name) || text(items[position].product_name) || 'Товар Prom'
-+        const promotion = remembered
-+          ? await promoteFamilyPriceLink(
-+              admin,
-+              'Пром',
-+              identity.familyKey,
-+              mappedLegacyKeys(productFamilyMappings, identity.familyKey, identity.legacyKeys),
-+              priceCostSnapshots,
-+              sourceName,
-+              productSize(items[position], sourceName),
-+            )
-+          : { conflict: true }
-+        if (promotion.conflict) familyConflicts.add(identity.familyKey)
++        if (!remembered) blockedFamilies.add(identity.familyKey)
 +      }
++      const familyKeys = [
++        ...new Set(familyIdentities.map((identity) => identity.familyKey).filter(Boolean)),
++      ]
++      for (const familyKey of familyKeys) {
++        if (blockedFamilies.has(familyKey)) {
++          familyConflicts.add(familyKey)
++          continue
++        }
++        const representativeIndex = familyIdentities.findIndex(
++          (identity) => identity.familyKey === familyKey,
++        )
++        const representative = items[representativeIndex]
++        const sourceName =
++          text(representative?.name) || text(representative?.product_name) || 'Товар Prom'
++        const promotion = await promoteFamilyPriceLink(
++          admin,
++          'Пром',
++          familyKey,
++          mappedLegacyKeys(productFamilyMappings, familyKey),
++          priceCostSnapshots,
++          sourceName,
++          representative ? productSize(representative, sourceName) : '',
++        )
++        if (promotion.conflict) familyConflicts.add(familyKey)
++      }
++
        const itemRows = await Promise.all(items.map(async (item, position) => {
-@@ -78,7 +156,7 @@
+       const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+       const localizedName = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
+@@ -953,27 +1044,42 @@
+         sourceName,
+         promToken,
          feedProducts,
 -        productSizeCache,
 +        productDetailsCache,
@@ -503,25 +721,109 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 -      const marketplaceProductKey = promProductKey(item)
 -      const currentVariantKey = variantKey(marketplaceProductKey, apiSize)
 +      const legacyMarketplaceProductKey = promProductKey(item)
-+      const currentVariantKey = variantKey(legacyMarketplaceProductKey, apiSize)
- 
-@@ -88,5 +166,5 @@
-         Boolean(candidate) &&
++      const identity = familyIdentities[position]
++      const matchingMarketplaceProductKeys = new Set(
++        [identity?.familyKey ?? '', legacyMarketplaceProductKey].filter(Boolean),
++      )
++      const currentVariantKeys = [...matchingMarketplaceProductKeys]
++        .map((key) => variantKey(key, apiSize))
++        .filter(Boolean)
+       const manualItem =
+-        (currentVariantKey ? manualByVariant.get(currentVariantKey) : undefined) ??
++        currentVariantKeys
++          .map((key) => manualByVariant.get(key))
++          .find((candidate): candidate is RecordValue => Boolean(candidate)) ??
+         manualItems.find(
+           (candidate) =>
+             text(candidate.name) === name && (!apiSize || text(candidate.size) === apiSize),
+         )
+-      const matchesCurrentVariant = (candidate: RecordValue | undefined) =>
+-        Boolean(candidate) &&
 -        (!marketplaceProductKey ||
-+        (!legacyMarketplaceProductKey ||
-           text(candidate?.marketplace_product_key ?? candidate?.marketplaceProductKey) ===
+-          text(candidate?.marketplace_product_key ?? candidate?.marketplaceProductKey) ===
 -            marketplaceProductKey) &&
-+            legacyMarketplaceProductKey) &&
-         (!apiSize || text(candidate?.size) === apiSize)
-@@ -98,3 +176,6 @@
+-        (!apiSize || text(candidate?.size) === apiSize)
++      const matchesCurrentVariant = (candidate: RecordValue | undefined) => {
++        if (!candidate) return false
++        const candidateKey = text(
++          candidate.marketplace_product_key ?? candidate.marketplaceProductKey,
++        )
++        return (
++          (!matchingMarketplaceProductKeys.size ||
++            matchingMarketplaceProductKeys.has(candidateKey)) &&
++          (!apiSize || text(candidate.size) === apiSize)
++        )
++      }
+       const namePrevious = byName.get(name)
+       const positionPrevious = byPosition.get(position)
+       const previous =
+-        (currentVariantKey ? byVariant.get(currentVariantKey) : undefined) ??
++        currentVariantKeys
++          .map((key) => byVariant.get(key))
++          .find((candidate): candidate is RecordValue => Boolean(candidate)) ??
+         (matchesCurrentVariant(namePrevious) ? namePrevious : undefined) ??
+         (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
+       const itemCommission = commissionAmount(item)
+@@ -1004,7 +1110,10 @@
+       const previousMarketplaceProductKey = text(
+         previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
        )
 -      const resolvedMarketplaceProductKey = marketplaceProductKey || previousMarketplaceProductKey
-+      const identity = familyIdentities[position]
-+      const resolvedMarketplaceProductKey = identity?.familyKey && !familyConflicts.has(identity.familyKey)
-+        ? identity.familyKey
-+        : legacyMarketplaceProductKey || previousMarketplaceProductKey
++      const familyKey =
++        identity?.familyKey && !familyConflicts.has(identity.familyKey) ? identity.familyKey : ''
++      const resolvedMarketplaceProductKey =
++        familyKey || legacyMarketplaceProductKey || previousMarketplaceProductKey
        const priceCostMatch = findPlatformPriceCostSnapshot(
-
+         priceCostSnapshots,
+         'Пром',
+@@ -1012,46 +1121,7 @@
+         name,
+         size,
+       )
+-      let linkedPriceCost = priceCostMatch?.snapshot
+-      if (
+-        priceCostMatch &&
+-        linkedPriceCost &&
+-        resolvedMarketplaceProductKey &&
+-        priceCostMatch.matchedKey !== resolvedMarketplaceProductKey &&
+-        !priceCostSnapshots.has(resolvedMarketplaceProductKey)
+-      ) {
+-        const promoted = await promoteLegacyPriceLink(
+-          admin,
+-          'Пром',
+-          priceCostMatch.matchedKey,
+-          resolvedMarketplaceProductKey,
+-          linkedPriceCost,
+-          name,
+-          size,
+-        )
+-        if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, linkedPriceCost)
+-      }
+-      if (
+-        !linkedPriceCost &&
+-        resolvedMarketplaceProductKey &&
+-        previousMarketplaceProductKey &&
+-        resolvedMarketplaceProductKey !== previousMarketplaceProductKey
+-      ) {
+-        const legacyPriceCost = priceCostSnapshots.get(previousMarketplaceProductKey)
+-        if (legacyPriceCost) {
+-          const promoted = await promoteLegacyPriceLink(
+-            admin,
+-            'Пром',
+-            previousMarketplaceProductKey,
+-            resolvedMarketplaceProductKey,
+-            legacyPriceCost,
+-            name,
+-            size,
+-          )
+-          if (promoted) priceCostSnapshots.set(resolvedMarketplaceProductKey, legacyPriceCost)
+-          linkedPriceCost = legacyPriceCost
+-        }
+-      }
++      const linkedPriceCost = priceCostMatch?.snapshot
+       const imageUrl =
+         productFromPromFeed(item, feedProducts)?.imageUrl ||
+         text(pick(item, 'image', 'image_url', 'imageUrl')) ||
 diff --git a/supabase/migrations/20260905200000_marketplace_product_families.sql b/supabase/migrations/20260905200000_marketplace_product_families.sql
 new file mode 100644
 --- /dev/null
