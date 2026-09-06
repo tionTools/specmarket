@@ -63,6 +63,7 @@ import { supabase } from '@/lib/supabase'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import { reapplyRegistryPreview } from '@/features/orders/registry-preview'
+import { currencyRateForDate, type CurrencyRateRow } from '@/features/prices/currencyRates'
 import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 
 const storageKey = 'specmarket-crm-demo-orders'
@@ -136,7 +137,7 @@ const orderDraftError = ref('')
 const commentEditorOrderId = ref<string | number | null>(null)
 const editingInternalCommentOrderId = ref<string | number | null>(null)
 const editingInternalCommentValue = ref<Record<string, string>>({})
-const usdRate = ref(45.2)
+const currencyRates = ref<CurrencyRateRow[]>([])
 const linkedPriceProductKeys = ref(new Set<string>())
 const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
@@ -283,6 +284,10 @@ let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+
+function usdRateForOrderDate(orderDate: string) {
+  return currencyRateForDate(currencyRates.value, orderDate, 0)
+}
 
 function showSyncMessage(message: string) {
   stopSyncNoticeTimer()
@@ -481,6 +486,16 @@ const currentTime = () =>
     new Date(),
   )
 const orderDraft = ref(createOrderDraft())
+
+function repriceOrderDraft() {
+  const rate = usdRateForOrderDate(orderDraft.value.date)
+  if (rate <= 0) return
+  for (const product of orderDraft.value.products) {
+    if ((product.costUsd ?? 0) > 0) product.cost = Number(product.costUsd) * rate
+  }
+}
+
+watch(() => orderDraft.value.date, repriceOrderDraft)
 
 function startOfLocalDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate())
@@ -1809,11 +1824,16 @@ async function openProductPriceLink(order: Order, product: OrderProduct) {
 }
 
 function updateDraftUsdCost(product: OrderProduct, event: Event) {
-  product.costManual = true
   const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
   if (!Number.isFinite(value)) return
+  const rate = usdRateForOrderDate(orderDraft.value.date)
+  if (value !== 0 && rate <= 0) {
+    orderDraftError.value = 'Нет курса USD на дату заказа. Добавьте курс в прайсе.'
+    return
+  }
+  product.costManual = true
   product.costUsd = value
-  if (value !== 0) product.cost = value * usdRate.value
+  if (value !== 0) product.cost = value * rate
 }
 
 function createOrderDraft(): Order {
@@ -2735,12 +2755,19 @@ async function loadRemoteOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   user.value = session.session.user
-  const { data: rateSetting } = await supabase
-    .from('crm_settings')
-    .select('numeric_value')
-    .eq('key', 'usd_rate')
-    .maybeSingle()
-  if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)
+  const { data: rateRows, error: rateError } = await supabase
+    .from('crm_currency_rates')
+    .select('effective_from, rate')
+    .eq('currency', 'USD')
+    .order('effective_from', { ascending: false })
+  currencyRates.value = (rateError ? [] : (rateRows ?? [])).map((row) => ({
+    effective_from: String(row.effective_from),
+    rate: Number(row.rate),
+  }))
+  if (rateError) showSyncError(`Не удалось загрузить историю курса: ${rateError.message}`)
+  else if (!currencyRates.value.length)
+    showSyncError('История курса USD пуста. Добавьте курс в прайсе.')
+  else repriceOrderDraft()
   await refreshLinkedPriceProductKeys()
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
@@ -2878,10 +2905,15 @@ function restoreManualOrderDraftFromPriceSelection() {
         product.name = selection.name?.trim() || product.name
         product.priceItemId = selection.priceItemId
         if (Number.isFinite(costUsd)) product.costUsd = costUsd
-        if (Number.isFinite(costUah)) product.cost = costUah
+        if (costUsd > 0) {
+          const rate = usdRateForOrderDate(orderDraft.value.date)
+          if (rate > 0) product.cost = costUsd * rate
+          else orderDraftError.value = 'Нет курса USD на дату заказа. Добавьте курс в прайсе.'
+        } else if (Number.isFinite(costUah)) product.cost = costUah
         product.costManual = false
       }
     }
+    repriceOrderDraft()
     return true
   } catch (error) {
     console.error('Не удалось восстановить ручной заказ после выбора цены:', error)
@@ -3085,6 +3117,14 @@ function preserveManualDeliveryHistory(draft: Order, previousOrder: Order | null
 
 async function saveOrderDraft() {
   if (isGuest.value || isSavingOrderDraft.value) return
+  if (
+    orderDraft.value.products.some((product) => (product.costUsd ?? 0) > 0) &&
+    usdRateForOrderDate(orderDraft.value.date) <= 0
+  ) {
+    orderDraftError.value = 'Нет курса USD на дату заказа. Добавьте курс в прайсе.'
+    return
+  }
+  repriceOrderDraft()
 
   isSavingOrderDraft.value = true
   orderDraftError.value = ''
@@ -3919,6 +3959,7 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
 }
 
 function updateOrderNumber(
+  order: Order,
   product: OrderProduct,
   field: 'quantity' | 'price' | 'cost' | 'costUsd',
   key: string,
@@ -3929,9 +3970,14 @@ function updateOrderNumber(
   const value = Number(raw.replace(',', '.'))
   if (!Number.isFinite(value)) return
   if (field === 'costUsd') {
+    const rate = usdRateForOrderDate(order.date)
+    if (value !== 0 && rate <= 0) {
+      showSyncError('Нет курса USD на дату заказа. Добавьте курс в прайсе.')
+      return
+    }
     product.costManual = true
     product.costUsd = value
-    if (value !== 0) product.cost = value * usdRate.value
+    if (value !== 0) product.cost = value * rate
     return
   }
   product[field] = value
@@ -5117,6 +5163,7 @@ function orderDateTime(order: Order) {
                             type="text"
                             @input="
                               updateOrderNumber(
+                                order,
                                 product,
                                 'quantity',
                                 `${order.id}-${product.id}-quantity`,
@@ -5138,6 +5185,7 @@ function orderDateTime(order: Order) {
                             type="text"
                             @input="
                               updateOrderNumber(
+                                order,
                                 product,
                                 'price',
                                 `${order.id}-${product.id}-price`,
@@ -5172,6 +5220,7 @@ function orderDateTime(order: Order) {
                             type="text"
                             @input="
                               updateOrderNumber(
+                                order,
                                 product,
                                 'costUsd',
                                 `${order.id}-${product.id}-cost-usd`,
@@ -5198,6 +5247,7 @@ function orderDateTime(order: Order) {
                             type="text"
                             @input="
                               updateOrderNumber(
+                                order,
                                 product,
                                 'cost',
                                 `${order.id}-${product.id}-cost`,

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
@@ -385,8 +386,12 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
 
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
   try {
-    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Каста')
+    ;[priceCostSnapshots, usdRateSchedule] = await Promise.all([
+      loadPlatformPriceCostSnapshots(admin, 'Каста'),
+      loadUsdRateSchedule(admin),
+    ])
   } catch (error) {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Kasta: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
   }
@@ -455,6 +460,7 @@ Deno.serve(async (request) => {
       const status = latestStatus(order)
       const createdStatus = (Array.isArray(order.statuses) ? order.statuses.map(asRecord) : []).find((item) => text(item.type) === 'Created') ?? status
       const createdAt = text(createdStatus.created_at) || text(status.created_at)
+      const orderUsdRate = usdRateForDate(usdRateSchedule, dateParts(createdAt).date)
       const items = itemRows(order)
       const deliveryFee = customerDeliveryFee(order, delivery)
       const currentDelivery = asRecord(existing?.delivery)
@@ -587,7 +593,7 @@ Deno.serve(async (request) => {
           }
         }
         const feedImage = feedImages.get(uniqueSkuId) || feedImages.get(supplierCode)
-        const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)
+        const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)
         const directRoyalty = royaltyPercent(item.royalty)
         const needsCatalogRoyalty = targetOrderId || previous === undefined
         const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)

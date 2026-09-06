@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useNow } from '@vueuse/core'
 import type { User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Link2, Plus } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
+import {
+  currencyRateEntryForDate,
+  currencyRateForDate,
+  localDateKey,
+  type CurrencyRateRow,
+} from '@/features/prices/currencyRates'
 import PricesTable from '@/features/prices/PricesTable.vue'
 import { supabase } from '@/lib/supabase'
 
@@ -54,7 +61,6 @@ const epicQuestionValues: Record<number, number> = {
 const storageKey = 'specmarket-crm-prices'
 const route = useRoute()
 const router = useRouter()
-const rateStorageKey = 'specmarket-crm-usd-rate'
 const savedCatalog = window.localStorage.getItem(storageKey)
 const items = ref<PriceItem[]>(
   (savedCatalog
@@ -66,10 +72,20 @@ const items = ref<PriceItem[]>(
     kind: item.kind ?? (sourceGroupIds.has(item.id) ? 'group' : 'item'),
   })),
 )
-const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))
+const currencyRates = ref<CurrencyRateRow[]>([])
+const today = useNow({ interval: 60_000 })
+const usdRate = computed(() =>
+  currencyRateForDate(currencyRates.value, localDateKey(today.value), 0),
+)
+const currentUsdRateEntry = computed(() =>
+  currencyRateEntryForDate(currencyRates.value, localDateKey(today.value)),
+)
+const newUsdRate = ref('')
+const newUsdRateDate = ref(localDateKey())
+const isSavingUsdRate = ref(false)
+const rateError = ref('')
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
-const editingUsdRate = ref(false)
 const user = ref<User | null>(null)
 const email = ref('')
 const password = ref('')
@@ -170,10 +186,58 @@ function save() {
   return savePromise
 }
 
-function saveRate() {
-  if (isGuest.value) return
-  if (supabase && user.value)
-    void supabase.from('crm_settings').upsert({ key: 'usd_rate', numeric_value: usdRate.value })
+async function loadCurrencyRates() {
+  if (!supabase || !user.value) return
+  const { data, error } = await supabase
+    .from('crm_currency_rates')
+    .select('effective_from, rate')
+    .eq('currency', 'USD')
+    .order('effective_from', { ascending: false })
+  if (error) {
+    currencyRates.value = []
+    rateError.value = `Не удалось загрузить историю курса: ${error.message}`
+    return
+  }
+  currencyRates.value = (data ?? []).map((row) => ({
+    effective_from: String(row.effective_from),
+    rate: Number(row.rate),
+  }))
+  rateError.value = currencyRates.value.length ? '' : 'История курса USD пуста. Добавьте курс.'
+}
+
+async function saveUsdRateHistory() {
+  if (!supabase || !user.value || isGuest.value || isSavingUsdRate.value) return
+  const rate = Number(newUsdRate.value.trim().replace(',', '.'))
+  if (!newUsdRateDate.value || !Number.isFinite(rate) || rate <= 0) {
+    rateError.value = 'Укажите положительный курс и дату начала действия.'
+    return
+  }
+  rateError.value = ''
+  isSavingUsdRate.value = true
+  const { error } = await supabase.from('crm_currency_rates').upsert(
+    {
+      currency: 'USD',
+      effective_from: newUsdRateDate.value,
+      rate,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'currency,effective_from' },
+  )
+  if (error) {
+    isSavingUsdRate.value = false
+    rateError.value = `Не удалось сохранить курс: ${error.message}`
+    return
+  }
+  await loadCurrencyRates()
+  if (usdRate.value > 0) {
+    const { error: cacheError } = await supabase
+      .from('crm_settings')
+      .upsert({ key: 'usd_rate', numeric_value: usdRate.value })
+    if (cacheError)
+      rateError.value = `Курс сохранён в истории, но cache не обновлён: ${cacheError.message}`
+  }
+  newUsdRate.value = ''
+  isSavingUsdRate.value = false
 }
 
 async function signIn() {
@@ -210,12 +274,7 @@ async function loadCatalog() {
       kastaThree: row.kasta_sale,
     }))
   else await save()
-  const { data: setting } = await supabase
-    .from('crm_settings')
-    .select('numeric_value')
-    .eq('key', 'usd_rate')
-    .maybeSingle()
-  if (setting?.numeric_value) usdRate.value = Number(setting.numeric_value)
+  await loadCurrencyRates()
   await loadCurrentPriceLink()
 }
 
@@ -334,7 +393,7 @@ async function selectManualPriceItem(item: PriceItem) {
   )
     return
   const costUsd = item.usd ?? 0
-  const costUah = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
+  const costUah = item.usd === null ? Number(item.costUah ?? 0) : 0
   window.sessionStorage.setItem(
     manualOrderPriceSelectionStorageKey,
     JSON.stringify({
@@ -388,17 +447,28 @@ async function linkPriceItem(item: PriceItem) {
     cost_manual: boolean
     cost: number
     cost_usd: number
+    orderDate: string
   } | null = null
   if (linkOrderRemoteId.value && linkPosition.value !== null) {
-    const { data, error } = await supabase
-      .from('crm_order_items')
-      .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')
-      .eq('order_id', linkOrderRemoteId.value)
-      .eq('position', linkPosition.value)
-      .maybeSingle()
-    if (error || !data) {
+    const [itemResult, orderResult] = await Promise.all([
+      supabase
+        .from('crm_order_items')
+        .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')
+        .eq('order_id', linkOrderRemoteId.value)
+        .eq('position', linkPosition.value)
+        .maybeSingle(),
+      supabase
+        .from('crm_orders')
+        .select('order_date')
+        .eq('id', linkOrderRemoteId.value)
+        .maybeSingle(),
+    ])
+    const { data, error } = itemResult
+    if (error || orderResult.error || !data) {
       isLinking.value = false
-      linkError.value = `Не удалось найти текущую позицию заказа: ${error?.message ?? 'позиция не найдена'}`
+      linkError.value = `Не удалось найти текущую позицию заказа: ${
+        error?.message ?? orderResult.error?.message ?? 'позиция не найдена'
+      }`
       return
     }
     const currentMarketplaceProductKey = String(data.marketplace_product_key ?? '').trim()
@@ -419,6 +489,7 @@ async function linkPriceItem(item: PriceItem) {
       cost_manual: data.cost_manual === true,
       cost: Number(data.cost ?? 0),
       cost_usd: Number(data.cost_usd ?? 0),
+      orderDate: String(orderResult.data?.order_date ?? ''),
     }
   }
 
@@ -451,7 +522,8 @@ async function linkPriceItem(item: PriceItem) {
   linkedPriceItemId.value = item.remoteId
   if (currentOrderItem) {
     const costUsd = item.usd ?? 0
-    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value
+    const orderUsdRate = currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
+    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * orderUsdRate
     const updatePayload: Record<string, unknown> = {
       marketplace_product_key: targetLinkProductKey,
       price_item_id: item.remoteId,
@@ -460,7 +532,7 @@ async function linkPriceItem(item: PriceItem) {
       !currentOrderItem.cost_manual &&
       currentOrderItem.cost === 0 &&
       currentOrderItem.cost_usd === 0
-    if (mayAutofillCost) {
+    if (mayAutofillCost && (costUsd <= 0 || orderUsdRate > 0)) {
       updatePayload.cost = cost
       updatePayload.cost_usd = costUsd
     }
@@ -491,31 +563,6 @@ onMounted(async () => {
   await nextTick()
   window.scrollTo({ top: 0, left: 0 })
 })
-
-function updateUsdRate(event: Event) {
-  const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))
-  if (Number.isFinite(value) && value > 0) {
-    usdRate.value = value
-    saveRate()
-  }
-}
-
-async function toggleUsdRateEdit(event: KeyboardEvent) {
-  if (editingUsdRate.value) {
-    updateUsdRate(event)
-    editingUsdRate.value = false
-    return
-  }
-  editingUsdRate.value = true
-  await nextTick()
-  ;(event.target as HTMLInputElement).select()
-}
-
-function finishUsdRateEdit(event: Event) {
-  if (!editingUsdRate.value) return
-  updateUsdRate(event)
-  editingUsdRate.value = false
-}
 
 function formatPrice(value: number | null) {
   if (value === null) return ''
@@ -707,21 +754,57 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           >
             Роялти Эпицентр
           </RouterLink>
-          <label
-            v-if="!isGuest"
-            class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm"
+          <div
+            v-if="user"
+            class="min-w-[18rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm"
           >
-            Курс $
-            <input
-              :value="formatPrice(usdRate)"
-              :readonly="!editingUsdRate"
-              class="catalog-cell ml-2 w-16 rounded border border-slate-200 px-1.5 py-1"
-              inputmode="decimal"
-              type="text"
-              @blur="finishUsdRateEdit"
-              @keydown.enter.prevent="toggleUsdRateEdit"
-            />
-          </label>
+            <div class="flex items-center justify-between gap-3">
+              <span class="font-semibold">Курс $: {{ formatPrice(usdRate) }} ₴</span>
+              <span v-if="currentUsdRateEntry" class="text-xs text-slate-500">
+                с {{ currentUsdRateEntry.effective_from }}
+              </span>
+            </div>
+            <div v-if="!isGuest" class="mt-2 grid grid-cols-[1fr_auto] gap-2">
+              <input
+                v-model="newUsdRate"
+                class="rounded-lg border border-slate-200 px-2 py-1.5"
+                inputmode="decimal"
+                placeholder="Новый курс"
+                aria-label="Новый курс USD"
+                type="text"
+              />
+              <label class="text-xs text-slate-600">
+                Действует с
+                <input
+                  v-model="newUsdRateDate"
+                  class="block rounded-lg border border-slate-200 px-2 py-1.5"
+                  type="date"
+                />
+              </label>
+              <button
+                class="col-span-2 rounded-lg bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                :disabled="isSavingUsdRate"
+                type="button"
+                @click="saveUsdRateHistory"
+              >
+                {{ isSavingUsdRate ? 'Сохраняем…' : 'Сохранить курс с этой даты' }}
+              </button>
+            </div>
+            <details v-if="currencyRates.length" class="mt-2 text-xs text-slate-600">
+              <summary class="cursor-pointer font-semibold">История курса</summary>
+              <div class="mt-1 max-h-32 space-y-1 overflow-auto">
+                <div
+                  v-for="rate in currencyRates"
+                  :key="rate.effective_from"
+                  class="flex justify-between gap-4"
+                >
+                  <span>{{ rate.effective_from }}</span>
+                  <strong>{{ formatPrice(Number(rate.rate)) }}</strong>
+                </div>
+              </div>
+            </details>
+            <p v-if="rateError" class="mt-2 text-xs font-semibold text-rose-700">{{ rateError }}</p>
+          </div>
           <button
             v-if="!isGuest"
             class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"

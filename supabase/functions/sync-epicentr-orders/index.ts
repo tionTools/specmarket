@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import {
   epicentrFamilyIdentity,
@@ -389,10 +390,12 @@ Deno.serve(async (request) => {
   for (const item of batchedItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
   let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
+  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
   try {
-    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([
+    ;[priceCostSnapshots, productFamilyMappings, usdRateSchedule] = await Promise.all([
       loadPlatformPriceCostSnapshots(admin, 'Эпицентр'),
       loadMarketplaceFamilyMappings(admin, 'Эпицентр'),
+      loadUsdRateSchedule(admin),
     ])
   } catch (error) {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Эпицентра: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
@@ -542,6 +545,7 @@ Deno.serve(async (request) => {
     const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
     const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
+    const orderUsdRate = usdRateForDate(usdRateSchedule, formatOrderDate(source.createdAt))
     const data = {
       external_id: externalId,
       order_number: Number.isFinite(orderNumber) ? orderNumber : 0,
@@ -667,7 +671,7 @@ Deno.serve(async (request) => {
           size,
         )
         const linkedPriceCost = priceCostMatch?.snapshot
-        const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost)
+        const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost, orderUsdRate)
         return {
           order_id: orderId,
           position,

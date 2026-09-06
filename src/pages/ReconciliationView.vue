@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useNow } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 
 import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'
 import type { Reconciliation } from '@/features/reconciliation/types'
+import {
+  currencyRateForDate,
+  localDateKey,
+  type CurrencyRateRow,
+} from '@/features/prices/currencyRates'
 import { supabase } from '@/lib/supabase'
 
 type SupplierPayment = {
@@ -21,7 +27,11 @@ type SupplierPayment = {
 const router = useRouter()
 const reconciliations = ref<Reconciliation[]>([])
 const payments = ref<SupplierPayment[]>([])
-const usdRate = ref(0)
+const currencyRates = ref<CurrencyRateRow[]>([])
+const today = useNow({ interval: 60_000 })
+const usdRate = computed(() =>
+  currencyRateForDate(currencyRates.value, localDateKey(today.value), 0),
+)
 const currentCostUsd = ref(0)
 const currentCostUah = ref(0)
 const isGuest = ref(false)
@@ -30,7 +40,7 @@ const isSaving = ref(false)
 const notice = ref('')
 const error = ref('')
 
-const initialDate = ref(new Date().toISOString().slice(0, 10))
+const initialDate = ref(localDateKey())
 const initialDebtUsd = ref('')
 const initialDebtUah = ref('')
 const paymentDate = ref(new Date().toISOString().slice(0, 10))
@@ -164,20 +174,24 @@ async function load() {
     return
   }
   isGuest.value = session.session.user.email?.toLowerCase() === 'guest@gmail.com'
-  const [settingsResult, reconciliationsResult, paymentsResult, totalsResult] = await Promise.all([
-    supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),
+  const [ratesResult, reconciliationsResult, paymentsResult, totalsResult] = await Promise.all([
+    supabase
+      .from('crm_currency_rates')
+      .select('effective_from, rate')
+      .eq('currency', 'USD')
+      .order('effective_from', { ascending: false }),
     supabase.from('crm_reconciliations').select('*').order('created_at', { ascending: false }),
     supabase.from('crm_supplier_payments').select('*').order('paid_at', { ascending: false }),
     supabase.rpc('get_crm_current_cost_totals'),
   ])
   if (
-    settingsResult.error ||
+    ratesResult.error ||
     reconciliationsResult.error ||
     paymentsResult.error ||
     totalsResult.error
   ) {
     error.value = [
-      settingsResult.error,
+      ratesResult.error,
       reconciliationsResult.error,
       paymentsResult.error,
       totalsResult.error,
@@ -187,7 +201,10 @@ async function load() {
     isLoading.value = false
     return
   }
-  usdRate.value = Number(settingsResult.data?.numeric_value ?? 0)
+  currencyRates.value = (ratesResult.data ?? []).map((row) => ({
+    effective_from: String(row.effective_from),
+    rate: Number(row.rate),
+  }))
   reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({
     ...item,
     kind: item.kind as Reconciliation['kind'],
@@ -203,13 +220,14 @@ async function saveInitialBalance() {
   if (!supabase || isGuest.value || initialCheckpoint.value) return
   const debtUsd = parsedNumber(initialDebtUsd.value)
   const debtUah = parsedNumber(initialDebtUah.value)
+  const initialUsdRate = currencyRateForDate(currencyRates.value, initialDate.value, 0)
   if (
     !initialDate.value ||
     debtUsd === null ||
     debtUah === null ||
     debtUsd < 0 ||
     debtUah < 0 ||
-    usdRate.value <= 0
+    initialUsdRate <= 0
   ) {
     error.value = 'Укажите дату и начальный долг в USD и гривне.'
     return
@@ -219,13 +237,13 @@ async function saveInitialBalance() {
   const { error: saveError } = await supabase.from('crm_reconciliations').insert({
     kind: 'initial',
     reconciled_at: new Date(`${initialDate.value}T12:00:00`).toISOString(),
-    usd_rate: usdRate.value,
+    usd_rate: initialUsdRate,
     crm_balance_usd_before_adjustment: debtUsd,
     crm_balance_uah_before_adjustment: debtUah,
     crm_balance_usd_after_adjustment: debtUsd,
     crm_balance_uah_after_adjustment: debtUah,
-    crm_balance_before_adjustment: debtUsd * usdRate.value + debtUah,
-    crm_balance_after_adjustment: debtUsd * usdRate.value + debtUah,
+    crm_balance_before_adjustment: debtUsd * initialUsdRate + debtUah,
+    crm_balance_after_adjustment: debtUsd * initialUsdRate + debtUah,
     cost_snapshot_usd: currentCostUsd.value,
     cost_snapshot_uah: currentCostUah.value,
   })

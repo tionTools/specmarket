@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import {
   loadMarketplaceFamilyMappings,
@@ -812,10 +813,12 @@ Deno.serve(async (request) => {
   for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
   let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
+  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
   try {
-    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([
+    ;[priceCostSnapshots, productFamilyMappings, usdRateSchedule] = await Promise.all([
       loadPlatformPriceCostSnapshots(admin, 'Пром'),
       loadMarketplaceFamilyMappings(admin, 'Пром'),
+      loadUsdRateSchedule(admin),
     ])
   } catch (error) {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
@@ -923,6 +926,7 @@ Deno.serve(async (request) => {
           ? 'prom-promo'
           : 'none'
     const { date, time } = dateParts(order.date_created ?? order.created_at)
+    const orderUsdRate = usdRateForDate(usdRateSchedule, date)
     const data = {
       external_id: externalId,
       order_number: number(order.id), order_date: date, order_time: time,
@@ -1123,7 +1127,7 @@ Deno.serve(async (request) => {
         productFromPromFeed(item, feedProducts)?.imageUrl ||
         text(pick(item, 'image', 'image_url', 'imageUrl')) ||
         text(previous?.image_url)
-      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)
+      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)
       return {
         order_id: orderId,
         position,
