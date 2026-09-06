@@ -1,0 +1,30 @@
+Patch 50 — защищать новый ручной заказ с момента открытия формы
+
+База: текущий main должен содержать commit 9ca6418f8f8582a7c34a8f0161b3b58b33f52e95 (Patch 49). AGENTS.md не изменять, не форматировать, не stage/commit.
+
+Цель: новый ручной заказ должен иметь checkpoint сразу после нажатия «Новый заказ», ещё до первого перехода в «Цены». После этого любые изменения формы уже подхватываются существующим deep-watch и переживают reload/remount. Черновик очищается только при явной отмене (X/Отмена/Esc) или после успешного сохранения.
+
+1. Убедись, что main синхронизирован с origin/main и что кроме прежнего пользовательского `M AGENTS.md` нет посторонних изменений.
+2. Выполни `git apply --check 50.patch`, затем `git apply 50.patch`.
+3. Проверь реализацию в `src/pages/HomeView.vue`:
+   - `openNewOrderDialog()` после `createOrderDraft()` синхронно создаёт `manualOrderPriceDraftStorageKey` со всем `orderDraft`, `editingId: null`, `productId: ''` ДО показа dialog;
+   - старый `manualOrderPriceSelectionStorageKey` при открытии нового заказа очищается;
+   - существующий deep-watch продолжает обновлять checkpoint при каждом дальнейшем изменении формы;
+   - не менять логику Patch 48/49: выбор цены, восстановление, сохранение исторической себестоимости, cancel и успешное save должны остаться прежними.
+4. Усиль `src/features/orders/manual-draft-checkpoint_test.mjs` реальным сценарием нового заказа:
+   - добавить в извлекаемые handlers `openNewOrderDialog`;
+   - дать VM-контексту `createOrderDraft()` и `orderDialog.showModal()`;
+   - до любого вызова price picker вызвать `openNewOrderDialog()` и проверить, что checkpoint уже существует и содержит полный новый draft;
+   - изменить несколько полей, вызвать `persistActiveManualOrderDraft()` и проверить, что checkpoint обновлён;
+   - создать remount и проверить `restoreManualOrderDraftFromPriceSelection()` без selection/query: все поля восстановлены;
+   - проверить, что explicit cancel удаляет checkpoint;
+   - существующие round-trip проверки выбора цены и сохранения остальных полей не ослаблять и не удалять.
+5. Запусти Node tests, включая минимум:
+   - `node src/features/orders/manual-draft-checkpoint_test.mjs`
+   - `node src/features/orders/manual-cost-preservation_test.mjs`
+   - остальные существующие Node unit-checks проекта, которые запускались для Patch 48/49.
+6. Выполни `pnpm format`, `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check`.
+7. Проверь итоговый diff: только файлы задачи; `AGENTS.md` не включать. Никаких миграций и Edge Function deploy для Patch 50 не требуется.
+8. Commit и push в `main`. Сообщи SHA и итоговый `git status --short`.
+
+Критерий приёмки: если пользователь открыл «Новый заказ», начал вводить данные и затем случился reload/remount или он ушёл в «Цены» и вернулся, введённый draft не теряется. Потеря разрешена только после явной отмены пользователем или успешного создания заказа.
