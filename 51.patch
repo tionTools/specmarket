@@ -1,0 +1,171 @@
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -13,6 +13,7 @@ import {
+ } from '../_shared/marketplace-family.ts'
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
++import { resolvePromShipping } from '../_shared/prom-delivery.ts'
+ 
+ const corsHeaders = {
+   'Access-Control-Allow-Origin': '*',
+@@ -895,20 +896,17 @@ Deno.serve(async (req) => {
+     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+     const websiteOrderCommission = orderLevelCommission(order)
+     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
+-    const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
+     const hasManualShipping = previousDelivery.shippingSource === 'manual'
+-    const shippingSource = hasManualShipping
+-      ? 'manual'
+-      : hasSellerDeliveryCost
+-        ? 'seller-api'
+-        : promoSellerDeliveryCost !== undefined
+-          ? 'prom-promo'
+-          : 'none'
++    const resolvedShipping = resolvePromShipping({
++      hasManualShipping,
++      manualShipping: number(existing?.shipping),
++      hasSellerDeliveryCost,
++      sellerDeliveryCost: number(sellerDeliveryCost),
++      deliveryProvider: text(deliveryProvider.provider),
++      orderAmount,
++    })
+     const { date, time } = dateParts(order.date_created ?? order.created_at)
+     const orderUsdRate = usdRateForDate(usdRateSchedule, date)
+     const data = {
+@@ -918,12 +916,7 @@ Deno.serve(async (req) => {
+       customer_email: buyerEmail || null,
+       customer_comment: text(order.client_notes) || text(order.comment) || null,
+       platform: 'Пром', status: orderStatus,
+-      shipping: hasManualShipping
+-        ? number(existing?.shipping)
+-        : hasSellerDeliveryCost
+-          ? number(sellerDeliveryCost)
+-          : promoSellerDeliveryCost ?? 0,
++      shipping: resolvedShipping.shipping,
+       acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
+       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
+       delivery: {
+@@ -940,7 +933,7 @@ Deno.serve(async (req) => {
+           : undefined,
+         hasWebsiteCommission: websiteOrderCommission > 0,
+-        shippingSource,
++        shippingSource: resolvedShipping.shippingSource,
+         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
+         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
+         printedAt: text(previousDelivery.printedAt) || undefined,
+diff --git a/supabase/functions/_shared/prom-delivery.ts b/supabase/functions/_shared/prom-delivery.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-delivery.ts
+@@ -0,0 +1,34 @@
++export type PromShippingSource = 'manual' | 'seller-api' | 'prom-promo' | 'none'
++
++type ResolvePromShippingInput = {
++  hasManualShipping: boolean
++  manualShipping: number
++  hasSellerDeliveryCost: boolean
++  sellerDeliveryCost: number
++  deliveryProvider: string
++  orderAmount: number
++}
++
++export function resolvePromShipping(input: ResolvePromShippingInput): {
++  shipping: number
++  shippingSource: PromShippingSource
++} {
++  if (input.hasManualShipping) {
++    return { shipping: input.manualShipping, shippingSource: 'manual' }
++  }
++
++  if (input.hasSellerDeliveryCost) {
++    return { shipping: input.sellerDeliveryCost, shippingSource: 'seller-api' }
++  }
++
++  if (input.deliveryProvider.trim().toLowerCase() === 'rozetka_delivery') {
++    return {
++      shipping: input.orderAmount >= 700 ? 30 : 10,
++      // Keep the existing persisted source value for compatibility. The
++      // amount is now selected by the Rozetka Delivery tariff, not promo flag.
++      shippingSource: 'prom-promo',
++    }
++  }
++
++  return { shipping: 0, shippingSource: 'none' }
++}
+diff --git a/supabase/functions/_shared/prom-delivery_test.ts b/supabase/functions/_shared/prom-delivery_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-delivery_test.ts
+@@ -0,0 +1,73 @@
++import { resolvePromShipping } from './prom-delivery.ts'
++
++function assert(value: unknown, message: string): asserts value {
++  if (!value) throw new Error(message)
++}
++
++function rozDelivery(orderAmount: number) {
++  return resolvePromShipping({
++    hasManualShipping: false,
++    manualShipping: 0,
++    hasSellerDeliveryCost: false,
++    sellerDeliveryCost: 0,
++    deliveryProvider: 'rozetka_delivery',
++    orderAmount,
++  })
++}
++
++for (const orderAmount of [105, 147, 240, 300, 699.99]) {
++  const result = rozDelivery(orderAmount)
++  assert(
++    result.shipping === 10 && result.shippingSource === 'prom-promo',
++    `Rozetka Delivery order ${orderAmount} UAH must cost seller 10 UAH`,
++  )
++}
++
++for (const orderAmount of [700, 1512]) {
++  const result = rozDelivery(orderAmount)
++  assert(
++    result.shipping === 30 && result.shippingSource === 'prom-promo',
++    `Rozetka Delivery order ${orderAmount} UAH must cost seller 30 UAH`,
++  )
++}
++
++const manual = resolvePromShipping({
++  hasManualShipping: true,
++  manualShipping: 44,
++  hasSellerDeliveryCost: true,
++  sellerDeliveryCost: 17,
++  deliveryProvider: 'rozetka_delivery',
++  orderAmount: 800,
++})
++assert(
++  manual.shipping === 44 && manual.shippingSource === 'manual',
++  'Manual Prom shipping must win over API and Rozetka tariff values',
++)
++
++const sellerApi = resolvePromShipping({
++  hasManualShipping: false,
++  manualShipping: 0,
++  hasSellerDeliveryCost: true,
++  sellerDeliveryCost: 17,
++  deliveryProvider: 'rozetka_delivery',
++  orderAmount: 800,
++})
++assert(
++  sellerApi.shipping === 17 && sellerApi.shippingSource === 'seller-api',
++  'Explicit seller delivery cost from Prom API must win over Rozetka tariff fallback',
++)
++
++const otherProvider = resolvePromShipping({
++  hasManualShipping: false,
++  manualShipping: 0,
++  hasSellerDeliveryCost: false,
++  sellerDeliveryCost: 0,
++  deliveryProvider: 'nova_poshta',
++  orderAmount: 240,
++})
++assert(
++  otherProvider.shipping === 0 && otherProvider.shippingSource === 'none',
++  'Rozetka tariff fallback must not affect other delivery providers',
++)
