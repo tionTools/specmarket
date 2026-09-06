@@ -1,0 +1,224 @@
+Patch 52 — первая рабочая Android CRM «Заказы»
+
+База: текущий `main` должен содержать commit `5c7480cd483f5c9e7a95b8a995da8ff318247b7d` (Patch51). Source of truth — текущий `main`, реальные схемы `crm_orders` / `crm_order_items`, существующие Supabase Edge Functions и фактические marketplace transition rules. `AGENTS.md` не изменять, не форматировать, не stage/commit.
+
+Цель Patch52: создать первую устанавливаемую native Android-версию CRM без видимого брендинга SpecMarket. Название приложения и заголовок главного экрана: `Заказы`. Android должен работать с той же Supabase CRM, показывать реальные заказы/их состояния, детали и историю, получать изменения общей CRM и позволять вручную принять новый Prom-заказ только после подтверждения пользователя. Kasta/Epicentr пока read-only: не имитировать их принятие локальной сменой статуса без проверенного API write-path.
+
+Важно: Patch52 — первый мобильный этап. Firebase/FCM и переключатель уведомлений на конкретном устройстве намеренно НЕ входят сюда; их делаем отдельным следующим патчем после проверки первой APK. Не добавляй placeholder-переключатель, который ничего не делает.
+
+1. Подготовка
+- Перейди в локальный проект `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+- Синхронизируй `main` с `origin/main` и убедись, что он содержит `5c7480cd483f5c9e7a95b8a995da8ff318247b7d`.
+- Исходный `git status --short` должен содержать только прежний пользовательский `M AGENTS.md` либо быть чище. Любые другие неожиданные изменения останови и явно сообщи.
+- `AGENTS.md` не трогать ни на одном этапе.
+- Получи `52.patch` из `chatgpt-patches`, выполни `git apply --check 52.patch`, затем `git apply 52.patch`.
+- После применения прочитай `android/README.md` полностью и используй его как обязательную спецификацию Patch52.
+
+2. Android project
+Создай самостоятельный Gradle Android project в `android/`, не превращая корневой pnpm/Vite проект в Android build.
+
+Требования к toolchain:
+- native Kotlin + Jetpack Compose;
+- baseline, подтверждённый официальной документацией на дату Patch52: AGP 9.4.0, Gradle 9.6.0, Kotlin 2.3.21, Compose BOM 2026.08.00, compileSdk 37, targetSdk 36, minSdk 26, JDK 17;
+- если локальный установленный Android SDK требует технически совместимую стабильную комбинацию, допускается выбрать ближайшую стабильную версию, но никаких dynamic/snapshot/alpha/beta зависимостей без необходимости; итоговые версии зафиксировать и сообщить;
+- commit Gradle wrapper (`gradlew`, `gradlew.bat`, wrapper properties и wrapper jar);
+- `android/local.properties`, build-каталоги, APK/AAB и IDE-local файлы не коммитить.
+
+Рекомендуемая структура — небольшая и понятная, например:
+- `android/app/src/main/.../MainActivity.kt`
+- `data/` — Supabase client/repository/DTO;
+- `domain/` или `model/` — order models + pure helpers;
+- `ui/` — login/orders/details/settings;
+- `ui/theme/` — Compose theme;
+- unit tests рядом в `src/test`.
+Не раздувай архитектуру DI-фреймворками без нужды; ViewModel + repository достаточно.
+
+3. Supabase connection / auth
+- Используй тот же Supabase URL и publishable key, что сейчас использует `src/lib/supabase.ts`. Это допустимые client credentials; никакой service-role или marketplace secret в APK.
+- Предпочтительно использовать стабильный `supabase-kt` BOM + `auth-kt`, `postgrest-kt`, `realtime-kt`, `functions-kt` и Ktor engine с WebSocket support. Выбери одну реально совместимую стабильную версию supabase-kt/Ktor, проверь сборкой и зафиксируй версии.
+- Вход email/password — тот же Supabase Auth аккаунт, что в web CRM. Сессию хранить штатным безопасным способом библиотеки и автообновлять.
+- Не хранить пароль после входа.
+- `guest@gmail.com` может быть отвергнут мобильным клиентом как read/write account; точно не показывать ему write action.
+- Не логировать access/refresh token, пароль, телефон, адрес или полный customer/order payload.
+
+4. Реальные данные заказов
+Android читает `crm_orders` и `crm_order_items`, не создаёт отдельной mobile order table/copy.
+
+Перед написанием DTO обязательно проверь фактические схемы/колонки, которые сейчас использует web CRM и Edge Functions. Не угадывай названия полей.
+
+Минимум данных для list/detail:
+- order id + `external_id`;
+- `order_number`, `order_label`, `order_date`, `order_time`;
+- customer/phone;
+- platform/status;
+- shipping;
+- delivery JSON;
+- items: position, product_name, size, quantity, price, image_url (если есть).
+
+Сумму заказа в Android считать из фактических items (`price * quantity`), а не придумывать новое поле.
+
+Историю не загружать одним бесконечным запросом. Сделай paging/batches (например 50 строк) и сортировку по доступному корректному updated/created timestamp; используй существующий `updated_at`, если он действительно есть и используется. Для `Новые` можно фильтровать клиентски по загруженному окну либо server-side, но статусная нормализация должна быть общей pure-функцией и покрыта тестами.
+
+5. UI v0.1
+Видимое имя — только `Заказы`, без SpecMarket в шапке/launcher label.
+
+Login screen:
+- email;
+- password;
+- `Войти`;
+- понятная ошибка без технического stack trace.
+
+Orders screen:
+- title `Заказы`;
+- refresh action и pull-to-refresh, если выбранная стабильная Compose API позволяет без нестабильной зависимости;
+- переключатели/filters минимум `Новые` / `Все`;
+- карточка: platform, №, дата/время, status, сумма, короткая сводка товара;
+- status color semantics совместимы с web CRM: новые синие; отмена/возврат красные; остальные активные/доставочные состояния не должны ошибочно становиться красными;
+- список должен быть пригоден для телефона, без копирования desktop-таблицы.
+
+Order detail:
+- platform + № + status + date/time;
+- products: name, size, qty, price;
+- customer + phone;
+- delivery carrier/city/address/TTN/payer;
+- seller shipping (`shipping`) отдельно;
+- payment method/status, если они присутствуют в `delivery` JSON;
+- данные отсутствующего поля отображай как `—`, приложение не должно падать от nullable/unknown JSON.
+
+Settings v0.1:
+- текущий account/email;
+- logout;
+- НЕ показывать пока notification toggle.
+
+6. Realtime / common state
+- Пока приложение открыто, подписаться через Supabase Realtime на изменения заказов (и при необходимости items) и обновлять list/detail.
+- На `onResume` делать лёгкий refresh.
+- После write action refresh соответствующий заказ.
+- Если изменение сделано в web CRM или на другом телефоне, Android должен увидеть общее состояние; не создавать локальный authoritative status.
+- Ошибка realtime не должна ломать приложение: ручной refresh остаётся рабочим fallback.
+
+7. Prom «Принять» — только через backend
+Расширь существующий `supabase/functions/sync-prom-orders/index.ts` новым body field `acceptExternalIds` по образцу безопасного `completeExternalIds`, не ломая текущую completion-логику.
+
+Поведение:
+- field должен быть array; иначе 400;
+- нормализовать `prom:<id>` / numeric strings, dedupe, удалить пустые;
+- максимум 100 IDs; только numeric Prom IDs;
+- scheduled/cron request НЕ может выполнять accept action;
+- guest не может;
+- найти соответствующие `crm_orders` по `platform='Пром'` + `external_id`;
+- принимать можно только действительно новый заказ. Нормализация должна учитывать реальные CRM spellings `Новий`, `Новый`, `new`, `pending` и фактический входной mapping текущего sync; не разрешать canceled/cancelled/скасовано, return/returned/повернено, delivered/completed/виконано и уже accepted/received/принято;
+- already accepted request не должен откатывать или повторно менять статус. Можно вернуть idempotent result/alreadyAccepted без вызова Prom API;
+- для новых заказов вызвать существующий Prom endpoint `POST https://my.prom.ua/api/v1/orders/set_status` с `{ status: 'received', ids: [...] }`, используя только серверный `PROM_API_TOKEN`;
+- только после успешного ответа Prom обновить соответствующие CRM rows в `status='Принято'`;
+- если Prom API не подтвердил, CRM status не менять;
+- ответ должен содержать минимум `ok`, accepted count, changedOrderIds и при необходимости alreadyAccepted IDs/message;
+- при конфликте/невалидном состоянии вернуть понятный 409, не маскировать его успехом.
+
+Вынеси pure helper, например `supabase/functions/_shared/prom-order-action.ts`, для:
+- normalize external IDs;
+- classify `new` / `alreadyAccepted` / forbidden final status;
+- eligibility predicate.
+Покрой Deno tests.
+
+Android:
+- `Принять` показывать только `platform=Пром` + normalized new status;
+- на tap показать Compose AlertDialog `Принять заказ №…?`;
+- только после подтверждения вызвать `sync-prom-orders` через authenticated Functions client с `acceptExternalIds`;
+- button disable while request in flight;
+- успех -> refresh, action исчезает;
+- 409/already accepted -> refresh и показать нормальное сообщение;
+- Kasta/Epicentr v0.1 read-only: не показывать fake `Принять`, который меняет только CRM.
+
+8. Pure Android tests
+Минимум tests:
+- `Новий`, `Новый`, `new`, `pending` => new;
+- `Принято` / `received` => not new;
+- canceled/cancelled/скасовано => red + not acceptable;
+- returned/повернено/возврат => red + not acceptable;
+- completed/delivered/виконано => not acceptable;
+- Prom + new => accept action visible;
+- Kasta/Epicentr + new => accept action not visible in v0.1;
+- total = sum(price*quantity) with multiple items and decimals.
+
+9. Android build workflow
+Добавь `.github/workflows/android-apk.yml`:
+- `workflow_dispatch`;
+- path-trigger на `android/**` и backend/shared files Patch52 при push в main;
+- checkout;
+- JDK 17;
+- setup Gradle/cache подходящим стандартным action;
+- run from `android/`: unit tests + lint + `assembleDebug`;
+- upload installable debug APK artifact с понятным именем, например `orders-android-debug`;
+- workflow не содержит secrets в YAML и не требует Firebase.
+
+10. Checks
+Перед commit выполнить:
+Backend/web:
+- новые Deno tests Patch52;
+- существующие релевантные Prom/shared tests;
+- `pnpm format`;
+- `pnpm type-check`;
+- `pnpm lint`;
+- `pnpm build`;
+- `git diff --check`.
+
+Android:
+- `android/gradlew.bat testDebugUnitTest` (Windows) или эквивалент;
+- `android/gradlew.bat lintDebug`;
+- `android/gradlew.bat assembleDebug`;
+- убедиться, что APK реально создан и не пустой.
+Если Android SDK component отсутствует и `sdkmanager` доступен — установи нужный стабильный SDK package. Не понижай требования молча; любое вынужденное отклонение от baseline явно сообщи.
+
+11. Static acceptance review
+Перед commit вручную проверь:
+- нигде в Android UI нет `SpecMarket`;
+- приложение называется `Заказы`;
+- нет service-role / PROM_API_TOKEN / Kasta / Epicentr / carrier secrets в Android, workflow, resources или BuildConfig;
+- Android использует те же Supabase data, а не demo/mock;
+- new/all list и detail работают на реальных DTO;
+- Prom accept идёт только через authenticated Edge Function + confirmation;
+- completion `completeExternalIds` не сломан;
+- Kasta/Epicentr не получают fake write;
+- FCM/notification toggle отсутствуют в Patch52, как и задумано;
+- `AGENTS.md` untouched.
+
+12. Expected task files
+Итоговый diff Patch52 может содержать только:
+- `.gitignore`;
+- `android/**` (исходники, Gradle files, wrapper, tests, README; без build/local.properties/APK);
+- `.github/workflows/android-apk.yml`;
+- `supabase/functions/sync-prom-orders/index.ts`;
+- новый shared helper + test для Prom accept, если он нужен (`supabase/functions/_shared/prom-order-action.ts`, `_test.ts`).
+Не трогай package lock/web-файлы без реальной необходимости. Если formatter затронул чужие файлы — откати их.
+
+13. Commit / push / deploy
+После всех успешных проверок:
+- stage только файлы Patch52, `AGENTS.md` исключить;
+- commit с понятным message, например `Add Android orders client`;
+- push `main -> origin/main`;
+- deploy только изменённую Edge Function `sync-prom-orders` в связанный production Supabase project;
+- не деплой другие functions;
+- после push проверь GitHub Actions Android build. Если workflow можно дождаться через `gh`, дождись результата; при failure прочитай лог, исправь и повтори цикл до green.
+
+14. Итоговый отчёт Codex
+Сообщи:
+- commit SHA;
+- push result;
+- `sync-prom-orders` deploy result/version;
+- выбранные Android/Gradle/Kotlin/Compose/supabase-kt/Ktor versions;
+- результаты Deno + pnpm checks;
+- результаты Android test/lint/assemble;
+- GitHub Actions run result и имя APK artifact, если run уже завершён;
+- локальный путь к debug APK;
+- полный итоговый `git status --short` (ожидается только прежний `M AGENTS.md`).
+
+Критерий приёмки Patch52:
+- устанавливаемая APK `Заказы` логинится в тот же Supabase account;
+- показывает реальные новые и исторические CRM orders + detail;
+- изменения web CRM видны в Android через realtime/refresh;
+- новый Prom order можно принять только после подтверждения, через серверный Prom API, и состояние становится общим;
+- Kasta/Epicentr остаются безопасно read-only;
+- нет marketplace/service secrets в APK;
+- web CRM не сломан;
+- FCM ещё не добавлен и будет отдельным следующим этапом.
