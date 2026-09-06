@@ -1,0 +1,57 @@
+Patch 51 — исправить продавцовскую стоимость Prom / Rozetka Delivery
+
+База: текущий main должен содержать commit 56cdf1bb188142376c83c414e4c47f86c2b94fbb (Patch 50). Source of truth — текущий main + подтверждённые реальные Prom API данные. AGENTS.md не изменять, не форматировать, не stage/commit.
+
+Диагностикой подтверждено:
+- 422329225: 105 грн, provider=rozetka_delivery, type=W2W, delivery_cost=30, has_order_promo_free_delivery=true, фактический расход продавца 10 грн;
+- 425960561: 240 грн, provider=rozetka_delivery, type=W2W, delivery_cost=30, promo=false, фактический расход 10 грн;
+- 425762365: 300 грн, provider=rozetka_delivery, type=W2W, delivery_cost=30, promo=false, фактический расход 10 грн;
+- 425750543: 147 грн, provider=rozetka_delivery, type=W2W, delivery_cost=30, promo=false, фактический расход 10 грн;
+- 424776302: 105 грн, provider=rozetka_delivery, type=W2W, delivery_cost=30, promo=false, фактический расход 10 грн;
+- 422358982: canceled, 1512 грн, provider=rozetka_delivery, type=W2W, delivery_cost=0, promo=true; фактическое списание неизвестно.
+В ps_promotion.conditions у части заказов API прямо описывает тариф: 10 грн продавец при заказах от 1 грн и 30 грн продавец при заказах от 700 грн. Это поле отсутствует у большинства заказов, поэтому его нельзя использовать как обязательный источник расчёта.
+
+Цель: убрать ложную зависимость продавцовского расхода Rozetka Delivery от has_order_promo_free_delivery. Для provider=rozetka_delivery использовать тарифный fallback по сумме заказа: <700 грн => 10 грн, >=700 грн => 30 грн. Обычный delivery_cost не использовать как расход продавца. Ручную доставку никогда не перезаписывать.
+
+1. Убедись, что локальный `main` синхронизирован с `origin/main`, содержит commit 56cdf1bb188142376c83c414e4c47f86c2b94fbb и кроме прежнего пользовательского `M AGENTS.md` нет посторонних изменений.
+2. Получи `51.patch` из ветки `chatgpt-patches`. Выполни `git apply --check 51.patch`, затем `git apply 51.patch`.
+3. Проверь `supabase/functions/_shared/prom-delivery.ts`:
+   - при `hasManualShipping=true` возвращается прежняя ручная сумма и `shippingSource='manual'`;
+   - затем при наличии отдельной seller-cost суммы API используется она и `shippingSource='seller-api'`;
+   - затем только для `deliveryProvider === 'rozetka_delivery'` применяется тариф: сумма заказа <700 => 10, >=700 => 30;
+   - для совместимости источник тарифного fallback остаётся существующим `shippingSource='prom-promo'`;
+   - для остальных provider без seller-cost возвращается 0 / `none`.
+4. Проверь `supabase/functions/sync-prom-orders/index.ts`:
+   - импортирован и используется `resolvePromShipping`;
+   - `has_order_promo_free_delivery` больше НЕ участвует в расчёте `shipping` или `shippingSource`;
+   - `has_order_promo_free_delivery` можно оставить в существующей отдельной логике определения payer — Patch51 её не меняет;
+   - `delivery_cost` по-прежнему не используется как расход продавца;
+   - provider берётся из реального `delivery_provider_data.provider`;
+   - порядок приоритетов строго: manual -> seller-api -> rozetka tariff -> 0;
+   - ручная сумма заказа 425960561 и любых других `shippingSource='manual'` не должна измениться при sync.
+5. Проверь `supabase/functions/_shared/prom-delivery_test.ts`. Тесты обязаны покрывать минимум:
+   - реальные суммы 105, 147, 240, 300 грн => 10 грн;
+   - 699.99 => 10 грн;
+   - 700 => 30 грн;
+   - 1512 => 30 грн как тарифный расчёт (не как доказательство фактического списания отменённого заказа 422358982);
+   - manual имеет приоритет даже над seller-api и rozetka tariff;
+   - явный seller-api имеет приоритет над тарифным fallback;
+   - другой provider не получает 10/30 грн.
+6. Запусти тест helper-а подходящим для проекта Deno-командой, минимум `deno test supabase/functions/_shared/prom-delivery_test.ts` (если в проекте используется обёртка/скрипт для Deno tests — используй штатный эквивалент). Также запусти существующие релевантные тесты shared Edge Function helpers, если они входят в обычный цикл проекта.
+7. Выполни полный стандартный цикл: `pnpm format`, `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check` и статическую проверку требований Patch51.
+8. Итоговый diff должен содержать только:
+   - `supabase/functions/sync-prom-orders/index.ts`
+   - `supabase/functions/_shared/prom-delivery.ts`
+   - `supabase/functions/_shared/prom-delivery_test.ts`
+   `AGENTS.md` не включать.
+9. После успешных проверок commit только файлов Patch51 и push в `main`.
+10. После commit/push задеплой только Edge Function `sync-prom-orders` в связанный Supabase production-проект. Не создавать временных диагностических функций и не трогать другие Edge Functions.
+11. После deploy сообщи: commit SHA, результат deploy, выполненные проверки и итоговый `git status --short`.
+
+Критерий приёмки:
+- реальные `rozetka_delivery` заказы 105/147/240/300 грн рассчитываются как 10 грн независимо от `has_order_promo_free_delivery`;
+- 699.99 => 10 грн; 700 и выше => 30 грн по тарифному fallback;
+- наличие явного seller-cost API перекрывает fallback;
+- `shippingSource='manual'` всегда сохраняет введённую пользователем сумму;
+- другие delivery provider не затронуты;
+- Patch51 не изменяет Kasta/Epicentr, семейства товаров, себестоимость, payer-логику и AGENTS.md.
