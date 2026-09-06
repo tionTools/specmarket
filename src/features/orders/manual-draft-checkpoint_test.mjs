@@ -10,6 +10,7 @@ const names = [
   'cloneOrder',
   'persistActiveManualOrderDraft',
   'cancelOrderDraft',
+  'openNewOrderDialog',
   'openDraftPricePicker',
   'restoreManualOrderDraftFromPriceSelection',
 ]
@@ -49,8 +50,14 @@ const context = {
   orderDraft: { value: structuredClone(draft) },
   orderDraftError: { value: '' },
   editingManualOrderId: { value: null },
-  orderDialog: { value: { close: () => (context.closed = true) } },
+  orderDialog: {
+    value: {
+      close: () => (context.closed = true),
+      showModal: () => (context.opened = true),
+    },
+  },
   router: { push: async (value) => (context.route = value) },
+  createOrderDraft: () => structuredClone(draft),
   usdRateForOrderDate: () => 45.2,
   manualOrderPriceDraftStorageKey: checkpointKey,
   manualOrderPriceSelectionStorageKey: selectionKey,
@@ -64,10 +71,25 @@ const context = {
 }
 runInNewContext(ts.transpile(handlers, { target: ts.ScriptTarget.ES2022 }), context)
 
-await context.openDraftPricePicker(context.orderDraft.value.products[0])
+storage.set(selectionKey, JSON.stringify({ productId: 'stale' }))
+context.openNewOrderDialog()
+assert.ok(context.opened, 'new order opens after checkpoint creation')
 assert.deepEqual(
   JSON.parse(storage.get(checkpointKey)).draft,
   draft,
+  'new order stores every draft field before price picker',
+)
+assert.ok(!storage.has(selectionKey), 'new order removes stale price selection')
+context.orderDraft.value.delivery.address = 'Відділення 7'
+context.orderDraft.value.products[1].quantity = 3
+context.persistActiveManualOrderDraft()
+assert.equal(JSON.parse(storage.get(checkpointKey)).draft.delivery.address, 'Відділення 7')
+assert.equal(JSON.parse(storage.get(checkpointKey)).draft.products[1].quantity, 3)
+
+await context.openDraftPricePicker(context.orderDraft.value.products[0])
+assert.deepEqual(
+  JSON.parse(storage.get(checkpointKey)).draft,
+  context.orderDraft.value,
   'picker stores every draft field',
 )
 assert.equal(context.route.path, '/prices')

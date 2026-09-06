@@ -2877,6 +2877,15 @@ function openNewOrderDialog() {
   editingManualOrderId.value = null
   orderDraftError.value = ''
   orderDraft.value = createOrderDraft()
+  window.sessionStorage.setItem(
+    manualOrderPriceDraftStorageKey,
+    JSON.stringify({
+      draft: cloneOrder(orderDraft.value),
+      editingId: null,
+      productId: '',
+    } satisfies ManualOrderPriceDraftState),
+  )
+  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
   orderDialog.value?.showModal()
 }
 
