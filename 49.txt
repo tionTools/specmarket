@@ -1,0 +1,53 @@
+Patch 49 — не терять новый/ручной заказ при выборе цены
+
+База задачи: текущий main должен включать Patch 48, commit 8e972af818b5db9fcb0223e6f50410415944f9ad (или быть его прямым актуальным продолжением без чужих изменений задачи).
+
+Проблема
+Сейчас черновик ручного/нового заказа сохраняется в sessionStorage перед переходом в /prices, но восстановление привязано к query returnManualDraft=1, а restoreManualOrderDraftFromPriceSelection() в finally сразу удаляет сам черновик. Поэтому возврат через browser Back, повторный mount/reload или другой маршрут возврата может открыть новый пустой draft и пользователь теряет уже введённые данные.
+
+Что сделать
+1. Получи 49.patch из origin/chatgpt-patches.
+2. Выполни git apply --check, затем git apply.
+3. Запусти node tools/apply-patch49.mjs. Трансформер должен завершиться сообщением Patch 49 transformer applied.
+4. Удали tools/apply-patch49.mjs до commit.
+
+Обязательная логика после применения
+- Черновик, сохранённый перед «Выбрать из цен», остаётся в sessionStorage после возврата из /prices; restore больше не удаляет manualOrderPriceDraftStorageKey.
+- manualOrderPriceSelectionStorageKey после применения выбранной цены по-прежнему удаляется.
+- Если HomeView открылся без returnManualDraft=1, но активный manualOrderPriceDraftStorageKey существует (например browser Back или reload), этот draft автоматически восстанавливается и окно заказа снова открывается.
+- Пока такой checkpoint существует, глубокие изменения orderDraft обновляют сохранённый draft. Это нужно, чтобы после возврата из «Цен» последующие правки тоже не потерялись при remount/reload.
+- После успешного saveOrderDraft checkpoint и selection очищаются.
+- Явная отмена через X, кнопку «Отмена» и Esc очищает checkpoint и закрывает окно.
+- Переход в «Цены» сам по себе НЕ считается отменой и не очищает draft.
+- Не менять логику Patch 48: обычное открытие/сохранение старого ручного заказа не должно пересчитывать историческую ненулевую себестоимость. Изменение даты, явный ввод С/С $ и явный выбор строки из «Цен» работают как раньше.
+- Не менять Prom/Epicentr/Kasta sync, currency-rate history, canonical product family logic, сверку и миграции.
+
+Проверка сценария потери данных — обязательна
+Статически/через Node проверь на фактическом HomeView минимум такой round-trip:
+A. Создать draft с заполненными покупателем, телефоном, площадкой, оплатой, датой/временем, доставкой, несколькими товарами, количеством, ценой продажи, С/С, доставкой и эквайрингом.
+B. Имитировать openDraftPricePicker: checkpoint должен содержать весь draft.
+C. Имитировать размонтирование HomeView и возврат без query returnManualDraft (browser Back): наличие checkpoint должно приводить к restore, все поля A должны совпасть.
+D. Имитировать выбор price item и возврат: меняется только выбранная товарная позиция; остальные введённые поля и другие товары сохраняются.
+E. После restore checkpoint должен продолжать существовать; selection payload должен быть удалён.
+F. После успешного save checkpoint должен исчезнуть.
+G. После явной отмены checkpoint должен исчезнуть.
+
+Также запусти существующий:
+node src/features/orders/manual-cost-preservation_test.mjs
+
+Проверки проекта:
+pnpm format
+pnpm type-check
+pnpm lint
+pnpm build
+git diff --check
+
+После format/lint обязательно ещё раз просмотри diff: форматтеры не должны внести посторонние изменения.
+
+Commit/push
+- В commit включить только файлы Patch 49. tools/apply-patch49.mjs не коммитить.
+- AGENTS.md не изменять, не stage и не commit.
+- Никаких production migrations/deploy Edge Functions: Patch 49 только frontend.
+- Commit message: Preserve manual order draft across price linking
+- Push в main.
+- В финальном отчёте дай commit SHA, результаты проверок и git status --short. Если status содержит прежний M AGENTS.md — оставить его как есть.
