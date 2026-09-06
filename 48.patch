@@ -67,11 +67,11 @@ new file mode 100644
 +  1,
 +)
 +
-+prices = readFileSync('src/pages/PricesView.vue', 'utf8')
-+start = prices.indexOf("async function saveUsdRateHistory() {")
++let prices = readFileSync('src/pages/PricesView.vue', 'utf8')
++const start = prices.indexOf("async function saveUsdRateHistory() {")
 +if (start < 0) throw new Error('src/pages/PricesView.vue: saveUsdRateHistory() not found')
-+endMarker = "\nasync function signIn() {"
-+end = prices.indexOf(endMarker, start)
++const endMarker = "\nasync function signIn() {"
++const end = prices.indexOf(endMarker, start)
 +if (end < 0) throw new Error('src/pages/PricesView.vue: signIn() marker not found')
 +prices = prices.slice(0, start) + prices.slice(end + 1)
 +writeFileSync('src/pages/PricesView.vue', prices)
@@ -134,7 +134,7 @@ new file mode 100644
 +            to="/currency-rates"
 +            :title="rateError || 'Открыть изменение и историю курса USD'"
 +          >
-+            Изменить курс · {{ usdRate > 0 ? \`${formatPrice(usdRate)} ₴\` : '—' }}
++            Изменить курс · {{ usdRate > 0 ? \`\${formatPrice(usdRate)} ₴\` : '—' }}
 +          </RouterLink>
 +`
 +replaceExact('src/pages/PricesView.vue', oldRatePanel, newRateButton, 1)
@@ -201,7 +201,7 @@ new file mode 100644
 +    .order('effective_from', { ascending: false })
 +  if (loadError) {
 +    rates.value = []
-+    error.value = \`Не удалось загрузить историю курса: ${loadError.message}\`
++    error.value = \`Не удалось загрузить историю курса: \${loadError.message}\`
 +    return
 +  }
 +  rates.value = (data ?? []).map((row) => ({
@@ -233,7 +233,7 @@ new file mode 100644
 +  )
 +  if (saveError) {
 +    isSaving.value = false
-+    error.value = \`Не удалось сохранить курс: ${saveError.message}\`
++    error.value = \`Не удалось сохранить курс: \${saveError.message}\`
 +    return
 +  }
 +
@@ -243,12 +243,12 @@ new file mode 100644
 +      .from('crm_settings')
 +      .upsert({ key: 'usd_rate', numeric_value: currentRate.value })
 +    if (cacheError) {
-+      notice.value = \`Курс сохранён, но совместимый cache не обновлён: ${cacheError.message}\`
++      notice.value = \`Курс сохранён, но совместимый cache не обновлён: \${cacheError.message}\`
 +    } else {
-+      notice.value = \`Курс ${formatRate(rate)} сохранён с ${effectiveFrom.value}.\`
++      notice.value = \`Курс \${formatRate(rate)} сохранён с \${effectiveFrom.value}.\`
 +    }
 +  } else {
-+    notice.value = \`Курс ${formatRate(rate)} сохранён с ${effectiveFrom.value}.\`
++    notice.value = \`Курс \${formatRate(rate)} сохранён с \${effectiveFrom.value}.\`
 +  }
 +  newRate.value = ''
 +  isSaving.value = false
@@ -293,7 +293,7 @@ new file mode 100644
 +          <div>
 +            <p class="text-sm font-medium text-slate-500">Текущий курс</p>
 +            <p class="mt-1 text-3xl font-bold">
-+              {{ currentRate > 0 ? \`${formatRate(currentRate)} ₴\` : '—' }}
++              {{ currentRate > 0 ? \`\${formatRate(currentRate)} ₴\` : '—' }}
 +            </p>
 +            <p v-if="currentEntry" class="mt-1 text-sm text-slate-500">
 +              Действует с {{ currentEntry.effective_from }}
