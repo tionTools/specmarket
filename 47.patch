@@ -1,0 +1,239 @@
+diff --git a/src/features/prices/currencyRates.ts b/src/features/prices/currencyRates.ts
+new file mode 100644
+--- /dev/null
++++ b/src/features/prices/currencyRates.ts
+@@ -0,0 +1,43 @@
++export type CurrencyRateRow = {
++  effective_from: string
++  rate: number | string
++}
++
++export function localDateKey(date = new Date()) {
++  const year = date.getFullYear()
++  const month = String(date.getMonth() + 1).padStart(2, '0')
++  const day = String(date.getDate()).padStart(2, '0')
++  return `${year}-${month}-${day}`
++}
++
++export function normalizeCurrencyDate(value: string | Date) {
++  if (value instanceof Date) return localDateKey(value)
++  const source = String(value ?? '').trim()
++  const iso = source.match(/^(\d{4})-(\d{2})-(\d{2})/)
++  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
++  const european = source.match(/^(\d{2})\.(\d{2})\.(\d{4})/)
++  if (european) return `${european[3]}-${european[2]}-${european[1]}`
++  return ''
++}
++
++export function currencyRateEntryForDate(
++  rates: CurrencyRateRow[],
++  value: string | Date,
++): CurrencyRateRow | null {
++  const date = normalizeCurrencyDate(value)
++  if (!date) return null
++  return (
++    [...rates]
++      .filter((row) => row.effective_from <= date && Number(row.rate) > 0)
++      .sort((left, right) => right.effective_from.localeCompare(left.effective_from))[0] ?? null
++  )
++}
++
++export function currencyRateForDate(
++  rates: CurrencyRateRow[],
++  value: string | Date,
++  fallback = 0,
++) {
++  const rate = Number(currencyRateEntryForDate(rates, value)?.rate ?? 0)
++  return rate > 0 ? rate : fallback
++}
+diff --git a/supabase/functions/_shared/currency-rate.ts b/supabase/functions/_shared/currency-rate.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/currency-rate.ts
+@@ -0,0 +1,49 @@
++import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
++
++export type CurrencyRateRow = {
++  effectiveFrom: string
++  rate: number
++}
++
++function dateKey(value: unknown) {
++  const source = String(value ?? '').trim()
++  const iso = source.match(/^(\d{4})-(\d{2})-(\d{2})/)
++  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
++  const european = source.match(/^(\d{2})\.(\d{2})\.(\d{4})/)
++  if (european) return `${european[3]}-${european[2]}-${european[1]}`
++  return ''
++}
++
++export async function loadUsdRateSchedule(admin: SupabaseClient): Promise<CurrencyRateRow[]> {
++  const { data, error } = await admin
++    .from('crm_currency_rates')
++    .select('effective_from, rate')
++    .eq('currency', 'USD')
++    .order('effective_from', { ascending: true })
++  if (error) throw error
++
++  return (data ?? [])
++    .map((row) => ({
++      effectiveFrom: String(row.effective_from ?? ''),
++      rate: Number(row.rate ?? 0),
++    }))
++    .filter((row) => Boolean(row.effectiveFrom) && row.rate > 0)
++}
++
++export function usdRateForDate(
++  rates: CurrencyRateRow[],
++  value: unknown,
++  fallback = 0,
++) {
++  const date = dateKey(value)
++  if (!date) return fallback
++  let selected = fallback
++  let selectedDate = ''
++  for (const row of rates) {
++    if (row.effectiveFrom <= date && row.effectiveFrom >= selectedDate && row.rate > 0) {
++      selected = row.rate
++      selectedDate = row.effectiveFrom
++    }
++  }
++  return selected
++}
+diff --git a/supabase/functions/_shared/currency-rate_test.ts b/supabase/functions/_shared/currency-rate_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/currency-rate_test.ts
+@@ -0,0 +1,36 @@
++import { usdRateForDate } from './currency-rate.ts'
++import { resolvedOrderItemCost } from './price-cost.ts'
++
++function assertEquals(actual: unknown, expected: unknown, message: string) {
++  if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
++}
++
++const rates = [
++  { effectiveFrom: '2000-01-01', rate: 45.2 },
++  { effectiveFrom: '2026-09-10', rate: 46 },
++  { effectiveFrom: '2026-10-01', rate: 46.5 },
++]
++
++assertEquals(usdRateForDate(rates, '09.09.2026'), 45.2, 'rate before change')
++assertEquals(usdRateForDate(rates, '10.09.2026'), 46, 'rate on effective date')
++assertEquals(usdRateForDate(rates, '2026-09-30T21:00:00Z'), 46, 'ISO timestamp')
++assertEquals(usdRateForDate(rates, '01.10.2026'), 46.5, 'next rate')
++assertEquals(usdRateForDate(rates, '1999-12-31', 44), 44, 'fallback before first rate')
++
++const usdLinked = { priceItemId: 'price-usd', cost: 0, costUsd: 10 }
++assertEquals(
++  resolvedOrderItemCost(undefined, usdLinked, usdRateForDate(rates, '09.09.2026')).cost,
++  452,
++  'USD cost before rate change',
++)
++assertEquals(
++  resolvedOrderItemCost(undefined, usdLinked, usdRateForDate(rates, '10.09.2026')).cost,
++  460,
++  'USD cost on rate effective date',
++)
++const preserved = resolvedOrderItemCost(
++  { cost: 429, cost_usd: 0, cost_manual: false },
++  usdLinked,
++  46,
++)
++assertEquals(preserved.cost, 429, 'existing nonzero historical cost stays frozen')
+diff --git a/supabase/migrations/20260906090000_currency_rate_history.sql b/supabase/migrations/20260906090000_currency_rate_history.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260906090000_currency_rate_history.sql
+@@ -0,0 +1,26 @@
++create table if not exists public.crm_currency_rates (
++  currency text not null default 'USD' check (currency = 'USD'),
++  effective_from date not null,
++  rate numeric not null check (rate > 0),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  primary key (currency, effective_from)
++);
++
++insert into public.crm_currency_rates (currency, effective_from, rate)
++select 'USD', date '2000-01-01', numeric_value
++from public.crm_settings
++where key = 'usd_rate'
++  and numeric_value is not null
++  and numeric_value > 0
++on conflict (currency, effective_from) do nothing;
++
++alter table public.crm_currency_rates enable row level security;
++
++create policy "crm_currency_rates_read" on public.crm_currency_rates
++  for select to authenticated using (true);
++
++create policy "crm_currency_rates_write" on public.crm_currency_rates
++  for all to authenticated
++  using ((auth.jwt() ->> 'email') <> 'guest@gmail.com')
++  with check ((auth.jwt() ->> 'email') <> 'guest@gmail.com');
+diff --git a/tools/apply-patch47.mjs b/tools/apply-patch47.mjs
+new file mode 100644
+--- /dev/null
++++ b/tools/apply-patch47.mjs
+@@ -0,0 +1,60 @@
++import { readFileSync, writeFileSync } from 'node:fs'
++
++function replaceExact(file, before, after, expected = 1) {
++  const source = readFileSync(file, 'utf8')
++  const occurrences = source.split(before).length - 1
++  if (occurrences !== expected) {
++    throw new Error(`${file}: expected ${expected} occurrence(s), found ${occurrences}`)
++  }
++  const next = expected === 1 ? source.replace(before, after) : source.split(before).join(after)
++  writeFileSync(file, next)
++}
++
++writeFileSync('supabase/functions/_shared/price-cost.ts', "import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'\n\nexport type PriceCostSnapshot = {\n  priceItemId: string\n  cost: number\n  costUsd: number\n}\n\nexport type PriceCostMatch = {\n  snapshot: PriceCostSnapshot\n  matchedKey: string\n}\n\ntype RecordValue = Record<string, unknown>\n\nconst text = (value: unknown) =>\n  typeof value === 'string' || typeof value === 'number' ? String(value) : ''\nconst number = (value: unknown) => Number(text(value).replace(',', '.')) || 0\n\nexport async function loadPlatformPriceCostSnapshots(\n  admin: SupabaseClient,\n  platform: string,\n): Promise<Map<string, PriceCostSnapshot>> {\n  const { data: links, error: linksError } = await admin\n    .from('crm_product_price_links')\n    .select('marketplace_product_key, price_item_id, product_title, size')\n    .eq('platform', platform)\n  if (linksError) throw linksError\n\n  const priceItemIds = [\n    ...new Set(\n      (links ?? [])\n        .map((link) => text(link.price_item_id))\n        .filter((priceItemId) => priceItemId.length > 0),\n    ),\n  ]\n  if (!priceItemIds.length) return new Map()\n\n  const { data: priceItems, error: priceItemsError } = await admin\n    .from('crm_price_items')\n    .select('id, usd, cost_uah')\n    .in('id', priceItemIds)\n  if (priceItemsError) throw priceItemsError\n\n  const priceItemById = new Map((priceItems ?? []).map((item) => [text(item.id), item]))\n  const snapshots = new Map<string, PriceCostSnapshot>()\n  for (const link of links ?? []) {\n    const marketplaceProductKey = text(link.marketplace_product_key)\n    const priceItemId = text(link.price_item_id)\n    const priceItem = priceItemById.get(priceItemId)\n    if (!marketplaceProductKey || !priceItem) continue\n    const usd = priceItem.usd === null || priceItem.usd === undefined ? null : number(priceItem.usd)\n    snapshots.set(marketplaceProductKey, {\n      priceItemId,\n      costUsd: usd ?? 0,\n      cost: usd === null ? number(priceItem.cost_uah) : 0,\n    })\n  }\n  return snapshots\n}\n\nexport function findPlatformPriceCostSnapshot(\n  snapshots: Map<string, PriceCostSnapshot>,\n  _platform: string,\n  marketplaceProductKey: string,\n  _productTitle: string,\n  _size: string,\n): PriceCostMatch | undefined {\n  const direct = snapshots.get(marketplaceProductKey)\n  return direct ? { snapshot: direct, matchedKey: marketplaceProductKey } : undefined\n}\n\nexport async function promoteLegacyPriceLink(\n  admin: SupabaseClient,\n  platform: string,\n  legacyKey: string,\n  canonicalKey: string,\n  snapshot: PriceCostSnapshot | undefined,\n  productTitle?: string,\n  size?: string,\n): Promise<boolean> {\n  if (!legacyKey || !canonicalKey || legacyKey === canonicalKey || !snapshot) return false\n\n  const { error } = await admin.from('crm_product_price_links').insert({\n    platform,\n    marketplace_product_key: canonicalKey,\n    price_item_id: snapshot.priceItemId,\n    product_title: productTitle || null,\n    size: size || null,\n  })\n  if (!error) return true\n  if (error.code === '23505') return false\n  throw error\n}\n\nexport function resolvedOrderItemCost(\n  previous: RecordValue | undefined,\n  linked: PriceCostSnapshot | undefined,\n  usdRate = 0,\n) {\n  const costManual = previous?.cost_manual === true || previous?.costManual === true\n  const existingCost = number(previous?.cost)\n  const existingCostUsd = number(previous?.cost_usd ?? previous?.costUsd)\n  const previousPriceItemId = text(previous?.price_item_id ?? previous?.priceItemId) || null\n  const mayAutofill = !costManual && existingCost === 0 && existingCostUsd === 0\n  const canAutofillLinked = Boolean(linked && (linked.costUsd <= 0 || usdRate > 0))\n  const linkedCost = linked\n    ? linked.costUsd > 0\n      ? linked.costUsd * usdRate\n      : linked.cost\n    : 0\n\n  return {\n    cost: mayAutofill && canAutofillLinked ? linkedCost : existingCost,\n    costUsd: mayAutofill && canAutofillLinked && linked ? linked.costUsd : existingCostUsd,\n    costManual,\n    priceItemId:\n      mayAutofill && linked\n        ? linked.priceItemId\n        : previousPriceItemId ?? linked?.priceItemId ?? null,\n  }\n}\n")
++
++replaceExact("supabase/functions/sync-prom-orders/index.ts", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'\nimport { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", 1)
++replaceExact("supabase/functions/sync-prom-orders/index.ts", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>\n  try {\n    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([\n      loadPlatformPriceCostSnapshots(admin, 'Пром'),\n      loadMarketplaceFamilyMappings(admin, 'Пром'),\n    ])\n", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>\n  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>\n  try {\n    ;[priceCostSnapshots, productFamilyMappings, usdRateSchedule] = await Promise.all([\n      loadPlatformPriceCostSnapshots(admin, 'Пром'),\n      loadMarketplaceFamilyMappings(admin, 'Пром'),\n      loadUsdRateSchedule(admin),\n    ])\n", 1)
++replaceExact("supabase/functions/sync-prom-orders/index.ts", "    const { date, time } = dateParts(order.date_created ?? order.created_at)\n    const data = {\n", "    const { date, time } = dateParts(order.date_created ?? order.created_at)\n    const orderUsdRate = usdRateForDate(usdRateSchedule, date)\n    const data = {\n", 1)
++replaceExact("supabase/functions/sync-prom-orders/index.ts", "      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)\n", "      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)\n", 1)
++replaceExact("supabase/functions/sync-epicentr-orders/index.ts", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'\nimport { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", 1)
++replaceExact("supabase/functions/sync-epicentr-orders/index.ts", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>\n  try {\n    ;[priceCostSnapshots, productFamilyMappings] = await Promise.all([\n      loadPlatformPriceCostSnapshots(admin, 'Эпицентр'),\n      loadMarketplaceFamilyMappings(admin, 'Эпицентр'),\n    ])\n", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>\n  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>\n  try {\n    ;[priceCostSnapshots, productFamilyMappings, usdRateSchedule] = await Promise.all([\n      loadPlatformPriceCostSnapshots(admin, 'Эпицентр'),\n      loadMarketplaceFamilyMappings(admin, 'Эпицентр'),\n      loadUsdRateSchedule(admin),\n    ])\n", 1)
++replaceExact("supabase/functions/sync-epicentr-orders/index.ts", "    const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)\n    const data = {\n", "    const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)\n    const orderUsdRate = usdRateForDate(usdRateSchedule, source.createdAt)\n    const data = {\n", 1)
++replaceExact("supabase/functions/sync-epicentr-orders/index.ts", "        const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost)\n", "        const resolvedCost = resolvedOrderItemCost(currentItem, linkedPriceCost, orderUsdRate)\n", 1)
++replaceExact("supabase/functions/sync-kasta-orders/index.ts", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'\nimport { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'\nimport { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'\n", 1)
++replaceExact("supabase/functions/sync-kasta-orders/index.ts", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  try {\n    priceCostSnapshots = await loadPlatformPriceCostSnapshots(admin, 'Каста')\n", "  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>\n  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>\n  try {\n    ;[priceCostSnapshots, usdRateSchedule] = await Promise.all([\n      loadPlatformPriceCostSnapshots(admin, 'Каста'),\n      loadUsdRateSchedule(admin),\n    ])\n", 1)
++replaceExact("supabase/functions/sync-kasta-orders/index.ts", "      const createdAt = text(createdStatus.created_at) || text(status.created_at)\n      const items = itemRows(order)\n", "      const createdAt = text(createdStatus.created_at) || text(status.created_at)\n      const orderUsdRate = usdRateForDate(usdRateSchedule, dateParts(createdAt).date)\n      const items = itemRows(order)\n", 1)
++replaceExact("supabase/functions/sync-kasta-orders/index.ts", "        const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost)\n", "        const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)\n", 1)
++replaceExact("src/pages/PricesView.vue", "import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'\nimport PricesTable from '@/features/prices/PricesTable.vue'\n", "import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'\nimport {\n  currencyRateEntryForDate,\n  currencyRateForDate,\n  localDateKey,\n  type CurrencyRateRow,\n} from '@/features/prices/currencyRates'\nimport PricesTable from '@/features/prices/PricesTable.vue'\n", 1)
++replaceExact("src/pages/PricesView.vue", "const rateStorageKey = 'specmarket-crm-usd-rate'\nconst savedCatalog = window.localStorage.getItem(storageKey)\n", "const savedCatalog = window.localStorage.getItem(storageKey)\n", 1)
++replaceExact("src/pages/PricesView.vue", "const usdRate = ref(Number(window.localStorage.getItem(rateStorageKey) ?? 45.2))\nconst draggedItemId = ref<number | null>(null)\nconst editingCell = ref<string | null>(null)\nconst editingUsdRate = ref(false)\n", "const currencyRates = ref<CurrencyRateRow[]>([])\nconst usdRate = computed(() => currencyRateForDate(currencyRates.value, localDateKey(), 45.2))\nconst currentUsdRateEntry = computed(() =>\n  currencyRateEntryForDate(currencyRates.value, localDateKey()),\n)\nconst newUsdRate = ref('')\nconst newUsdRateDate = ref(localDateKey())\nconst isSavingUsdRate = ref(false)\nconst rateError = ref('')\nconst draggedItemId = ref<number | null>(null)\nconst editingCell = ref<string | null>(null)\n", 1)
++replaceExact("src/pages/PricesView.vue", "function saveRate() {\n  if (isGuest.value) return\n  if (supabase && user.value)\n    void supabase.from('crm_settings').upsert({ key: 'usd_rate', numeric_value: usdRate.value })\n}\n", "async function loadCurrencyRates() {\n  if (!supabase || !user.value) return\n  const { data, error } = await supabase\n    .from('crm_currency_rates')\n    .select('effective_from, rate')\n    .eq('currency', 'USD')\n    .order('effective_from', { ascending: false })\n  if (error) {\n    rateError.value = `Не удалось загрузить историю курса: ${error.message}`\n    return\n  }\n  currencyRates.value = (data ?? []).map((row) => ({\n    effective_from: String(row.effective_from),\n    rate: Number(row.rate),\n  }))\n}\n\nasync function saveUsdRateHistory() {\n  if (!supabase || !user.value || isGuest.value || isSavingUsdRate.value) return\n  const rate = Number(newUsdRate.value.trim().replace(',', '.'))\n  if (!newUsdRateDate.value || !Number.isFinite(rate) || rate <= 0) {\n    rateError.value = 'Укажите положительный курс и дату начала действия.'\n    return\n  }\n  rateError.value = ''\n  isSavingUsdRate.value = true\n  const { error } = await supabase.from('crm_currency_rates').upsert(\n    {\n      currency: 'USD',\n      effective_from: newUsdRateDate.value,\n      rate,\n      updated_at: new Date().toISOString(),\n    },\n    { onConflict: 'currency,effective_from' },\n  )\n  if (error) {\n    isSavingUsdRate.value = false\n    rateError.value = `Не удалось сохранить курс: ${error.message}`\n    return\n  }\n  await loadCurrencyRates()\n  if (usdRate.value > 0) {\n    await supabase\n      .from('crm_settings')\n      .upsert({ key: 'usd_rate', numeric_value: usdRate.value })\n  }\n  newUsdRate.value = ''\n  isSavingUsdRate.value = false\n}\n", 1)
++replaceExact("src/pages/PricesView.vue", "  const { data: setting } = await supabase\n    .from('crm_settings')\n    .select('numeric_value')\n    .eq('key', 'usd_rate')\n    .maybeSingle()\n  if (setting?.numeric_value) usdRate.value = Number(setting.numeric_value)\n  await loadCurrentPriceLink()\n", "  await loadCurrencyRates()\n  await loadCurrentPriceLink()\n", 1)
++replaceExact("src/pages/PricesView.vue", "  const costUah = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value\n", "  const costUah = item.usd === null ? Number(item.costUah ?? 0) : 0\n", 1)
++replaceExact("src/pages/PricesView.vue", "  let currentOrderItem: {\n    id: string\n    cost_manual: boolean\n    cost: number\n    cost_usd: number\n  } | null = null\n", "  let currentOrderItem: {\n    id: string\n    cost_manual: boolean\n    cost: number\n    cost_usd: number\n    orderDate: string\n  } | null = null\n", 1)
++replaceExact("src/pages/PricesView.vue", "  if (linkOrderRemoteId.value && linkPosition.value !== null) {\n    const { data, error } = await supabase\n      .from('crm_order_items')\n      .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')\n      .eq('order_id', linkOrderRemoteId.value)\n      .eq('position', linkPosition.value)\n      .maybeSingle()\n    if (error || !data) {\n      isLinking.value = false\n      linkError.value = `Не удалось найти текущую позицию заказа: ${error?.message ?? 'позиция не найдена'}`\n      return\n    }\n", "  if (linkOrderRemoteId.value && linkPosition.value !== null) {\n    const [itemResult, orderResult] = await Promise.all([\n      supabase\n        .from('crm_order_items')\n        .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')\n        .eq('order_id', linkOrderRemoteId.value)\n        .eq('position', linkPosition.value)\n        .maybeSingle(),\n      supabase.from('crm_orders').select('order_date').eq('id', linkOrderRemoteId.value).maybeSingle(),\n    ])\n    const { data, error } = itemResult\n    if (error || orderResult.error || !data) {\n      isLinking.value = false\n      linkError.value = `Не удалось найти текущую позицию заказа: ${\n        error?.message ?? orderResult.error?.message ?? 'позиция не найдена'\n      }`\n      return\n    }\n", 1)
++replaceExact("src/pages/PricesView.vue", "    currentOrderItem = {\n      id: String(data.id),\n      cost_manual: data.cost_manual === true,\n      cost: Number(data.cost ?? 0),\n      cost_usd: Number(data.cost_usd ?? 0),\n    }\n", "    currentOrderItem = {\n      id: String(data.id),\n      cost_manual: data.cost_manual === true,\n      cost: Number(data.cost ?? 0),\n      cost_usd: Number(data.cost_usd ?? 0),\n      orderDate: String(orderResult.data?.order_date ?? ''),\n    }\n", 1)
++replaceExact("src/pages/PricesView.vue", "    const costUsd = item.usd ?? 0\n    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * usdRate.value\n", "    const costUsd = item.usd ?? 0\n    const orderUsdRate = currencyRateForDate(\n      currencyRates.value,\n      currentOrderItem.orderDate || localDateKey(),\n      usdRate.value,\n    )\n    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * orderUsdRate\n", 1)
++replaceExact("src/pages/PricesView.vue", "function updateUsdRate(event: Event) {\n  const value = Number((event.target as HTMLInputElement).value.replace(',', '.'))\n  if (Number.isFinite(value) && value > 0) {\n    usdRate.value = value\n    saveRate()\n  }\n}\n\nasync function toggleUsdRateEdit(event: KeyboardEvent) {\n  if (editingUsdRate.value) {\n    updateUsdRate(event)\n    editingUsdRate.value = false\n    return\n  }\n  editingUsdRate.value = true\n  await nextTick()\n  ;(event.target as HTMLInputElement).select()\n}\n\nfunction finishUsdRateEdit(event: Event) {\n  if (!editingUsdRate.value) return\n  updateUsdRate(event)\n  editingUsdRate.value = false\n}\n\n", "", 1)
++replaceExact("src/pages/PricesView.vue", "          <label\n            v-if=\"!isGuest\"\n            class=\"rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm\"\n          >\n            Курс $\n            <input\n              :value=\"formatPrice(usdRate)\"\n              :readonly=\"!editingUsdRate\"\n              class=\"catalog-cell ml-2 w-16 rounded border border-slate-200 px-1.5 py-1\"\n              inputmode=\"decimal\"\n              type=\"text\"\n              @blur=\"finishUsdRateEdit\"\n              @keydown.enter.prevent=\"toggleUsdRateEdit\"\n            />\n          </label>\n", "          <div\n            v-if=\"user\"\n            class=\"min-w-[18rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm\"\n          >\n            <div class=\"flex items-center justify-between gap-3\">\n              <span class=\"font-semibold\">Курс $: {{ formatPrice(usdRate) }} ₴</span>\n              <span v-if=\"currentUsdRateEntry\" class=\"text-xs text-slate-500\">\n                с {{ currentUsdRateEntry.effective_from }}\n              </span>\n            </div>\n            <div v-if=\"!isGuest\" class=\"mt-2 grid grid-cols-[1fr_auto] gap-2\">\n              <input\n                v-model=\"newUsdRate\"\n                class=\"rounded-lg border border-slate-200 px-2 py-1.5\"\n                inputmode=\"decimal\"\n                placeholder=\"Новый курс\"\n                type=\"text\"\n              />\n              <input\n                v-model=\"newUsdRateDate\"\n                class=\"rounded-lg border border-slate-200 px-2 py-1.5\"\n                type=\"date\"\n              />\n              <button\n                class=\"col-span-2 rounded-lg bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800 disabled:opacity-50\"\n                :disabled=\"isSavingUsdRate\"\n                type=\"button\"\n                @click=\"saveUsdRateHistory\"\n              >\n                {{ isSavingUsdRate ? 'Сохраняем…' : 'Сохранить курс с этой даты' }}\n              </button>\n            </div>\n            <details v-if=\"currencyRates.length\" class=\"mt-2 text-xs text-slate-600\">\n              <summary class=\"cursor-pointer font-semibold\">История курса</summary>\n              <div class=\"mt-1 max-h-32 space-y-1 overflow-auto\">\n                <div\n                  v-for=\"rate in currencyRates\"\n                  :key=\"rate.effective_from\"\n                  class=\"flex justify-between gap-4\"\n                >\n                  <span>{{ rate.effective_from }}</span>\n                  <strong>{{ formatPrice(Number(rate.rate)) }}</strong>\n                </div>\n              </div>\n            </details>\n            <p v-if=\"rateError\" class=\"mt-2 text-xs font-semibold text-rose-700\">{{ rateError }}</p>\n          </div>\n", 1)
++replaceExact("src/pages/HomeView.vue", "import { reapplyRegistryPreview } from '@/features/orders/registry-preview'\nimport PrintRegistry from '@/features/orders/PrintRegistry.vue'\n", "import { reapplyRegistryPreview } from '@/features/orders/registry-preview'\nimport {\n  currencyRateForDate,\n  localDateKey,\n  type CurrencyRateRow,\n} from '@/features/prices/currencyRates'\nimport PrintRegistry from '@/features/orders/PrintRegistry.vue'\n", 1)
++replaceExact("src/pages/HomeView.vue", "const usdRate = ref(45.2)\nconst linkedPriceProductKeys = ref(new Set<string>())\n", "const currencyRates = ref<CurrencyRateRow[]>([])\nconst usdRate = computed(() => currencyRateForDate(currencyRates.value, localDateKey(), 45.2))\nconst linkedPriceProductKeys = ref(new Set<string>())\n", 1)
++replaceExact("src/pages/HomeView.vue", "const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')\n\nfunction showSyncMessage(message: string) {\n", "const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')\n\nfunction usdRateForOrderDate(orderDate: string) {\n  return currencyRateForDate(currencyRates.value, orderDate || localDateKey(), usdRate.value)\n}\n\nfunction showSyncMessage(message: string) {\n", 1)
++replaceExact("src/pages/HomeView.vue", "  const { data: rateSetting } = await supabase\n    .from('crm_settings')\n    .select('numeric_value')\n    .eq('key', 'usd_rate')\n    .maybeSingle()\n  if (rateSetting?.numeric_value) usdRate.value = Number(rateSetting.numeric_value)\n", "  const { data: rateRows } = await supabase\n    .from('crm_currency_rates')\n    .select('effective_from, rate')\n    .eq('currency', 'USD')\n    .order('effective_from', { ascending: false })\n  currencyRates.value = (rateRows ?? []).map((row) => ({\n    effective_from: String(row.effective_from),\n    rate: Number(row.rate),\n  }))\n", 1)
++replaceExact("src/pages/HomeView.vue", "  product.costUsd = value\n  if (value !== 0) product.cost = value * usdRate.value\n}\n\nfunction createOrderDraft(): Order {\n", "  product.costUsd = value\n  if (value !== 0) product.cost = value * usdRateForOrderDate(orderDraft.value.date)\n}\n\nfunction createOrderDraft(): Order {\n", 1)
++replaceExact("src/pages/HomeView.vue", "        if (Number.isFinite(costUsd)) product.costUsd = costUsd\n        if (Number.isFinite(costUah)) product.cost = costUah\n        product.costManual = false\n", "        if (Number.isFinite(costUsd)) product.costUsd = costUsd\n        if (costUsd > 0) product.cost = costUsd * usdRateForOrderDate(orderDraft.value.date)\n        else if (Number.isFinite(costUah)) product.cost = costUah\n        product.costManual = false\n", 1)
++replaceExact("src/pages/HomeView.vue", "function updateOrderNumber(\n  product: OrderProduct,\n  field: 'quantity' | 'price' | 'cost' | 'costUsd',\n", "function updateOrderNumber(\n  order: Order,\n  product: OrderProduct,\n  field: 'quantity' | 'price' | 'cost' | 'costUsd',\n", 1)
++replaceExact("src/pages/HomeView.vue", "    product.costUsd = value\n    if (value !== 0) product.cost = value * usdRate.value\n    return\n", "    product.costUsd = value\n    if (value !== 0) product.cost = value * usdRateForOrderDate(order.date)\n    return\n", 1)
++replaceExact("src/pages/HomeView.vue", "                              updateOrderNumber(\n                                product,\n", "                              updateOrderNumber(\n                                order,\n                                product,\n", 4)
++replaceExact("src/pages/HomeView.vue", "const orderDraft = ref(createOrderDraft())\n\nfunction startOfLocalDay(value: Date) {\n", "const orderDraft = ref(createOrderDraft())\n\nwatch(\n  () => orderDraft.value.date,\n  (date, previousDate) => {\n    if (!previousDate || date === previousDate) return\n    const rate = usdRateForOrderDate(date)\n    for (const product of orderDraft.value.products) {\n      if ((product.costUsd ?? 0) > 0) product.cost = Number(product.costUsd) * rate\n    }\n  },\n)\n\nfunction startOfLocalDay(value: Date) {\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'\nimport type { Reconciliation } from '@/features/reconciliation/types'\nimport { supabase } from '@/lib/supabase'\n", "import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'\nimport type { Reconciliation } from '@/features/reconciliation/types'\nimport {\n  currencyRateForDate,\n  localDateKey,\n  type CurrencyRateRow,\n} from '@/features/prices/currencyRates'\nimport { supabase } from '@/lib/supabase'\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "const reconciliations = ref<Reconciliation[]>([])\nconst payments = ref<SupplierPayment[]>([])\nconst usdRate = ref(0)\n", "const reconciliations = ref<Reconciliation[]>([])\nconst payments = ref<SupplierPayment[]>([])\nconst currencyRates = ref<CurrencyRateRow[]>([])\nconst usdRate = computed(() => currencyRateForDate(currencyRates.value, localDateKey(), 0))\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "  const [settingsResult, reconciliationsResult, paymentsResult, totalsResult] = await Promise.all([\n    supabase.from('crm_settings').select('numeric_value').eq('key', 'usd_rate').maybeSingle(),\n", "  const [ratesResult, reconciliationsResult, paymentsResult, totalsResult] = await Promise.all([\n    supabase\n      .from('crm_currency_rates')\n      .select('effective_from, rate')\n      .eq('currency', 'USD')\n      .order('effective_from', { ascending: false }),\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "    settingsResult.error ||\n", "    ratesResult.error ||\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "      settingsResult.error,\n", "      ratesResult.error,\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "  usdRate.value = Number(settingsResult.data?.numeric_value ?? 0)\n  reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({\n", "  currencyRates.value = (ratesResult.data ?? []).map((row) => ({\n    effective_from: String(row.effective_from),\n    rate: Number(row.rate),\n  }))\n  reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "  const debtUsd = parsedNumber(initialDebtUsd.value)\n  const debtUah = parsedNumber(initialDebtUah.value)\n  if (\n", "  const debtUsd = parsedNumber(initialDebtUsd.value)\n  const debtUah = parsedNumber(initialDebtUah.value)\n  const initialUsdRate = currencyRateForDate(currencyRates.value, initialDate.value, usdRate.value)\n  if (\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "    debtUah < 0 ||\n    usdRate.value <= 0\n", "    debtUah < 0 ||\n    initialUsdRate <= 0\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "    reconciled_at: new Date(`${initialDate.value}T12:00:00`).toISOString(),\n    usd_rate: usdRate.value,\n", "    reconciled_at: new Date(`${initialDate.value}T12:00:00`).toISOString(),\n    usd_rate: initialUsdRate,\n", 1)
++replaceExact("src/pages/ReconciliationView.vue", "    crm_balance_before_adjustment: debtUsd * usdRate.value + debtUah,\n    crm_balance_after_adjustment: debtUsd * usdRate.value + debtUah,\n", "    crm_balance_before_adjustment: debtUsd * initialUsdRate + debtUah,\n    crm_balance_after_adjustment: debtUsd * initialUsdRate + debtUah,\n", 1)
++
++console.log('Patch 47 transformer applied successfully.')
