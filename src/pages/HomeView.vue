@@ -487,6 +487,12 @@ const currentTime = () =>
   )
 const orderDraft = ref(createOrderDraft())
 
+watch(
+  () => orderDraft.value,
+  () => persistActiveManualOrderDraft(),
+  { deep: true },
+)
+
 function repriceOrderDraft() {
   const rate = usdRateForOrderDate(orderDraft.value.date)
   if (rate <= 0) return
@@ -2797,8 +2803,12 @@ onMounted(async () => {
   startAutomaticOrdersRefresh()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
+  const hasManualDraftCheckpoint = Boolean(
+    window.sessionStorage.getItem(manualOrderPriceDraftStorageKey),
+  )
   const restoreManualDraft =
-    route.query.returnManualDraft === '1' && restoreManualOrderDraftFromPriceSelection()
+    (route.query.returnManualDraft === '1' || hasManualDraftCheckpoint) &&
+    restoreManualOrderDraftFromPriceSelection()
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
   if (restoreManualDraft) {
@@ -2833,6 +2843,33 @@ onScopeDispose(() => {
 
 function cloneOrder(order: Order) {
   return JSON.parse(JSON.stringify(toRaw(order))) as Order
+}
+
+function persistActiveManualOrderDraft() {
+  const raw = window.sessionStorage.getItem(manualOrderPriceDraftStorageKey)
+  if (!raw) return
+  try {
+    const state = JSON.parse(raw) as Partial<ManualOrderPriceDraftState>
+    if (!state.draft || !Array.isArray(state.draft.products)) return
+    window.sessionStorage.setItem(
+      manualOrderPriceDraftStorageKey,
+      JSON.stringify({
+        draft: cloneOrder(orderDraft.value),
+        editingId: editingManualOrderId.value,
+        productId: typeof state.productId === 'string' ? state.productId : '',
+      } satisfies ManualOrderPriceDraftState),
+    )
+  } catch (error) {
+    console.error('Не удалось обновить сохранённый черновик ручного заказа:', error)
+  }
+}
+
+function cancelOrderDraft() {
+  window.sessionStorage.removeItem(manualOrderPriceDraftStorageKey)
+  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
+  editingManualOrderId.value = null
+  orderDraftError.value = ''
+  orderDialog.value?.close()
 }
 
 function openNewOrderDialog() {
@@ -2915,7 +2952,6 @@ function restoreManualOrderDraftFromPriceSelection() {
     console.error('Не удалось восстановить ручной заказ после выбора цены:', error)
     return false
   } finally {
-    window.sessionStorage.removeItem(manualOrderPriceDraftStorageKey)
     window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
   }
 }
@@ -3157,6 +3193,8 @@ async function saveOrderDraft() {
       orders.value.unshift(draft)
       await persistOrders(draft)
     }
+    window.sessionStorage.removeItem(manualOrderPriceDraftStorageKey)
+    window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
     editingManualOrderId.value = null
     orderDialog.value?.close()
   } catch (error) {
@@ -5759,6 +5797,7 @@ function orderDateTime(order: Order) {
     <dialog
       ref="orderDialog"
       class="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/35"
+      @cancel.prevent="cancelOrderDraft"
     >
       <form
         class="flex max-h-[calc(100dvh-2rem)] flex-col bg-slate-50"
@@ -5780,7 +5819,7 @@ function orderDateTime(order: Order) {
             class="rounded-lg px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100"
             type="button"
             aria-label="Закрыть"
-            @click="orderDialog?.close()"
+            @click="cancelOrderDraft"
           >
             <X class="size-5" aria-hidden="true" />
           </button>
@@ -6076,7 +6115,7 @@ function orderDateTime(order: Order) {
             <button
               class="rounded-xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
               type="button"
-              @click="orderDialog?.close()"
+              @click="cancelOrderDraft"
             >
               Отмена
             </button>
