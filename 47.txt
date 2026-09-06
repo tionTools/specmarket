@@ -1,0 +1,160 @@
+Patch 47 — история курса USD с датой начала действия
+
+База: актуальный main = 3c30a44e9a69e4803bf3135c160a1c2290d845f6 (`Keep family price relinks consistent`).
+
+Цель:
+Перевести CRM с одного глобального `crm_settings.usd_rate` на историю курсов USD. Пользователь при изменении курса обязан указывать дату, с которой новый курс действует. Для любого заказа/операции курс определяется по дате самого заказа/операции, а не по дате синхронизации.
+
+Ключевые правила:
+1. Источник истины — `crm_currency_rates` с `(currency='USD', effective_from, rate)`.
+2. Курс на дату = запись с максимальным `effective_from`, не превышающим нужную дату.
+3. Будущую дату разрешать: новый курс не влияет на сегодняшние расчёты до наступления этой даты.
+4. Старые ненулевые `crm_order_items.cost` / `cost_usd` НЕ пересчитывать автоматически. История прибыли не должна плавать.
+5. Если позиция ещё с нулевой себестоимостью и привязана к долларовой цене, при автозаполнении использовать курс на дату заказа.
+6. Для Prom / Epicentr / Kasta автоматическая себестоимость должна использовать дату заказа, даже если старый заказ синхронизируется значительно позже.
+7. Для ручного заказа и ручного редактирования `С/С $` использовать курс на дату этого заказа.
+8. При выборе строки из `/prices` для существующего заказа, если себестоимость ещё нулевая, долларовую строку пересчитать по дате заказа.
+9. Раздел `/prices` показывает курс, действующий сегодня, и историю курсов. Ввод нового курса: значение + дата начала действия.
+10. Если пользователь вводит ту же дату повторно — это корректировка курса на эту дату (`upsert`).
+11. Текущий `crm_settings.usd_rate` оставить только как совместимый fallback/cache: при сохранении истории обновлять его значением, которое действует СЕГОДНЯ. Он больше не должен быть источником исторических расчётов.
+12. Сверка:
+   - текущая сверка использует курс, действующий сегодня;
+   - начальный остаток использует курс на выбранную `initialDate`;
+   - уже сохранённые сверки продолжают хранить собственный `usd_rate`;
+   - `supplier_rate` в платежах поставщику НЕ менять.
+13. Patch 44–46 (canonical family / relink) не ломать и не менять архитектурно.
+
+Что содержит 47.patch:
+- `src/features/prices/currencyRates.ts` — frontend helper выбора курса по дате.
+- `supabase/functions/_shared/currency-rate.ts` — Edge helper и загрузка расписания курса.
+- `supabase/functions/_shared/currency-rate_test.ts` — проверки граничных дат и сохранения старой ненулевой себестоимости.
+- `supabase/migrations/20260906090000_currency_rate_history.sql` — таблица истории курса + seed текущего курса как базового с `2000-01-01`.
+- `tools/apply-patch47.mjs` — одноразовый трансформер текущего main. После успешного выполнения удалить и в commit не включать.
+
+Порядок выполнения:
+1. Работай из `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+2. Синхронизируй локальный `main` с `origin/main`. База ожидается `3c30a44e9a69e4803bf3135c160a1c2290d845f6`. Если main продвинулся, сначала проверь совместимость, ничего не откатывай.
+3. Пользовательский `AGENTS.md` НЕ ИЗМЕНЯТЬ, НЕ STAGE, НЕ COMMIT. Уже существующий `M AGENTS.md` оставить как есть.
+4. Получи `47.patch` и `47.txt` из `origin/chatgpt-patches`.
+5. Выполни `git apply --check 47.patch`.
+6. Примени `47.patch`.
+7. Выполни:
+   `node tools/apply-patch47.mjs`
+   Трансформер обязан завершиться сообщением `Patch 47 transformer applied successfully.`.
+8. Если трансформер останавливается из-за несовпавшего anchor:
+   - не делай откат всей задачи;
+   - сравни фактический current main;
+   - минимально адаптируй ТОЛЬКО несовпавший anchor/тот же участок;
+   - реализуй ровно описанную ниже логику, без смежных рефакторингов.
+9. После трансформации удали `tools/apply-patch47.mjs`. В итоговом commit его быть не должно.
+
+Обязательная проверка реализации:
+
+A. `supabase/functions/_shared/price-cost.ts`
+- `loadPlatformPriceCostSnapshots()` больше НЕ читает `crm_settings.usd_rate`.
+- Для долларовой строки snapshot хранит `costUsd`, а `cost` не конвертирует заранее по сегодняшнему курсу.
+- `resolvedOrderItemCost(previous, linked, usdRate)` конвертирует USD только в момент заполнения конкретного заказа.
+- Ненулевая или ручная существующая себестоимость остаётся неизменной.
+- `price_item_id` может быть заполнен без перезаписи ненулевой исторической себестоимости, как и до Patch 47.
+
+B. Prom
+- Один раз загружается `loadUsdRateSchedule(admin)`.
+- Для каждого заказа после определения `date` выбирается `orderUsdRate = usdRateForDate(schedule, date)`.
+- Именно этот `orderUsdRate` передаётся в `resolvedOrderItemCost`.
+- Никаких title/name heuristics для family не возвращать; Patch 44–46 оставить как есть.
+
+C. Epicentr
+- Аналогично: rate schedule загружается один раз.
+- Курс выбирается по `source.createdAt` / фактической дате заказа.
+- В `resolvedOrderItemCost` передаётся order-specific rate.
+
+D. Kasta
+- Аналогично: курс по `createdAt` заказа.
+- Kasta product-key/family логика остаётся прежней; Patch 47 касается только валютного курса.
+
+E. `src/pages/PricesView.vue`
+- Старого прямого inline-редактирования одного `usd_rate` больше нет.
+- Есть текущий курс + дата, с которой он действует.
+- Есть поля `Новый курс` + `Действует с` (date) + сохранение.
+- Есть read-only история курсов.
+- Сохраняется `crm_currency_rates` через upsert `(currency,effective_from)`.
+- После сохранения `crm_settings.usd_rate` обновляется только текущим на сегодняшний день курсом для совместимости.
+- Будущий курс не меняет сегодняшнее значение.
+- Каталог цен пересчитывает `$ -> ₴` по курсу, действующему сегодня.
+- При выборе строки для ручного заказа долларовая сумма в UAH не фиксируется сегодняшним курсом заранее: HomeView должен пересчитать её по дате заказа.
+- При relink существующего заказа с нулевой себестоимостью PricesView читает `crm_orders.order_date` и применяет курс этой даты.
+- Логика Patch 46 синхронной canonical/legacy перепривязки должна остаться неизменной.
+
+F. `src/pages/HomeView.vue`
+- Загружает `crm_currency_rates`, а не `crm_settings.usd_rate`.
+- `usdRate` для сегодняшнего интерфейса вычисляется из расписания.
+- Ручное изменение `С/С $` существующего заказа использует `order.date`.
+- Ручной draft использует `orderDraft.date`.
+- Если дата ручного draft меняется, все позиции draft с `costUsd > 0` пересчитывают только гривневый `cost` по новому курсу даты; сам `costUsd` не меняется.
+- Восстановление manual price selection из `/prices`: если `costUsd > 0`, UAH вычисляется по дате draft; если USD нет, берётся обычный `costUah`.
+- Другие поля заказа не менять.
+
+G. `src/pages/ReconciliationView.vue`
+- Загружает историю курса.
+- Текущий `usdRate` = курс на сегодня.
+- `saveInitialBalance()` фиксирует курс на `initialDate`, а не текущий.
+- `saveReconciliation()` фиксирует текущий сегодняшний курс в собственной строке `crm_reconciliations.usd_rate`.
+- Исторические строки сверок и `supplier_rate` платежей не пересчитывать.
+
+H. Migration
+- Таблица `crm_currency_rates`:
+  - `currency` только `USD`;
+  - `effective_from date`;
+  - `rate > 0`;
+  - primary key `(currency,effective_from)`;
+  - RLS: authenticated read; write запрещён guest@gmail.com.
+- Seed: существующий `crm_settings.usd_rate` записать как базовый курс с `effective_from = 2000-01-01`, только если он положительный.
+- Никакого массового пересчёта старых `crm_order_items`.
+
+Проверки:
+1. Запусти unit-check для:
+   - `supabase/functions/_shared/currency-rate_test.ts`
+   - существующих `marketplace-family_test.ts` и других затронутых shared tests, если они есть.
+2. `pnpm format`
+3. `pnpm type-check`
+4. `pnpm lint`
+5. `pnpm build`
+6. `git diff --check`
+7. Поиск по runtime-коду:
+   - HomeView, ReconciliationView и `_shared/price-cost.ts` не должны читать `crm_settings.usd_rate`;
+   - допустим только совместимый fallback WRITE в PricesView и seed migration.
+8. Статически проверь сценарии:
+   - rates: 45.20 с 2000-01-01, 46.00 с 2026-09-10;
+   - заказ 09.09.2026 с USD cost 10 -> 452.00 грн;
+   - заказ 10.09.2026 -> 460.00 грн;
+   - заказ 09.09, синхронизированный 20.09, всё равно -> 452.00;
+   - уже сохранённый `cost=429`, `cost_manual=false` после sync остаётся 429;
+   - будущий курс с 01.10 не меняет текущий курс в сентябре;
+   - manual order: изменение даты с 09.09 на 10.09 пересчитывает 10 USD с 452 на 460;
+   - initial reconciliation на 09.09 фиксирует 45.20; новая текущая сверка после 10.09 фиксирует 46.00.
+9. Проверь, что canonical family/relink Patch 44–46 не изменены.
+
+Deploy:
+1. Применить production migration `20260906090000_currency_rate_history.sql`.
+2. После migration задеплоить ТОЛЬКО изменённые Edge Functions:
+   - `sync-prom-orders`
+   - `sync-epicentr-orders`
+   - `sync-kasta-orders`
+3. Другие Edge Functions не деплоить.
+4. Browser/production login вручную не обходить.
+
+Commit:
+- В commit включить только реальные файлы Patch 47 после удаления `tools/apply-patch47.mjs`.
+- `AGENTS.md` не включать.
+- Commit message: `Add effective-dated USD rates`
+- Push в `origin/main`.
+
+Финальный отчёт:
+- результат `git apply --check`;
+- результат трансформера;
+- результаты unit-check / format / type-check / lint / build / diff-check;
+- результат migration;
+- какие 3 Edge Functions задеплоены;
+- статические сценарии курса;
+- полный commit SHA и push;
+- итоговый `git status --short`, где допустим только прежний `M AGENTS.md`.
