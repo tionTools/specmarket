@@ -1,0 +1,19 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -2859,7 +2859,16 @@ function openNewOrderDialog() {
+   if (isGuest.value) return
+   editingManualOrderId.value = null
+   orderDraftError.value = ''
+   orderDraft.value = createOrderDraft()
++  window.sessionStorage.setItem(
++    manualOrderPriceDraftStorageKey,
++    JSON.stringify({
++      draft: cloneOrder(orderDraft.value),
++      editingId: null,
++      productId: '',
++    } satisfies ManualOrderPriceDraftState),
++  )
++  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
+   orderDialog.value?.showModal()
+ }
