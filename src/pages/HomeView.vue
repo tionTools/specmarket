@@ -495,8 +495,6 @@ function repriceOrderDraft() {
   }
 }
 
-watch(() => orderDraft.value.date, repriceOrderDraft)
-
 function startOfLocalDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate())
 }
@@ -2767,7 +2765,6 @@ async function loadRemoteOrders() {
   if (rateError) showSyncError(`Не удалось загрузить историю курса: ${rateError.message}`)
   else if (!currencyRates.value.length)
     showSyncError('История курса USD пуста. Добавьте курс в прайсе.')
-  else repriceOrderDraft()
   await refreshLinkedPriceProductKeys()
   const { data: remoteOrders } = await supabase
     .from('crm_orders')
@@ -2913,7 +2910,6 @@ function restoreManualOrderDraftFromPriceSelection() {
         product.costManual = false
       }
     }
-    repriceOrderDraft()
     return true
   } catch (error) {
     console.error('Не удалось восстановить ручной заказ после выбора цены:', error)
@@ -3124,7 +3120,6 @@ async function saveOrderDraft() {
     orderDraftError.value = 'Нет курса USD на дату заказа. Добавьте курс в прайсе.'
     return
   }
-  repriceOrderDraft()
 
   isSavingOrderDraft.value = true
   orderDraftError.value = ''
@@ -5856,6 +5851,7 @@ function orderDateTime(order: Order) {
                   v-model="orderDraft.date"
                   class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
                   type="date"
+                  @change="repriceOrderDraft"
                 />
               </label>
               <label class="text-sm font-medium text-slate-700">

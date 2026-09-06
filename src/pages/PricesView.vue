@@ -7,7 +7,6 @@ import { ArrowLeft, Link2, Plus } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
 import {
-  currencyRateEntryForDate,
   currencyRateForDate,
   localDateKey,
   type CurrencyRateRow,
@@ -77,12 +76,6 @@ const today = useNow({ interval: 60_000 })
 const usdRate = computed(() =>
   currencyRateForDate(currencyRates.value, localDateKey(today.value), 0),
 )
-const currentUsdRateEntry = computed(() =>
-  currencyRateEntryForDate(currencyRates.value, localDateKey(today.value)),
-)
-const newUsdRate = ref('')
-const newUsdRateDate = ref(localDateKey())
-const isSavingUsdRate = ref(false)
 const rateError = ref('')
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
@@ -203,41 +196,6 @@ async function loadCurrencyRates() {
     rate: Number(row.rate),
   }))
   rateError.value = currencyRates.value.length ? '' : 'История курса USD пуста. Добавьте курс.'
-}
-
-async function saveUsdRateHistory() {
-  if (!supabase || !user.value || isGuest.value || isSavingUsdRate.value) return
-  const rate = Number(newUsdRate.value.trim().replace(',', '.'))
-  if (!newUsdRateDate.value || !Number.isFinite(rate) || rate <= 0) {
-    rateError.value = 'Укажите положительный курс и дату начала действия.'
-    return
-  }
-  rateError.value = ''
-  isSavingUsdRate.value = true
-  const { error } = await supabase.from('crm_currency_rates').upsert(
-    {
-      currency: 'USD',
-      effective_from: newUsdRateDate.value,
-      rate,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'currency,effective_from' },
-  )
-  if (error) {
-    isSavingUsdRate.value = false
-    rateError.value = `Не удалось сохранить курс: ${error.message}`
-    return
-  }
-  await loadCurrencyRates()
-  if (usdRate.value > 0) {
-    const { error: cacheError } = await supabase
-      .from('crm_settings')
-      .upsert({ key: 'usd_rate', numeric_value: usdRate.value })
-    if (cacheError)
-      rateError.value = `Курс сохранён в истории, но cache не обновлён: ${cacheError.message}`
-  }
-  newUsdRate.value = ''
-  isSavingUsdRate.value = false
 }
 
 async function signIn() {
@@ -754,57 +712,14 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           >
             Роялти Эпицентр
           </RouterLink>
-          <div
+          <RouterLink
             v-if="user"
-            class="min-w-[18rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm"
+            class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-800 shadow-sm hover:bg-sky-100"
+            to="/currency-rates"
+            :title="rateError || 'Открыть изменение и историю курса USD'"
           >
-            <div class="flex items-center justify-between gap-3">
-              <span class="font-semibold">Курс $: {{ formatPrice(usdRate) }} ₴</span>
-              <span v-if="currentUsdRateEntry" class="text-xs text-slate-500">
-                с {{ currentUsdRateEntry.effective_from }}
-              </span>
-            </div>
-            <div v-if="!isGuest" class="mt-2 grid grid-cols-[1fr_auto] gap-2">
-              <input
-                v-model="newUsdRate"
-                class="rounded-lg border border-slate-200 px-2 py-1.5"
-                inputmode="decimal"
-                placeholder="Новый курс"
-                aria-label="Новый курс USD"
-                type="text"
-              />
-              <label class="text-xs text-slate-600">
-                Действует с
-                <input
-                  v-model="newUsdRateDate"
-                  class="block rounded-lg border border-slate-200 px-2 py-1.5"
-                  type="date"
-                />
-              </label>
-              <button
-                class="col-span-2 rounded-lg bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-                :disabled="isSavingUsdRate"
-                type="button"
-                @click="saveUsdRateHistory"
-              >
-                {{ isSavingUsdRate ? 'Сохраняем…' : 'Сохранить курс с этой даты' }}
-              </button>
-            </div>
-            <details v-if="currencyRates.length" class="mt-2 text-xs text-slate-600">
-              <summary class="cursor-pointer font-semibold">История курса</summary>
-              <div class="mt-1 max-h-32 space-y-1 overflow-auto">
-                <div
-                  v-for="rate in currencyRates"
-                  :key="rate.effective_from"
-                  class="flex justify-between gap-4"
-                >
-                  <span>{{ rate.effective_from }}</span>
-                  <strong>{{ formatPrice(Number(rate.rate)) }}</strong>
-                </div>
-              </div>
-            </details>
-            <p v-if="rateError" class="mt-2 text-xs font-semibold text-rose-700">{{ rateError }}</p>
-          </div>
+            Изменить курс · {{ usdRate > 0 ? `${formatPrice(usdRate)} ₴` : '—' }}
+          </RouterLink>
           <button
             v-if="!isGuest"
             class="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"

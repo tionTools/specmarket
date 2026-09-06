@@ -12,6 +12,7 @@ const router = createRouter({
         { path: '', component: () => import('@/pages/HomeView.vue') },
         { path: 'prices', component: () => import('@/pages/PricesView.vue') },
         { path: 'epicentr-royalty', component: () => import('@/pages/EpicentrRoyaltyView.vue') },
+        { path: 'currency-rates', component: () => import('@/pages/CurrencyRatesView.vue') },
         { path: 'reconciliation', component: () => import('@/pages/ReconciliationView.vue') },
       ],
     },
