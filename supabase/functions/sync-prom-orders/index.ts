@@ -13,6 +13,7 @@ import {
 } from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -916,15 +917,15 @@ Deno.serve(async (request) => {
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const websiteOrderCommission = orderLevelCommission(order)
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
-    const promoSellerDeliveryCost = isPromFreeDelivery ? (orderAmount >= 700 ? 30 : 10) : undefined
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
-    const shippingSource = hasManualShipping
-      ? 'manual'
-      : hasSellerDeliveryCost
-        ? 'seller-api'
-        : promoSellerDeliveryCost !== undefined
-          ? 'prom-promo'
-          : 'none'
+    const resolvedShipping = resolvePromShipping({
+      hasManualShipping,
+      manualShipping: number(existing?.shipping),
+      hasSellerDeliveryCost,
+      sellerDeliveryCost: number(sellerDeliveryCost),
+      deliveryProvider: text(deliveryProvider.provider),
+      orderAmount,
+    })
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const orderUsdRate = usdRateForDate(usdRateSchedule, date)
     const data = {
@@ -934,11 +935,7 @@ Deno.serve(async (request) => {
       customer_email: buyerEmail || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
       platform: 'Пром', status: orderStatus,
-      shipping: hasManualShipping
-        ? number(existing?.shipping)
-        : hasSellerDeliveryCost
-          ? number(sellerDeliveryCost)
-          : promoSellerDeliveryCost ?? 0,
+      shipping: resolvedShipping.shipping,
       acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
       delivery: {
@@ -955,7 +952,7 @@ Deno.serve(async (request) => {
           ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
           : undefined,
         hasWebsiteCommission: websiteOrderCommission > 0,
-        shippingSource,
+        shippingSource: resolvedShipping.shippingSource,
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
