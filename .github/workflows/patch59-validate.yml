@@ -1,0 +1,81 @@
+name: Patch 59 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-59]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply candidate
+        run: |
+          git apply --check --recount PATCH59-CANDIDATE.patch
+          git apply --recount PATCH59-CANDIDATE.patch
+
+      - name: Validate scope and layout assertions
+        shell: bash
+        run: |
+          BASE=bdecf14d6456fb337d38948dc09c9cf632ae1524
+          git diff --check "$BASE" -- src/pages/HomeView.vue
+          test "$(git diff --name-only "$BASE" -- src/pages/HomeView.vue | wc -l)" -eq 1
+          test "$(git diff --name-only "$BASE" -- src/pages/HomeView.vue)" = "src/pages/HomeView.vue"
+          ! git diff --name-only "$BASE" | grep -Fx 'AGENTS.md'
+          test "$(grep -c 'title="Обновить доставку"' src/pages/HomeView.vue)" -eq 1
+          test "$(grep -c '@click="syncOrderDelivery(order)"' src/pages/HomeView.vue)" -eq 1
+          grep -F 'class="relative grid size-5 shrink-0 place-items-center rounded text-emerald-700' src/pages/HomeView.vue
+          grep -F 'class="size-3.5"' src/pages/HomeView.vue
+          grep -F '<span class="whitespace-nowrap">{{' src/pages/HomeView.vue
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('src/pages/HomeView.vue').read_text()
+          carrier = s.index('{{ displayCarrier(order.delivery.carrier) }}')
+          refresh = s.index('title="Обновить доставку"', carrier)
+          ttn = s.index('>Текущая ТТН:</span', refresh)
+          copy = s.index('aria-label="Скопировать номер ТТН"', ttn)
+          assert carrier < refresh < ttn < copy
+          print('PATCH59_LAYOUT_ASSERTIONS_OK')
+          PY
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Web checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - name: Build and re-apply canonical patch from clean main
+        shell: bash
+        run: |
+          BASE=bdecf14d6456fb337d38948dc09c9cf632ae1524
+          git diff "$BASE" -- src/pages/HomeView.vue > /tmp/PATCH59-CANONICAL.patch
+          test -s /tmp/PATCH59-CANONICAL.patch
+          git worktree add /tmp/patch59-base "$BASE"
+          cd /tmp/patch59-base
+          git apply --check /tmp/PATCH59-CANONICAL.patch
+          git apply /tmp/PATCH59-CANONICAL.patch
+          git diff --check
+          test "$(git diff --name-only)" = "src/pages/HomeView.vue"
+          cp /tmp/PATCH59-CANONICAL.patch "$GITHUB_WORKSPACE/PATCH59-CANONICAL.patch"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch59-canonical
+          path: PATCH59-CANONICAL.patch
+          if-no-files-found: error
