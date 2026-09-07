@@ -32,6 +32,7 @@ jobs:
             supabase/functions/sync-delivery-tracking/worker.ts \
             supabase/functions/sync-delivery-tracking/normalize.ts \
             supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
           git diff --name-only "$BASE" -- \
             src/features/orders/delivery-tracking.ts \
@@ -40,10 +41,12 @@ jobs:
             supabase/functions/sync-delivery-tracking/worker.ts \
             supabase/functions/sync-delivery-tracking/normalize.ts \
             supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts | sort > /tmp/changed.txt
           cat > /tmp/expected.txt <<'EOF'
           src/features/orders/delivery-tracking.ts
           src/pages/HomeView.vue
+          supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
           supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
           supabase/functions/sync-delivery-tracking/index.ts
           supabase/functions/sync-delivery-tracking/normalize.ts
@@ -78,11 +81,11 @@ jobs:
             'Ожидается возврат: 08.09, 15:00',
           )
           assert.equal(
-            returnDestinationLabel('Відмова від отримання', 'returning', 'Циркуни', 'Відділення 1', true),
-            'Возврат: Циркуни, Відділення 1',
+            returnDestinationLabel('Відмова від отримання', 'returning', 'Циркуни', 'Відділення №1', true),
+            'Возврат: Циркуни, Відділення №1',
           )
           assert.equal(
-            returnDestinationLabel('Відмова від отримання', 'cancelled', 'Київ', 'Відділення 343', false),
+            returnDestinationLabel('Відмова від отримання', 'cancelled', 'Київ', 'Відділення №343', false),
             '',
           )
           console.log('PATCH58_FRONTEND_RUNTIME_OK')
@@ -117,6 +120,7 @@ jobs:
           grep -F "body: { force: true, orderId: remoteId }" src/pages/HomeView.vue
           grep -F "ordersQuery = ordersQuery.eq('id', orderId)" supabase/functions/sync-delivery-tracking/worker.ts
           grep -F "runTrackingWorker(admin, forced, orderId || undefined)" supabase/functions/sync-delivery-tracking/index.ts
+          grep -F "base.normalizedStatus === 'returning'" supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
           grep -F "title=\"Обновить доставку\"" src/pages/HomeView.vue
           ! grep -F "secondaryDeliveryStatus" src/pages/HomeView.vue
 
@@ -131,6 +135,7 @@ jobs:
             supabase/functions/sync-delivery-tracking/worker.ts \
             supabase/functions/sync-delivery-tracking/normalize.ts \
             supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
             > /tmp/PATCH58-CANONICAL.patch
           test -s /tmp/PATCH58-CANONICAL.patch
