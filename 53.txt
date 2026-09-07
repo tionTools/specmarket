@@ -1,0 +1,256 @@
+Patch 53 — Android v0.2: принятие Prom/Epicentr/Kasta + FCM per-device + System/Light/Dark на Android и web
+
+База: текущий `main` должен содержать commit `61edd181cdf9e7b276a6a35fd6128737d9072cfd` (Patch52). Source of truth — текущий `main`, реальные схемы Supabase, существующие Edge Functions, текущие official marketplace API contracts и фактическая production-архитектура. `AGENTS.md` не изменять, не форматировать, не stage/commit.
+
+Цель Patch53: выполнить спецификацию `PATCH53-SPEC.md` полностью. Это один функциональный релиз Android v0.2 + связанная backend/web часть. Не подменять реальные функции placeholder'ами.
+
+1. Подготовка
+- Работай в `C:\Users\Вадим\Documents\CRM моя\specmarket`.
+- Синхронизируй локальный `main` с `origin/main` и проверь, что `HEAD` содержит `61edd181cdf9e7b276a6a35fd6128737d9072cfd`.
+- До начала зафиксируй `git status --short`. Допустим только прежний пользовательский `M AGENTS.md`; при любых других неожиданных изменениях остановись и сообщи.
+- `AGENTS.md` не трогать ни при каких обстоятельствах.
+- Получи `53.patch` из ветки `chatgpt-patches`.
+- Выполни `git apply --check 53.patch`, затем `git apply 53.patch`.
+- Полностью прочитай `PATCH53-SPEC.md`. Это обязательная спецификация, а не справочный документ.
+- Затем проведи аудит текущего Patch52-кода и составь внутренний checklist всех требований до начала правок.
+
+2. Не доверять предположениям об API
+Перед любой записью во внешнюю площадку проверь актуальный официальный контракт на дату выполнения:
+- Prom acceptance — сохранить уже проверенный Patch52 path.
+- Epicentr — официальный Merchant API Swagger; проверь `allowed-statuses` и `change-status` и фактический seller-confirmation transition.
+- Kasta — текущая официальная HUB API документация; проверь точный endpoint/method/payload для `Created -> ConfirmedBySupplier`.
+
+Если официальная документация и текущий API расходятся, не угадывай. Проведи безопасную read-only диагностику либо остановись и опиши расхождение. Не принимай/не меняй реальный пользовательский заказ только ради тестирования.
+
+3. Marketplace accept backend
+Расширь текущие Edge Functions так, чтобы Android мог реально принимать новый заказ на всех трёх площадках.
+
+Prom:
+- не переписывай рабочую Patch52-логику без необходимости;
+- сохрани idempotency, processed_ids confirmation, optimistic concurrency guard и `completeExternalIds`.
+
+Epicentr:
+- добавь отдельный request action (предпочтительно `acceptExternalIds`, если это не конфликтует с текущим contract);
+- cron/scheduled и guest запрещены;
+- строгая нормализация IDs, dedupe, max 100;
+- load CRM row только `platform='Эпицентр'`;
+- new/accepted/final classification должна отражать текущий sync mapping;
+- перед transition проверь allowed statuses через официальный API, если контракт это позволяет;
+- выполни реальный seller-confirmation transition;
+- только после подтверждения площадки обнови CRM;
+- CRM update защищён старым `status` + `updated_at`/эквивалентным optimistic concurrency условием;
+- already accepted — idempotent result без регресса;
+- external failure => CRM не меняется;
+- concurrent conflict => понятный 409 и refresh path.
+
+Kasta:
+- аналогичный dedicated accept action в `sync-kasta-orders`;
+- точный API write path только после проверки official HUB docs;
+- `Created` / реальный CRM `Новый` -> marketplace `ConfirmedBySupplier`;
+- после подтверждения площадки CRM становится текущим accepted status (`Принято`), не раньше;
+- те же auth/idempotency/concurrency/failure guarantees.
+
+Вынеси pure/helpers там, где это уменьшает дублирование и делает Deno tests реальными, но не устраивай большой рефакторинг unrelated sync logic.
+
+4. Android acceptance
+В Patch52 `canAccept` жёстко Prom-only. Переделай на platform-aware eligibility/routing:
+- Prom + new -> `sync-prom-orders`;
+- Epicentr + new -> `sync-epicentr-orders`;
+- Kasta + new -> `sync-kasta-orders`;
+- guest/unauth/malformed external ID/final/accepted/cancelled/returned -> no action.
+
+Используй общий UX:
+- кнопка `Принять` в details;
+- AlertDialog с площадкой и № заказа;
+- защита от двойного нажатия;
+- нормальные сообщения success/already accepted/409/API failure;
+- после любого ответа адресный refresh заказа;
+- Realtime остаётся дополнительным общим обновлением, но не единственным источником проверки результата.
+
+5. Push notifications — архитектура
+Нужны реальные background/killed-app notifications, поэтому использовать FCM, а не бесконечный polling или только Realtime.
+
+Сначала проверь, существует ли уже Firebase project/public Android config и server credential в окружении/секретах. Ничего секретного не печатай в логи.
+
+Если Firebase-конфигурации нет:
+- не создавай самовольно внешний Firebase project;
+- не придумывай фейковые значения;
+- можешь подготовить безопасный код/migration/tests, но до финального `commit/push/deploy` не объявляй задачу завершённой;
+- в отчёте перечисли ровно какие public Android Firebase values/config и какие Supabase secret values нужны для продолжения.
+
+Если конфигурация есть, реализуй полностью.
+
+6. Device registry + RLS
+Добавь migration по спецификации для `crm_mobile_devices` либо эквивалентной таблицы.
+
+Обязательно:
+- per-user/per-device rows;
+- device_id app-private, не hardware ID;
+- fcm token;
+- `notifications_enabled`;
+- timestamps/last_seen/app version;
+- RLS owner-only для authenticated user;
+- sender/service role читает enabled rows;
+- logout unregister/disable;
+- token refresh/upsert без дублей;
+- ни один пользователь не может читать token другого пользователя.
+
+Проверь миграцию статически и существующим Supabase workflow. Не отключай RLS.
+
+7. Durable new-order notification event
+Нельзя посылать push на любой UPDATE `crm_orders`.
+
+Сделай idempotent outbox/event model:
+- unique `(order_id, event_type)` или эквивалент;
+- событие `new_order` создаётся только когда normal sync реально создаёт новый текущий Prom/Epicentr/Kasta заказ;
+- update existing order, retry/realtime/status sync не создают новый event;
+- full historical/backfill не создаёт шторм старых notifications;
+- transient sender failure можно retry;
+- permanent invalid token выключается/удаляется;
+- push failure никогда не откатывает order sync.
+
+Выбери реализацию, которая соответствует уже существующим `pg_cron`/Edge Function patterns проекта. Не добавляй dashboard-only автоматику, которую нельзя воспроизвести из repo migrations/config.
+
+8. FCM sender
+Используй текущий рекомендованный FCM HTTP v1/server mechanism.
+- service account/private key только в Supabase secret/runtime;
+- никаких server credentials в git/Android/web/GitHub Actions output;
+- payload: platform, display/order number, internal order id; без customer phone/address/payment private details;
+- invalid registration token обрабатывается;
+- delivery event marked sent только после реального success;
+- sender failure логируется безопасно без sensitive payload.
+
+Если нужен новый Edge Function sender — добавь его, Deno tests и deployment step.
+
+9. Android FCM
+- подключи только стабильные совместимые Firebase Android dependencies;
+- получить/refresh FCM token;
+- upsert device registration after authenticated session;
+- Android 13+ notification permission;
+- Settings switch `Уведомления на этом устройстве` действительно меняет server routing;
+- одна и та же учётка на двух телефонах имеет независимые switches;
+- logout disable/unregister local device;
+- foreground notification не дублируется нелепо;
+- tap по notification открывает нужный order detail после session restore; если нужна login — сохранить безопасный pending internal order id и открыть после login.
+
+Не логируй tokens/customer data.
+
+10. Android theme
+Добавь в Settings `Оформление`/`Тема` с тремя значениями:
+- `Системная`
+- `Светлая`
+- `Тёмная`
+
+Требования:
+- default System;
+- persist locally per phone через DataStore/app-private preferences;
+- System реагирует на OS theme;
+- переключение применяется сразу;
+- proper Material light/dark schemes, не простой invert;
+- все screens/dialog/snackbar/cards/filters respect theme;
+- semantic status colors remain readable in both modes.
+
+Bump `versionCode` и `versionName` до v0.2 согласно spec.
+
+11. Web/PC theme
+Проведи аудит текущего Vue/CSS layout и выбери минимально правильную интеграцию.
+
+Нужно:
+- `Системная / Светлая / Тёмная`;
+- default System;
+- localStorage per browser/profile/device;
+- System uses `prefers-color-scheme` and reacts live;
+- theme applied to root via one semantic attribute/class;
+- avoid strong flash of wrong theme at startup where practical;
+- selector расположен в существующем логичном settings/profile/header UI;
+- semantic CSS variables/tokens, не сотни несвязанных overrides.
+
+Обязательно визуально/статически пройти shared UI: shell/sidebar/header, HomeView order table/cards, modals, forms, selects, dropdowns, buttons, price/reconciliation/registry areas, hover/selected/disabled/borders/scroll surfaces.
+
+Статусные плашки и бизнес-цвета не менять по смыслу; адаптировать контраст для dark.
+
+Не использовать production browser/login обход. Проверяй через код/tests/build и доступные безопасные preview/local средства, если они уже предусмотрены проектом.
+
+12. Stable APK signing
+Patch52 GitHub Actions создавал обычный debug APK. Частный signing key в repo не добавлять.
+
+Проверь, есть ли уже стабильные signing credentials в доступном окружении/Actions secrets.
+- Если есть — configure stable signing без раскрытия secret и сохрани APK artifact.
+- Если нет — оставь debug build рабочим и в финальном отчёте явно предупреди, что Patch53 APK может потребовать один раз удалить Patch52 из-за другой подписи. Не создавай/не коммить новый private keystore самовольно.
+
+13. Tests
+Deno/backend минимум:
+- все старые relevant tests;
+- Prom acceptance regression;
+- Epicentr: normalize/eligibility/allowed transition/success/API failure/already accepted/concurrent conflict;
+- Kasta: normalize/eligibility/success/API failure/already accepted/concurrent conflict;
+- cross-platform/malformed IDs;
+- outbox idempotency/new-only/no-update/no-backfill;
+- sender transient retry/permanent invalid token behavior;
+- `deno check` для всех изменённых/new Edge Functions.
+
+Android:
+- существующие Patch52 tests не удалять;
+- accept routing/eligibility 3 marketplaces;
+- final/cancel/return;
+- System/Light/Dark pure resolution;
+- device registration/notification preference pure helpers;
+- `testDebugUnitTest`;
+- `lintDebug`;
+- `assembleDebug`.
+
+Web:
+- если есть test harness, добавь focused pure tests для theme resolution/persistence без чрезмерного scaffolding;
+- `pnpm format`;
+- `pnpm type-check`;
+- `pnpm lint`;
+- `pnpm build`;
+- `git diff --check`.
+
+14. Migration/deploy
+Только после зелёных локальных checks:
+- применить новые Supabase migrations через установленный/принятый в проекте workflow;
+- deploy только изменённые/new Edge Functions;
+- не менять unrelated functions;
+- не печатать secrets;
+- push `main`;
+- дождаться GitHub Actions Android build и production web deploy;
+- убедиться, что v0.2 APK artifact реально создан.
+
+Если внешний Firebase prerequisite отсутствует и делает реальный push невозможным, не маскируй это зелёными unit tests. Остановись в безопасной точке без ложного `complete` и дай конкретный список недостающих данных.
+
+15. Static final audit
+Перед commit проверь каждое требование `PATCH53-SPEC.md` построчно и создай/обнови `android/PATCH53-AUDIT.md` с фактическим evidence, а не обещаниями.
+
+Отдельно проверь:
+- Android UI всё ещё называется `Заказы`, без SpecMarket branding;
+- client не содержит service_role, marketplace tokens, Firebase server private key;
+- web bundle не содержит server secrets;
+- acceptance идёт через backend и marketplace confirms before CRM;
+- Kasta/Epicentr больше не read-only для eligible new orders;
+- notification toggle реальный per-device server preference;
+- themes работают независимо per Android device и per browser;
+- Realtime Patch52 не сломан;
+- `AGENTS.md` byte-for-byte untouched относительно исходного локального пользовательского состояния и не в commit.
+
+16. Commit/push discipline
+- В commit включить только файлы Patch53.
+- `AGENTS.md` не stage/commit.
+- Не включать local build/cache, APK, keystore, service-account files, `local.properties`, temporary Firebase secrets.
+- Commit message: `feat: complete Patch 53 mobile actions push and themes` либо близкий по смыслу.
+- Push `main -> origin/main` только после всех обязательных checks и runtime prerequisites, которые доступны.
+- Финальный `git status --short` должен содержать только прежний `M AGENTS.md` либо быть чище.
+
+17. Финальный отчёт
+Дай:
+- commit SHA;
+- какие marketplace accept paths реализованы и как verified;
+- migration(s) applied;
+- Edge Function names + deployed versions/status;
+- Android test count, lint result, assemble result;
+- Deno test count/check result;
+- pnpm checks;
+- GitHub Actions run + APK artifact;
+- web deploy result;
+- FCM real runtime verification (foreground/background/killed) либо честное описание external prerequisite, если оно не могло быть выполнено;
+- final `git status --short`.
