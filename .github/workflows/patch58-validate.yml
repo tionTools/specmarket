@@ -138,6 +138,9 @@ jobs:
           cd /tmp/patch58-base
           git apply --check /tmp/PATCH58-CANONICAL.patch
           git apply /tmp/PATCH58-CANONICAL.patch
+          git add -N \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
           git diff --check
           git diff --name-only | sort > /tmp/reapplied.txt
           diff -u /tmp/expected.txt /tmp/reapplied.txt
