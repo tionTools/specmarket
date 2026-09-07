@@ -41,6 +41,26 @@ function currentAddress(delivery: JsonRecord) {
   return [text(delivery.city), text(delivery.address)].filter(Boolean).join(', ')
 }
 
+function deliveryHasReturnInProgress(delivery: JsonRecord) {
+  return delivery.trackingReturnInProgress === true || text(delivery.trackingNormalizedStatus) === 'returning'
+}
+
+function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
+  if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
+  return deliveryHasReturnInProgress(delivery) || result.normalizedStatus === 'returning'
+}
+
+function destinationForTrackingUpdate(delivery: JsonRecord, result: TrackingResult) {
+  if (
+    deliveryHasReturnInProgress(delivery) &&
+    result.normalizedStatus !== 'returning' &&
+    result.relation !== 'redirect'
+  ) {
+    return undefined
+  }
+  return result.destination
+}
+
 function destinationChanged(delivery: JsonRecord, destination?: TrackingDestination) {
   if (!destination) return false
   if (destination.city && normalizedText(destination.city) !== normalizedText(delivery.city)) return true
@@ -215,10 +235,12 @@ export function sameShipment(left: JsonRecord, right: JsonRecord) {
 export function trackingChanged(delivery: JsonRecord, result: TrackingResult) {
   if (hasDuplicateHistoryTtn(delivery.shipmentHistory)) return true
   if (text(delivery.ttn) && !historyRows(delivery.shipmentHistory).length) return true
+  if (nextReturnInProgress(delivery, result) !== (delivery.trackingReturnInProgress === true))
+    return true
   if (result.status !== text(delivery.trackingStatus)) return true
   if (result.normalizedStatus !== text(delivery.trackingNormalizedStatus)) return true
   if (result.activeTtn && shipmentValue(result.activeTtn) !== shipmentValue(delivery.ttn)) return true
-  if (destinationChanged(delivery, result.destination)) return true
+  if (destinationChanged(delivery, destinationForTrackingUpdate(delivery, result))) return true
   if (
     result.relatedShipments &&
     !sameValue(relatedShipmentsValue(result.relatedShipments), delivery.trackingRelatedShipments ?? [])
@@ -241,8 +263,10 @@ export function mergeTrackingDelivery(
   const oldAddress = currentAddress(currentDelivery)
   const activeTtn = text(result.activeTtn) || oldTtn
   const source = result.source ?? 'carrier_api'
+  const destination = destinationForTrackingUpdate(currentDelivery, result)
+  const returnInProgress = nextReturnInProgress(currentDelivery, result)
   const ttnChanged = Boolean(activeTtn) && shipmentValue(activeTtn) !== shipmentValue(oldTtn)
-  const addressChanged = destinationHistoryChanged(currentDelivery, result.destination)
+  const addressChanged = destinationHistoryChanged(currentDelivery, destination)
   const statusChanged =
     result.status !== text(currentDelivery.trackingStatus) ||
     result.normalizedStatus !== text(currentDelivery.trackingNormalizedStatus)
@@ -287,20 +311,20 @@ export function mergeTrackingDelivery(
   }
 
   if (activeTtn) nextDelivery.ttn = activeTtn
-  if (result.destination?.city) {
-    nextDelivery.city = result.destination.city
-    nextDelivery.trackingDestinationCity = result.destination.city
+  if (destination?.city) {
+    nextDelivery.city = destination.city
+    nextDelivery.trackingDestinationCity = destination.city
   }
-  if (result.destination?.address) {
-    nextDelivery.address = result.destination.address
-    nextDelivery.trackingDestinationAddress = result.destination.address
+  if (destination?.address) {
+    nextDelivery.address = destination.address
+    nextDelivery.trackingDestinationAddress = destination.address
   }
-  if (result.destination?.branchNumber)
-    nextDelivery.trackingDestinationBranchNumber = result.destination.branchNumber
-  if (result.destination?.locationCode)
-    nextDelivery.trackingDestinationLocationCode = result.destination.locationCode
-  if (result.destination?.postalCode)
-    nextDelivery.trackingDestinationPostalCode = result.destination.postalCode
+  if (destination?.branchNumber)
+    nextDelivery.trackingDestinationBranchNumber = destination.branchNumber
+  if (destination?.locationCode)
+    nextDelivery.trackingDestinationLocationCode = destination.locationCode
+  if (destination?.postalCode)
+    nextDelivery.trackingDestinationPostalCode = destination.postalCode
 
   if (activeTtn && (ttnChanged || addressChanged || result.relation)) {
     const currentRelated = (result.relatedShipments ?? []).find(
@@ -312,11 +336,11 @@ export function mergeTrackingDelivery(
       carrier: text(currentDelivery.carrier),
       relation,
       relatedTtn: currentRelated?.relatedTtn || (ttnChanged ? oldTtn : ''),
-      city: text(result.destination?.city) || text(nextDelivery.city),
-      address: text(result.destination?.address) || text(nextDelivery.address),
-      branchNumber: text(result.destination?.branchNumber) || text(nextDelivery.trackingDestinationBranchNumber),
-      locationCode: text(result.destination?.locationCode) || text(nextDelivery.trackingDestinationLocationCode),
-      postalCode: text(result.destination?.postalCode) || text(nextDelivery.trackingDestinationPostalCode),
+      city: text(destination?.city) || text(nextDelivery.city),
+      address: text(destination?.address) || text(nextDelivery.address),
+      branchNumber: text(destination?.branchNumber) || text(nextDelivery.trackingDestinationBranchNumber),
+      locationCode: text(destination?.locationCode) || text(nextDelivery.trackingDestinationLocationCode),
+      postalCode: text(destination?.postalCode) || text(nextDelivery.trackingDestinationPostalCode),
       source,
       firstSeenAt: changedAt,
       lastSeenAt: changedAt,
@@ -327,6 +351,7 @@ export function mergeTrackingDelivery(
 
   nextDelivery.trackingStatus = result.status
   nextDelivery.trackingNormalizedStatus = result.normalizedStatus
+  nextDelivery.trackingReturnInProgress = returnInProgress
   nextDelivery.trackingProvider = result.provider ?? carrierKind(currentDelivery)
   nextDelivery.trackingSource = source === 'public_tracking' ? 'public_tracking' : 'official_api'
   nextDelivery.trackingDataChangedAt = changedAt

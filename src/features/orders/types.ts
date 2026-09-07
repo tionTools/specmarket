@@ -67,6 +67,8 @@ export interface Delivery {
   /** Последний статус, полученный из tracking перевозчика. */
   trackingStatus?: string
   trackingNormalizedStatus?: string
+  /** Возврат уже начался, даже если текущий checkpoint перевозчика снова выглядит как обычное движение. */
+  trackingReturnInProgress?: boolean
   trackingLastCheckedAt?: string
   trackingStatusChangedAt?: string
   trackingDataChangedAt?: string

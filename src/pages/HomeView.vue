@@ -67,6 +67,7 @@ import {
   orderBusinessPlatform,
 } from '@/features/orders/display'
 import {
+  currentReturnTrackingStatus,
   deliveryReturnStatus,
   expectedReturnLabel,
   returnDestinationLabel,
@@ -1988,6 +1989,7 @@ function returnSignalLabel(order: Order) {
   if (lifecycleState === 'cancelled_before_shipment') return null
   if (lifecycleState === 'return_completed') return 'Возврат принят'
   if (lifecycleState === 'return_partial') return 'Возврат принят частично'
+  if (order.delivery.trackingReturnInProgress) return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
   if (/повер|возврат|return|refund/i.test(order.status)) return 'Возврат заявлен'
@@ -3590,6 +3592,7 @@ function orderStatusTone(order: Order): OrderStatusTone {
   const deliveryStatus = order.delivery.status?.trim().toLowerCase() ?? ''
 
   if (
+    order.delivery.trackingReturnInProgress === true ||
     ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
     /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
     /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(trackingStatus) ||
@@ -5634,27 +5637,53 @@ function orderDateTime(order: Order) {
                     deliveryReturnStatus(
                       order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
+                      order.delivery.trackingReturnInProgress,
                     ) || deliveryStatusForOrder(order)
                   }}</span
                 >
               </div>
               <div
                 v-if="
+                  currentReturnTrackingStatus(
+                    order.delivery.trackingStatus,
+                    order.delivery.trackingNormalizedStatus,
+                    order.delivery.trackingReturnInProgress,
+                  ) ||
                   returnDestinationLabel(
                     order.delivery.trackingStatus,
                     order.delivery.trackingNormalizedStatus,
                     order.delivery.city,
                     order.delivery.address,
                     hasDeliveryHistory(order.delivery),
+                    order.delivery.trackingReturnInProgress,
                   ) ||
                   expectedReturnLabel(
                     order.delivery.trackingStatus,
                     order.delivery.trackingNormalizedStatus,
                     order.delivery.trackingExpectedDeliveryAt,
+                    order.delivery.trackingReturnInProgress,
                   )
                 "
                 class="mt-2 space-y-1 rounded-lg bg-rose-50 px-3 py-2 text-xs"
               >
+                <p
+                  v-if="
+                    currentReturnTrackingStatus(
+                      order.delivery.trackingStatus,
+                      order.delivery.trackingNormalizedStatus,
+                      order.delivery.trackingReturnInProgress,
+                    )
+                  "
+                  class="font-semibold text-slate-800"
+                >
+                  {{
+                    currentReturnTrackingStatus(
+                      order.delivery.trackingStatus,
+                      order.delivery.trackingNormalizedStatus,
+                      order.delivery.trackingReturnInProgress,
+                    )
+                  }}
+                </p>
                 <p
                   v-if="
                     returnDestinationLabel(
@@ -5663,6 +5692,7 @@ function orderDateTime(order: Order) {
                       order.delivery.city,
                       order.delivery.address,
                       hasDeliveryHistory(order.delivery),
+                      order.delivery.trackingReturnInProgress,
                     )
                   "
                   class="font-semibold text-rose-800"
@@ -5674,6 +5704,7 @@ function orderDateTime(order: Order) {
                       order.delivery.city,
                       order.delivery.address,
                       hasDeliveryHistory(order.delivery),
+                      order.delivery.trackingReturnInProgress,
                     )
                   }}
                 </p>
@@ -5683,6 +5714,7 @@ function orderDateTime(order: Order) {
                       order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
                       order.delivery.trackingExpectedDeliveryAt,
+                      order.delivery.trackingReturnInProgress,
                     )
                   "
                   class="font-semibold text-slate-600"
@@ -5692,6 +5724,7 @@ function orderDateTime(order: Order) {
                       order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
                       order.delivery.trackingExpectedDeliveryAt,
+                      order.delivery.trackingReturnInProgress,
                     )
                   }}
                 </p>
