@@ -1,0 +1,103 @@
+Patch 53 — финальный цикл готовых частей. Выполняй механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+Работай в текущем незакоммиченном дереве:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+ВАЖНО:
+- AGENTS.md не изменять и не включать в commit;
+- НЕ включать в commit: PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock, supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql;
+- миграции сейчас НЕ применять: FCM ещё не реализован полностью;
+- никаких новых функциональных изменений;
+- если любая проверка кода падает — ничего самостоятельно не чинить, показать ошибку и остановиться;
+- если проблема только в отсутствии команды/окружения, использовать только явно указанный ниже fallback, ничего не устанавливать.
+
+1. Web проверки:
+pnpm format
+pnpm type-check
+pnpm lint
+pnpm build
+git diff --check
+
+2. Deno. Используй уже установленный локальный runtime напрямую, не PATH:
+$Deno = "$env:USERPROFILE\.deno\bin\deno.exe"
+if (!(Test-Path $Deno)) { throw "Deno runtime not found at $Deno; nothing was installed." }
+& $Deno test supabase/functions/_shared/financials_test.ts supabase/functions/_shared/kasta-return_test.ts supabase/functions/_shared/marketplace-accept_test.ts supabase/functions/_shared/shipment-accounting_test.ts
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $Deno check supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+3. Android. Ничего не устанавливать. Сначала проверь java:
+$Java = Get-Command java -ErrorAction SilentlyContinue
+if (!$Java) {
+  $Jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if (!$Jdk) { throw 'JDK not found; nothing was installed.' }
+  $env:JAVA_HOME = $Jdk.FullName
+  $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+}
+
+Чтобы обойти кириллицу в исходном пути, временно подключи свободную букву X: к корню проекта:
+if (Test-Path 'X:\') { throw 'X: is already in use; stop without changes.' }
+$ProjectRoot = (Get-Location).Path
+subst X: "$ProjectRoot"
+try {
+  Push-Location X:\android
+  .\gradlew.bat testDebugUnitTest lintDebug assembleDebug --no-daemon
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  Pop-Location
+} finally {
+  Set-Location $ProjectRoot
+  subst X: /D
+}
+
+git diff --check
+
+4. В commit добавить ТОЛЬКО эти файлы:
+git add -- `
+  android/app/build.gradle.kts `
+  android/app/src/main/java/ua/orders/crm/MainActivity.kt `
+  android/app/src/main/java/ua/orders/crm/OrderModels.kt `
+  android/app/src/main/java/ua/orders/crm/OrdersRepository.kt `
+  android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt `
+  android/app/src/main/java/ua/orders/crm/Appearance.kt `
+  android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt `
+  src/global.css `
+  src/layouts/MainLayout.vue `
+  src/main.ts `
+  src/pages/HomeView.vue `
+  src/features/orders/financials.ts `
+  src/features/orders/shipment-accounting.ts `
+  src/lib/appearance.ts `
+  src/lib/physical-shipment.ts `
+  supabase/functions/_shared/financials_test.ts `
+  supabase/functions/_shared/kasta-return.ts `
+  supabase/functions/_shared/kasta-return_test.ts `
+  supabase/functions/_shared/marketplace-accept.ts `
+  supabase/functions/_shared/marketplace-accept_test.ts `
+  supabase/functions/_shared/shipment-accounting_test.ts `
+  supabase/functions/sync-epicentr-orders/index.ts `
+  supabase/functions/sync-kasta-orders/index.ts
+
+Проверь:
+git diff --cached --check
+git diff --cached --name-only
+
+В staged НЕ должно быть AGENTS.md, PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock или migration 20260907090000.
+
+5. Если все проверки зелёные:
+git commit -m "feat: update mobile actions themes and return workflow"
+git push origin main
+
+6. После успешного push задеплой только изменённые Edge Functions:
+pnpm exec supabase functions deploy sync-epicentr-orders
+pnpm exec supabase functions deploy sync-kasta-orders
+
+НЕ выполнять db push/migration. НЕ пытаться настраивать Firebase/Kasta write contract.
+
+7. После deploy остановись. В ответ дай только:
+- полный SHA commit;
+- push result;
+- результаты web/Deno/Android проверок;
+- deploy result двух Edge Functions;
+- git status --short.
+
+Не проверяй GitHub Actions — это сделает ChatGPT отдельно.
