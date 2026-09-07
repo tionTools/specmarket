@@ -66,6 +66,10 @@ import {
   formatUkrainianPhone,
   orderBusinessPlatform,
 } from '@/features/orders/display'
+import {
+  expectedReturnLabel,
+  secondaryDeliveryStatus,
+} from '@/features/orders/delivery-tracking'
 import type {
   Delivery,
   Order,
@@ -5579,6 +5583,52 @@ function orderDateTime(order: Order) {
                   :class="statusBadgeClass(order)"
                   >{{ deliveryStatusForOrder(order) }}</span
                 >
+              </div>
+              <div
+                v-if="
+                  secondaryDeliveryStatus(
+                    order.delivery.trackingStatus,
+                    order.delivery.trackingNormalizedStatus,
+                  ) ||
+                  expectedReturnLabel(
+                    order.delivery.trackingNormalizedStatus,
+                    order.delivery.trackingExpectedDeliveryAt,
+                  )
+                "
+                class="mt-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs"
+              >
+                <span
+                  v-if="
+                    secondaryDeliveryStatus(
+                      order.delivery.trackingStatus,
+                      order.delivery.trackingNormalizedStatus,
+                    )
+                  "
+                  class="rounded-full bg-rose-100 px-2.5 py-1 font-semibold text-rose-800"
+                >
+                  {{
+                    secondaryDeliveryStatus(
+                      order.delivery.trackingStatus,
+                      order.delivery.trackingNormalizedStatus,
+                    )
+                  }}
+                </span>
+                <span
+                  v-if="
+                    expectedReturnLabel(
+                      order.delivery.trackingNormalizedStatus,
+                      order.delivery.trackingExpectedDeliveryAt,
+                    )
+                  "
+                  class="font-semibold text-slate-600"
+                >
+                  {{
+                    expectedReturnLabel(
+                      order.delivery.trackingNormalizedStatus,
+                      order.delivery.trackingExpectedDeliveryAt,
+                    )
+                  }}
+                </span>
               </div>
               <dl class="mt-2 text-sm">
                 <div class="pb-1">

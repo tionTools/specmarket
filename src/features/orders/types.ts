@@ -70,6 +70,8 @@ export interface Delivery {
   trackingLastCheckedAt?: string
   trackingStatusChangedAt?: string
   trackingDataChangedAt?: string
+  /** Прогнозируемая дата/время прибытия по данным перевозчика. */
+  trackingExpectedDeliveryAt?: string
   trackingLastError?: string
   trackingDestinationCity?: string
   trackingDestinationAddress?: string
