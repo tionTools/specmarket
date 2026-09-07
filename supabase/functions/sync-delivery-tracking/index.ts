@@ -24,6 +24,7 @@ Deno.serve(async (request) => {
   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   const forced = body.force === true && !scheduled && Boolean(user)
-  const result = await runTrackingWorker(admin, forced)
+  const orderId = !scheduled && typeof body.orderId === 'string' ? body.orderId.trim() : ''
+  const result = await runTrackingWorker(admin, forced, orderId || undefined)
   return Response.json(result.body, { ...(result.status ? { status: result.status } : {}), headers: corsHeaders })
 })

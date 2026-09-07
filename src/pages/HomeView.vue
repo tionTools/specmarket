@@ -67,8 +67,9 @@ import {
   orderBusinessPlatform,
 } from '@/features/orders/display'
 import {
+  deliveryReturnStatus,
   expectedReturnLabel,
-  secondaryDeliveryStatus,
+  returnDestinationLabel,
 } from '@/features/orders/delivery-tracking'
 import type {
   Delivery,
@@ -164,6 +165,7 @@ const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
 const isSyncingAllPlatforms = ref(false)
 const isSyncingDelivery = ref(false)
+const syncingDeliveryOrderId = ref<string | null>(null)
 const isMarketplaceSyncBusy = computed(
   () =>
     isSyncingAllPlatforms.value ||
@@ -2324,7 +2326,7 @@ async function syncFullAllPlatforms() {
 }
 
 async function syncDeliveryTracking() {
-  if (!supabase || isGuest.value || isSyncingDelivery.value) return
+  if (!supabase || isGuest.value || isSyncingDelivery.value || syncingDeliveryOrderId.value) return
   isSyncingDelivery.value = true
   const { data, error } = await supabase.functions.invoke<{
     ok?: boolean
@@ -2344,6 +2346,53 @@ async function syncDeliveryTracking() {
   showSyncMessage(
     `Доставки: проверено ${data.checked ?? 0}, обновлено ${data.updated ?? 0}, ошибок ${data.failed ?? 0}.`,
   )
+}
+
+async function syncOrderDelivery(order: Order) {
+  const remoteId = order.remoteId
+  if (
+    !supabase ||
+    isGuest.value ||
+    isSyncingDelivery.value ||
+    syncingDeliveryOrderId.value ||
+    !remoteId ||
+    !order.delivery.ttn.trim()
+  )
+    return
+  if (!(await waitForPendingSaves())) return
+
+  syncingDeliveryOrderId.value = remoteId
+  try {
+    const { data, error } = await supabase.functions.invoke<{
+      ok?: boolean
+      message?: string
+      checked?: number
+      updated?: number
+      failed?: number
+    }>('sync-delivery-tracking', {
+      method: 'POST',
+      body: { force: true, orderId: remoteId },
+    })
+    if (error || !data?.ok) {
+      showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить доставку заказа.')
+      return
+    }
+    if ((data.failed ?? 0) > 0) {
+      showSyncError('Перевозчик не вернул актуальный статус этой доставки.')
+      return
+    }
+    if ((data.checked ?? 0) === 0) {
+      showSyncError('Эту доставку не удалось проверить. Проверьте ТТН и перевозчика.')
+      return
+    }
+    if (!(await refreshRemoteOrders([remoteId]))) {
+      showSyncError('Доставка проверена, но карточку заказа не удалось обновить.')
+      return
+    }
+    showInlineActionNotice(`delivery-sync:${order.id}`, 'Обновлено')
+  } finally {
+    syncingDeliveryOrderId.value = null
+  }
 }
 
 async function syncKastaOrder(order: Order) {
@@ -4218,7 +4267,7 @@ function orderDateTime(order: Order) {
           <button
             v-if="!isGuest"
             class="whitespace-nowrap rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isSyncingDelivery"
+            :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
             type="button"
             @click="syncDeliveryTracking"
           >
@@ -5581,41 +5630,57 @@ function orderDateTime(order: Order) {
                 <span
                   class="rounded-full px-2.5 py-1 text-xs font-semibold"
                   :class="statusBadgeClass(order)"
-                  >{{ deliveryStatusForOrder(order) }}</span
+                  >{{
+                    deliveryReturnStatus(
+                      order.delivery.trackingStatus,
+                      order.delivery.trackingNormalizedStatus,
+                    ) || deliveryStatusForOrder(order)
+                  }}</span
                 >
               </div>
               <div
                 v-if="
-                  secondaryDeliveryStatus(
+                  returnDestinationLabel(
                     order.delivery.trackingStatus,
                     order.delivery.trackingNormalizedStatus,
+                    order.delivery.city,
+                    order.delivery.address,
+                    hasDeliveryHistory(order.delivery),
                   ) ||
                   expectedReturnLabel(
+                    order.delivery.trackingStatus,
                     order.delivery.trackingNormalizedStatus,
                     order.delivery.trackingExpectedDeliveryAt,
                   )
                 "
-                class="mt-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs"
+                class="mt-2 space-y-1 rounded-lg bg-rose-50 px-3 py-2 text-xs"
               >
-                <span
+                <p
                   v-if="
-                    secondaryDeliveryStatus(
+                    returnDestinationLabel(
                       order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
+                      order.delivery.city,
+                      order.delivery.address,
+                      hasDeliveryHistory(order.delivery),
                     )
                   "
-                  class="rounded-full bg-rose-100 px-2.5 py-1 font-semibold text-rose-800"
+                  class="font-semibold text-rose-800"
                 >
                   {{
-                    secondaryDeliveryStatus(
+                    returnDestinationLabel(
                       order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
+                      order.delivery.city,
+                      order.delivery.address,
+                      hasDeliveryHistory(order.delivery),
                     )
                   }}
-                </span>
-                <span
+                </p>
+                <p
                   v-if="
                     expectedReturnLabel(
+                      order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
                       order.delivery.trackingExpectedDeliveryAt,
                     )
@@ -5624,11 +5689,12 @@ function orderDateTime(order: Order) {
                 >
                   {{
                     expectedReturnLabel(
+                      order.delivery.trackingStatus,
                       order.delivery.trackingNormalizedStatus,
                       order.delivery.trackingExpectedDeliveryAt,
                     )
                   }}
-                </span>
+                </p>
               </div>
               <dl class="mt-2 text-sm">
                 <div class="pb-1">
@@ -5677,6 +5743,28 @@ function orderDateTime(order: Order) {
                           v-if="inlineActionNotice?.key === `copy-ttn:${order.id}`"
                           class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-lg"
                           >Скопировано</span
+                        >
+                      </button>
+                      <button
+                        v-if="!isGuest && order.remoteId && order.delivery.ttn"
+                        class="relative grid size-6 shrink-0 place-items-center rounded text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 disabled:cursor-wait disabled:opacity-50"
+                        :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
+                        type="button"
+                        title="Обновить доставку"
+                        aria-label="Обновить доставку"
+                        @click="syncOrderDelivery(order)"
+                      >
+                        <RefreshCw
+                          class="size-4"
+                          :class="{
+                            'animate-spin': syncingDeliveryOrderId === order.remoteId,
+                          }"
+                          aria-hidden="true"
+                        />
+                        <span
+                          v-if="inlineActionNotice?.key === `delivery-sync:${order.id}`"
+                          class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+                          >Обновлено</span
                         >
                       </button>
                     </dd>
