@@ -1,0 +1,60 @@
+PATCH 57 — отображение возврата в блоке «Доставка»
+
+База patch: main commit 76dfbe8d0f61ab5f49192d8853b6c7bd12b850ea.
+
+Действуй только механически. Ничего не исследуй и не исправляй самостоятельно.
+
+1. Перейди в локальный проект:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+
+2. Выполни:
+   git fetch origin main chatgpt-patches
+
+3. Проверь:
+   git rev-parse origin/main
+   Ожидается:
+   76dfbe8d0f61ab5f49192d8853b6c7bd12b850ea
+
+   Если SHA другой — остановись и только сообщи новый SHA. Patch не применять.
+
+4. Убедись, что текущая ветка main, затем подтяни её только fast-forward:
+   git switch main
+   git merge --ff-only origin/main
+
+5. Не трогай AGENTS.md и любые посторонние local/untracked файлы.
+
+6. Получи готовый patch без создания файла в рабочем дереве:
+   git show origin/chatgpt-patches:57-delivery-return-tracking.patch > .git/PATCH57.patch
+
+7. Выполни precheck:
+   git apply --check .git/PATCH57.patch
+
+   Если precheck не прошёл — остановись и только сообщи ошибку. Ничего не исправляй.
+
+8. Примени:
+   git apply .git/PATCH57.patch
+
+9. Выполни только минимальные проверки, не расходуя quota на повтор полного тестового набора:
+   git diff --check
+   git diff --name-only
+
+   В diff должны быть только:
+   src/features/orders/delivery-tracking.ts
+   src/features/orders/types.ts
+   src/pages/HomeView.vue
+
+10. Добавь в commit только эти три файла:
+    git add src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue
+
+11. Commit:
+    git commit -m "Show delivery return tracking status"
+
+12. Push:
+    git push origin main
+
+13. Сообщи только:
+    - commit SHA;
+    - успешен ли push;
+    - итог `git status --short`.
+
+Не запускать deno. Не запускать pnpm type-check/lint/build повторно: они уже пройдены при независимой валидации patch. Не менять и не коммитить AGENTS.md.
