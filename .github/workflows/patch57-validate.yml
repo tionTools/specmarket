@@ -21,7 +21,9 @@ jobs:
         run: git apply --check --recount PATCH57-CANDIDATE.patch
 
       - name: Apply candidate
-        run: git apply --recount PATCH57-CANDIDATE.patch
+        run: |
+          git apply --recount PATCH57-CANDIDATE.patch
+          git add -N src/features/orders/delivery-tracking.ts
 
       - name: Validate changed files and whitespace
         shell: bash
@@ -100,7 +102,8 @@ jobs:
       - name: Publish canonical validation artifact on temp branch
         shell: bash
         run: |
-          git restore src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue
+          git reset --hard HEAD
+          git clean -fd -- src/features/orders/delivery-tracking.ts
           git config user.name 'chatgpt-validation'
           git config user.email 'chatgpt-validation@users.noreply.github.com'
           git add PATCH57-CANONICAL.patch
