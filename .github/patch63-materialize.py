@@ -55,6 +55,9 @@ fun Order.deliveryStatusInfo(): DeliveryStatusInfo {
     return DeliveryStatusInfo(stage = stage)
 }
 
+fun ordersDuringDetailRefresh(current: List<Order>, fetched: List<Order>, detailOpen: Boolean): List<Order> =
+    if (detailOpen && current.isNotEmpty() && fetched.isEmpty()) current else fetched
+
 fun ordersAfterClosingDetail(current: List<Order>, beforeDetail: List<Order>): List<Order> =
     if (current.isEmpty() && beforeDetail.isNotEmpty()) beforeDetail else current
 
@@ -75,6 +78,11 @@ s = s.replace(
     1,
 )
 s = s.replace(
+    "                    orders = sortOrdersForDisplay(batch)",
+    "                    orders = sortOrdersForDisplay(ordersDuringDetailRefresh(orders, batch, selectedId != null))",
+    1,
+)
+s = s.replace(
     "    fun open(id: String) {\n        selectedId = id; detail = orders.find { it.id == id }",
     "    fun open(id: String) {\n        ordersBeforeDetail = orders\n        selectedId = id; detail = orders.find { it.id == id }",
     1,
@@ -86,7 +94,6 @@ s = s.replace(
         ordersBeforeDetail = emptyList()
         selectedId = null
         detail = null
-        if (email != null) refresh()
     }''',
     1,
 )
@@ -170,6 +177,14 @@ tests = '''    @Test fun delivery_status_exposes_return_stage_and_live_carrier_c
         }).deliveryStatusInfo()
         assertEquals("Прибула у відділення", ordinary.stage)
         assertEquals("", ordinary.current)
+    }
+
+    @Test fun detail_refresh_does_not_replace_a_loaded_list_with_transient_empty_result() {
+        val current = listOf(Order("a"), Order("b"))
+        assertEquals(current, ordersDuringDetailRefresh(current, emptyList(), true))
+        assertTrue(ordersDuringDetailRefresh(current, emptyList(), false).isEmpty())
+        val fetched = listOf(Order("c"))
+        assertEquals(fetched, ordersDuringDetailRefresh(current, fetched, true))
     }
 
     @Test fun closing_detail_restores_cached_list_only_if_current_list_was_lost() {
