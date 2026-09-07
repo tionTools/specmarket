@@ -25,6 +25,7 @@ import {
   getOrderLifecycleState,
   hasPhysicalShipmentMovement,
   includeInUnpaidShipment,
+  includeInTurnoverReport,
   isOrderVisibleInMainList,
   isReturnLifecycleState,
 } from '../features/orders/shipment-accounting'
@@ -1175,8 +1176,7 @@ function isCancelledOrReturned(order: Order) {
 const reportOrders = computed(() =>
   orders.value.filter((order) => {
     if (!order.delivery.ttn.trim()) return false
-    if (!isCancelledOrReturned(order)) return true
-    return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
+    return includeInTurnoverReport(order, displayOrderStatus(order.status))
   }),
 )
 const unpaidShipmentAccountingStart = new Date(2026, 7, 1)

@@ -3,6 +3,7 @@ import {
   getOrderLifecycleState,
   hasPhysicalShipmentMovement,
   includeInUnpaidShipment,
+  includeInTurnoverReport,
   isOrderVisibleInMainList,
   isReturnLifecycleState,
 } from '../../../src/features/orders/shipment-accounting.ts'
@@ -39,16 +40,18 @@ Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit mone
   const cancelled = order({})
   assert(!hasPhysicalShipmentMovement(cancelled))
   assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
+  assert(!includeInTurnoverReport(cancelled, cancelled.status))
   const state = getOrderLifecycleState(cancelled, cancelled.status)
   assert(state === 'cancelled_before_shipment')
   assert(!isOrderVisibleInMainList(state))
   assert(!isReturnLifecycleState(state))
 })
 
-Deno.test('shipped return stays in transit until full accepted return, then is excluded', () => {
-  const shipped = order({ trackingNormalizedStatus: 'returning' })
+Deno.test('S5TSAE5 stays in turnover until return acceptance and then contributes zero', () => {
+  const shipped = order({ printedAt: '2026-09-05', trackingNormalizedStatus: 'cancelled' })
   assert(hasPhysicalShipmentMovement(shipped))
   assert(includeInUnpaidShipment(shipped, shipped.status, false))
+  assert(includeInTurnoverReport(shipped, shipped.status))
   assert(getNetOrderAmount(shipped) === 676)
   const pendingState = getOrderLifecycleState(shipped, shipped.status)
   assert(pendingState === 'return_pending')
@@ -57,6 +60,7 @@ Deno.test('shipped return stays in transit until full accepted return, then is e
 
   shipped.products[0]!.returnedQuantity = 1
   assert(getNetOrderAmount(shipped) === 0)
+  assert(includeInTurnoverReport(shipped, shipped.status))
   assert(!includeInUnpaidShipment(shipped, shipped.status, false))
   const completedState = getOrderLifecycleState(shipped, shipped.status)
   assert(completedState === 'return_completed')
@@ -68,6 +72,7 @@ Deno.test('partial accepted return remains in transit only for the remaining qua
   const partial = order({ printedAt: '2026-09-01' }, 2)
   partial.products[0]!.returnedQuantity = 1
   assert(getNetOrderAmount(partial) === 338)
+  assert(includeInTurnoverReport(partial, partial.status))
   assert(includeInUnpaidShipment(partial, partial.status, false))
   const state = getOrderLifecycleState(partial, partial.status)
   assert(state === 'return_partial')

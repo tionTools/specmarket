@@ -51,6 +51,11 @@ export function isReturnLifecycleState(state: OrderLifecycleState) {
   return state === 'return_pending' || state === 'return_partial' || state === 'return_completed'
 }
 
+export function includeInTurnoverReport(order: Order, status: string) {
+  if (!order.delivery.ttn.trim()) return false
+  return getOrderLifecycleState(order, status) !== 'cancelled_before_shipment'
+}
+
 export function includeInUnpaidShipment(order: Order, status: string, paid: boolean) {
   if (!order.delivery.ttn.trim() || paid) return false
   const state = getOrderLifecycleState(order, status)
