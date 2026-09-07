@@ -55,15 +55,24 @@ async function getTrackingStatus(delivery: JsonRecord, novaRedirectCircuit: Nova
   }
 }
 
-export async function runTrackingWorker(admin: SupabaseClient, forced: boolean): Promise<WorkerResult> {
+export async function runTrackingWorker(
+  admin: SupabaseClient,
+  forced: boolean,
+  orderId?: string,
+): Promise<WorkerResult> {
   const minutes = intervalMinutes()
   if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
 
   const now = new Date()
-  const { data: rows, error } = await admin.from('crm_orders')
-    .select('id, external_id, delivery')
-    .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
-    .not('delivery->>ttn', 'is', null)
+  let ordersQuery = admin.from('crm_orders').select('id, external_id, delivery')
+  if (orderId) {
+    ordersQuery = ordersQuery.eq('id', orderId)
+  } else {
+    ordersQuery = ordersQuery
+      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
+      .not('delivery->>ttn', 'is', null)
+  }
+  const { data: rows, error } = await ordersQuery
   if (error) return { status: 500, body: { ok: false, message: error.message } }
   const orderRows = (rows ?? []) as TrackingOrderRow[]
   const ids = orderRows.map((row) => row.id)
@@ -81,7 +90,13 @@ export async function runTrackingWorker(admin: SupabaseClient, forced: boolean):
     const delivery = record(row.delivery)
     const carrier: CarrierKind = carrierKind(delivery)
     const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
-    if (!carrier || (!forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) || (forced && !trackable)) continue
+    if (
+      !carrier ||
+      (!orderId && !forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) ||
+      (!orderId && forced && !trackable) ||
+      (orderId && !text(delivery.ttn))
+    )
+      continue
     try {
       const result = await getTrackingStatus(delivery, novaRedirectCircuit)
       const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
