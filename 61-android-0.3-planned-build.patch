@@ -1,0 +1,798 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index fc9d011..b060158 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -7,7 +7,7 @@ plugins {
+ android {
+     namespace = "ua.orders.crm"
+     compileSdk = 37
+-    defaultConfig { applicationId = "ua.orders.crm"; minSdk = 26; targetSdk = 36; versionCode = 2; versionName = "0.2" }
++    defaultConfig { applicationId = "ua.orders.crm"; minSdk = 26; targetSdk = 36; versionCode = 3; versionName = "0.3" }
+     buildFeatures { compose = true; buildConfig = true }
+     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+ }
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index ce90553..aef9bac 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -1,5 +1,6 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <application android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_orders" android:label="Заказы" android:theme="@style/Theme.Orders" android:usesCleartextTraffic="false">
+         <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+     </application>
+diff --git a/android/app/src/main/java/ua/orders/crm/Appearance.kt b/android/app/src/main/java/ua/orders/crm/Appearance.kt
+index 319634d..e9eb23f 100644
+--- a/android/app/src/main/java/ua/orders/crm/Appearance.kt
++++ b/android/app/src/main/java/ua/orders/crm/Appearance.kt
+@@ -1,6 +1,7 @@
+ package ua.orders.crm
+ 
+ import android.content.Context
++import androidx.datastore.preferences.core.booleanPreferencesKey
+ import androidx.datastore.preferences.core.stringPreferencesKey
+ import androidx.datastore.preferences.core.edit
+ import androidx.datastore.preferences.preferencesDataStore
+@@ -14,6 +15,9 @@ enum class Appearance(val label: String) { SYSTEM("Системная"), LIGHT("
+ fun Appearance.isDark(systemDark: Boolean) = this == Appearance.DARK || this == Appearance.SYSTEM && systemDark
+ private val Context.appearanceStore by preferencesDataStore("orders_appearance")
+ private val appearanceKey = stringPreferencesKey("appearance")
++private val newOrderNotificationsKey = booleanPreferencesKey("new_order_notifications")
+ fun Context.appearance() = appearanceStore.data.map { Appearance.entries.find { mode -> mode.name == it[appearanceKey] } ?: Appearance.SYSTEM }
+ suspend fun Context.saveAppearance(value: Appearance) { appearanceStore.edit { it[appearanceKey] = value.name } }
++fun Context.newOrderNotifications() = appearanceStore.data.map { it[newOrderNotificationsKey] ?: true }
++suspend fun Context.saveNewOrderNotifications(value: Boolean) { appearanceStore.edit { it[newOrderNotificationsKey] = value } }
+ fun ordersColors(dark: Boolean): ColorScheme = if (dark) darkColorScheme(primary = Color(0xFF9CCAFF), secondary = Color(0xFFFFB95B), surface = Color(0xFF121417), onSurface = Color(0xFFE2E2E6)) else lightColorScheme(primary = Color(0xFF155E9E), secondary = Color(0xFF795900), surface = Color(0xFFFFFBFF), onSurface = Color(0xFF1A1C20))
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+index 5443653..333ab71 100644
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -1,12 +1,19 @@
+ package ua.orders.crm
+ 
++import android.Manifest
++import android.os.Build
+ import android.os.Bundle
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.BackHandler
++import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.compose.setContent
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.compose.foundation.BorderStroke
++import androidx.compose.foundation.isSystemInDarkTheme
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
++import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.text.KeyboardOptions
+ import androidx.compose.foundation.text.selection.SelectionContainer
+ import androidx.compose.material3.*
+@@ -16,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.platform.LocalContext
+-import androidx.compose.foundation.isSystemInDarkTheme
+ import androidx.compose.ui.text.input.KeyboardType
+ import androidx.compose.ui.text.input.PasswordVisualTransformation
+ import androidx.compose.ui.unit.dp
+@@ -126,6 +132,12 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
+     val context = LocalContext.current
+     val scope = rememberCoroutineScope()
+     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
++    val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
++    var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
++    val permissionLauncher = rememberLauncherForActivityResult(
++        ActivityResultContracts.RequestPermission(),
++    ) { granted -> notificationPermissionGranted = granted }
++
+     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+         TextButton(onBack) { Text("Назад") }
+         Text("Настройки", style = MaterialTheme.typography.headlineMedium)
+@@ -139,19 +151,65 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
+                 label = { Text(mode.label) },
+             )
+         }
++        HorizontalDivider()
++        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
++            Column(Modifier.weight(1f)) {
++                Text("Уведомления о новых заказах", style = MaterialTheme.typography.titleMedium)
++                Text(
++                    if (notificationsEnabled && !notificationPermissionGranted)
++                        "Разрешение уведомлений отключено в Android."
++                    else
++                        "Prom, Эпицентр и Kasta.",
++                    style = MaterialTheme.typography.bodySmall,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                )
++            }
++            Switch(
++                checked = notificationsEnabled,
++                onCheckedChange = { enabled ->
++                    scope.launch { context.saveNewOrderNotifications(enabled) }
++                    if (
++                        enabled &&
++                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
++                        !context.canPostOrderNotifications()
++                    ) {
++                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
++                    }
++                },
++            )
++        }
++        Text(
++            "Фоновое уведомление работает, пока Android не остановил процесс приложения. " +
++                "Для гарантированной доставки после полной остановки нужен серверный push.",
++            style = MaterialTheme.typography.bodySmall,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++        )
+         Button({ vm.logout() }, enabled = !vm.authBusy && vm.acceptingId == null) { Text("Выйти") }
+     }
+ }
+ 
++private data class StatusColors(val background: Color, val foreground: Color)
++
+ @Composable
+-private fun StatusLabel(status: String?) {
+-    val color = when (statusTone(status)) {
+-        StatusTone.NEW -> Color(0xFF1565C0)
+-        StatusTone.NEGATIVE -> Color(0xFFB3261E)
+-        StatusTone.COMPLETE -> Color(0xFF1B6B36)
+-        StatusTone.ACTIVE -> Color(0xFF965000)
++private fun StatusLabel(order: Order) {
++    val colors = when (orderStatusTone(order)) {
++        StatusTone.BLUE -> StatusColors(Color(0xFFDBEAFE), Color(0xFF1E40AF))
++        StatusTone.GREEN -> StatusColors(Color(0xFFDCFCE7), Color(0xFF166534))
++        StatusTone.ORANGE -> StatusColors(Color(0xFFFFEDD5), Color(0xFF9A3412))
++        StatusTone.RED -> StatusColors(Color(0xFFFEE2E2), Color(0xFF991B1B))
++    }
++    Surface(
++        shape = RoundedCornerShape(999.dp),
++        color = colors.background,
++        contentColor = colors.foreground,
++    ) {
++        Text(
++            displayOrderStatus(order.status).display(),
++            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
++            color = colors.foreground,
++            style = MaterialTheme.typography.labelLarge,
++        )
+     }
+-    Text(status.display(), color = color, style = MaterialTheme.typography.labelLarge)
+ }
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+@@ -163,25 +221,36 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+             TextButton(onSettings) { Text("Настройки") }
+         }
+         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+-            FilterChip(vm.showNew, { vm.showNew = true }, { Text("Новые") })
+-            FilterChip(!vm.showNew, { vm.showNew = false }, { Text("Все") })
+             TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") }
+         }
+-        if (!vm.realtimeConnected) Text("Автообновление подключается. Доступно ручное обновление.",
+-            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+-        PullToRefreshBox(isRefreshing = vm.loading, onRefresh = { vm.refresh() }, modifier = Modifier.weight(1f)) {
+-            val shown = vm.orders.filter { !vm.showNew || isNewStatus(it.status) }
++        if (!vm.realtimeConnected) Text(
++            "Автообновление подключается. Доступно ручное обновление.",
++            style = MaterialTheme.typography.bodySmall,
++            modifier = Modifier.padding(bottom = 8.dp),
++        )
++        PullToRefreshBox(
++            isRefreshing = vm.loading,
++            onRefresh = { vm.refresh() },
++            modifier = Modifier.weight(1f),
++        ) {
+             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-                if (shown.isEmpty()) item {
+-                    Text(if (vm.loading) "Загрузка…" else if (vm.showNew) "В загруженной истории новых заказов нет." else "Заказов пока нет.",
+-                        Modifier.padding(vertical = 24.dp))
++                if (vm.orders.isEmpty()) item {
++                    Text(
++                        if (vm.loading) "Загрузка…" else "Заказов пока нет.",
++                        Modifier.padding(vertical = 24.dp),
++                    )
+                 }
+-                items(shown, key = { it.id }) { order ->
+-                    Card(onClick = { vm.open(order.id) }, modifier = Modifier.fillMaxWidth()) {
++                items(vm.orders, key = { it.id }) { order ->
++                    OutlinedCard(
++                        onClick = { vm.open(order.id) },
++                        modifier = Modifier.fillMaxWidth(),
++                        border = if (isNewStatus(order.status)) BorderStroke(2.dp, Color(0xFF60A5FA))
++                            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
++                    ) {
+                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                             Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.titleMedium)
+                             Text("${order.orderDate.display()} ${order.orderTime.display()}")
+-                            StatusLabel(order.status)
++                            StatusLabel(order)
+                             Text(money(order.total()), style = MaterialTheme.typography.titleMedium)
+                             Text(order.items.sortedBy { it.position }.joinToString("\n") {
+                                 "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
+@@ -189,11 +258,6 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+                         }
+                     }
+                 }
+-                item {
+-                    if (vm.hasMore) OutlinedButton({ vm.more() },
+-                        Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = !vm.loading) { Text("Загрузить ещё") }
+-                    else Text("Вся история загружена", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
+-                }
+             }
+         }
+     }
+@@ -223,7 +287,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+             item {
+                 Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.headlineSmall)
+                 Text("${order.orderDate.display()} ${order.orderTime.display()}")
+-                StatusLabel(order.status)
++                StatusLabel(order)
+                 Text(money(order.total()), style = MaterialTheme.typography.titleLarge)
+             }
+             item { Text("Товары", style = MaterialTheme.typography.titleMedium) }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+index a8d3e03..34d1675 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -34,7 +34,7 @@ data class Order(
+     @SerialName("crm_order_items") val items: List<OrderItem> = emptyList(),
+ )
+ 
+-enum class StatusTone { NEW, NEGATIVE, COMPLETE, ACTIVE }
++enum class StatusTone { BLUE, GREEN, ORANGE, RED }
+ enum class AcceptRoute(val function: String) {
+     PROM("sync-prom-orders"),
+     EPICENTR("sync-epicentr-orders"),
+@@ -42,14 +42,109 @@ enum class AcceptRoute(val function: String) {
+ }
+ fun normalizedStatus(status: String?) = status.orEmpty().trim().lowercase(Locale.ROOT)
+ fun isNewStatus(status: String?) = normalizedStatus(status) in setOf("новий", "новый", "new", "pending")
+-fun statusTone(status: String?): StatusTone {
+-    val value = normalizedStatus(status)
+-    return when {
+-        Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(value) -> StatusTone.NEGATIVE
+-        isNewStatus(value) -> StatusTone.NEW
+-        Regex("виконан|выполн|completed|delivered|доставлен|отриман|получен").containsMatchIn(value) -> StatusTone.COMPLETE
+-        else -> StatusTone.ACTIVE
++
++fun displayOrderStatus(status: String?): String {
++    val value = status.orEmpty().trim()
++    val names = mapOf(
++        "pending" to "Новий",
++        "completed" to "Завершено",
++        "cancelled" to "Скасовано",
++        "received" to "Принято",
++        "delivered" to "Виконано",
++        "new" to "Новий",
++        "confirmed_by_seller" to "Підтверджено продавцем",
++        "confirmed_by_merchant" to "Підтверджено продавцем",
++        "confirmed" to "Підтверджено",
++        "sent" to "Відправлено",
++        "ready_for_pickup" to "Готово до видачі",
++        "finished" to "Завершено",
++        "closed" to "Закрито",
++        "canceled" to "Скасовано",
++        "returned" to "Повернено",
++        "return_request" to "Запит на повернення",
++        "canceled_by_seller" to "Скасовано продавцем",
++        "canceled_by_merchant" to "Скасовано продавцем",
++    )
++    return names[value.lowercase(Locale.ROOT)] ?: value
++}
++
++fun Order.deliveryValue(key: String): String =
++    ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
++
++fun Order.deliveryFlag(key: String): Boolean =
++    ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
++
++fun orderStatusTone(order: Order): StatusTone {
++    val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
++    val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
++    val trackingStatus = order.deliveryValue("trackingStatus").trim().lowercase(Locale.ROOT)
++    val deliveryStatus = order.deliveryValue("status").trim().lowercase(Locale.ROOT)
++    val platform = order.platform.orEmpty().trim()
++
++    if (
++        order.deliveryFlag("trackingReturnInProgress") ||
++        trackingNormalized in setOf("returning", "returned", "cancelled") ||
++        Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(status) ||
++        Regex("возвращ|повер|return|отмен|скас|cancel|відмов.*одерж").containsMatchIn(trackingStatus) ||
++        Regex("возвращ|повер|return|отмен|скас|cancel|відмов.*одерж").containsMatchIn(deliveryStatus)
++    ) return StatusTone.RED
++
++    if (
++        (platform == "Пром" && Regex("виконан|заверш|delivered|completed").containsMatchIn(status)) ||
++        (platform == "Эпицентр" && Regex("заверш|закрит|closed|finished|completed").containsMatchIn(status)) ||
++        (platform in setOf("Каста", "Р/С", "Сайт") &&
++            Regex("закрыт|закрит|closed|finished|completed").containsMatchIn(status))
++    ) return StatusTone.ORANGE
++
++    val carrierConfirmsDelivery =
++        trackingNormalized == "delivered" ||
++            ((trackingNormalized.isBlank() || trackingNormalized == "unknown") &&
++                Regex("получ|отрим|доставлен|доставлено|вруч|delivered|received").containsMatchIn(trackingStatus))
++
++    if (platform != "Пром" && carrierConfirmsDelivery) return StatusTone.ORANGE
++
++    val carrierConfirmsShipment =
++        trackingNormalized in setOf("accepted", "in_transit", "ready_for_pickup", "delivered") ||
++            (trackingNormalized.isBlank() &&
++                Regex("отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received")
++                    .containsMatchIn(trackingStatus))
++
++    if (
++        carrierConfirmsShipment ||
++        (platform in setOf("Каста", "Р/С", "Сайт") && "в дороге" in status)
++    ) return StatusTone.GREEN
++
++    return StatusTone.BLUE
++}
++
++private fun orderDateTimeKey(order: Order): Long {
++    val date = order.orderDate.orEmpty().trim()
++    val dateParts = date.split('.', '-', '/').mapNotNull { it.toIntOrNull() }
++    val (year, month, day) = when {
++        dateParts.size != 3 -> Triple(0, 0, 0)
++        dateParts[0] > 1900 -> Triple(dateParts[0], dateParts[1], dateParts[2])
++        else -> Triple(dateParts[2], dateParts[1], dateParts[0])
+     }
++    val timeParts = order.orderTime.orEmpty().trim().split(':').mapNotNull { it.toIntOrNull() }
++    val hour = timeParts.getOrElse(0) { 0 }
++    val minute = timeParts.getOrElse(1) { 0 }
++    return year.toLong() * 100_000_000L +
++        month.toLong() * 1_000_000L +
++        day.toLong() * 10_000L +
++        hour.toLong() * 100L +
++        minute.toLong()
++}
++
++fun sortOrdersForDisplay(orders: List<Order>): List<Order> =
++    orders.sortedWith(
++        compareByDescending<Order> { orderDateTimeKey(it) }
++            .thenByDescending { it.orderNumber ?: Long.MIN_VALUE }
++            .thenByDescending { it.id },
++    )
++
++fun isNewOrderNotificationCandidate(order: Order): Boolean {
++    if (!isNewStatus(order.status)) return false
++    return normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta")
+ }
+ fun acceptRoute(order: Order, email: String?): AcceptRoute? {
+     if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
+@@ -78,6 +173,6 @@ fun Order.total(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
+ }
+ fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
+ fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
+-fun Order.deliveryField(key: String): String = ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.display()
++fun Order.deliveryField(key: String): String = deliveryValue(key).display()
+ fun Order.shipments(): List<JsonObject> = (((delivery as? JsonObject)?.get("shipmentHistory")) as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+ fun JsonObject.field(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull.display()
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+new file mode 100644
+index 0000000..db5ee2d
+--- /dev/null
++++ b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+@@ -0,0 +1,49 @@
++package ua.orders.crm
++
++import android.Manifest
++import android.app.Notification
++import android.app.NotificationChannel
++import android.app.NotificationManager
++import android.app.PendingIntent
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.os.Build
++
++private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
++
++fun Context.canPostOrderNotifications(): Boolean =
++    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
++        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
++
++fun Context.showNewOrderNotification(order: Order) {
++    if (!canPostOrderNotifications()) return
++    val manager = getSystemService(NotificationManager::class.java)
++    manager.createNotificationChannel(
++        NotificationChannel(
++            NEW_ORDERS_CHANNEL_ID,
++            "Новые заказы",
++            NotificationManager.IMPORTANCE_HIGH,
++        ).apply {
++            description = "Новые заказы Prom, Эпицентр и Kasta"
++        },
++    )
++    val intent = Intent(this, MainActivity::class.java).apply {
++        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
++    }
++    val pendingIntent = PendingIntent.getActivity(
++        this,
++        order.id.hashCode(),
++        intent,
++        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
++    )
++    val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)
++        .setSmallIcon(R.drawable.ic_orders)
++        .setContentTitle("Новый заказ · ${order.platform.display()}")
++        .setContentText("№${order.number()} · ${order.customer.display()}")
++        .setAutoCancel(true)
++        .setContentIntent(pendingIntent)
++        .setCategory(Notification.CATEGORY_MESSAGE)
++        .build()
++    manager.notify(order.id.hashCode(), notification)
++}
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+index 761f93f..0a4bafc 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+@@ -51,12 +51,20 @@ class OrdersRepository {
+     suspend fun signOut() = client.auth.signOut()
+     private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url)")
+ 
+-    suspend fun orders(offset: Long = 0): List<Order> =
+-        client.from("crm_orders").select(columns) {
+-            order("updated_at", SortOrder.DESCENDING)
+-            order("id", SortOrder.DESCENDING)
+-            range(offset..offset + 49)
+-        }.decodeList()
++    suspend fun orders(): List<Order> {
++        val result = mutableListOf<Order>()
++        var offset = 0L
++        do {
++            val batch = client.from("crm_orders").select(columns) {
++                order("created_at", SortOrder.DESCENDING)
++                order("id", SortOrder.DESCENDING)
++                range(offset..offset + 199)
++            }.decodeList<Order>()
++            result += batch
++            offset += batch.size
++        } while (batch.size == 200)
++        return result
++    }
+ 
+     suspend fun order(id: String): Order? = client.from("crm_orders").select(columns) {
+         filter { eq("id", id) }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+index 130c85f..9fdfdcd 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -1,32 +1,31 @@
+ package ua.orders.crm
+ 
++import android.app.Application
+ import androidx.compose.runtime.*
+-import androidx.lifecycle.ViewModel
++import androidx.lifecycle.AndroidViewModel
+ import androidx.lifecycle.viewModelScope
+ import io.github.jan.supabase.auth.status.SessionStatus
+ import io.github.jan.supabase.exceptions.RestException
+ import kotlinx.coroutines.*
++import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
+ 
+-class OrdersViewModel : ViewModel() {
++class OrdersViewModel(application: Application) : AndroidViewModel(application) {
+     private val repository = OrdersRepository()
+     private val requests = Mutex()
+     private var realtimeJob: Job? = null
+     private var visible = false
+-    private var offset = 0L
+     var email by mutableStateOf<String?>(null); private set
+     var initializing by mutableStateOf(true); private set
+     var authBusy by mutableStateOf(false); private set
+     var orders by mutableStateOf<List<Order>>(emptyList()); private set
+     var loading by mutableStateOf(false); private set
+-    var hasMore by mutableStateOf(true); private set
+     var message by mutableStateOf<String?>(null); private set
+     var realtimeConnected by mutableStateOf(false); private set
+     var selectedId by mutableStateOf<String?>(null); private set
+     var detail by mutableStateOf<Order?>(null); private set
+     var acceptingId by mutableStateOf<String?>(null); private set
+-    var showNew by mutableStateOf(true)
+ 
+     init {
+         viewModelScope.launch {
+@@ -42,6 +41,8 @@ class OrdersViewModel : ViewModel() {
+                 } else if (session is SessionStatus.NotAuthenticated) {
+                     email = null
+                     realtimeJob?.cancel()
++                    realtimeJob = null
++                    realtimeConnected = false
+                     clearOrders()
+                 }
+             }
+@@ -50,19 +51,19 @@ class OrdersViewModel : ViewModel() {
+ 
+     fun foreground(active: Boolean) {
+         visible = active
+-        if (active && email != null) { startRealtime(); refresh() }
+-        if (!active) { realtimeJob?.cancel(); realtimeJob = null; realtimeConnected = false }
++        if (email != null) startRealtime()
++        if (active && email != null) refresh()
+     }
+ 
+     private fun startRealtime() {
+         if (realtimeJob?.isActive == true) return
+         realtimeJob = viewModelScope.launch {
+-            while (isActive && visible && email != null) {
++            while (isActive && email != null) {
+                 try {
+                     repository.watch(onConnection = { connected ->
+                         val reconnect = connected && !realtimeConnected
+                         realtimeConnected = connected
+-                        if (reconnect) refresh()
++                        if (reconnect && visible) refresh()
+                     }) { change ->
+                         requests.withLock {
+                             if (change.operation == "DELETE") {
+@@ -70,7 +71,10 @@ class OrdersViewModel : ViewModel() {
+                                 if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
+                             } else {
+                                 val order = repository.order(change.order_id)
+-                                if (order != null) merge(order)
++                                if (order != null) {
++                                    merge(order)
++                                    if (change.operation == "INSERT") notifyNewOrder(order)
++                                }
+                             }
+                         }
+                     }
+@@ -81,12 +85,19 @@ class OrdersViewModel : ViewModel() {
+         }
+     }
+ 
++    private suspend fun notifyNewOrder(order: Order) {
++        if (!isNewOrderNotificationCandidate(order)) return
++        val app = getApplication<Application>()
++        if (!app.newOrderNotifications().first() || !app.canPostOrderNotifications()) return
++        app.showNewOrderNotification(order)
++    }
++
+     private fun clearOrders() {
+-        orders = emptyList(); selectedId = null; detail = null; offset = 0; hasMore = true
++        orders = emptyList(); selectedId = null; detail = null
+     }
++
+     private fun merge(order: Order) {
+-        orders = (orders.filterNot { it.id == order.id } + order)
+-            .sortedWith(compareByDescending<Order> { it.updatedAt }.thenByDescending { it.id })
++        orders = sortOrdersForDisplay(orders.filterNot { it.id == order.id } + order)
+         if (selectedId == order.id) detail = order
+     }
+ 
+@@ -99,9 +110,7 @@ class OrdersViewModel : ViewModel() {
+                 requests.withLock {
+                     val batch = repository.orders()
+                     if (email != account) return@withLock
+-                    orders = batch
+-                    offset = batch.size.toLong()
+-                    hasMore = batch.size == 50
++                    orders = sortOrdersForDisplay(batch)
+                     selectedId?.let { id ->
+                         val updated = repository.order(id)
+                         if (email == account && selectedId == id) detail = updated
+@@ -113,25 +122,6 @@ class OrdersViewModel : ViewModel() {
+         }
+     }
+ 
+-    fun more() {
+-        if (email == null || loading || !hasMore) return
+-        val account = email
+-        loading = true
+-        viewModelScope.launch {
+-            try {
+-                requests.withLock {
+-                    val batch = repository.orders(offset)
+-                    if (email != account) return@withLock
+-                    orders = (orders + batch).distinctBy { it.id }
+-                    offset += batch.size
+-                    hasMore = batch.size == 50
+-                }
+-            } catch (cancel: CancellationException) { throw cancel }
+-            catch (_: Exception) { message = "Не удалось загрузить следующую страницу." }
+-            finally { loading = false }
+-        }
+-    }
+-
+     fun open(id: String) {
+         selectedId = id; detail = orders.find { it.id == id }
+         viewModelScope.launch {
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+index 0f058f2..bc82270 100644
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -2,6 +2,8 @@ package ua.orders.crm
+ 
+ import java.math.BigDecimal
+ import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.buildJsonObject
++import kotlinx.serialization.json.put
+ import org.junit.Assert.*
+ import org.junit.Test
+ 
+@@ -10,10 +12,14 @@ class OrderModelsTest {
+     private fun order(status: String, platform: String = "Пром") =
+         Order("1", externalId = "prom:123", platform = platform, status = status)
+ 
++    private fun delivery(vararg values: Pair<String, String>) = buildJsonObject {
++        for ((key, value) in values) put(key, value)
++    }
++
+     @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
+         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
+             assertTrue(isNewStatus(status))
+-            assertEquals(StatusTone.NEW, statusTone(status))
++            assertEquals(StatusTone.BLUE, orderStatusTone(order(status)))
+             assertEquals(AcceptRoute.PROM, acceptRoute(order(status), email))
+             assertEquals(
+                 AcceptRoute.EPICENTR,
+@@ -24,36 +30,112 @@ class OrderModelsTest {
+             assertNotNull(acceptUnavailableReason(kasta, email))
+         }
+     }
++
+     @Test fun appearance_resolves_system_and_overrides() {
+         assertFalse(Appearance.SYSTEM.isDark(false))
+         assertTrue(Appearance.SYSTEM.isDark(true))
+         assertFalse(Appearance.LIGHT.isDark(true))
+         assertTrue(Appearance.DARK.isDark(false))
+     }
+-    @Test fun cancelled_and_returned_are_red_and_never_acceptable() {
++
++    @Test fun android_status_tones_match_web_crm_rules() {
++        assertEquals(StatusTone.BLUE, orderStatusTone(order("Прийнято")))
++        assertEquals(
++            StatusTone.RED,
++            orderStatusTone(order("Прийнято").copy(delivery = buildJsonObject {
++                put("trackingNormalizedStatus", "in_transit")
++                put("trackingReturnInProgress", true)
++            })),
++        )
++        assertEquals(
++            StatusTone.GREEN,
++            orderStatusTone(order("Прийнято").copy(delivery = delivery("trackingNormalizedStatus" to "in_transit"))),
++        )
++        assertEquals(
++            StatusTone.GREEN,
++            orderStatusTone(order("Прийнято").copy(delivery = delivery("trackingNormalizedStatus" to "delivered"))),
++        )
++        assertEquals(StatusTone.ORANGE, orderStatusTone(order("Виконано")))
++        assertEquals(
++            StatusTone.ORANGE,
++            orderStatusTone(order("Підтверджено", "Эпицентр").copy(
++                externalId = "123",
++                delivery = delivery("trackingNormalizedStatus" to "delivered"),
++            )),
++        )
++        assertEquals(StatusTone.ORANGE, orderStatusTone(order("Закрыт", "Каста")))
++        assertEquals(StatusTone.GREEN, orderStatusTone(order("В дороге", "Каста")))
+         for (status in listOf("canceled", "cancelled", "скасовано", "returned", "повернено", "возврат")) {
+-            assertEquals(StatusTone.NEGATIVE, statusTone(status))
++            assertEquals(StatusTone.RED, orderStatusTone(order(status)))
+             assertFalse(canAccept(order(status), email))
+         }
+     }
++
++    @Test fun display_statuses_match_web_crm_labels() {
++        assertEquals("Новий", displayOrderStatus("pending"))
++        assertEquals("Виконано", displayOrderStatus("delivered"))
++        assertEquals("Підтверджено продавцем", displayOrderStatus("confirmed_by_merchant"))
++        assertEquals("Скасовано продавцем", displayOrderStatus("canceled_by_seller"))
++        assertEquals("Принято", displayOrderStatus("received"))
++    }
++
++    @Test fun order_sort_is_by_order_date_and_time_not_updated_at() {
++        val oldEditedLast = Order(
++            "old",
++            orderNumber = 3,
++            orderDate = "05.09.2026",
++            orderTime = "23:59",
++            updatedAt = "2099-01-01T00:00:00Z",
++        )
++        val newMorning = Order(
++            "new-morning",
++            orderNumber = 4,
++            orderDate = "07.09.2026",
++            orderTime = "08:10",
++            updatedAt = "2020-01-01T00:00:00Z",
++        )
++        val newEvening = Order(
++            "new-evening",
++            orderNumber = 5,
++            orderDate = "07.09.2026",
++            orderTime = "18:30",
++            updatedAt = "2020-01-01T00:00:00Z",
++        )
++        assertEquals(
++            listOf("new-evening", "new-morning", "old"),
++            sortOrdersForDisplay(listOf(oldEditedLast, newMorning, newEvening)).map { it.id },
++        )
++    }
++
++    @Test fun notification_candidate_is_only_new_marketplace_order() {
++        assertTrue(isNewOrderNotificationCandidate(order("Новий", "Пром")))
++        assertTrue(isNewOrderNotificationCandidate(order("Новый", "Каста")))
++        assertTrue(isNewOrderNotificationCandidate(order("pending", "Эпицентр")))
++        assertFalse(isNewOrderNotificationCandidate(order("Прийнято", "Пром")))
++        assertFalse(isNewOrderNotificationCandidate(order("Новый", "Сайт")))
++    }
++
+     @Test fun completed_accepted_and_delivery_states_never_allow_accept() {
+         for (status in listOf("Принято", "received", "accepted", "completed", "delivered", "виконано", "В дорозі", "Принято перевозчиком")) {
+             assertFalse(isNewStatus(status))
+             assertFalse(canAccept(order(status), email))
+-            assertNotEquals(StatusTone.NEGATIVE, statusTone(status))
++            assertNotEquals(StatusTone.RED, orderStatusTone(order(status)))
+         }
+     }
++
+     @Test fun guest_unauthenticated_and_missing_external_id_are_not_writable() {
+         assertFalse(canAccept(order("new"), "GUEST@gmail.com"))
+         assertFalse(canAccept(order("new"), null))
+         assertFalse(canAccept(order("new").copy(externalId = null), email))
+         assertFalse(canAccept(order("new").copy(externalId = "kasta:123"), email))
+     }
++
+     @Test fun total_uses_all_items_without_binary_rounding() {
+         val value = Order("1", items = listOf(OrderItem(price = 10.25, quantity = 2.0), OrderItem(price = 0.1, quantity = 3.0)))
+         assertEquals(0, BigDecimal("20.8").compareTo(value.total()))
+         assertEquals(0, BigDecimal.ZERO.compareTo(Order("empty").total()))
+     }
++
+     @Test fun nullable_and_unknown_delivery_json_remains_readable() {
+         val json = Json { ignoreUnknownKeys = true }
+         val parsed = json.decodeFromString<Order>("""{"id":"1","customer":null,"status":null,"delivery":{"ttn":123,"city":null,"unknown":{"future":true}},"future":true,"crm_order_items":[{"product_name":null,"size":null,"price":null,"quantity":null}]}""")
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 9577618..338f334 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -92,6 +92,7 @@ const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
+ const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
+ const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
+ const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
++const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
+ const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
+ const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
+ const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
+@@ -292,6 +293,12 @@ let lastReconciliationAt = 0
+ const pendingRemoteOrderIds = new Set<string>()
+ const pendingNewOrderIds = new Set<string>()
+ const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
++const newOrderNotificationsEnabled = ref(
++  window.localStorage.getItem(newOrderNotificationsStorageKey) !== 'false',
++)
++watch(newOrderNotificationsEnabled, (value) => {
++  window.localStorage.setItem(newOrderNotificationsStorageKey, String(value))
++})
+ let nextNewOrderToastId = 0
+ let audioContext: AudioContext | undefined
+ const stopAudioUnlockListeners = ['pointerdown', 'click', 'keydown'].map((event) =>
+@@ -2775,6 +2782,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
+ }
+ 
+ function notifyNewOrder(order: Order) {
++  if (!newOrderNotificationsEnabled.value) return
+   const toast = {
+     id: ++nextNewOrderToastId,
+     text: `Новый заказ · ${orderBusinessPlatform(order)} · №${order.displayNumber ?? order.id}`,
+@@ -4303,6 +4311,15 @@ function orderDateTime(order: Order) {
+           >
+             <Plus class="mr-1 inline size-4" aria-hidden="true" /> Новый заказ
+           </button>
++          <button
++            v-if="!isGuest"
++            class="whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold shadow-sm transition"
++            :class="newOrderNotificationsEnabled
++              ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
++              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
++            type="button"
++            @click="newOrderNotificationsEnabled = !newOrderNotificationsEnabled"
++          >Уведомления: {{ newOrderNotificationsEnabled ? 'вкл' : 'выкл' }}</button>
+           <button
+             class="ml-1 grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
+             type="button"
