@@ -1,0 +1,65 @@
+PATCH 58 — точечное обновление доставки и понятный возврат
+
+База patch: main commit 0de1d906fa8e7541be1de41e59cfd124c91cb9b6.
+
+Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+1. Перейди в:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+
+2. Выполни:
+   git fetch origin main chatgpt-patches
+   git rev-parse origin/main
+
+   Ожидается ровно:
+   0de1d906fa8e7541be1de41e59cfd124c91cb9b6
+
+   Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+3. Выполни:
+   git switch main
+   git merge --ff-only origin/main
+
+4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+5. Получи patch:
+   git show origin/chatgpt-patches:58-targeted-delivery-return-refresh.patch > .git/PATCH58.patch
+
+6. Выполни:
+   git apply --check .git/PATCH58.patch
+   git apply .git/PATCH58.patch
+   git diff --check
+
+   Если git apply --check или применение не прошло — остановись. Ничего не исправляй.
+
+7. Добавь в commit ТОЛЬКО:
+   src/features/orders/delivery-tracking.ts
+   src/pages/HomeView.vue
+   supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+   supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+   supabase/functions/sync-delivery-tracking/index.ts
+   supabase/functions/sync-delivery-tracking/normalize.ts
+   supabase/functions/sync-delivery-tracking/normalize_test.ts
+   supabase/functions/sync-delivery-tracking/worker.ts
+
+8. Проверь:
+   git diff --cached --name-only
+
+   В staged должны быть ровно эти 8 файлов. AGENTS.md не добавлять.
+
+9. Commit и push:
+   git commit -m "Improve delivery return tracking and targeted refresh"
+   git push origin main
+
+10. После успешного push задеплой только изменённую Edge Function в уже связанный Supabase-проект:
+    pnpm exec supabase functions deploy sync-delivery-tracking
+
+    Если deploy не прошёл — не исследуй причину, просто сообщи ошибку.
+
+11. Сообщи только:
+    - commit SHA;
+    - успешен ли push;
+    - успешен ли deploy sync-delivery-tracking;
+    - итог git status --short.
+
+Не запускать Deno. Не запускать pnpm type-check/lint/build: Patch уже независимо проверен этими тестами. Не менять AGENTS.md.

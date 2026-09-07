@@ -1,0 +1,471 @@
+diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/delivery-tracking.ts
+index abdecf9..f3c21da 100644
+--- a/src/features/orders/delivery-tracking.ts
++++ b/src/features/orders/delivery-tracking.ts
+@@ -1,20 +1,12 @@
+-const normalizedStatusLabels: Record<string, string> = {
+-  returning: 'Возвращается отправителю',
+-  returned: 'Возвращено',
+-  cancelled: 'Отменено',
+-  delivered: 'Получено',
+-  ready_for_pickup: 'Готово к выдаче',
+-  in_transit: 'В дороге',
+-  accepted: 'Принято перевозчиком',
+-  created: 'Запланировано',
+-}
+-
+-export function secondaryDeliveryStatus(rawStatus?: string, normalizedStatus?: string) {
++export function isReturningDelivery(rawStatus?: string, normalizedStatus?: string) {
+   const normalized = normalizedStatus?.trim().toLowerCase() ?? ''
+-  const label = normalizedStatusLabels[normalized] ?? ''
+-  if (!label) return ''
++  if (normalized === 'returning') return true
+   const raw = rawStatus?.trim().toLowerCase() ?? ''
+-  return raw === label.toLowerCase() ? '' : label
++  return /відмова від (?:одержання|отримання)|возвращ|поверта|return(?:ing| to sender)/.test(raw)
++}
++
++export function deliveryReturnStatus(rawStatus?: string, normalizedStatus?: string) {
++  return isReturningDelivery(rawStatus, normalizedStatus) ? 'Возвращается отправителю' : ''
+ }
+ 
+ export function formatTrackingExpectedDeliveryAt(value?: string) {
+@@ -40,8 +32,24 @@ export function formatTrackingExpectedDeliveryAt(value?: string) {
+   return source
+ }
+ 
+-export function expectedReturnLabel(normalizedStatus?: string, expectedDeliveryAt?: string) {
+-  if (normalizedStatus?.trim().toLowerCase() !== 'returning') return ''
++export function expectedReturnLabel(
++  rawStatus?: string,
++  normalizedStatus?: string,
++  expectedDeliveryAt?: string,
++) {
++  if (!isReturningDelivery(rawStatus, normalizedStatus)) return ''
+   const expected = formatTrackingExpectedDeliveryAt(expectedDeliveryAt)
+   return expected ? `Ожидается возврат: ${expected}` : ''
+ }
++
++export function returnDestinationLabel(
++  rawStatus?: string,
++  normalizedStatus?: string,
++  city?: string,
++  address?: string,
++  hasPreviousDestination = false,
++) {
++  if (normalizedStatus?.trim().toLowerCase() !== 'returning' || !hasPreviousDestination) return ''
++  const destination = [city?.trim(), address?.trim()].filter(Boolean).join(', ')
++  return destination ? `Возврат: ${destination}` : ''
++}
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index b0488c2..2631cb7 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -67,8 +67,9 @@ import {
+   orderBusinessPlatform,
+ } from '@/features/orders/display'
+ import {
++  deliveryReturnStatus,
+   expectedReturnLabel,
+-  secondaryDeliveryStatus,
++  returnDestinationLabel,
+ } from '@/features/orders/delivery-tracking'
+ import type {
+   Delivery,
+@@ -164,6 +165,7 @@ const isSyncingProm = ref(false)
+ const isSyncingKasta = ref(false)
+ const isSyncingAllPlatforms = ref(false)
+ const isSyncingDelivery = ref(false)
++const syncingDeliveryOrderId = ref<string | null>(null)
+ const isMarketplaceSyncBusy = computed(
+   () =>
+     isSyncingAllPlatforms.value ||
+@@ -2324,7 +2326,7 @@ async function syncFullAllPlatforms() {
+ }
+ 
+ async function syncDeliveryTracking() {
+-  if (!supabase || isGuest.value || isSyncingDelivery.value) return
++  if (!supabase || isGuest.value || isSyncingDelivery.value || syncingDeliveryOrderId.value) return
+   isSyncingDelivery.value = true
+   const { data, error } = await supabase.functions.invoke<{
+     ok?: boolean
+@@ -2346,6 +2348,53 @@ async function syncDeliveryTracking() {
+   )
+ }
+ 
++async function syncOrderDelivery(order: Order) {
++  const remoteId = order.remoteId
++  if (
++    !supabase ||
++    isGuest.value ||
++    isSyncingDelivery.value ||
++    syncingDeliveryOrderId.value ||
++    !remoteId ||
++    !order.delivery.ttn.trim()
++  )
++    return
++  if (!(await waitForPendingSaves())) return
++
++  syncingDeliveryOrderId.value = remoteId
++  try {
++    const { data, error } = await supabase.functions.invoke<{
++      ok?: boolean
++      message?: string
++      checked?: number
++      updated?: number
++      failed?: number
++    }>('sync-delivery-tracking', {
++      method: 'POST',
++      body: { force: true, orderId: remoteId },
++    })
++    if (error || !data?.ok) {
++      showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить доставку заказа.')
++      return
++    }
++    if ((data.failed ?? 0) > 0) {
++      showSyncError('Перевозчик не вернул актуальный статус этой доставки.')
++      return
++    }
++    if ((data.checked ?? 0) === 0) {
++      showSyncError('Эту доставку не удалось проверить. Проверьте ТТН и перевозчика.')
++      return
++    }
++    if (!(await refreshRemoteOrders([remoteId]))) {
++      showSyncError('Доставка проверена, но карточку заказа не удалось обновить.')
++      return
++    }
++    showInlineActionNotice(`delivery-sync:${order.id}`, 'Обновлено')
++  } finally {
++    syncingDeliveryOrderId.value = null
++  }
++}
++
+ async function syncKastaOrder(order: Order) {
+   if (
+     !supabase ||
+@@ -4218,7 +4267,7 @@ function orderDateTime(order: Order) {
+           <button
+             v-if="!isGuest"
+             class="whitespace-nowrap rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm font-semibold text-violet-800 shadow-sm transition hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60"
+-            :disabled="isSyncingDelivery"
++            :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
+             type="button"
+             @click="syncDeliveryTracking"
+           >
+@@ -5581,41 +5630,57 @@ function orderDateTime(order: Order) {
+                 <span
+                   class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                   :class="statusBadgeClass(order)"
+-                  >{{ deliveryStatusForOrder(order) }}</span
++                  >{{
++                    deliveryReturnStatus(
++                      order.delivery.trackingStatus,
++                      order.delivery.trackingNormalizedStatus,
++                    ) || deliveryStatusForOrder(order)
++                  }}</span
+                 >
+               </div>
+               <div
+                 v-if="
+-                  secondaryDeliveryStatus(
++                  returnDestinationLabel(
+                     order.delivery.trackingStatus,
+                     order.delivery.trackingNormalizedStatus,
++                    order.delivery.city,
++                    order.delivery.address,
++                    hasDeliveryHistory(order.delivery),
+                   ) ||
+                   expectedReturnLabel(
++                    order.delivery.trackingStatus,
+                     order.delivery.trackingNormalizedStatus,
+                     order.delivery.trackingExpectedDeliveryAt,
+                   )
+                 "
+-                class="mt-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs"
++                class="mt-2 space-y-1 rounded-lg bg-rose-50 px-3 py-2 text-xs"
+               >
+-                <span
++                <p
+                   v-if="
+-                    secondaryDeliveryStatus(
++                    returnDestinationLabel(
+                       order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
++                      order.delivery.city,
++                      order.delivery.address,
++                      hasDeliveryHistory(order.delivery),
+                     )
+                   "
+-                  class="rounded-full bg-rose-100 px-2.5 py-1 font-semibold text-rose-800"
++                  class="font-semibold text-rose-800"
+                 >
+                   {{
+-                    secondaryDeliveryStatus(
++                    returnDestinationLabel(
+                       order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
++                      order.delivery.city,
++                      order.delivery.address,
++                      hasDeliveryHistory(order.delivery),
+                     )
+                   }}
+-                </span>
+-                <span
++                </p>
++                <p
+                   v-if="
+                     expectedReturnLabel(
++                      order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
+                       order.delivery.trackingExpectedDeliveryAt,
+                     )
+@@ -5624,11 +5689,12 @@ function orderDateTime(order: Order) {
+                 >
+                   {{
+                     expectedReturnLabel(
++                      order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
+                       order.delivery.trackingExpectedDeliveryAt,
+                     )
+                   }}
+-                </span>
++                </p>
+               </div>
+               <dl class="mt-2 text-sm">
+                 <div class="pb-1">
+@@ -5679,6 +5745,28 @@ function orderDateTime(order: Order) {
+                           >Скопировано</span
+                         >
+                       </button>
++                      <button
++                        v-if="!isGuest && order.remoteId && order.delivery.ttn"
++                        class="relative grid size-6 shrink-0 place-items-center rounded text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 disabled:cursor-wait disabled:opacity-50"
++                        :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
++                        type="button"
++                        title="Обновить доставку"
++                        aria-label="Обновить доставку"
++                        @click="syncOrderDelivery(order)"
++                      >
++                        <RefreshCw
++                          class="size-4"
++                          :class="{
++                            'animate-spin': syncingDeliveryOrderId === order.remoteId,
++                          }"
++                          aria-hidden="true"
++                        />
++                        <span
++                          v-if="inlineActionNotice?.key === `delivery-sync:${order.id}`"
++                          class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
++                          >Обновлено</span
++                        >
++                      </button>
+                     </dd>
+                     <dd
+                       v-if="deliveryWasRedirected(order.delivery)"
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts b/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+index 96c7ebd..0db0189 100644
+--- a/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+@@ -47,14 +47,20 @@ async function novaShipment(apiKey: string, ttn: string, timeoutMs?: number) {
+   return shipment
+ }
+ 
+-function novaDestination(shipment: JsonRecord): TrackingDestination | undefined {
+-  const city = text(shipment.CityRecipient)
+-  const address =
+-    text(shipment.WarehouseRecipient) ||
+-    text(shipment.WarehouseRecipientAddress) ||
+-    text(shipment.RecipientAddress)
+-  const branchNumber = text(shipment.WarehouseRecipientNumber)
+-  const locationCode = text(shipment.WarehouseRecipientRef)
++function novaDestination(
++  shipment: JsonRecord,
++  returning = false,
++): TrackingDestination | undefined {
++  const city = text(returning ? shipment.CitySender : shipment.CityRecipient)
++  const address = returning
++    ? text(shipment.WarehouseSender) || text(shipment.WarehouseSenderAddress) || text(shipment.SenderAddress)
++    : text(shipment.WarehouseRecipient) ||
++      text(shipment.WarehouseRecipientAddress) ||
++      text(shipment.RecipientAddress)
++  const branchNumber = text(
++    returning ? shipment.WarehouseSenderNumber : shipment.WarehouseRecipientNumber,
++  )
++  const locationCode = text(returning ? shipment.WarehouseSenderRef : shipment.WarehouseRecipientRef)
+   if (!city && !address && !branchNumber && !locationCode) return undefined
+   return { city, address, branchNumber, locationCode }
+ }
+@@ -150,6 +156,7 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
+ 
+   const source = text(shipment.Status)
+   const base = readableStatus(source, text(shipment.StatusCode))
++  const destination = novaDestination(shipment, base.normalizedStatus === 'returning')
+   const eventAt = text(shipment.DateScan) || text(shipment.RecipientDateTime)
+   const events = compactEvents([{
+     at: eventAt,
+@@ -164,7 +171,7 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
+     source: 'carrier_api',
+     activeTtn,
+     relation,
+-    destination: novaDestination(shipment),
++    destination,
+     relatedShipments,
+     events,
+     details: {
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts b/supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+new file mode 100644
+index 0000000..8ed2389
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+@@ -0,0 +1,47 @@
++import { novaStatus } from './nova-poshta.ts'
++
++function assert(value: unknown, message: string): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('Nova refusal exposes sender as return destination and expected arrival', async () => {
++  const originalFetch = globalThis.fetch
++  const previousKey = Deno.env.get('NOVA_POSHTA_API_KEY')
++  const responses = [
++    {
++      success: true,
++      data: [
++        {
++          Status: 'Відмова від отримання',
++          StatusCode: '102',
++          CityRecipient: 'Київ',
++          WarehouseRecipient: 'Відділення №343',
++          WarehouseRecipientNumber: '343',
++          CitySender: 'Циркуни',
++          WarehouseSender: 'Відділення №1',
++          WarehouseSenderNumber: '1',
++          ScheduledDeliveryDate: '08-09-2026 15:00:00',
++        },
++      ],
++    },
++    { success: true, data: [] },
++  ]
++  Deno.env.set('NOVA_POSHTA_API_KEY', 'test-key')
++  globalThis.fetch = async () =>
++    new Response(JSON.stringify(responses.shift()), { status: 200 })
++  try {
++    const result = await novaStatus('20451528497280')
++    assert(result.normalizedStatus === 'returning', 'refusal did not become return in progress')
++    assert(result.destination?.city === 'Циркуни', 'return target did not use sender city')
++    assert(result.destination?.address === 'Відділення №1', 'return target did not use sender branch')
++    assert(result.destination?.branchNumber === '1', 'return target branch number was not exposed')
++    assert(
++      result.details?.trackingExpectedDeliveryAt === '08-09-2026 15:00:00',
++      'expected return time was not exposed',
++    )
++  } finally {
++    globalThis.fetch = originalFetch
++    if (previousKey) Deno.env.set('NOVA_POSHTA_API_KEY', previousKey)
++    else Deno.env.delete('NOVA_POSHTA_API_KEY')
++  }
++})
+diff --git a/supabase/functions/sync-delivery-tracking/index.ts b/supabase/functions/sync-delivery-tracking/index.ts
+index 2de1783..87dc170 100644
+--- a/supabase/functions/sync-delivery-tracking/index.ts
++++ b/supabase/functions/sync-delivery-tracking/index.ts
+@@ -24,6 +24,7 @@ Deno.serve(async (request) => {
+   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+   if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+   const forced = body.force === true && !scheduled && Boolean(user)
+-  const result = await runTrackingWorker(admin, forced)
++  const orderId = !scheduled && typeof body.orderId === 'string' ? body.orderId.trim() : ''
++  const result = await runTrackingWorker(admin, forced, orderId || undefined)
+   return Response.json(result.body, { ...(result.status ? { status: result.status } : {}), headers: corsHeaders })
+ })
+diff --git a/supabase/functions/sync-delivery-tracking/normalize.ts b/supabase/functions/sync-delivery-tracking/normalize.ts
+index 1a88b13..1ef4973 100644
+--- a/supabase/functions/sync-delivery-tracking/normalize.ts
++++ b/supabase/functions/sync-delivery-tracking/normalize.ts
+@@ -15,7 +15,7 @@ export function isFinal(status: string) {
+ export function readableStatus(source: string, code = ''): TrackingResult {
+   const value = source.trim()
+   const normalized = `${value} ${code}`.toLowerCase()
+-  if (/відмова від одержання/.test(normalized)) return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
++  if (/відмова від (?:одержання|отримання)/.test(normalized)) return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
+   if (/return|повернен|41010|31200/.test(normalized)) return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
+   if (/cancel|скасован|відмінен|10600|10602|102|103/.test(normalized)) return { status: 'Отменено', final: true, normalizedStatus: 'cancelled' }
+   if (/receivedwarehouse|received|отриман|получен|вручено|доставлено|41000|\b9\b|\b10\b|\b11\b/.test(normalized)) return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
+diff --git a/supabase/functions/sync-delivery-tracking/normalize_test.ts b/supabase/functions/sync-delivery-tracking/normalize_test.ts
+new file mode 100644
+index 0000000..ad19ab3
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/normalize_test.ts
+@@ -0,0 +1,23 @@
++import { readableStatus } from './normalize.ts'
++
++function assert(value: unknown, message: string): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('Nova refusal wording with отримання is a return in progress', () => {
++  const result = readableStatus('Відмова від отримання', '102')
++  assert(result.normalizedStatus === 'returning', 'refusal was classified as cancellation')
++  assert(result.status === 'Возвращается отправителю', 'refusal got the wrong display status')
++  assert(result.final === false, 'return in progress must not be final')
++})
++
++Deno.test('Nova refusal wording with одержання remains a return in progress', () => {
++  const result = readableStatus('Відмова від одержання', '102')
++  assert(result.normalizedStatus === 'returning', 'legacy refusal wording regressed')
++})
++
++Deno.test('ordinary cancellation remains cancelled', () => {
++  const result = readableStatus('Скасовано', '102')
++  assert(result.normalizedStatus === 'cancelled', 'ordinary cancellation became a return')
++  assert(result.final === true, 'ordinary cancellation must stay final')
++})
+diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
+index feea289..fd0fc37 100644
+--- a/supabase/functions/sync-delivery-tracking/worker.ts
++++ b/supabase/functions/sync-delivery-tracking/worker.ts
+@@ -55,15 +55,24 @@ async function getTrackingStatus(delivery: JsonRecord, novaRedirectCircuit: Nova
+   }
+ }
+ 
+-export async function runTrackingWorker(admin: SupabaseClient, forced: boolean): Promise<WorkerResult> {
++export async function runTrackingWorker(
++  admin: SupabaseClient,
++  forced: boolean,
++  orderId?: string,
++): Promise<WorkerResult> {
+   const minutes = intervalMinutes()
+   if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
+ 
+   const now = new Date()
+-  const { data: rows, error } = await admin.from('crm_orders')
+-    .select('id, external_id, delivery')
+-    .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
+-    .not('delivery->>ttn', 'is', null)
++  let ordersQuery = admin.from('crm_orders').select('id, external_id, delivery')
++  if (orderId) {
++    ordersQuery = ordersQuery.eq('id', orderId)
++  } else {
++    ordersQuery = ordersQuery
++      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
++      .not('delivery->>ttn', 'is', null)
++  }
++  const { data: rows, error } = await ordersQuery
+   if (error) return { status: 500, body: { ok: false, message: error.message } }
+   const orderRows = (rows ?? []) as TrackingOrderRow[]
+   const ids = orderRows.map((row) => row.id)
+@@ -81,7 +90,13 @@ export async function runTrackingWorker(admin: SupabaseClient, forced: boolean):
+     const delivery = record(row.delivery)
+     const carrier: CarrierKind = carrierKind(delivery)
+     const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
+-    if (!carrier || (!forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) || (forced && !trackable)) continue
++    if (
++      !carrier ||
++      (!orderId && !forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) ||
++      (!orderId && forced && !trackable) ||
++      (orderId && !text(delivery.ttn))
++    )
++      continue
+     try {
+       const result = await getTrackingStatus(delivery, novaRedirectCircuit)
+       const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
