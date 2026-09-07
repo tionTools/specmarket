@@ -1,0 +1,283 @@
+name: Patch 62 Materialize
+
+on:
+  push:
+    branches: [chatgpt-validate-62]
+    paths:
+      - '.github/workflows/patch62-materialize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: c339ec736e4a0cfde1cb34619125e0b68b411167
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify base and materialize source changes
+        shell: bash
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          python - <<'PY'
+          from pathlib import Path
+
+          nova = Path('supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts')
+          s = nova.read_text()
+          old = """function latestRedirection(rows: JsonRecord[], ttn: string) {
+  const normalized = normalizedTtn(ttn)
+  return rows
+    .filter((row) => normalizedTtn(row.DocumentNumber) === normalized)
+    .reduce<JsonRecord | undefined>((latest, row) => {
+      if (!latest) return row
+      return novaDate(row.DateTime) >= novaDate(latest.DateTime) ? row : latest
+    }, undefined)
+}
+
+export async function novaStatus"""
+          new = """function latestRedirection(rows: JsonRecord[], ttn: string) {
+  const normalized = normalizedTtn(ttn)
+  return rows
+    .filter((row) => normalizedTtn(row.DocumentNumber) === normalized)
+    .reduce<JsonRecord | undefined>((latest, row) => {
+      if (!latest) return row
+      return novaDate(row.DateTime) >= novaDate(latest.DateTime) ? row : latest
+    }, undefined)
+}
+
+function novaCargoReturnNumber(shipment: JsonRecord) {
+  return text(shipment.LastCreatedOnTheBasisDocumentType).toLowerCase() === 'cargoreturn'
+    ? normalizedTtn(shipment.LastCreatedOnTheBasisNumber)
+    : ''
+}
+
+export async function novaStatus"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """  const lightReturnNumber = normalizedTtn(shipment.LightReturnNumber)
+  if (lightReturnNumber && lightReturnNumber !== activeTtn) {"""
+          new = """  let returnLookupError = ''
+  const cargoReturnNumber = novaCargoReturnNumber(shipment)
+  if (cargoReturnNumber && cargoReturnNumber !== activeTtn && !visited.has(cargoReturnNumber)) {
+    try {
+      const returnShipment = await novaShipment(apiKey, cargoReturnNumber, redirectTimeoutMs)
+      relatedShipments.push({
+        ttn: cargoReturnNumber,
+        relation: 'return',
+        relatedTtn: activeTtn,
+        destination: novaDestination(returnShipment),
+      })
+      relation = 'return'
+      visited.add(cargoReturnNumber)
+      activeTtn = cargoReturnNumber
+      shipment = returnShipment
+    } catch (error) {
+      returnLookupError = error instanceof Error ? error.message : 'Ошибка проверки возврата Nova Poshta'
+    }
+  }
+
+  const lightReturnNumber = normalizedTtn(shipment.LightReturnNumber)
+  if (lightReturnNumber && lightReturnNumber !== activeTtn) {"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """      trackingLightReturnNumber: lightReturnNumber,
+      trackingRedirectLookupError: redirectLookupError,
+"""
+          new = """      trackingLightReturnNumber: lightReturnNumber,
+      trackingRedirectLookupError: redirectLookupError,
+      trackingReturnLookupError: returnLookupError,
+"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          nova.write_text(s)
+
+          storage = Path('supabase/functions/sync-delivery-tracking/storage.ts')
+          s = storage.read_text()
+          old = """function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
+  if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
+  return deliveryHasReturnInProgress(delivery) || result.normalizedStatus === 'returning'
+}
+"""
+          new = """function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
+  if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
+  return deliveryHasReturnInProgress(delivery) ||
+    result.normalizedStatus === 'returning' ||
+    result.relation === 'return'
+}
+"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = """    deliveryHasReturnInProgress(delivery) &&
+    result.normalizedStatus !== 'returning' &&
+    result.relation !== 'redirect'
+"""
+          new = """    deliveryHasReturnInProgress(delivery) &&
+    result.normalizedStatus !== 'returning' &&
+    !['redirect', 'return'].includes(result.relation ?? '')
+"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          storage.write_text(s)
+
+          nova_test = Path('supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts')
+          s = nova_test.read_text()
+          addition = r'''
+
+Deno.test('Nova CargoReturn promotes the live return TTN, status, destination and ETA', async () => {
+  const originalFetch = globalThis.fetch
+  const previousKey = Deno.env.get('NOVA_POSHTA_API_KEY')
+  const responses = [
+    {
+      success: true,
+      data: [
+        {
+          Number: '20451528497280',
+          Status: 'Відмова від отримання',
+          StatusCode: '102',
+          CityRecipient: 'Київ',
+          WarehouseRecipient: 'Відділення №343',
+          CitySender: 'Циркуни',
+          WarehouseSender: 'Відділення №1',
+          LastCreatedOnTheBasisDocumentType: 'CargoReturn',
+          LastCreatedOnTheBasisNumber: '59001764954977',
+        },
+      ],
+    },
+    { success: true, data: [] },
+    {
+      success: true,
+      data: [
+        {
+          Number: '59001764954977',
+          Status: 'Відправлення у с. Циркуни. Очікуйте повідомлення про прибуття',
+          StatusCode: '6',
+          DateScan: '16:12 07.09.2026',
+          CitySender: 'Київ',
+          WarehouseSender: 'Відділення №343',
+          CityRecipient: 'Циркуни',
+          WarehouseRecipient: 'Відділення №1',
+          WarehouseRecipientNumber: '1',
+          ScheduledDeliveryDate: '08-09-2026 15:00:00',
+        },
+      ],
+    },
+  ]
+  Deno.env.set('NOVA_POSHTA_API_KEY', 'test-key')
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(responses.shift()), { status: 200 })
+  try {
+    const result = await novaStatus('20451528497280')
+    assert(result.activeTtn === '59001764954977', 'CargoReturn TTN did not become current')
+    assert(result.relation === 'return', 'CargoReturn TTN was not marked as a return')
+    assert(
+      result.status === 'Відправлення у с. Циркуни. Очікуйте повідомлення про прибуття',
+      'live return status was not exposed',
+    )
+    assert(result.normalizedStatus === 'in_transit', 'live return movement was not normalized')
+    assert(result.destination?.city === 'Циркуни', 'return TTN recipient city was not used')
+    assert(result.destination?.address === 'Відділення №1', 'return TTN recipient branch was not used')
+    assert(result.destination?.branchNumber === '1', 'return TTN recipient branch number was not used')
+    assert(
+      result.details?.trackingExpectedDeliveryAt === '08-09-2026 15:00:00',
+      'return TTN ETA was not exposed',
+    )
+    assert(
+      result.relatedShipments?.some((shipment) =>
+        shipment.ttn === '59001764954977' &&
+        shipment.relatedTtn === '20451528497280' &&
+        shipment.relation === 'return'
+      ),
+      'CargoReturn relationship was not preserved',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+    if (previousKey) Deno.env.set('NOVA_POSHTA_API_KEY', previousKey)
+    else Deno.env.delete('NOVA_POSHTA_API_KEY')
+  }
+})
+'''
+          assert 'Nova CargoReturn promotes the live return TTN' not in s
+          nova_test.write_text(s.rstrip() + addition + '\n')
+
+          storage_test = Path('supabase/functions/sync-delivery-tracking/storage_return_test.ts')
+          s = storage_test.read_text()
+          old = "import { mergeTrackingDelivery, trackingChanged } from './storage.ts'\n"
+          new = old + "import { record } from './normalize.ts'\n"
+          assert old in s
+          s = s.replace(old, new, 1)
+          addition = r'''
+
+Deno.test('CargoReturn relation promotes the return TTN and return destination from stale refusal data', () => {
+  const delivery: JsonRecord = {
+    ttn: '20451528497280',
+    carrier: 'Новая почта',
+    city: 'Київ',
+    address: 'Відділення №343',
+    trackingDestinationBranchNumber: '343',
+    trackingStatus: 'Відмова від отримання',
+    trackingNormalizedStatus: 'cancelled',
+  }
+  const liveReturn: TrackingResult = {
+    status: 'Відправлення у с. Циркуни. Очікуйте повідомлення про прибуття',
+    final: false,
+    normalizedStatus: 'in_transit',
+    provider: 'nova_poshta_api',
+    source: 'carrier_api',
+    activeTtn: '59001764954977',
+    relation: 'return',
+    destination: {
+      city: 'Циркуни',
+      address: 'Відділення №1',
+      branchNumber: '1',
+    },
+    relatedShipments: [
+      {
+        ttn: '59001764954977',
+        relation: 'return',
+        relatedTtn: '20451528497280',
+        destination: { city: 'Циркуни', address: 'Відділення №1', branchNumber: '1' },
+      },
+    ],
+    details: { trackingExpectedDeliveryAt: '08-09-2026 15:00:00' },
+  }
+  const next = mergeTrackingDelivery(delivery, liveReturn, '2026-09-07T16:12:37Z')
+  assert(next.ttn === '59001764954977', 'return TTN did not become current')
+  assert(next.trackingReturnInProgress === true, 'return relation did not restore return stage')
+  assert(next.trackingStatus === liveReturn.status, 'live return status was not stored')
+  assert(next.city === 'Циркуни', 'live return city was not stored')
+  assert(next.address === 'Відділення №1', 'live return branch was not stored')
+  assert(next.trackingDestinationBranchNumber === '1', 'live return branch number was not stored')
+  assert(next.trackingExpectedDeliveryAt === '08-09-2026 15:00:00', 'live return ETA was not stored')
+  assert(Array.isArray(next.ttnHistory) && next.ttnHistory.includes('20451528497280'), 'original TTN was not preserved')
+  assert(
+    Array.isArray(next.shipmentHistory) && next.shipmentHistory.some((row) =>
+      record(row).ttn === '59001764954977' && record(row).relation === 'return'
+    ),
+    'return TTN was not preserved in shipment history',
+  )
+})
+'''
+          assert 'CargoReturn relation promotes the return TTN' not in s
+          storage_test.write_text(s.rstrip() + addition + '\n')
+          PY
+          git diff --check
+
+      - name: Commit validation candidate
+        shell: bash
+        run: |
+          git config user.name 'chatgpt-validation'
+          git config user.email 'chatgpt-validation@users.noreply.github.com'
+          git add \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
+            supabase/functions/sync-delivery-tracking/storage.ts \
+            supabase/functions/sync-delivery-tracking/storage_return_test.ts
+          test "$(git diff --cached --name-only | wc -l)" -eq 4
+          git commit -m 'chore: materialize Patch 62 candidate'
+          git push origin HEAD:chatgpt-validate-62
