@@ -1,0 +1,390 @@
+diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/delivery-tracking.ts
+index f3c21da..b0c1f12 100644
+--- a/src/features/orders/delivery-tracking.ts
++++ b/src/features/orders/delivery-tracking.ts
+@@ -1,14 +1,31 @@
+-export function isReturningDelivery(rawStatus?: string, normalizedStatus?: string) {
++function isGenericReturnTrackingStatus(value: string) {
++  return /відмова від (?:одержання|отримання)|^(?:отменено|скасовано|cancelled?)$|возвращается отправителю|повертається відправнику|return(?:ing| to sender)/i.test(
++    value,
++  )
++}
++
++export function isReturningDelivery(
++  rawStatus?: string,
++  normalizedStatus?: string,
++  returnInProgress = false,
++) {
++  if (returnInProgress) return true
+   const normalized = normalizedStatus?.trim().toLowerCase() ?? ''
+   if (normalized === 'returning') return true
+   const raw = rawStatus?.trim().toLowerCase() ?? ''
+   return /відмова від (?:одержання|отримання)|возвращ|поверта|return(?:ing| to sender)/.test(raw)
+ }
+ 
+-export function deliveryReturnStatus(rawStatus?: string, normalizedStatus?: string) {
+-  return isReturningDelivery(rawStatus, normalizedStatus) ? 'Возвращается отправителю' : ''
++export function deliveryReturnStatus(
++  rawStatus?: string,
++  normalizedStatus?: string,
++  returnInProgress = false,
++) {
++  return isReturningDelivery(rawStatus, normalizedStatus, returnInProgress)
++    ? 'Возвращается отправителю'
++    : ''
++}
++
++export function currentReturnTrackingStatus(
++  rawStatus?: string,
++  normalizedStatus?: string,
++  returnInProgress = false,
++) {
++  if (!isReturningDelivery(rawStatus, normalizedStatus, returnInProgress)) return ''
++  const raw = rawStatus?.trim() ?? ''
++  if (!raw || isGenericReturnTrackingStatus(raw)) return ''
++  return `Текущий статус: ${raw}`
+ }
+ 
+ export function formatTrackingExpectedDeliveryAt(value?: string) {
+@@ -43,8 +60,9 @@ export function expectedReturnLabel(
+   rawStatus?: string,
+   normalizedStatus?: string,
+   expectedDeliveryAt?: string,
++  returnInProgress = false,
+ ) {
+-  if (!isReturningDelivery(rawStatus, normalizedStatus)) return ''
++  if (!isReturningDelivery(rawStatus, normalizedStatus, returnInProgress)) return ''
+   const expected = formatTrackingExpectedDeliveryAt(expectedDeliveryAt)
+   return expected ? `Ожидается возврат: ${expected}` : ''
+ }
+@@ -56,8 +74,9 @@ export function returnDestinationLabel(
+   city?: string,
+   address?: string,
+   hasPreviousDestination = false,
++  returnInProgress = false,
+ ) {
+-  if (normalizedStatus?.trim().toLowerCase() !== 'returning' || !hasPreviousDestination) return ''
++  if (!isReturningDelivery(rawStatus, normalizedStatus, returnInProgress) || !hasPreviousDestination)
++    return ''
+   const destination = [city?.trim(), address?.trim()].filter(Boolean).join(', ')
+   return destination ? `Возврат: ${destination}` : ''
+ }
+diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
+index 9f1f403..f729943 100644
+--- a/src/features/orders/types.ts
++++ b/src/features/orders/types.ts
+@@ -65,6 +65,8 @@ export interface Delivery {
+   /** Последний статус, полученный из tracking перевозчика. */
+   trackingStatus?: string
+   trackingNormalizedStatus?: string
++  /** Возврат уже начался, даже если текущий checkpoint перевозчика снова выглядит как обычное движение. */
++  trackingReturnInProgress?: boolean
+   trackingLastCheckedAt?: string
+   trackingStatusChangedAt?: string
+   trackingDataChangedAt?: string
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 9fcf0aa..2d28e5e 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -67,6 +67,7 @@ import {
+ } from '@/features/orders/display'
+ import {
++  currentReturnTrackingStatus,
+   deliveryReturnStatus,
+   expectedReturnLabel,
+   returnDestinationLabel,
+@@ -2139,6 +2140,7 @@ function returnSignalLabel(order: Order) {
+   if (lifecycleState === 'cancelled_before_shipment') return null
+   if (lifecycleState === 'return_completed') return 'Возврат принят'
+   if (lifecycleState === 'return_partial') return 'Возврат принят частично'
++  if (order.delivery.trackingReturnInProgress) return 'Возвращается'
+   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
+   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
+   if (/повер|возврат|return|refund/i.test(order.status)) return 'Возврат заявлен'
+@@ -3566,6 +3568,7 @@ function orderStatusTone(order: Order): OrderStatusTone {
+ 
+   if (
++    order.delivery.trackingReturnInProgress === true ||
+     ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
+     /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
+     /возвращ|повер|return|отмен|скас|cancel|відмов.*одерж/.test(trackingStatus) ||
+@@ -5637,6 +5640,7 @@ function orderDateTime(order: Order) {
+                     deliveryReturnStatus(
+                       order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
++                      order.delivery.trackingReturnInProgress,
+                     ) || deliveryStatusForOrder(order)
+                   }}</span
+                 >
+@@ -5644,6 +5648,12 @@ function orderDateTime(order: Order) {
+               <div
+                 v-if="
++                  currentReturnTrackingStatus(
++                    order.delivery.trackingStatus,
++                    order.delivery.trackingNormalizedStatus,
++                    order.delivery.trackingReturnInProgress,
++                  ) ||
+                   returnDestinationLabel(
+                     order.delivery.trackingStatus,
+                     order.delivery.trackingNormalizedStatus,
+@@ -5651,12 +5661,28 @@ function orderDateTime(order: Order) {
+                     order.delivery.address,
+                     hasDeliveryHistory(order.delivery),
++                    order.delivery.trackingReturnInProgress,
+                   ) ||
+                   expectedReturnLabel(
+                     order.delivery.trackingStatus,
+                     order.delivery.trackingNormalizedStatus,
+                     order.delivery.trackingExpectedDeliveryAt,
++                    order.delivery.trackingReturnInProgress,
+                   )
+                 "
+                 class="mt-2 space-y-1 rounded-lg bg-rose-50 px-3 py-2 text-xs"
+               >
++                <p
++                  v-if="
++                    currentReturnTrackingStatus(
++                      order.delivery.trackingStatus,
++                      order.delivery.trackingNormalizedStatus,
++                      order.delivery.trackingReturnInProgress,
++                    )
++                  "
++                  class="font-semibold text-slate-800"
++                >
++                  {{
++                    currentReturnTrackingStatus(
++                      order.delivery.trackingStatus,
++                      order.delivery.trackingNormalizedStatus,
++                      order.delivery.trackingReturnInProgress,
++                    )
++                  }}
++                </p>
+                 <p
+                   v-if="
+                     returnDestinationLabel(
+@@ -5666,6 +5692,7 @@ function orderDateTime(order: Order) {
+                       order.delivery.address,
+                       hasDeliveryHistory(order.delivery),
++                      order.delivery.trackingReturnInProgress,
+                     )
+                   "
+                   class="font-semibold text-rose-800"
+@@ -5678,6 +5705,7 @@ function orderDateTime(order: Order) {
+                       order.delivery.address,
+                       hasDeliveryHistory(order.delivery),
++                      order.delivery.trackingReturnInProgress,
+                     )
+                   }}
+                 </p>
+@@ -5688,6 +5716,7 @@ function orderDateTime(order: Order) {
+                       order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
+                       order.delivery.trackingExpectedDeliveryAt,
++                      order.delivery.trackingReturnInProgress,
+                     )
+                   "
+                   class="font-semibold text-slate-600"
+@@ -5698,6 +5727,7 @@ function orderDateTime(order: Order) {
+                       order.delivery.trackingStatus,
+                       order.delivery.trackingNormalizedStatus,
+                       order.delivery.trackingExpectedDeliveryAt,
++                      order.delivery.trackingReturnInProgress,
+                     )
+                   }}
+                 </p>
+diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/functions/sync-delivery-tracking/storage.ts
+index 21c943b..d5b0210 100644
+--- a/supabase/functions/sync-delivery-tracking/storage.ts
++++ b/supabase/functions/sync-delivery-tracking/storage.ts
+@@ -31,6 +31,28 @@ function currentAddress(delivery: JsonRecord) {
+   return [text(delivery.city), text(delivery.address)].filter(Boolean).join(', ')
+ }
+ 
++function deliveryHasReturnInProgress(delivery: JsonRecord) {
++  return delivery.trackingReturnInProgress === true || text(delivery.trackingNormalizedStatus) === 'returning'
++}
++
++function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
++  if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
++  return deliveryHasReturnInProgress(delivery) || result.normalizedStatus === 'returning'
++}
++
++function destinationForTrackingUpdate(delivery: JsonRecord, result: TrackingResult) {
++  if (
++    deliveryHasReturnInProgress(delivery) &&
++    result.normalizedStatus !== 'returning' &&
++    result.relation !== 'redirect'
++  ) {
++    return undefined
++  }
++  return result.destination
++}
++
+ function destinationChanged(delivery: JsonRecord, destination?: TrackingDestination) {
+   if (!destination) return false
+   if (destination.city && normalizedText(destination.city) !== normalizedText(delivery.city)) return true
+@@ -186,11 +208,14 @@ export function trackingChanged(delivery: JsonRecord, result: TrackingResult) {
+   if (hasDuplicateHistoryTtn(delivery.shipmentHistory)) return true
+   if (text(delivery.ttn) && !historyRows(delivery.shipmentHistory).length) return true
++  if (nextReturnInProgress(delivery, result) !== (delivery.trackingReturnInProgress === true))
++    return true
+   if (result.status !== text(delivery.trackingStatus)) return true
+   if (result.normalizedStatus !== text(delivery.trackingNormalizedStatus)) return true
+   if (result.activeTtn && shipmentValue(result.activeTtn) !== shipmentValue(delivery.ttn)) return true
+-  if (destinationChanged(delivery, result.destination)) return true
++  if (destinationChanged(delivery, destinationForTrackingUpdate(delivery, result))) return true
+   if (
+     result.relatedShipments &&
+     !sameValue(relatedShipmentsValue(result.relatedShipments), delivery.trackingRelatedShipments ?? [])
+@@ -214,11 +239,13 @@ export function mergeTrackingDelivery(
+   const oldAddress = currentAddress(currentDelivery)
+   const activeTtn = text(result.activeTtn) || oldTtn
+   const source = result.source ?? 'carrier_api'
++  const destination = destinationForTrackingUpdate(currentDelivery, result)
++  const returnInProgress = nextReturnInProgress(currentDelivery, result)
+   const ttnChanged = Boolean(activeTtn) && shipmentValue(activeTtn) !== shipmentValue(oldTtn)
+-  const addressChanged = destinationHistoryChanged(currentDelivery, result.destination)
++  const addressChanged = destinationHistoryChanged(currentDelivery, destination)
+   const statusChanged =
+     result.status !== text(currentDelivery.trackingStatus) ||
+     result.normalizedStatus !== text(currentDelivery.trackingNormalizedStatus)
+@@ -261,19 +288,19 @@ export function mergeTrackingDelivery(
+   }
+ 
+   if (activeTtn) nextDelivery.ttn = activeTtn
+-  if (result.destination?.city) {
+-    nextDelivery.city = result.destination.city
+-    nextDelivery.trackingDestinationCity = result.destination.city
++  if (destination?.city) {
++    nextDelivery.city = destination.city
++    nextDelivery.trackingDestinationCity = destination.city
+   }
+-  if (result.destination?.address) {
+-    nextDelivery.address = result.destination.address
+-    nextDelivery.trackingDestinationAddress = result.destination.address
++  if (destination?.address) {
++    nextDelivery.address = destination.address
++    nextDelivery.trackingDestinationAddress = destination.address
+   }
+-  if (result.destination?.branchNumber)
+-    nextDelivery.trackingDestinationBranchNumber = result.destination.branchNumber
+-  if (result.destination?.locationCode)
+-    nextDelivery.trackingDestinationLocationCode = result.destination.locationCode
+-  if (result.destination?.postalCode)
+-    nextDelivery.trackingDestinationPostalCode = result.destination.postalCode
++  if (destination?.branchNumber)
++    nextDelivery.trackingDestinationBranchNumber = destination.branchNumber
++  if (destination?.locationCode)
++    nextDelivery.trackingDestinationLocationCode = destination.locationCode
++  if (destination?.postalCode)
++    nextDelivery.trackingDestinationPostalCode = destination.postalCode
+ 
+   if (activeTtn && (ttnChanged || addressChanged || result.relation)) {
+     const currentRelated = (result.relatedShipments ?? []).find(
+@@ -286,11 +313,11 @@ export function mergeTrackingDelivery(
+       relation,
+       relatedTtn: currentRelated?.relatedTtn || (ttnChanged ? oldTtn : ''),
+-      city: text(result.destination?.city) || text(nextDelivery.city),
+-      address: text(result.destination?.address) || text(nextDelivery.address),
+-      branchNumber: text(result.destination?.branchNumber) || text(nextDelivery.trackingDestinationBranchNumber),
+-      locationCode: text(result.destination?.locationCode) || text(nextDelivery.trackingDestinationLocationCode),
+-      postalCode: text(result.destination?.postalCode) || text(nextDelivery.trackingDestinationPostalCode),
++      city: text(destination?.city) || text(nextDelivery.city),
++      address: text(destination?.address) || text(nextDelivery.address),
++      branchNumber: text(destination?.branchNumber) || text(nextDelivery.trackingDestinationBranchNumber),
++      locationCode: text(destination?.locationCode) || text(nextDelivery.trackingDestinationLocationCode),
++      postalCode: text(destination?.postalCode) || text(nextDelivery.trackingDestinationPostalCode),
+       source,
+       firstSeenAt: changedAt,
+       lastSeenAt: changedAt,
+@@ -301,6 +328,7 @@ export function mergeTrackingDelivery(
+ 
+   nextDelivery.trackingStatus = result.status
+   nextDelivery.trackingNormalizedStatus = result.normalizedStatus
++  nextDelivery.trackingReturnInProgress = returnInProgress
+   nextDelivery.trackingProvider = result.provider ?? carrierKind(currentDelivery)
+   nextDelivery.trackingSource = source === 'public_tracking' ? 'public_tracking' : 'official_api'
+   nextDelivery.trackingDataChangedAt = changedAt
+diff --git a/supabase/functions/sync-delivery-tracking/storage_return_test.ts b/supabase/functions/sync-delivery-tracking/storage_return_test.ts
+new file mode 100644
+index 0000000..622d1e3
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/storage_return_test.ts
+@@ -0,0 +1,72 @@
++import { mergeTrackingDelivery, trackingChanged } from './storage.ts'
++import type { JsonRecord, TrackingResult } from './types.ts'
++
++function assert(value: unknown, message: string): asserts value {
++  if (!value) throw new Error(message)
++}
++
++const depotResult: TrackingResult = {
++  status: 'Прибула в депо 4',
++  final: false,
++  normalizedStatus: 'in_transit',
++  provider: 'nova_poshta_api',
++  source: 'carrier_api',
++  destination: {
++    city: 'Київ',
++    address: 'Відділення №343',
++    branchNumber: '343',
++  },
++}
++
++Deno.test('return keeps its stage and destination while raw carrier checkpoint advances', () => {
++  const delivery: JsonRecord = {
++    ttn: '20451528497280',
++    carrier: 'Новая почта',
++    city: 'Циркуни',
++    address: 'Відділення №1',
++    trackingDestinationBranchNumber: '1',
++    trackingStatus: 'Відмова від отримання',
++    trackingNormalizedStatus: 'returning',
++    shipmentHistory: [
++      {
++        ttn: '20451528497280',
++        carrier: 'Новая почта',
++        relation: 'original',
++        city: 'Київ',
++        address: 'Відділення №343',
++        source: 'marketplace',
++        firstSeenAt: '2026-09-05T15:03:54Z',
++        lastSeenAt: '2026-09-06T14:58:08Z',
++      },
++    ],
++  }
++
++  assert(trackingChanged(delivery, depotResult), 'new depot checkpoint was ignored')
++  const next = mergeTrackingDelivery(delivery, depotResult, '2026-09-07T16:03:43Z')
++  assert(next.trackingStatus === 'Прибула в депо 4', 'raw current checkpoint was not stored')
++  assert(next.trackingNormalizedStatus === 'in_transit', 'current movement status was not stored')
++  assert(next.trackingReturnInProgress === true, 'return stage was lost after the refusal checkpoint')
++  assert(next.city === 'Циркуни', 'return destination city regressed to the original recipient')
++  assert(next.address === 'Відділення №1', 'return destination branch regressed to the original recipient')
++  assert(
++    next.trackingDestinationBranchNumber === '1',
++    'return destination branch number regressed to the original recipient',
++  )
++  assert(!trackingChanged(next, depotResult), 'unchanged depot checkpoint would cause repeated writes')
++})
++
++Deno.test('return flag is cleared when the carrier reports a terminal return delivery', () => {
++  const delivery: JsonRecord = {
++    ttn: '20451528497280',
++    carrier: 'Новая почта',
++    city: 'Циркуни',
++    address: 'Відділення №1',
++    trackingStatus: 'Прибула в депо 4',
++    trackingNormalizedStatus: 'in_transit',
++    trackingReturnInProgress: true,
++  }
++  const delivered: TrackingResult = {
++    status: 'Отримано',
++    final: true,
++    normalizedStatus: 'delivered',
++    destination: { city: 'Київ', address: 'Відділення №343' },
++  }
++  const next = mergeTrackingDelivery(delivery, delivered, '2026-09-08T12:00:00Z')
++  assert(next.trackingReturnInProgress === false, 'terminal delivery kept the return-in-progress flag')
++  assert(next.city === 'Циркуни', 'terminal return changed the return destination back to recipient')
++})
