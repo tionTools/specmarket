@@ -1,0 +1,90 @@
+name: Patch 56 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-56]
+    paths:
+      - 'PATCH56-CANDIDATE.patch'
+      - '.github/workflows/patch56-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply check
+        run: git apply --check PATCH56-CANDIDATE.patch
+
+      - name: Apply candidate
+        run: git apply PATCH56-CANDIDATE.patch
+
+      - name: Validate changed files and whitespace
+        shell: bash
+        run: |
+          git diff --check
+          git diff --name-only | sort | tee /tmp/changed.txt
+          cat > /tmp/expected.txt <<'EOF'
+          android/app/build.gradle.kts
+          android/app/src/main/AndroidManifest.xml
+          android/app/src/main/java/ua/orders/crm/Appearance.kt
+          android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          android/app/src/main/java/ua/orders/crm/OrderModels.kt
+          android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+          android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+          src/pages/HomeView.vue
+          EOF
+          sort -o /tmp/expected.txt /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/changed.txt
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Android tests, lint and APK
+        run: |
+          sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+          ./gradlew testDebugUnitTest lintDebug assembleDebug
+        working-directory: android
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 25
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Web checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - name: Final diff checks
+        shell: bash
+        run: |
+          git diff --check
+          git diff --name-only | sort > /tmp/final-changed.txt
+          diff -u /tmp/expected.txt /tmp/final-changed.txt
+          git diff > /tmp/PATCH56-FINAL-DIFF.patch
+          git status --short
+
+      - name: Upload validation diff
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch56-validation-diff
+          path: /tmp/PATCH56-FINAL-DIFF.patch
+          if-no-files-found: error
