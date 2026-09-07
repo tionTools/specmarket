@@ -25,6 +25,7 @@ jobs:
         shell: bash
         run: |
           BASE=f8d2e3f08b9047b94143033df11f6827db4bebb1
+          git add -N supabase/functions/sync-delivery-tracking/storage_return_test.ts
           git diff --check "$BASE" -- \
             src/features/orders/delivery-tracking.ts \
             src/features/orders/types.ts \
