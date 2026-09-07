@@ -47,14 +47,20 @@ async function novaShipment(apiKey: string, ttn: string, timeoutMs?: number) {
   return shipment
 }
 
-function novaDestination(shipment: JsonRecord): TrackingDestination | undefined {
-  const city = text(shipment.CityRecipient)
-  const address =
-    text(shipment.WarehouseRecipient) ||
-    text(shipment.WarehouseRecipientAddress) ||
-    text(shipment.RecipientAddress)
-  const branchNumber = text(shipment.WarehouseRecipientNumber)
-  const locationCode = text(shipment.WarehouseRecipientRef)
+function novaDestination(
+  shipment: JsonRecord,
+  returning = false,
+): TrackingDestination | undefined {
+  const city = text(returning ? shipment.CitySender : shipment.CityRecipient)
+  const address = returning
+    ? text(shipment.WarehouseSender) || text(shipment.WarehouseSenderAddress) || text(shipment.SenderAddress)
+    : text(shipment.WarehouseRecipient) ||
+      text(shipment.WarehouseRecipientAddress) ||
+      text(shipment.RecipientAddress)
+  const branchNumber = text(
+    returning ? shipment.WarehouseSenderNumber : shipment.WarehouseRecipientNumber,
+  )
+  const locationCode = text(returning ? shipment.WarehouseSenderRef : shipment.WarehouseRecipientRef)
   if (!city && !address && !branchNumber && !locationCode) return undefined
   return { city, address, branchNumber, locationCode }
 }
@@ -150,6 +156,7 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
 
   const source = text(shipment.Status)
   const base = readableStatus(source, text(shipment.StatusCode))
+  const destination = novaDestination(shipment, base.normalizedStatus === 'returning')
   const eventAt = text(shipment.DateScan) || text(shipment.RecipientDateTime)
   const events = compactEvents([{
     at: eventAt,
@@ -164,7 +171,7 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
     source: 'carrier_api',
     activeTtn,
     relation,
-    destination: novaDestination(shipment),
+    destination,
     relatedShipments,
     events,
     details: {
