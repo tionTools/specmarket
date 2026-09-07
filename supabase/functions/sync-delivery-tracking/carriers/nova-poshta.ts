@@ -93,6 +93,12 @@ function latestRedirection(rows: JsonRecord[], ttn: string) {
     }, undefined)
 }
 
+function novaCargoReturnNumber(shipment: JsonRecord) {
+  return text(shipment.LastCreatedOnTheBasisDocumentType).toLowerCase() === 'cargoreturn'
+    ? normalizedTtn(shipment.LastCreatedOnTheBasisNumber)
+    : ''
+}
+
 export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCircuit): Promise<TrackingResult> {
   const apiKey = text(Deno.env.get('NOVA_POSHTA_API_KEY'))
   if (!apiKey) throw new Error('Не задан NOVA_POSHTA_API_KEY')
@@ -148,6 +154,26 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
     }
   }
 
+  let returnLookupError = ''
+  const cargoReturnNumber = novaCargoReturnNumber(shipment)
+  if (cargoReturnNumber && cargoReturnNumber !== activeTtn && !visited.has(cargoReturnNumber)) {
+    try {
+      const returnShipment = await novaShipment(apiKey, cargoReturnNumber, redirectTimeoutMs)
+      relatedShipments.push({
+        ttn: cargoReturnNumber,
+        relation: 'return',
+        relatedTtn: activeTtn,
+        destination: novaDestination(returnShipment),
+      })
+      relation = 'return'
+      visited.add(cargoReturnNumber)
+      activeTtn = cargoReturnNumber
+      shipment = returnShipment
+    } catch (error) {
+      returnLookupError = error instanceof Error ? error.message : 'Ошибка проверки возврата Nova Poshta'
+    }
+  }
+
   const lightReturnNumber = normalizedTtn(shipment.LightReturnNumber)
   if (lightReturnNumber && lightReturnNumber !== activeTtn) {
     relatedShipments.push({ ttn: activeTtn, relation: 'return', relatedTtn: lightReturnNumber })
@@ -186,6 +212,7 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
       trackingStatusCode: text(shipment.StatusCode),
       trackingLightReturnNumber: lightReturnNumber,
       trackingRedirectLookupError: redirectLookupError,
+      trackingReturnLookupError: returnLookupError,
     },
   }
 }

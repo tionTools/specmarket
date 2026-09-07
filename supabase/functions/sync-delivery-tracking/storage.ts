@@ -47,14 +47,16 @@ function deliveryHasReturnInProgress(delivery: JsonRecord) {
 
 function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
   if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
-  return deliveryHasReturnInProgress(delivery) || result.normalizedStatus === 'returning'
+  return deliveryHasReturnInProgress(delivery) ||
+    result.normalizedStatus === 'returning' ||
+    result.relation === 'return'
 }
 
 function destinationForTrackingUpdate(delivery: JsonRecord, result: TrackingResult) {
   if (
     deliveryHasReturnInProgress(delivery) &&
     result.normalizedStatus !== 'returning' &&
-    result.relation !== 'redirect'
+    !['redirect', 'return'].includes(result.relation ?? '')
   ) {
     return undefined
   }

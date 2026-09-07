@@ -1,4 +1,5 @@
 import { mergeTrackingDelivery, trackingChanged } from './storage.ts'
+import { record } from './normalize.ts'
 import type { JsonRecord, TrackingResult } from './types.ts'
 
 function assert(value: unknown, message: string): asserts value {
@@ -74,4 +75,54 @@ Deno.test('return flag is cleared when the carrier reports a terminal return del
   const next = mergeTrackingDelivery(delivery, delivered, '2026-09-08T12:00:00Z')
   assert(next.trackingReturnInProgress === false, 'terminal delivery kept the return-in-progress flag')
   assert(next.city === 'Циркуни', 'terminal return changed the return destination back to recipient')
+})
+
+Deno.test('CargoReturn relation promotes the return TTN and return destination from stale refusal data', () => {
+  const delivery: JsonRecord = {
+    ttn: '20451528497280',
+    carrier: 'Новая почта',
+    city: 'Київ',
+    address: 'Відділення №343',
+    trackingDestinationBranchNumber: '343',
+    trackingStatus: 'Відмова від отримання',
+    trackingNormalizedStatus: 'cancelled',
+  }
+  const liveReturn: TrackingResult = {
+    status: 'Відправлення у с. Циркуни. Очікуйте повідомлення про прибуття',
+    final: false,
+    normalizedStatus: 'in_transit',
+    provider: 'nova_poshta_api',
+    source: 'carrier_api',
+    activeTtn: '59001764954977',
+    relation: 'return',
+    destination: {
+      city: 'Циркуни',
+      address: 'Відділення №1',
+      branchNumber: '1',
+    },
+    relatedShipments: [
+      {
+        ttn: '59001764954977',
+        relation: 'return',
+        relatedTtn: '20451528497280',
+        destination: { city: 'Циркуни', address: 'Відділення №1', branchNumber: '1' },
+      },
+    ],
+    details: { trackingExpectedDeliveryAt: '08-09-2026 15:00:00' },
+  }
+  const next = mergeTrackingDelivery(delivery, liveReturn, '2026-09-07T16:12:37Z')
+  assert(next.ttn === '59001764954977', 'return TTN did not become current')
+  assert(next.trackingReturnInProgress === true, 'return relation did not restore return stage')
+  assert(next.trackingStatus === liveReturn.status, 'live return status was not stored')
+  assert(next.city === 'Циркуни', 'live return city was not stored')
+  assert(next.address === 'Відділення №1', 'live return branch was not stored')
+  assert(next.trackingDestinationBranchNumber === '1', 'live return branch number was not stored')
+  assert(next.trackingExpectedDeliveryAt === '08-09-2026 15:00:00', 'live return ETA was not stored')
+  assert(Array.isArray(next.ttnHistory) && next.ttnHistory.includes('20451528497280'), 'original TTN was not preserved')
+  assert(
+    Array.isArray(next.shipmentHistory) && next.shipmentHistory.some((row) =>
+      record(row).ttn === '59001764954977' && record(row).relation === 'return'
+    ),
+    'return TTN was not preserved in shipment history',
+  )
 })
