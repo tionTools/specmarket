@@ -35,7 +35,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
      return (
        matchesPlatform &&
        matchesOrderState &&
-@@ -1418,12 +1424,10 @@
+@@ -1418,11 +1424,9 @@
      )
    })
  })
