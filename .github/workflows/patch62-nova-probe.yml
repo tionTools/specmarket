@@ -16,48 +16,26 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Probe official TrackingDocument without key
+      - name: Probe original and CargoReturn documents
         shell: bash
         run: |
           cat >/tmp/request.json <<'EOF'
-          {"apiKey":"","modelName":"TrackingDocument","calledMethod":"getStatusDocuments","methodProperties":{"Documents":[{"DocumentNumber":"20451528497280"}]}}
+          {"apiKey":"","modelName":"TrackingDocument","calledMethod":"getStatusDocuments","methodProperties":{"Documents":[{"DocumentNumber":"20451528497280"},{"DocumentNumber":"59001764954977"}]}}
           EOF
           curl -fsS --max-time 20 -H 'Content-Type: application/json' \
-            -d @/tmp/request.json https://api.novaposhta.ua/v2.0/json/ > /tmp/no-key.json
-          python - <<'PY' | tee /tmp/no-key.pretty.txt
+            -d @/tmp/request.json https://api.novaposhta.ua/v2.0/json/ > /tmp/live.json
+          python - <<'PY' | tee /tmp/live-summary.txt
           import json
-          p=json.load(open('/tmp/no-key.json'))
-          print(json.dumps(p, ensure_ascii=False, indent=2)[:30000])
+          p=json.load(open('/tmp/live.json'))
+          for row in p.get('data', []):
+              keys=['Number','Status','StatusCode','DateScan','TrackingUpdateDate','CitySender','WarehouseSender','CityRecipient','WarehouseRecipient','ScheduledDeliveryDate','ActualDeliveryDate','LastCreatedOnTheBasisDocumentType','LastCreatedOnTheBasisNumber','DateReturnCargo']
+              print(json.dumps({k:row.get(k) for k in keys}, ensure_ascii=False, indent=2))
+          print('errors=', p.get('errors'))
+          print('warnings=', p.get('warnings'))
           PY
-
-      - name: Inspect public tracking frontend assets
-        shell: bash
-        run: |
-          set -o pipefail
-          curl -LfsS --max-time 20 https://tracking.novaposhta.ua/ -o /tmp/tracking.html
-          python - <<'PY' >/tmp/scripts.txt
-          import re
-          from urllib.parse import urljoin
-          h=open('/tmp/tracking.html',encoding='utf-8',errors='ignore').read()
-          for x in re.findall(r'<script[^>]+src=["\x27]([^"\x27]+)',h): print(urljoin('https://tracking.novaposhta.ua/',x))
-          PY
-          mkdir -p /tmp/npjs
-          i=0
-          while IFS= read -r u; do
-            i=$((i+1)); curl -LfsS --max-time 15 "$u" -o "/tmp/npjs/$i.js" || true
-          done </tmp/scripts.txt
-          {
-            echo 'HTML_BYTES'; wc -c /tmp/tracking.html
-            echo 'SCRIPT_URLS'; cat /tmp/scripts.txt
-            echo 'ENDPOINT_CLUES'
-            grep -RaoE '.{0,160}(api\.novaposhta|graphql|track[^"[:space:]]{0,100}|getStatusDocuments|statusDocuments|api/[^"[:space:]]{1,120}).{0,160}' /tmp/npjs | head -n 200 || true
-          } | tee /tmp/frontend-clues.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: patch62-nova-probe
-          path: |
-            /tmp/no-key.pretty.txt
-            /tmp/frontend-clues.txt
-            /tmp/tracking.html
+          name: patch62-nova-live-return
+          path: /tmp/live-summary.txt
           if-no-files-found: error
