@@ -1,0 +1,199 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index b060158..7df9c0c 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -7,7 +7,7 @@ plugins {
+ android {
+     namespace = "ua.orders.crm"
+     compileSdk = 37
+-    defaultConfig { applicationId = "ua.orders.crm"; minSdk = 26; targetSdk = 36; versionCode = 3; versionName = "0.3" }
++    defaultConfig { applicationId = "ua.orders.crm"; minSdk = 26; targetSdk = 36; versionCode = 4; versionName = "0.4" }
+     buildFeatures { compose = true; buildConfig = true }
+     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+ }
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+index 333ab71..f80b912 100644
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -212,6 +212,26 @@ private fun StatusLabel(order: Order) {
+     }
+ }
+ 
++@Composable
++private fun DeliveryStatus(order: Order, compact: Boolean = false) {
++    val status = order.deliveryStatusInfo()
++    if (status.stage.isBlank()) return
++    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
++        Text(
++            "Доставка: ${status.stage}",
++            style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++        )
++        if (status.current.isNotBlank()) {
++            Text(
++                "Текущий статус: ${status.current}",
++                style = MaterialTheme.typography.bodySmall,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++            )
++        }
++    }
++}
++
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+@@ -251,6 +271,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+                             Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.titleMedium)
+                             Text("${order.orderDate.display()} ${order.orderTime.display()}")
+                             StatusLabel(order)
++                            DeliveryStatus(order, compact = true)
+                             Text(money(order.total()), style = MaterialTheme.typography.titleMedium)
+                             Text(order.items.sortedBy { it.position }.joinToString("\n") {
+                                 "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
+@@ -307,9 +328,12 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+                 Text("Доставка", style = MaterialTheme.typography.titleMedium)
+                 for ((key, label) in listOf("carrier" to "Перевозчик", "recipient" to "Получатель",
+                     "recipientPhone" to "Телефон получателя", "city" to "Город", "address" to "Адрес",
+-                    "ttn" to "ТТН", "payer" to "Плательщик", "trackingStatus" to "Статус доставки")) {
++                    "ttn" to "ТТН", "payer" to "Плательщик")) {
+                     DetailField(label, order.deliveryField(key))
+                 }
++                val deliveryStatus = order.deliveryStatusInfo()
++                DetailField("Статус доставки", deliveryStatus.stage.display())
++                if (deliveryStatus.current.isNotBlank()) DetailField("Текущий статус", deliveryStatus.current)
+                 DetailField("Расход продавца на доставку", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
+                 HorizontalDivider()
+                 DetailField("Способ оплаты", order.deliveryField("paymentMethod"))
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+index 34d1675..6f31234 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -74,6 +74,41 @@ fun Order.deliveryValue(key: String): String =
+ fun Order.deliveryFlag(key: String): Boolean =
+     ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
+ 
++data class DeliveryStatusInfo(val stage: String = "", val current: String = "")
++
++private fun isGenericReturnTrackingStatus(value: String) =
++    Regex("відмова від (?:одержання|отримання)|^(?:отменено|скасовано|cancelled?)$|возвращается отправителю|повертається відправнику|return(?:ing| to sender)", RegexOption.IGNORE_CASE)
++        .containsMatchIn(value.trim())
++
++fun Order.deliveryStatusInfo(): DeliveryStatusInfo {
++    val raw = deliveryValue("trackingStatus").trim()
++    val normalized = deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
++    val deliveryStatus = deliveryValue("status").trim()
++    val rawImpliesReturn = Regex("відмова від (?:одержання|отримання)|возвращ|поверта|return", RegexOption.IGNORE_CASE)
++        .containsMatchIn(raw)
++    val returning = deliveryFlag("trackingReturnInProgress") || normalized == "returning" || rawImpliesReturn
++    if (returning) {
++        return DeliveryStatusInfo(
++            stage = "Возвращается отправителю",
++            current = raw.takeUnless { it.isBlank() || isGenericReturnTrackingStatus(it) }.orEmpty(),
++        )
++    }
++    if (raw.isNotBlank()) return DeliveryStatusInfo(stage = raw)
++    val stage = when (normalized) {
++        "accepted" -> "Принято перевозчиком"
++        "in_transit" -> "В пути"
++        "ready_for_pickup" -> "Готово к выдаче"
++        "delivered" -> "Получено"
++        "returned" -> "Возвращено"
++        "cancelled" -> "Отменено"
++        else -> deliveryStatus
++    }
++    return DeliveryStatusInfo(stage = stage)
++}
++
++fun ordersAfterClosingDetail(current: List<Order>, beforeDetail: List<Order>): List<Order> =
++    if (current.isEmpty() && beforeDetail.isNotEmpty()) beforeDetail else current
++
+ fun orderStatusTone(order: Order): StatusTone {
+     val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
+     val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+index 9fdfdcd..69e8c65 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -16,6 +16,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+     private val requests = Mutex()
+     private var realtimeJob: Job? = null
+     private var visible = false
++    private var ordersBeforeDetail: List<Order> = emptyList()
+     var email by mutableStateOf<String?>(null); private set
+     var initializing by mutableStateOf(true); private set
+     var authBusy by mutableStateOf(false); private set
+@@ -93,7 +94,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+     }
+ 
+     private fun clearOrders() {
+-        orders = emptyList(); selectedId = null; detail = null
++        orders = emptyList(); ordersBeforeDetail = emptyList(); selectedId = null; detail = null
+     }
+ 
+     private fun merge(order: Order) {
+@@ -123,6 +124,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+     }
+ 
+     fun open(id: String) {
++        ordersBeforeDetail = orders
+         selectedId = id; detail = orders.find { it.id == id }
+         viewModelScope.launch {
+             try {
+@@ -132,7 +134,13 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+             catch (_: Exception) { message = "Не удалось обновить детали. Показаны ранее загруженные данные." }
+         }
+     }
+-    fun closeDetail() { selectedId = null; detail = null }
++    fun closeDetail() {
++        orders = ordersAfterClosingDetail(orders, ordersBeforeDetail)
++        ordersBeforeDetail = emptyList()
++        selectedId = null
++        detail = null
++        if (email != null) refresh()
++    }
+     fun dismissMessage() { message = null }
+ 
+     fun login(email: String, password: String) {
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+index bc82270..506b0c3 100644
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -107,6 +107,38 @@ class OrderModelsTest {
+         )
+     }
+ 
++    @Test fun delivery_status_exposes_return_stage_and_live_carrier_checkpoint() {
++        val returning = order("Прийнято").copy(delivery = buildJsonObject {
++            put("trackingReturnInProgress", true)
++            put("trackingNormalizedStatus", "in_transit")
++            put("trackingStatus", "Прибула в депо 4")
++        }).deliveryStatusInfo()
++        assertEquals("Возвращается отправителю", returning.stage)
++        assertEquals("Прибула в депо 4", returning.current)
++
++        val staleRefusal = order("Прийнято").copy(delivery = buildJsonObject {
++            put("trackingNormalizedStatus", "cancelled")
++            put("trackingStatus", "Відмова від отримання")
++        }).deliveryStatusInfo()
++        assertEquals("Возвращается отправителю", staleRefusal.stage)
++        assertEquals("", staleRefusal.current)
++
++        val ordinary = order("Прийнято").copy(delivery = buildJsonObject {
++            put("trackingNormalizedStatus", "in_transit")
++            put("trackingStatus", "Прибула у відділення")
++        }).deliveryStatusInfo()
++        assertEquals("Прибула у відділення", ordinary.stage)
++        assertEquals("", ordinary.current)
++    }
++
++    @Test fun closing_detail_restores_cached_list_only_if_current_list_was_lost() {
++        val cached = listOf(Order("a"), Order("b"))
++        assertEquals(cached, ordersAfterClosingDetail(emptyList(), cached))
++        val current = listOf(Order("c"))
++        assertEquals(current, ordersAfterClosingDetail(current, cached))
++        assertTrue(ordersAfterClosingDetail(emptyList(), emptyList()).isEmpty())
++    }
++
+     @Test fun notification_candidate_is_only_new_marketplace_order() {
+         assertTrue(isNewOrderNotificationCandidate(order("Новий", "Пром")))
+         assertTrue(isNewOrderNotificationCandidate(order("Новый", "Каста")))
