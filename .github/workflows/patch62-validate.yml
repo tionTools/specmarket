@@ -31,10 +31,10 @@ jobs:
       - name: Apply Patch 62 candidate
         shell: bash
         run: |
-          git apply --check PATCH62-CANDIDATE.patch
-          git apply PATCH62-CANDIDATE.patch
-          git apply --check PATCH62-ADJUST.patch
-          git apply PATCH62-ADJUST.patch
+          git apply --check --recount PATCH62-CANDIDATE.patch
+          git apply --recount PATCH62-CANDIDATE.patch
+          git apply --check --recount PATCH62-ADJUST.patch
+          git apply --recount PATCH62-ADJUST.patch
           git diff --check
 
       - name: Validate exact diff scope
