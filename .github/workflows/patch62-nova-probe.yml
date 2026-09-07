@@ -1,0 +1,68 @@
+name: Patch 62 Nova Probe
+
+on:
+  push:
+    branches: [chatgpt-validate-62]
+    paths:
+      - '.github/workflows/patch62-nova-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Probe official TrackingDocument without key
+        shell: bash
+        run: |
+          cat >/tmp/request.json <<'EOF'
+          {"apiKey":"","modelName":"TrackingDocument","calledMethod":"getStatusDocuments","methodProperties":{"Documents":[{"DocumentNumber":"20451528497280"}]}}
+          EOF
+          curl -fsS --max-time 20 -H 'Content-Type: application/json' \
+            -d @/tmp/request.json https://api.novaposhta.ua/v2.0/json/ | tee /tmp/no-key.json
+          echo
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/no-key.json'))
+          print(json.dumps(p, ensure_ascii=False, indent=2)[:20000])
+          PY
+
+      - name: Inspect public tracking frontend assets
+        shell: bash
+        run: |
+          set -o pipefail
+          curl -LfsS --max-time 20 https://tracking.novaposhta.ua/ -o /tmp/tracking.html
+          echo '--- html bytes ---'
+          wc -c /tmp/tracking.html
+          echo '--- script srcs ---'
+          python - <<'PY'
+          import re
+          h=open('/tmp/tracking.html',encoding='utf-8',errors='ignore').read()
+          for x in re.findall(r'<script[^>]+src=["\x27]([^"\x27]+)',h): print(x)
+          PY
+          mkdir -p /tmp/npjs
+          python - <<'PY' >/tmp/scripts.txt
+          import re
+          from urllib.parse import urljoin
+          h=open('/tmp/tracking.html',encoding='utf-8',errors='ignore').read()
+          for x in re.findall(r'<script[^>]+src=["\x27]([^"\x27]+)',h): print(urljoin('https://tracking.novaposhta.ua/',x))
+          PY
+          i=0
+          while IFS= read -r u; do
+            i=$((i+1)); curl -LfsS --max-time 20 "$u" -o "/tmp/npjs/$i.js" || true
+          done </tmp/scripts.txt
+          echo '--- endpoint clues ---'
+          grep -RaoE '.{0,120}(api\.novaposhta|graphql|track[^"[:space:]]{0,80}|getStatusDocuments|statusDocuments|api/[^"[:space:]]{1,100}).{0,120}' /tmp/npjs | head -n 120 || true
+
+      - name: Inspect current novaposhta tracking route
+        shell: bash
+        run: |
+          curl -LfsS --max-time 20 https://novaposhta.ua/tracking/20451528497280/ -o /tmp/newtracking.html || true
+          echo '--- new route bytes ---'
+          wc -c /tmp/newtracking.html || true
+          echo '--- TTN/status snippets ---'
+          grep -aoE '.{0,180}(20451528497280|Прибула|депо|Відмова|tracking).{0,220}' /tmp/newtracking.html | head -n 80 || true
