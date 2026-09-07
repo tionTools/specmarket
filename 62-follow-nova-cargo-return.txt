@@ -1,0 +1,63 @@
+PATCH 62 — Nova Poshta CargoReturn tracking
+
+База patch: main commit c339ec736e4a0cfde1cb34619125e0b68b411167.
+
+Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+1. Перейди в:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+
+2. Выполни:
+   git fetch origin main chatgpt-patches
+   git rev-parse origin/main
+
+   Ожидается ровно:
+   c339ec736e4a0cfde1cb34619125e0b68b411167
+
+   Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+3. Выполни:
+   git switch main
+   git merge --ff-only origin/main
+
+4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+5. Получи patch:
+   git show origin/chatgpt-patches:62-follow-nova-cargo-return.patch > .git/PATCH62.patch
+
+6. Выполни:
+   git apply --check .git/PATCH62.patch
+   git apply .git/PATCH62.patch
+   git diff --check
+
+   Если git apply --check или применение не прошло — остановись. Ничего не исправляй.
+
+7. Добавь в commit ТОЛЬКО:
+   supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+   supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+   supabase/functions/sync-delivery-tracking/storage.ts
+   supabase/functions/sync-delivery-tracking/storage_return_test.ts
+
+8. Проверь:
+   git diff --cached --name-only
+
+   В staged должны быть ровно эти 4 файла. AGENTS.md не добавлять.
+
+9. Commit и push:
+   git commit -m "Follow Nova Poshta CargoReturn tracking"
+   git push origin main
+
+10. После успешного push задеплой только изменённую Edge Function:
+    pnpm exec supabase functions deploy sync-delivery-tracking
+
+    Если deploy завершился ошибкой — не исследуй причину, просто сообщи ошибку.
+
+11. Ничего больше не запускать. Все regression-тесты, Deno check, live Nova Poshta control и чистое повторное применение canonical patch уже независимо проверены.
+
+12. Сообщи только:
+    - commit SHA;
+    - успешен ли push;
+    - успешен ли deploy sync-delivery-tracking;
+    - итог git status --short.
+
+Не запускать Deno. Не менять AGENTS.md.
