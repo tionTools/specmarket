@@ -68,8 +68,8 @@ jobs:
           grep -F 'DeliveryStatus(order, compact = true)' android/app/src/main/java/ua/orders/crm/MainActivity.kt
           grep -F 'Текущий статус:' android/app/src/main/java/ua/orders/crm/MainActivity.kt
           grep -F 'ordersBeforeDetail = orders' android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          grep -F 'orders = sortOrdersForDisplay(ordersDuringDetailRefresh(orders, batch, selectedId != null))' android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
           grep -F 'orders = ordersAfterClosingDetail(orders, ordersBeforeDetail)' android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
-          grep -F 'if (email != null) refresh()' android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
           test -s android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Build canonical Patch 63 and clean re-apply
