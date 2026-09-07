@@ -35,6 +35,11 @@ data class Order(
 )
 
 enum class StatusTone { NEW, NEGATIVE, COMPLETE, ACTIVE }
+enum class AcceptRoute(val function: String) {
+    PROM("sync-prom-orders"),
+    EPICENTR("sync-epicentr-orders"),
+    KASTA("sync-kasta-orders"),
+}
 fun normalizedStatus(status: String?) = status.orEmpty().trim().lowercase(Locale.ROOT)
 fun isNewStatus(status: String?) = normalizedStatus(status) in setOf("новий", "новый", "new", "pending")
 fun statusTone(status: String?): StatusTone {
@@ -46,10 +51,27 @@ fun statusTone(status: String?): StatusTone {
         else -> StatusTone.ACTIVE
     }
 }
-fun canAccept(order: Order, email: String?) =
-    email != null && !email.equals("guest@gmail.com", true) &&
-        order.platform.orEmpty().trim().equals("Пром", true) && isNewStatus(order.status) &&
-        order.externalId?.matches(Regex("prom:[0-9]+")) == true
+fun acceptRoute(order: Order, email: String?): AcceptRoute? {
+    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
+    val externalId = order.externalId.orEmpty()
+    return when (order.platform.orEmpty().trim().lowercase(Locale.ROOT)) {
+        "пром" -> AcceptRoute.PROM.takeIf { externalId.matches(Regex("prom:[1-9][0-9]*")) }
+        "эпицентр", "епіцентр" -> AcceptRoute.EPICENTR.takeIf { externalId.matches(Regex("[1-9][0-9]*")) }
+        // Reserved for the confirmed Kasta write contract. It must stay unavailable until then.
+        "каста", "kasta" -> null
+        else -> null
+    }
+}
+fun canAccept(order: Order, email: String?) = acceptRoute(order, email) != null
+
+fun acceptUnavailableReason(order: Order, email: String?): String? {
+    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
+    val platform = order.platform.orEmpty().trim().lowercase(Locale.ROOT)
+    val validKastaId = order.externalId?.matches(Regex("kasta:[1-9][0-9]*")) == true
+    return if (platform in setOf("каста", "kasta") && validKastaId)
+        "Принятие Каста временно недоступно: нужен официальный HUB API contract."
+    else null
+}
 
 fun Order.total(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
     sum + BigDecimal.valueOf(item.price ?: 0.0) * BigDecimal.valueOf(item.quantity ?: 0.0)

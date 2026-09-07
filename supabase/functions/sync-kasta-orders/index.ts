@@ -3,6 +3,11 @@ import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import {
+  kastaPhysicalMovement,
+  preserveKastaPhysicalReturnQuantity,
+  resolveKastaPersistedItemSnapshot,
+} from '../_shared/kasta-return.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -175,16 +180,23 @@ function originalOrderItemQuantity(
   order: RecordValue,
   item: RecordValue,
   previous: RecordValue | undefined,
+  delivery: RecordValue,
 ) {
   const apiQuantity = itemQuantity(item)
-  if (!hasGoodsReturnStatus(order)) return apiQuantity
-
-  // CRM quantity is the originally ordered quantity. Kasta may later reduce/storno
-  // the API quantity during a return, but that must not silently accept the return
-  // inside CRM. A previously saved positive quantity is therefore authoritative.
+  const statuses = Array.isArray(order.statuses) ? order.statuses : []
   const previousQuantity = number(previous?.quantity)
-  if (previousQuantity > 0) return Math.max(previousQuantity, apiQuantity)
+  const preservedPhysicalQuantity = preserveKastaPhysicalReturnQuantity(
+    statuses,
+    delivery,
+    apiQuantity,
+    previousQuantity,
+  )
+  if (preservedPhysicalQuantity !== apiQuantity) return preservedPhysicalQuantity
 
+  if (!hasGoodsReturnStatus(order) || !kastaPhysicalMovement(delivery)) return apiQuantity
+
+  // Recovery for a physically shipped goods return when the current API payload no
+  // longer carries the original quantity and CRM has no positive previous snapshot.
   const explicitOriginalQuantity = number(
     pick(item, 'original_quantity', 'ordered_quantity', 'initial_quantity'),
   )
@@ -383,7 +395,30 @@ Deno.serve(async (request) => {
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+
+  const body = await request.json().catch(() => ({})) as {
+    full?: unknown
+    externalId?: unknown
+    scheduled?: unknown
+    acceptExternalIds?: unknown
+  }
+  if (body.acceptExternalIds !== undefined) {
+    if (isScheduledRequest || body.scheduled === true) {
+      return Response.json(
+        { ok: false, message: 'Принятие недоступно для cron.' },
+        { status: 403, headers: corsHeaders },
+      )
+    }
+    return Response.json(
+      {
+        ok: false,
+        message: 'Принятие Каста временно недоступно: нужен официальный HUB API contract.',
+        code: 'KASTA_ACCEPT_CONTRACT_REQUIRED',
+      },
+      { status: 501, headers: corsHeaders },
+    )
+  }
 
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
   let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
@@ -396,7 +431,6 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Kasta: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
   }
 
-  const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
   const fullSync = body.full === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
   const royaltyCache = new Map<string, number>()
@@ -414,7 +448,11 @@ Deno.serve(async (request) => {
     received += orders.length
     if (!orders.length) return null
 
-    const hashes = new Map(await Promise.all(orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const)))
+    const hashes = new Map<string, string>(
+      await Promise.all(
+        orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const),
+      ),
+    )
     const externalIds = [...hashes.keys()]
     const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
       ? await admin
@@ -561,7 +599,7 @@ Deno.serve(async (request) => {
       const savedItems = []
       for (const [position, item] of items.entries()) {
         const previous = byPosition.get(position)
-        const quantity = originalOrderItemQuantity(order, item, previous)
+        const quantity = originalOrderItemQuantity(order, item, previous, currentDelivery)
         const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
         const supplierCode = text(item.supplier_code)
         const previousMarketplaceProductKey = text(
@@ -609,7 +647,30 @@ Deno.serve(async (request) => {
             apiRoyalty,
           } }))
         }
-        savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: resolvedCost.cost, cost_usd: resolvedCost.costUsd, marketplace_product_key: marketplaceProductKey || null, cost_manual: resolvedCost.costManual, price_item_id: resolvedCost.priceItemId, royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
+        const apiItemSnapshot = {
+          order_id: orderId,
+          position,
+          product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')),
+          size: text(pick(item, 'kasta_size', 'size')),
+          image_url: itemImage(item) || feedImage || previous?.image_url || null,
+          quantity,
+          price: itemPrice(item) || (quantity > 0 ? number(item.total_price) / quantity : 0),
+          cost: resolvedCost.cost,
+          cost_usd: resolvedCost.costUsd,
+          marketplace_product_key: marketplaceProductKey || null,
+          cost_manual: resolvedCost.costManual,
+          price_item_id: resolvedCost.priceItemId,
+          royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0,
+          royalty_amount: previous?.royalty_amount ?? null,
+        }
+        savedItems.push(
+          resolveKastaPersistedItemSnapshot(
+            Array.isArray(order.statuses) ? order.statuses : [],
+            currentDelivery,
+            previous,
+            apiItemSnapshot,
+          ),
+        )
       }
       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))

@@ -7,4 +7,48 @@
 
 body {
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f8fafc;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #cbd5e1;
+}
+:root[data-theme='dark'] {
+  --surface: #101418;
+  --surface-raised: #182028;
+  --text: #e5e7eb;
+  --muted: #a8b3c1;
+  --border: #455466;
+}
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+:root[data-theme='dark'] .bg-white,
+:root[data-theme='dark'] .bg-slate-50,
+:root[data-theme='dark'] .bg-slate-100 {
+  background-color: var(--surface-raised) !important;
+}
+:root[data-theme='dark'] .text-slate-900,
+:root[data-theme='dark'] .text-slate-800,
+:root[data-theme='dark'] .text-slate-700 {
+  color: var(--text) !important;
+}
+:root[data-theme='dark'] .text-slate-600,
+:root[data-theme='dark'] .text-slate-500,
+:root[data-theme='dark'] .text-slate-400 {
+  color: var(--muted) !important;
+}
+:root[data-theme='dark'] .border-slate-100,
+:root[data-theme='dark'] .border-slate-200,
+:root[data-theme='dark'] .border-slate-300 {
+  border-color: var(--border) !important;
 }

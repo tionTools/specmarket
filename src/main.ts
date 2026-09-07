@@ -1,11 +1,13 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import './global.css'
+import { applyAppearance, appearanceStorageKey, parseAppearance } from './lib/appearance'
 
 import App from './App.vue'
 import router from './router'
 
 const staleChunkReloadKey = 'specmarket:stale-chunk-reload'
+applyAppearance(parseAppearance(window.localStorage.getItem(appearanceStorageKey)))
 
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault()

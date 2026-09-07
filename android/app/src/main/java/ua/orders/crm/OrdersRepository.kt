@@ -63,9 +63,9 @@ class OrdersRepository {
         limit(1)
     }.decodeList<Order>().firstOrNull()
 
-    suspend fun accept(externalId: String): AcceptResponse {
+    suspend fun accept(route: AcceptRoute, externalId: String): AcceptResponse {
         check(client.auth.currentSessionOrNull() != null)
-        return json.decodeFromString(client.functions.invoke("sync-prom-orders", buildJsonObject {
+        return json.decodeFromString(client.functions.invoke(route.function, buildJsonObject {
             put("acceptExternalIds", buildJsonArray { add(externalId) })
         }).bodyAsText())
     }

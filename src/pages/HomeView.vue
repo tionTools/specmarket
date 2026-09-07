@@ -22,6 +22,20 @@ import {
   useWindowScroll,
 } from '@vueuse/core'
 import {
+  getOrderLifecycleState,
+  hasPhysicalShipmentMovement,
+  includeInUnpaidShipment,
+  isOrderVisibleInMainList,
+  isReturnLifecycleState,
+} from '../features/orders/shipment-accounting'
+import {
+  getNetOrderAmount,
+  getNetOrderCost,
+  getNetRoyalty,
+  getProductRoyalty,
+  getRemainingQuantity,
+} from '../features/orders/financials'
+import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -119,7 +133,8 @@ watch(orderListPeriod, (period) => {
 })
 const isComparingPreviousPeriod = ref(false)
 const isPlatformSummaryExpanded = ref(false)
-const isShowingCancelledAndReturned = ref(false)
+const isShowingCancellations = ref(false)
+const isShowingReturns = ref(false)
 const isShowingUnpaidOnly = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
@@ -549,27 +564,6 @@ const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
 const getOrderPreviewImage = (order: Order) => order.products[0]?.imageUrl
 const getProductAmount = (product: OrderProduct) => product.price * product.quantity
-const getRemainingQuantity = (product: OrderProduct) =>
-  Math.max(0, product.quantity - (product.returnedQuantity ?? 0))
-const getNetOrderAmount = (order: Order) =>
-  order.products.reduce((sum, product) => sum + product.price * getRemainingQuantity(product), 0)
-const getNetOrderCost = (order: Order) =>
-  order.products.reduce((sum, product) => sum + product.cost * getRemainingQuantity(product), 0)
-const getProductRoyalty = (order: Order, product: OrderProduct) => {
-  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
-  return product.royaltyAmount ?? product.price * product.quantity * (percent / 100)
-}
-const getNetProductRoyalty = (order: Order, product: OrderProduct) => {
-  const remainingQuantity = getRemainingQuantity(product)
-  if (remainingQuantity === product.quantity) return getProductRoyalty(order, product)
-  if (product.quantity <= 0) return 0
-  if (product.royaltyAmount !== undefined)
-    return product.royaltyAmount * (remainingQuantity / product.quantity)
-  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
-  return product.price * remainingQuantity * (percent / 100)
-}
-const getNetRoyalty = (order: Order) =>
-  order.products.reduce((sum, product) => sum + getNetProductRoyalty(order, product), 0)
 const hasAcceptedReturn = (order: Order) =>
   order.products.some((product) => (product.returnedQuantity ?? 0) > 0)
 const isFullyAcceptedReturn = (order: Order) =>
@@ -1108,7 +1102,8 @@ async function handlePromRegistryFile(file: File) {
     registryKeyType.value = keyType
     isPromRegistryDraft.value = true
     platformFilter.value = 'all'
-    isShowingCancelledAndReturned.value = false
+    isShowingCancellations.value = false
+    isShowingReturns.value = false
     await persistenceQueue
     await reconcileRemoteOrders(true)
     applyPromRegistryPreview(entries)
@@ -1177,10 +1172,6 @@ function isCancelledOrReturned(order: Order) {
   )
 }
 
-function isCancelledOrder(order: Order) {
-  return /скас|отмен|cancel/.test(displayOrderStatus(order.status).toLowerCase())
-}
-
 const reportOrders = computed(() =>
   orders.value.filter((order) => {
     if (!order.delivery.ttn.trim()) return false
@@ -1194,7 +1185,7 @@ const unpaidShipmentAmount = computed(() =>
     .filter((order) => {
       const orderDate = parseOrderDate(order.date)
       if (orderDate === null || orderDate < unpaidShipmentAccountingStart) return false
-      return Boolean(order.delivery.ttn.trim()) && !isPaid(order) && !isCancelledOrder(order)
+      return includeInUnpaidShipment(order, displayOrderStatus(order.status), isPaid(order))
     })
     .reduce((total, order) => total + getNetOrderAmount(order), 0),
 )
@@ -1403,15 +1394,19 @@ const matchingOrders = computed(() => {
 
     if (search) return haystack.includes(search) || matchesTtn
 
+    const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
     const matchesPlatform =
-      isShowingCancelledAndReturned.value ||
+      isShowingCancellations.value ||
+      isShowingReturns.value ||
       platformFilter.value === 'all' ||
       orderBusinessPlatform(order) === platformFilter.value
     const matchesOrderState = isPromRegistryView.value
       ? true
-      : isShowingCancelledAndReturned.value
-        ? isCancelledOrReturned(order)
-        : !isCancelledOrReturned(order)
+      : isShowingCancellations.value
+        ? lifecycleState === 'cancelled_before_shipment'
+        : isShowingReturns.value
+          ? isReturnLifecycleState(lifecycleState)
+          : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
       isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
@@ -1640,9 +1635,19 @@ async function restorePrintedOrder(order: Order) {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
 }
 
-function toggleCancelledAndReturned() {
-  isShowingCancelledAndReturned.value = !isShowingCancelledAndReturned.value
-  if (isShowingCancelledAndReturned.value) {
+function toggleCancellations() {
+  isShowingCancellations.value = !isShowingCancellations.value
+  if (isShowingCancellations.value) {
+    isShowingReturns.value = false
+    platformFilter.value = 'all'
+    isShowingUnpaidOnly.value = false
+  }
+}
+
+function toggleReturns() {
+  isShowingReturns.value = !isShowingReturns.value
+  if (isShowingReturns.value) {
+    isShowingCancellations.value = false
     platformFilter.value = 'all'
     isShowingUnpaidOnly.value = false
   }
@@ -1650,7 +1655,10 @@ function toggleCancelledAndReturned() {
 
 function toggleUnpaidOrders() {
   isShowingUnpaidOnly.value = !isShowingUnpaidOnly.value
-  if (isShowingUnpaidOnly.value) isShowingCancelledAndReturned.value = false
+  if (isShowingUnpaidOnly.value) {
+    isShowingCancellations.value = false
+    isShowingReturns.value = false
+  }
 }
 
 function scrollOrdersToTop() {
@@ -1966,11 +1974,15 @@ function productReturnKey(order: Order, product: OrderProduct) {
 }
 
 function returnSignalLabel(order: Order) {
+  const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
+  if (lifecycleState === 'cancelled_before_shipment') return null
+  if (lifecycleState === 'return_completed') return 'Возврат принят'
+  if (lifecycleState === 'return_partial') return 'Возврат принят частично'
   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
   if (/повер|возврат|return|refund/i.test(order.status)) return 'Возврат заявлен'
-  if (order.delivery.printedAt && /скас|отмен|cancel/i.test(order.status))
-    return 'Отменён после сборки — возможен возврат'
+  if (hasPhysicalShipmentMovement(order) && /скас|отмен|cancel/i.test(order.status))
+    return 'Отменён после отправки — ожидается возврат'
   return null
 }
 
@@ -4605,14 +4617,26 @@ function orderDateTime(order: Order) {
           <button
             class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
             :class="
-              isShowingCancelledAndReturned
+              isShowingCancellations
                 ? 'border-rose-500 bg-rose-50 text-rose-700'
                 : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
             "
             type="button"
-            @click="toggleCancelledAndReturned"
+            @click="toggleCancellations"
           >
-            Отмены и возвраты
+            Отмены
+          </button>
+          <button
+            class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            :class="
+              isShowingReturns
+                ? 'border-rose-500 bg-rose-50 text-rose-700'
+                : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+            "
+            type="button"
+            @click="toggleReturns"
+          >
+            Возвраты
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
             <label
@@ -4931,7 +4955,7 @@ function orderDateTime(order: Order) {
                     {{ returnSignalLabel(order) }} · возврат ожидает принятия
                   </span>
                   <button
-                    v-if="!isGuest && order.delivery.printedAt"
+                    v-if="!isGuest && hasPhysicalShipmentMovement(order)"
                     :disabled="isSavingReturn"
                     class="rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
                     :class="

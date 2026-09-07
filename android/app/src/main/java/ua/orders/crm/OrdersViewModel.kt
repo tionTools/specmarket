@@ -167,13 +167,13 @@ class OrdersViewModel : ViewModel() {
         }
     }
     fun accept(order: Order) {
-        if (acceptingId != null || !canAccept(order, email)) return
+        val route = acceptRoute(order, email) ?: return
         acceptingId = order.id
         viewModelScope.launch {
             try {
-                val result = repository.accept(requireNotNull(order.externalId))
+                val result = repository.accept(route, requireNotNull(order.externalId))
                 message = when {
-                    !result.ok -> "Заказ не принят. Обновите данные и проверьте статус."
+                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
                     result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
                     else -> "Заказ принят."
                 }

@@ -10,6 +10,13 @@ import {
 } from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import {
+  epicentrConfirmationStatus,
+  epicentrOrderStatus,
+  isAcceptedMarketplaceStatus,
+  isNewMarketplaceStatus,
+  normalizeExternalIds,
+} from '../_shared/marketplace-accept.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -328,11 +335,172 @@ Deno.serve(async (request) => {
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') {
+  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
 
-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
+  const body = await request.json().catch(() => ({})) as {
+    externalId?: unknown
+    full?: unknown
+    manual?: unknown
+    scheduled?: unknown
+    acceptExternalIds?: unknown
+  }
+
+  if (body.acceptExternalIds !== undefined) {
+    if (isScheduledRequest || body.scheduled === true) {
+      return Response.json(
+        { ok: false, message: 'Принятие недоступно для cron.' },
+        { status: 403, headers: corsHeaders },
+      )
+    }
+
+    let ids: string[]
+    try {
+      ids = normalizeExternalIds(body.acceptExternalIds, 'epicentr')
+    } catch (error) {
+      return Response.json(
+        {
+          ok: false,
+          message: error instanceof Error ? error.message : 'Некорректный заказ.',
+        },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+
+    const { data: rows, error } = await admin
+      .from('crm_orders')
+      .select('id,external_id,status,updated_at')
+      .eq('platform', 'Эпицентр')
+      .in('external_id', ids)
+    if (error)
+      return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
+    if ((rows ?? []).length !== ids.length) {
+      return Response.json(
+        { ok: false, message: 'Заказ не найден или относится к другой площадке.' },
+        { status: 409, headers: corsHeaders },
+      )
+    }
+
+    const alreadyAccepted: string[] = []
+    const changedOrderIds: string[] = []
+    const marketplaceStatus = async (externalId: string) => {
+      const response = await fetch(
+        `https://merchant-api.epicentrm.com.ua/v6/oms/orders/${encodeURIComponent(externalId)}`,
+        { headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' } },
+      )
+      if (!response.ok) return { ok: false as const, status: '' }
+      return { ok: true as const, status: epicentrOrderStatus(await response.json()) }
+    }
+
+    for (const row of rows ?? []) {
+      if (isAcceptedMarketplaceStatus(row.status)) {
+        alreadyAccepted.push(row.id)
+        continue
+      }
+      if (!isNewMarketplaceStatus(row.status)) {
+        return Response.json(
+          { ok: false, message: 'Статус заказа уже изменился.' },
+          { status: 409, headers: corsHeaders },
+        )
+      }
+
+      const externalId = String(row.external_id)
+      let actual = await marketplaceStatus(externalId)
+      if (!actual.ok) {
+        return Response.json(
+          { ok: false, message: 'Эпицентр не подтвердил текущий статус заказа.' },
+          { status: 502, headers: corsHeaders },
+        )
+      }
+
+      if (!isAcceptedMarketplaceStatus(actual.status)) {
+        if (!isNewMarketplaceStatus(actual.status)) {
+          return Response.json(
+            { ok: false, message: 'Статус заказа на Эпицентре уже изменился.' },
+            { status: 409, headers: corsHeaders },
+          )
+        }
+
+        const allowedResponse = await fetch(
+          `https://merchant-api.epicentrm.com.ua/v2/oms/orders/${encodeURIComponent(externalId)}/allowed-statuses`,
+          { headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' } },
+        )
+        if (!allowedResponse.ok) {
+          return Response.json(
+            { ok: false, message: 'Эпицентр не подтвердил доступный переход.' },
+            { status: 502, headers: corsHeaders },
+          )
+        }
+
+        const target = epicentrConfirmationStatus(await allowedResponse.json())
+        if (!target) {
+          return Response.json(
+            { ok: false, message: 'Эпицентр не разрешает принять этот заказ.' },
+            { status: 409, headers: corsHeaders },
+          )
+        }
+
+        const changeResponse = await fetch(
+          `https://merchant-api.epicentrm.com.ua/v2/oms/orders/${encodeURIComponent(externalId)}/change-status/to/${encodeURIComponent(target)}`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+          },
+        )
+        if (!changeResponse.ok) {
+          return Response.json(
+            { ok: false, message: 'Эпицентр не подтвердил принятие заказа.' },
+            { status: 502, headers: corsHeaders },
+          )
+        }
+
+        actual = await marketplaceStatus(externalId)
+        if (!actual.ok || !isAcceptedMarketplaceStatus(actual.status)) {
+          return Response.json(
+            { ok: false, message: 'Эпицентр не подтвердил фактический статус после принятия.' },
+            { status: 502, headers: corsHeaders },
+          )
+        }
+      }
+
+      const normalizedActual = actual.status.trim().toLowerCase()
+      const crmStatus = statusNames[normalizedActual] ?? 'Підтверджено'
+      const { data: saved, error: saveError } = await admin
+        .from('crm_orders')
+        .update({ status: crmStatus })
+        .eq('id', row.id)
+        .eq('platform', 'Эпицентр')
+        .eq('status', row.status)
+        .eq('updated_at', row.updated_at)
+        .select('id')
+        .maybeSingle()
+      if (saveError) {
+        return Response.json(
+          { ok: false, message: saveError.message },
+          { status: 500, headers: corsHeaders },
+        )
+      }
+      if (!saved) {
+        return Response.json(
+          { ok: false, message: 'CRM заказ изменился параллельно; обновите данные.' },
+          { status: 409, headers: corsHeaders },
+        )
+      }
+      changedOrderIds.push(saved.id)
+    }
+
+    return Response.json(
+      {
+        ok: true,
+        accepted: changedOrderIds.length,
+        changedOrderIds,
+        alreadyAccepted,
+      },
+      { headers: corsHeaders },
+    )
+  }
+
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
   const fullSync = body.full === true
   const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}
@@ -476,7 +644,7 @@ Deno.serve(async (request) => {
       ...order,
       ...detail,
       address: detail.address ?? order.address,
-      items: detail.items ?? order.items,
+      items: (detail.items ?? order.items) as EpicentrOrder['items'],
     }
     const externalId = source.id
     const existing = { data: existingByExternalId.get(externalId) ?? null }
@@ -542,7 +710,7 @@ Deno.serve(async (request) => {
       : apiDeliveryStatus ||
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
-    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
+    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
     const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
     const orderUsdRate = usdRateForDate(usdRateSchedule, formatOrderDate(source.createdAt))

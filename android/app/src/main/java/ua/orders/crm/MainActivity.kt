@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -23,12 +25,20 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { OrdersApp() } }
+        setContent { AppearanceHost { OrdersApp() } }
     }
+}
+
+@Composable
+private fun AppearanceHost(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
+    MaterialTheme(ordersColors(appearance.isDark(isSystemInDarkTheme()))) { content() }
 }
 
 private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
@@ -68,7 +78,7 @@ fun OrdersApp(vm: OrdersViewModel = viewModel()) {
         AlertDialog(
             onDismissRequest = { confirmationId = null },
             title = { Text("Принять заказ №${confirmationOrder.number()}?") },
-            text = { Text("Статус заказа изменится в Prom и общей CRM.") },
+            text = { Text("Статус изменится на площадке ${confirmationOrder.platform.display()} и затем в CRM.") },
             confirmButton = {
                 Button(onClick = {
                     confirmationId = null
@@ -113,11 +123,22 @@ private fun Login(vm: OrdersViewModel) {
 
 @Composable
 private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TextButton(onBack) { Text("Назад") }
         Text("Настройки", style = MaterialTheme.typography.headlineMedium)
         Text("Аккаунт")
         SelectionContainer { Text(vm.email.display()) }
+        Text("Оформление")
+        Appearance.entries.forEach { mode ->
+            FilterChip(
+                selected = appearance == mode,
+                onClick = { scope.launch { context.saveAppearance(mode) } },
+                label = { Text(mode.label) },
+            )
+        }
         Button({ vm.logout() }, enabled = !vm.authBusy && vm.acceptingId == null) { Text("Выйти") }
     }
 }
@@ -244,10 +265,21 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
             }
             item { Spacer(Modifier.height(16.dp)) }
         }
-        if (canAccept(order, vm.email)) Button(
-            onClick = { onAccept(order) },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            enabled = vm.acceptingId == null,
-        ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять") }
+        if (canAccept(order, vm.email)) {
+            Button(
+                onClick = { onAccept(order) },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                enabled = vm.acceptingId == null,
+            ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять") }
+        } else {
+            acceptUnavailableReason(order, vm.email)?.let { reason ->
+                Text(
+                    reason,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }

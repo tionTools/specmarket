@@ -10,15 +10,25 @@ class OrderModelsTest {
     private fun order(status: String, platform: String = "Пром") =
         Order("1", externalId = "prom:123", platform = platform, status = status)
 
-    @Test fun new_statuses_are_blue_and_acceptable_only_for_prom() {
+    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
             assertTrue(isNewStatus(status))
             assertEquals(StatusTone.NEW, statusTone(status))
-            assertTrue(canAccept(order(status), email))
-            for (platform in listOf("Каста", "Kasta", "Эпицентр", "Epicentr")) {
-                assertFalse(canAccept(order(status, platform), email))
-            }
+            assertEquals(AcceptRoute.PROM, acceptRoute(order(status), email))
+            assertEquals(
+                AcceptRoute.EPICENTR,
+                acceptRoute(order(status, "Эпицентр").copy(externalId = "123"), email),
+            )
+            val kasta = order(status, "Каста").copy(externalId = "kasta:123")
+            assertNull(acceptRoute(kasta, email))
+            assertNotNull(acceptUnavailableReason(kasta, email))
         }
+    }
+    @Test fun appearance_resolves_system_and_overrides() {
+        assertFalse(Appearance.SYSTEM.isDark(false))
+        assertTrue(Appearance.SYSTEM.isDark(true))
+        assertFalse(Appearance.LIGHT.isDark(true))
+        assertTrue(Appearance.DARK.isDark(false))
     }
     @Test fun cancelled_and_returned_are_red_and_never_acceptable() {
         for (status in listOf("canceled", "cancelled", "скасовано", "returned", "повернено", "возврат")) {
