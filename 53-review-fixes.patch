@@ -1,1 +1,1057 @@
-PLACEHOLDER
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -35,4 +35,9 @@
+ enum class StatusTone { NEW, NEGATIVE, COMPLETE, ACTIVE }
++enum class AcceptRoute(val function: String) {
++    PROM("sync-prom-orders"),
++    EPICENTR("sync-epicentr-orders"),
++    KASTA("sync-kasta-orders"),
++}
+ fun normalizedStatus(status: String?) = status.orEmpty().trim().lowercase(Locale.ROOT)
+ fun isNewStatus(status: String?) = normalizedStatus(status) in setOf("новий", "новый", "new", "pending")
+ fun statusTone(status: String?): StatusTone {
+@@ -44,7 +49,24 @@
+         else -> StatusTone.ACTIVE
+     }
+ }
+-fun canAccept(order: Order, email: String?) =
+-    email != null && !email.equals("guest@gmail.com", true) &&
+-        order.platform.orEmpty().trim().equals("Пром", true) && isNewStatus(order.status) &&
+-        order.externalId?.matches(Regex("prom:[0-9]+")) == true
++fun acceptRoute(order: Order, email: String?): AcceptRoute? {
++    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
++    val externalId = order.externalId.orEmpty()
++    return when (order.platform.orEmpty().trim().lowercase(Locale.ROOT)) {
++        "пром" -> AcceptRoute.PROM.takeIf { externalId.matches(Regex("prom:[1-9][0-9]*")) }
++        "эпицентр", "епіцентр" -> AcceptRoute.EPICENTR.takeIf { externalId.matches(Regex("[1-9][0-9]*")) }
++        // Reserved for the confirmed Kasta write contract. It must stay unavailable until then.
++        "каста", "kasta" -> null
++        else -> null
++    }
++}
++fun canAccept(order: Order, email: String?) = acceptRoute(order, email) != null
++
++fun acceptUnavailableReason(order: Order, email: String?): String? {
++    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
++    val platform = order.platform.orEmpty().trim().lowercase(Locale.ROOT)
++    val validKastaId = order.externalId?.matches(Regex("kasta:[1-9][0-9]*")) == true
++    return if (platform in setOf("каста", "kasta") && validKastaId)
++        "Принятие Каста временно недоступно: нужен официальный HUB API contract."
++    else null
++}
+ 
+ fun Order.total(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -13,10 +13,20 @@
+-    @Test fun new_statuses_are_blue_and_acceptable_only_for_prom() {
++    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
+         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
+             assertTrue(isNewStatus(status))
+             assertEquals(StatusTone.NEW, statusTone(status))
+-            assertTrue(canAccept(order(status), email))
+-            for (platform in listOf("Каста", "Kasta", "Эпицентр", "Epicentr")) {
+-                assertFalse(canAccept(order(status, platform), email))
+-            }
++            assertEquals(AcceptRoute.PROM, acceptRoute(order(status), email))
++            assertEquals(
++                AcceptRoute.EPICENTR,
++                acceptRoute(order(status, "Эпицентр").copy(externalId = "123"), email),
++            )
++            val kasta = order(status, "Каста").copy(externalId = "kasta:123")
++            assertNull(acceptRoute(kasta, email))
++            assertNotNull(acceptUnavailableReason(kasta, email))
+         }
+     }
++    @Test fun appearance_resolves_system_and_overrides() {
++        assertFalse(Appearance.SYSTEM.isDark(false))
++        assertTrue(Appearance.SYSTEM.isDark(true))
++        assertFalse(Appearance.LIGHT.isDark(true))
++        assertTrue(Appearance.DARK.isDark(false))
++    }
+     @Test fun cancelled_and_returned_are_red_and_never_acceptable() {
+         for (status in listOf("canceled", "cancelled", "скасовано", "returned", "повернено", "возврат")) {
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -18,3 +18,5 @@
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.foundation.isSystemInDarkTheme
+ import androidx.compose.ui.text.input.KeyboardType
+@@ -26,11 +26,19 @@
+ import java.math.BigDecimal
+ import java.math.RoundingMode
++import kotlinx.coroutines.launch
+ 
+ class MainActivity : ComponentActivity() {
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+-        setContent { MaterialTheme { OrdersApp() } }
++        setContent { AppearanceHost { OrdersApp() } }
+     }
+ }
+ 
++@Composable
++private fun AppearanceHost(content: @Composable () -> Unit) {
++    val context = LocalContext.current
++    val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
++    MaterialTheme(ordersColors(appearance.isDark(isSystemInDarkTheme()))) { content() }
++}
++
+ private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
+@@ -69,3 +69,3 @@
+             onDismissRequest = { confirmationId = null },
+             title = { Text("Принять заказ №${confirmationOrder.number()}?") },
+-            text = { Text("Статус заказа изменится в Prom и общей CRM.") },
++            text = { Text("Статус изменится на площадке ${confirmationOrder.platform.display()} и затем в CRM.") },
+             confirmButton = {
+@@ -111,9 +111,20 @@
+ @Composable
+ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
++    val context = LocalContext.current
++    val scope = rememberCoroutineScope()
++    val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
+     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+         TextButton(onBack) { Text("Назад") }
+         Text("Настройки", style = MaterialTheme.typography.headlineMedium)
+         Text("Аккаунт")
+         SelectionContainer { Text(vm.email.display()) }
++        Text("Оформление")
++        Appearance.entries.forEach { mode ->
++            FilterChip(
++                selected = appearance == mode,
++                onClick = { scope.launch { context.saveAppearance(mode) } },
++                label = { Text(mode.label) },
++            )
++        }
+         Button({ vm.logout() }, enabled = !vm.authBusy && vm.acceptingId == null) { Text("Выйти") }
+     }
+ }
+@@ -248,7 +248,18 @@
+-        if (canAccept(order, vm.email)) Button(
+-            onClick = { onAccept(order) },
+-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+-            enabled = vm.acceptingId == null,
+-        ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять") }
++        if (canAccept(order, vm.email)) {
++            Button(
++                onClick = { onAccept(order) },
++                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
++                enabled = vm.acceptingId == null,
++            ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять") }
++        } else {
++            acceptUnavailableReason(order, vm.email)?.let { reason ->
++                Text(
++                    reason,
++                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    style = MaterialTheme.typography.bodyMedium,
++                )
++            }
++        }
+     }
+ }
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -20,5 +20,13 @@
+   useTimeoutFn,
+   useWindowScroll,
+ } from '@vueuse/core'
++import { includeInUnpaidShipment } from '../features/orders/shipment-accounting'
++import {
++  getNetOrderAmount,
++  getNetOrderCost,
++  getNetRoyalty,
++  getProductRoyalty,
++  getRemainingQuantity,
++} from '../features/orders/financials'
+ import {
+   ChevronDown,
+@@ -550,25 +550,4 @@
+   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
+ const getOrderPreviewImage = (order: Order) => order.products[0]?.imageUrl
+ const getProductAmount = (product: OrderProduct) => product.price * product.quantity
+-const getRemainingQuantity = (product: OrderProduct) =>
+-  Math.max(0, product.quantity - (product.returnedQuantity ?? 0))
+-const getNetOrderAmount = (order: Order) =>
+-  order.products.reduce((sum, product) => sum + product.price * getRemainingQuantity(product), 0)
+-const getNetOrderCost = (order: Order) =>
+-  order.products.reduce((sum, product) => sum + product.cost * getRemainingQuantity(product), 0)
+-const getProductRoyalty = (order: Order, product: OrderProduct) => {
+-  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
+-  return product.royaltyAmount ?? product.price * product.quantity * (percent / 100)
+-}
+-const getNetProductRoyalty = (order: Order, product: OrderProduct) => {
+-  const remainingQuantity = getRemainingQuantity(product)
+-  if (remainingQuantity === product.quantity) return getProductRoyalty(order, product)
+-  if (product.quantity <= 0) return 0
+-  if (product.royaltyAmount !== undefined)
+-    return product.royaltyAmount * (remainingQuantity / product.quantity)
+-  const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
+-  return product.price * remainingQuantity * (percent / 100)
+-}
+-const getNetRoyalty = (order: Order) =>
+-  order.products.reduce((sum, product) => sum + getNetProductRoyalty(order, product), 0)
+ const hasAcceptedReturn = (order: Order) =>
+@@ -1175,5 +1175 @@
+-function isCancelledOrder(order: Order) {
+-  return /скас|отмен|cancel/.test(displayOrderStatus(order.status).toLowerCase())
+-}
+-
+ const reportOrders = computed(() =>
+@@ -1190,5 +1190,5 @@
+       const orderDate = parseOrderDate(order.date)
+       if (orderDate === null || orderDate < unpaidShipmentAccountingStart) return false
+-      return Boolean(order.delivery.ttn.trim()) && !isPaid(order) && !isCancelledOrder(order)
++      return includeInUnpaidShipment(order, displayOrderStatus(order.status), isPaid(order))
+     })
+     .reduce((total, order) => total + getNetOrderAmount(order), 0),
+diff --git a/src/features/orders/financials.ts b/src/features/orders/financials.ts
+new file mode 100644
+--- /dev/null
++++ b/src/features/orders/financials.ts
+@@ -0,0 +1,30 @@
++import type { Order, OrderProduct } from './types'
++
++export const getRemainingQuantity = (product: OrderProduct) =>
++  Math.max(0, product.quantity - (product.returnedQuantity ?? 0))
++
++export const getNetOrderAmount = (order: Order) =>
++  order.products.reduce((sum, product) => sum + product.price * getRemainingQuantity(product), 0)
++
++export const getNetOrderCost = (order: Order) =>
++  order.products.reduce((sum, product) => sum + product.cost * getRemainingQuantity(product), 0)
++
++export const getProductRoyalty = (order: Order, product: OrderProduct) =>
++  product.royaltyAmount ??
++  product.price *
++    product.quantity *
++    ((product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)) / 100)
++
++export const getNetRoyalty = (order: Order) =>
++  order.products.reduce((sum, product) => {
++    const remainingQuantity = getRemainingQuantity(product)
++    if (remainingQuantity === product.quantity) return sum + getProductRoyalty(order, product)
++    if (product.quantity <= 0) return sum
++    if (product.royaltyAmount !== undefined)
++      return sum + product.royaltyAmount * (remainingQuantity / product.quantity)
++    const percent = product.royaltyPercent ?? (order.platform === 'Каста' ? 22 : 0)
++    return sum + product.price * remainingQuantity * (percent / 100)
++  }, 0)
+diff --git a/src/lib/physical-shipment.ts b/src/lib/physical-shipment.ts
+new file mode 100644
+--- /dev/null
++++ b/src/lib/physical-shipment.ts
+@@ -0,0 +1,21 @@
++export type PhysicalShipmentDelivery = {
++  printedAt?: unknown
++  trackingNormalizedStatus?: unknown
++}
++
++const physicalCarrierStatuses = new Set([
++  'accepted',
++  'in_transit',
++  'ready_for_pickup',
++  'delivered',
++  'returning',
++  'returned',
++])
++
++const text = (value: unknown) =>
++  typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
++
++export function hasPhysicalShipmentMovement(delivery: PhysicalShipmentDelivery) {
++  if (text(delivery.printedAt)) return true
++  return physicalCarrierStatuses.has(text(delivery.trackingNormalizedStatus).toLowerCase())
++}
+diff --git a/src/features/orders/shipment-accounting.ts b/src/features/orders/shipment-accounting.ts
+new file mode 100644
+--- /dev/null
++++ b/src/features/orders/shipment-accounting.ts
+@@ -0,0 +1,26 @@
++import type { Order } from './types'
++import { getRemainingQuantity } from './financials'
++import { hasPhysicalShipmentMovement as deliveryHasPhysicalMovement } from '../../lib/physical-shipment'
++
++const returnStatus = (status: string) =>
++  /скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим/.test(status.toLowerCase())
++
++export function hasPhysicalShipmentMovement(order: Order) {
++  return deliveryHasPhysicalMovement(order.delivery)
++}
++
++export function hasReturnSignal(order: Order, status: string) {
++  const normalizedTracking = order.delivery.trackingNormalizedStatus?.trim().toLowerCase()
++  return (
++    returnStatus(status) ||
++    normalizedTracking === 'returning' ||
++    normalizedTracking === 'returned'
++  )
++}
++
++export function includeInUnpaidShipment(order: Order, status: string, paid: boolean) {
++  if (!order.delivery.ttn.trim() || paid) return false
++  if (!order.products.some((product) => getRemainingQuantity(product) > 0)) return false
++  if (!hasReturnSignal(order, status)) return true
++  return hasPhysicalShipmentMovement(order)
++}
+diff --git a/supabase/functions/_shared/financials_test.ts b/supabase/functions/_shared/financials_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/financials_test.ts
+@@ -0,0 +1,71 @@
++import {
++  getNetOrderAmount,
++  getNetOrderCost,
++  getNetRoyalty,
++  getRemainingQuantity,
++} from '../../../src/features/orders/financials.ts'
++import type { Order } from '../../../src/features/orders/types.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++const order = (): Order => ({
++  id: 'S5TSAE5',
++  date: '01.09.2026',
++  customer: '',
++  phone: '',
++  platform: 'Каста',
++  status: 'Відмова від отримання',
++  products: [
++    {
++      id: '1',
++      name: '',
++      size: '',
++      quantity: 1,
++      price: 676,
++      cost: 429,
++      royaltyAmount: 101.4,
++    },
++  ],
++  shipping: 0,
++  acquiring: 0,
++  delivery: {
++    carrier: 'Новая почта',
++    ttn: '2040',
++    recipient: '',
++    recipientPhone: '',
++    city: '',
++    address: '',
++    status: '',
++    payer: '',
++    trackingNormalizedStatus: 'returning',
++  },
++})
++
++Deno.test('marketplace return status does not change financials before accepted CRM return', () => {
++  const value = order()
++  assert(getRemainingQuantity(value.products[0]!) === 1)
++  assert(getNetOrderAmount(value) === 676)
++  assert(getNetOrderCost(value) === 429)
++  assert(getNetRoyalty(value) === 101.4)
++})
++
++Deno.test('accepted full and partial returns proportionally reduce sale cost and royalty', () => {
++  const full = order()
++  full.products[0]!.returnedQuantity = 1
++  assert(getNetOrderAmount(full) === 0)
++  assert(getNetOrderCost(full) === 0)
++  assert(getNetRoyalty(full) === 0)
++
++  const partial = order()
++  partial.products[0]!.quantity = 2
++  partial.products[0]!.price = 338
++  partial.products[0]!.cost = 214.5
++  partial.products[0]!.royaltyAmount = 101.4
++  partial.products[0]!.returnedQuantity = 1
++  assert(getRemainingQuantity(partial.products[0]!) === 1)
++  assert(getNetOrderAmount(partial) === 338)
++  assert(getNetOrderCost(partial) === 214.5)
++  assert(getNetRoyalty(partial) === 50.7)
++})
+diff --git a/supabase/functions/_shared/kasta-return.ts b/supabase/functions/_shared/kasta-return.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/kasta-return.ts
+@@ -0,0 +1,65 @@
++import { hasPhysicalShipmentMovement } from '../../../src/lib/physical-shipment.ts'
++
++type RecordValue = Record<string, unknown>
++
++const text = (value: unknown) =>
++  typeof value === 'string' || typeof value === 'number' ? String(value) : ''
++
++const number = (value: unknown) => Number(text(value).replace(',', '.').replace(/[^\d.-]/g, '')) || 0
++
++export function kastaHasReturnSignal(statuses: unknown[]) {
++  return statuses.some((status) => {
++    if (!status || typeof status !== 'object') return false
++    return /^(?:Cancelled|Return|Refund)/i.test(text((status as RecordValue).type))
++  })
++}
++
++export function kastaPhysicalMovement(delivery: RecordValue) {
++  return hasPhysicalShipmentMovement(delivery)
++}
++
++export function preserveKastaPhysicalReturnQuantity(
++  statuses: unknown[],
++  delivery: RecordValue,
++  apiQuantity: number,
++  previousQuantity: number,
++) {
++  return kastaHasReturnSignal(statuses) &&
++      kastaPhysicalMovement(delivery) &&
++      previousQuantity > 0
++    ? previousQuantity
++    : apiQuantity
++}
++
++export function resolveKastaPersistedItemSnapshot<T extends RecordValue>(
++  statuses: unknown[],
++  delivery: RecordValue,
++  previous: T | undefined,
++  api: T,
++): T {
++  if (
++    !previous ||
++    number(previous.quantity) <= 0 ||
++    !kastaHasReturnSignal(statuses) ||
++    !kastaPhysicalMovement(delivery)
++  ) {
++    return api
++  }
++
++  const resolved: RecordValue = { ...api }
++  for (const key of [
++    'quantity',
++    'price',
++    'cost',
++    'cost_usd',
++    'royalty_percent',
++    'royalty_amount',
++  ]) {
++    if (Object.prototype.hasOwnProperty.call(previous, key)) resolved[key] = previous[key]
++  }
++  return resolved as T
++}
++
++export function quantityAfterAcceptedReturn(quantity: number, acceptedReturnQuantity: number) {
++  return Math.max(0, quantity - acceptedReturnQuantity)
++}
+diff --git a/supabase/functions/_shared/kasta-return_test.ts b/supabase/functions/_shared/kasta-return_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/kasta-return_test.ts
+@@ -0,0 +1,82 @@
++import {
++  kastaPhysicalMovement,
++  preserveKastaPhysicalReturnQuantity,
++  quantityAfterAcceptedReturn,
++  resolveKastaPersistedItemSnapshot,
++} from './kasta-return.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('physical shipment uses only print or normalized carrier movement', () => {
++  assert(!kastaPhysicalMovement({ ttn: '2040' }), 'bare TTN must not prove movement')
++  assert(!kastaPhysicalMovement({ trackingEventAt: '2026-09-01' }), 'event time must not prove movement')
++  assert(!kastaPhysicalMovement({ trackingStatusCode: '7' }), 'raw code must not prove movement')
++  assert(kastaPhysicalMovement({ printedAt: '2026-09-01' }))
++  for (const status of [
++    'accepted',
++    'in_transit',
++    'ready_for_pickup',
++    'delivered',
++    'returning',
++    'returned',
++  ]) {
++    assert(kastaPhysicalMovement({ trackingNormalizedStatus: status }), status)
++  }
++})
++
++Deno.test('production snapshot resolver keeps S5TSAE5 financials until CRM accepts return', () => {
++  const statuses = [{ type: 'Cancelled' }]
++  const previous = {
++    quantity: 1,
++    price: 676,
++    cost: 429,
++    cost_usd: 10.5,
++    royalty_percent: 15,
++    royalty_amount: 101.4,
++    product_name: 'old name',
++  }
++  const api = {
++    quantity: 0,
++    price: 0,
++    cost: 0,
++    cost_usd: 0,
++    royalty_percent: 0,
++    royalty_amount: 0,
++    product_name: 'current API name',
++  }
++  const resolved = resolveKastaPersistedItemSnapshot(
++    statuses,
++    { trackingNormalizedStatus: 'returning' },
++    previous,
++    api,
++  )
++  assert(resolved.quantity === 1)
++  assert(resolved.price === 676)
++  assert(resolved.cost === 429)
++  assert(resolved.cost_usd === 10.5)
++  assert(resolved.royalty_percent === 15)
++  assert(resolved.royalty_amount === 101.4)
++  assert(resolved.product_name === 'current API name', 'non-financial API fields must still refresh')
++})
++
++Deno.test('cancellation before physical movement keeps API zero snapshot', () => {
++  const statuses = [{ type: 'Cancelled' }]
++  const previous = { quantity: 1, price: 676, cost: 429 }
++  const api = { quantity: 0, price: 0, cost: 0 }
++  const resolved = resolveKastaPersistedItemSnapshot(statuses, { ttn: '2040' }, previous, api)
++  assert(resolved.quantity === 0)
++  assert(resolved.price === 0)
++  assert(resolved.cost === 0)
++  assert(preserveKastaPhysicalReturnQuantity(statuses, { ttn: '2040' }, 0, 1) === 0)
++})
++
++Deno.test('accepted CRM return quantity reduces the preserved original quantity', () => {
++  assert(quantityAfterAcceptedReturn(1, 0) === 1)
++  assert(quantityAfterAcceptedReturn(1, 1) === 0)
++  assert(quantityAfterAcceptedReturn(2, 1) === 1)
++})
+diff --git a/supabase/functions/_shared/shipment-accounting_test.ts b/supabase/functions/_shared/shipment-accounting_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/shipment-accounting_test.ts
+@@ -0,0 +1,65 @@
++import { getNetOrderAmount } from '../../../src/features/orders/financials.ts'
++import {
++  hasPhysicalShipmentMovement,
++  includeInUnpaidShipment,
++} from '../../../src/features/orders/shipment-accounting.ts'
++import type { Order } from '../../../src/features/orders/types.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++const order = (delivery: Partial<Order['delivery']>, quantity = 1): Order => ({
++  id: 'S5TSAE5',
++  date: '01.09.2026',
++  customer: '',
++  phone: '',
++  platform: 'Каста',
++  status: 'Скасовано / Відмова від отримання',
++  products: [{ id: '1', name: '', size: '', quantity, price: 676 / quantity, cost: 429 / quantity }],
++  shipping: 0,
++  acquiring: 0,
++  delivery: {
++    carrier: 'Новая почта',
++    ttn: '2040',
++    recipient: '',
++    recipientPhone: '',
++    city: '',
++    address: '',
++    status: '',
++    payer: '',
++    ...delivery,
++  },
++})
++
++Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit money', () => {
++  const cancelled = order({})
++  assert(!hasPhysicalShipmentMovement(cancelled))
++  assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
++})
++
++Deno.test('shipped return stays in transit until full accepted return, then is excluded', () => {
++  const shipped = order({ trackingNormalizedStatus: 'returning' })
++  assert(hasPhysicalShipmentMovement(shipped))
++  assert(includeInUnpaidShipment(shipped, shipped.status, false))
++  assert(getNetOrderAmount(shipped) === 676)
++
++  shipped.products[0]!.returnedQuantity = 1
++  assert(getNetOrderAmount(shipped) === 0)
++  assert(!includeInUnpaidShipment(shipped, shipped.status, false))
++})
++
++Deno.test('partial accepted return remains in transit only for the remaining quantity', () => {
++  const partial = order({ printedAt: '2026-09-01' }, 2)
++  partial.products[0]!.returnedQuantity = 1
++  assert(getNetOrderAmount(partial) === 338)
++  assert(includeInUnpaidShipment(partial, partial.status, false))
++})
++
++Deno.test('paid shipment is never included in unpaid shipment amount', () => {
++  const paid = order({ trackingNormalizedStatus: 'returning' })
++  assert(!includeInUnpaidShipment(paid, paid.status, true))
++})
+diff --git a/supabase/functions/_shared/marketplace-accept.ts b/supabase/functions/_shared/marketplace-accept.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/marketplace-accept.ts
+@@ -0,0 +1,84 @@
++type RecordValue = Record<string, unknown>
++
++const asRecord = (value: unknown): RecordValue =>
++  value && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {}
++
++const text = (value: unknown) =>
++  typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
++
++export function normalizeExternalIds(value: unknown, prefix?: string) {
++  if (!Array.isArray(value) || value.length > 100)
++    throw new Error('Некорректный список заказов.')
++
++  const ids = value
++    .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item).trim() : ''))
++    .filter(Boolean)
++  if (ids.length !== value.length) throw new Error('Некорректный идентификатор заказа.')
++
++  const normalized = ids.map((id) =>
++    prefix ? id.replace(new RegExp(`^${prefix}:`, 'i'), '') : id,
++  )
++  if (normalized.some((id) => !/^[1-9]\d*$/.test(id)))
++    throw new Error('Некорректный идентификатор заказа.')
++  return [...new Set(normalized)]
++}
++
++export function isNewMarketplaceStatus(status: unknown) {
++  return ['new', 'новый', 'новий', 'created'].includes(text(status).toLowerCase())
++}
++
++export function isAcceptedMarketplaceStatus(status: unknown) {
++  return [
++    'принято',
++    'підтверджено',
++    'подтверждено',
++    'підтверджено продавцем',
++    'confirmed',
++    'confirmed_by_seller',
++    'confirmed_by_merchant',
++    'confirmedbysupplier',
++    'accepted',
++  ].includes(text(status).toLowerCase())
++}
++
++export function epicentrConfirmationStatus(allowed: unknown) {
++  const root = asRecord(allowed)
++  const values = Array.isArray(allowed)
++    ? allowed
++    : Array.isArray(root.data)
++      ? root.data
++      : []
++
++  for (const item of values) {
++    const value =
++      typeof item === 'string'
++        ? item
++        : text(asRecord(item).code) || text(asRecord(item).status)
++    if (['confirmed_by_seller', 'confirmed_by_merchant', 'confirmed'].includes(value.toLowerCase()))
++      return value
++  }
++  return undefined
++}
++
++export function epicentrOrderStatus(payload: unknown) {
++  const root = asRecord(payload)
++  const data = asRecord(root.data)
++  const candidates = [
++    asRecord(data.order),
++    data,
++    asRecord(root.order),
++    root,
++  ]
++
++  for (const candidate of candidates) {
++    for (const key of ['statusCode', 'status_code', 'orderStatus', 'order_status', 'status']) {
++      const value = candidate[key]
++      const direct = text(value)
++      if (direct) return direct
++      const nested = asRecord(value)
++      const nestedValue = text(nested.code) || text(nested.status) || text(nested.name)
++      if (nestedValue) return nestedValue
++    }
++  }
++  return ''
++}
+diff --git a/supabase/functions/_shared/marketplace-accept_test.ts b/supabase/functions/_shared/marketplace-accept_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/marketplace-accept_test.ts
+@@ -0,0 +1,45 @@
++import {
++  epicentrConfirmationStatus,
++  epicentrOrderStatus,
++  isAcceptedMarketplaceStatus,
++  isNewMarketplaceStatus,
++  normalizeExternalIds,
++} from './marketplace-accept.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('marketplace acceptance validates IDs and status classes', () => {
++  assert(
++    JSON.stringify(normalizeExternalIds(['epicentr:12', 12, '13'], 'epicentr')) ===
++      JSON.stringify(['12', '13']),
++  )
++  let rejected = false
++  try {
++    normalizeExternalIds(['0'], 'kasta')
++  } catch {
++    rejected = true
++  }
++  assert(rejected)
++  assert(isNewMarketplaceStatus('Created'))
++  assert(isAcceptedMarketplaceStatus('Принято'))
++  assert(isAcceptedMarketplaceStatus('Підтверджено'))
++  assert(isAcceptedMarketplaceStatus('confirmed_by_seller'))
++})
++
++Deno.test('Epicentr selects only an API-allowed seller confirmation', () => {
++  assert(
++    epicentrConfirmationStatus({
++      data: [{ code: 'cancelled' }, { code: 'confirmed_by_seller' }],
++    }) === 'confirmed_by_seller',
++  )
++  assert(epicentrConfirmationStatus(['sent']) === undefined)
++})
++
++Deno.test('Epicentr verification extracts the actual marketplace status after POST', () => {
++  assert(epicentrOrderStatus({ data: { order: { statusCode: 'confirmed_by_seller' } } }) ===
++    'confirmed_by_seller')
++  assert(epicentrOrderStatus({ data: { status: { code: 'confirmed' } } }) === 'confirmed')
++  assert(!isAcceptedMarketplaceStatus(epicentrOrderStatus({ data: { order: { statusCode: 'new' } } })))
++})
+diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+--- a/supabase/functions/sync-epicentr-orders/index.ts
++++ b/supabase/functions/sync-epicentr-orders/index.ts
+@@ -10,4 +10,11 @@
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
++import {
++  epicentrConfirmationStatus,
++  epicentrOrderStatus,
++  isAcceptedMarketplaceStatus,
++  isNewMarketplaceStatus,
++  normalizeExternalIds,
++} from '../_shared/marketplace-accept.ts'
+ 
+ function stableStringify(value: unknown): string {
+@@ -328,9 +328,170 @@
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') {
++  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
+     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+   }
+ 
+-  const body = await request.json().catch(() => ({})) as { externalId?: unknown; full?: unknown; manual?: unknown }
++  const body = await request.json().catch(() => ({})) as {
++    externalId?: unknown
++    full?: unknown
++    manual?: unknown
++    scheduled?: unknown
++    acceptExternalIds?: unknown
++  }
++
++  if (body.acceptExternalIds !== undefined) {
++    if (isScheduledRequest || body.scheduled === true) {
++      return Response.json(
++        { ok: false, message: 'Принятие недоступно для cron.' },
++        { status: 403, headers: corsHeaders },
++      )
++    }
++
++    let ids: string[]
++    try {
++      ids = normalizeExternalIds(body.acceptExternalIds, 'epicentr')
++    } catch (error) {
++      return Response.json(
++        {
++          ok: false,
++          message: error instanceof Error ? error.message : 'Некорректный заказ.',
++        },
++        { status: 400, headers: corsHeaders },
++      )
++    }
++
++    const { data: rows, error } = await admin
++      .from('crm_orders')
++      .select('id,external_id,status,updated_at')
++      .eq('platform', 'Эпицентр')
++      .in('external_id', ids)
++    if (error)
++      return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
++    if ((rows ?? []).length !== ids.length) {
++      return Response.json(
++        { ok: false, message: 'Заказ не найден или относится к другой площадке.' },
++        { status: 409, headers: corsHeaders },
++      )
++    }
++
++    const alreadyAccepted: string[] = []
++    const changedOrderIds: string[] = []
++    const marketplaceStatus = async (externalId: string) => {
++      const response = await fetch(
++        `https://merchant-api.epicentrm.com.ua/v6/oms/orders/${encodeURIComponent(externalId)}`,
++        { headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' } },
++      )
++      if (!response.ok) return { ok: false as const, status: '' }
++      return { ok: true as const, status: epicentrOrderStatus(await response.json()) }
++    }
++
++    for (const row of rows ?? []) {
++      if (isAcceptedMarketplaceStatus(row.status)) {
++        alreadyAccepted.push(row.id)
++        continue
++      }
++      if (!isNewMarketplaceStatus(row.status)) {
++        return Response.json(
++          { ok: false, message: 'Статус заказа уже изменился.' },
++          { status: 409, headers: corsHeaders },
++        )
++      }
++
++      const externalId = String(row.external_id)
++      let actual = await marketplaceStatus(externalId)
++      if (!actual.ok) {
++        return Response.json(
++          { ok: false, message: 'Эпицентр не подтвердил текущий статус заказа.' },
++          { status: 502, headers: corsHeaders },
++        )
++      }
++
++      if (!isAcceptedMarketplaceStatus(actual.status)) {
++        if (!isNewMarketplaceStatus(actual.status)) {
++          return Response.json(
++            { ok: false, message: 'Статус заказа на Эпицентре уже изменился.' },
++            { status: 409, headers: corsHeaders },
++          )
++        }
++
++        const allowedResponse = await fetch(
++          `https://merchant-api.epicentrm.com.ua/v2/oms/orders/${encodeURIComponent(externalId)}/allowed-statuses`,
++          { headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' } },
++        )
++        if (!allowedResponse.ok) {
++          return Response.json(
++            { ok: false, message: 'Эпицентр не подтвердил доступный переход.' },
++            { status: 502, headers: corsHeaders },
++          )
++        }
++
++        const target = epicentrConfirmationStatus(await allowedResponse.json())
++        if (!target) {
++          return Response.json(
++            { ok: false, message: 'Эпицентр не разрешает принять этот заказ.' },
++            { status: 409, headers: corsHeaders },
++          )
++        }
++
++        const changeResponse = await fetch(
++          `https://merchant-api.epicentrm.com.ua/v2/oms/orders/${encodeURIComponent(externalId)}/change-status/to/${encodeURIComponent(target)}`,
++          {
++            method: 'POST',
++            headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
++          },
++        )
++        if (!changeResponse.ok) {
++          return Response.json(
++            { ok: false, message: 'Эпицентр не подтвердил принятие заказа.' },
++            { status: 502, headers: corsHeaders },
++          )
++        }
++
++        actual = await marketplaceStatus(externalId)
++        if (!actual.ok || !isAcceptedMarketplaceStatus(actual.status)) {
++          return Response.json(
++            { ok: false, message: 'Эпицентр не подтвердил фактический статус после принятия.' },
++            { status: 502, headers: corsHeaders },
++          )
++        }
++      }
++
++      const normalizedActual = actual.status.trim().toLowerCase()
++      const crmStatus = statusNames[normalizedActual] ?? 'Підтверджено'
++      const { data: saved, error: saveError } = await admin
++        .from('crm_orders')
++        .update({ status: crmStatus })
++        .eq('id', row.id)
++        .eq('platform', 'Эпицентр')
++        .eq('status', row.status)
++        .eq('updated_at', row.updated_at)
++        .select('id')
++        .maybeSingle()
++      if (saveError) {
++        return Response.json(
++          { ok: false, message: saveError.message },
++          { status: 500, headers: corsHeaders },
++        )
++      }
++      if (!saved) {
++        return Response.json(
++          { ok: false, message: 'CRM заказ изменился параллельно; обновите данные.' },
++          { status: 409, headers: corsHeaders },
++        )
++      }
++      changedOrderIds.push(saved.id)
++    }
++
++    return Response.json(
++      {
++        ok: true,
++        accepted: changedOrderIds.length,
++        changedOrderIds,
++        alreadyAccepted,
++      },
++      { headers: corsHeaders },
++    )
++  }
++
+   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
+@@ -476,3 +476,3 @@
+       ...detail,
+       address: detail.address ?? order.address,
+-      items: detail.items ?? order.items,
++      items: (detail.items ?? order.items) as EpicentrOrder['items'],
+     }
+@@ -542,3 +542,3 @@
+       : apiDeliveryStatus ||
+         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
+     const hasManualShipping = previousDelivery.shippingSource === 'manual'
+-    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null && shipment.deliveryPrice !== ''
++    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null
+     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
+diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+--- a/supabase/functions/sync-kasta-orders/index.ts
++++ b/supabase/functions/sync-kasta-orders/index.ts
+@@ -3,4 +3,9 @@
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
++import {
++  kastaPhysicalMovement,
++  preserveKastaPhysicalReturnQuantity,
++  resolveKastaPersistedItemSnapshot,
++} from '../_shared/kasta-return.ts'
+ 
+ const corsHeaders = {
+@@ -172,16 +172,23 @@
+   order: RecordValue,
+   item: RecordValue,
+   previous: RecordValue | undefined,
++  delivery: RecordValue,
+ ) {
+   const apiQuantity = itemQuantity(item)
+-  if (!hasGoodsReturnStatus(order)) return apiQuantity
++  const statuses = Array.isArray(order.statuses) ? order.statuses : []
++  const previousQuantity = number(previous?.quantity)
++  const preservedPhysicalQuantity = preserveKastaPhysicalReturnQuantity(
++    statuses,
++    delivery,
++    apiQuantity,
++    previousQuantity,
++  )
++  if (preservedPhysicalQuantity !== apiQuantity) return preservedPhysicalQuantity
+ 
+-  // CRM quantity is the originally ordered quantity. Kasta may later reduce/storno
+-  // the API quantity during a return, but that must not silently accept the return
+-  // inside CRM. A previously saved positive quantity is therefore authoritative.
+-  const previousQuantity = number(previous?.quantity)
+-  if (previousQuantity > 0) return Math.max(previousQuantity, apiQuantity)
++  if (!hasGoodsReturnStatus(order) || !kastaPhysicalMovement(delivery)) return apiQuantity
+ 
++  // Recovery for a physically shipped goods return when the current API payload no
++  // longer carries the original quantity and CRM has no positive previous snapshot.
+   const explicitOriginalQuantity = number(
+     pick(item, 'original_quantity', 'ordered_quantity', 'initial_quantity'),
+@@ -383,6 +383,29 @@
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!isScheduledRequest && user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++
++  const body = await request.json().catch(() => ({})) as {
++    full?: unknown
++    externalId?: unknown
++    scheduled?: unknown
++    acceptExternalIds?: unknown
++  }
++  if (body.acceptExternalIds !== undefined) {
++    if (isScheduledRequest || body.scheduled === true) {
++      return Response.json(
++        { ok: false, message: 'Принятие недоступно для cron.' },
++        { status: 403, headers: corsHeaders },
++      )
++    }
++    return Response.json(
++      {
++        ok: false,
++        message: 'Принятие Каста временно недоступно: нужен официальный HUB API contract.',
++        code: 'KASTA_ACCEPT_CONTRACT_REQUIRED',
++      },
++      { status: 501, headers: corsHeaders },
++    )
++  }
+ 
+   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+@@ -396,2 +396 @@
+-  const body = await request.json().catch(() => ({})) as { full?: unknown; externalId?: unknown }
+   const fullSync = body.full === true
+@@ -414,2 +414,6 @@
+-    const hashes = new Map(await Promise.all(orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const)))
++    const hashes = new Map<string, string>(
++      await Promise.all(
++        orders.map(async (order) => [`kasta:${text(order.id)}`, await sourceHash(order)] as const),
++      ),
++    )
+     const externalIds = [...hashes.keys()]
+@@ -561,4 +561,4 @@
+       const savedItems = []
+       for (const [position, item] of items.entries()) {
+         const previous = byPosition.get(position)
+-        const quantity = originalOrderItemQuantity(order, item, previous)
++        const quantity = originalOrderItemQuantity(order, item, previous, currentDelivery)
+         const uniqueSkuId = text(pick(item, 'unique_sku_id', 'offer_id', 'product_id', 'id'))
+@@ -609,2 +609,25 @@
+-        savedItems.push({ order_id: orderId, position, product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')), size: text(pick(item, 'kasta_size', 'size')), image_url: itemImage(item) || feedImage || previous?.image_url || null, quantity, price: itemPrice(item) || number(item.total_price) / quantity, cost: resolvedCost.cost, cost_usd: resolvedCost.costUsd, marketplace_product_key: marketplaceProductKey || null, cost_manual: resolvedCost.costManual, price_item_id: resolvedCost.priceItemId, royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0, royalty_amount: previous?.royalty_amount ?? null })
++        const apiItemSnapshot = {
++          order_id: orderId,
++          position,
++          product_name: text(pick(item, 'name', 'title', 'product_name', 'kind', 'supplier_code')),
++          size: text(pick(item, 'kasta_size', 'size')),
++          image_url: itemImage(item) || feedImage || previous?.image_url || null,
++          quantity,
++          price: itemPrice(item) || (quantity > 0 ? number(item.total_price) / quantity : 0),
++          cost: resolvedCost.cost,
++          cost_usd: resolvedCost.costUsd,
++          marketplace_product_key: marketplaceProductKey || null,
++          cost_manual: resolvedCost.costManual,
++          price_item_id: resolvedCost.priceItemId,
++          royalty_percent: apiRoyalty ?? previous?.royalty_percent ?? 0,
++          royalty_amount: previous?.royalty_amount ?? null,
++        }
++        savedItems.push(
++          resolveKastaPersistedItemSnapshot(
++            Array.isArray(order.statuses) ? order.statuses : [],
++            currentDelivery,
++            previous,
++            apiItemSnapshot,
++          ),
++        )
+       }
