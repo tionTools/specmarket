@@ -1,0 +1,71 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 2631cb7..9fcf0aa 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -5708,6 +5708,28 @@ function orderDateTime(order: Order) {
+                       />
+                       <Truck v-else class="size-5 shrink-0 text-slate-500" aria-hidden="true" />
+                       <span class="min-w-0">{{ displayCarrier(order.delivery.carrier) }}</span>
++                      <button
++                        v-if="!isGuest && order.remoteId && order.delivery.ttn"
++                        class="relative grid size-5 shrink-0 place-items-center rounded text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 disabled:cursor-wait disabled:opacity-50"
++                        :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
++                        type="button"
++                        title="Обновить доставку"
++                        aria-label="Обновить доставку"
++                        @click="syncOrderDelivery(order)"
++                      >
++                        <RefreshCw
++                          class="size-3.5"
++                          :class="{
++                            'animate-spin': syncingDeliveryOrderId === order.remoteId,
++                          }"
++                          aria-hidden="true"
++                        />
++                        <span
++                          v-if="inlineActionNotice?.key === `delivery-sync:${order.id}`"
++                          class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
++                          >Обновлено</span
++                        >
++                      </button>
+                     </dd>
+                     <dd
+                       class="flex min-w-0 items-center justify-center gap-1 font-semibold text-blue-700"
+@@ -5726,7 +5748,7 @@ function orderDateTime(order: Order) {
+                       >
+                         <ExternalLink class="size-4" aria-hidden="true" />
+                       </a>
+-                      <span>{{
++                      <span class="whitespace-nowrap">{{
+                         order.delivery.ttn
+                           ? formatDeliveryTtn(order.delivery.carrier, order.delivery.ttn)
+                           : '—'
+@@ -5745,28 +5767,6 @@ function orderDateTime(order: Order) {
+                           >Скопировано</span
+                         >
+                       </button>
+-                      <button
+-                        v-if="!isGuest && order.remoteId && order.delivery.ttn"
+-                        class="relative grid size-6 shrink-0 place-items-center rounded text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 disabled:cursor-wait disabled:opacity-50"
+-                        :disabled="isSyncingDelivery || syncingDeliveryOrderId !== null"
+-                        type="button"
+-                        title="Обновить доставку"
+-                        aria-label="Обновить доставку"
+-                        @click="syncOrderDelivery(order)"
+-                      >
+-                        <RefreshCw
+-                          class="size-4"
+-                          :class="{
+-                            'animate-spin': syncingDeliveryOrderId === order.remoteId,
+-                          }"
+-                          aria-hidden="true"
+-                        />
+-                        <span
+-                          v-if="inlineActionNotice?.key === `delivery-sync:${order.id}`"
+-                          class="pointer-events-none absolute top-full right-0 z-50 mt-1 whitespace-nowrap rounded-md bg-emerald-700 px-2 py-1 text-xs font-semibold text-white shadow-lg"
+-                          >Обновлено</span
+-                        >
+-                      </button>
+                     </dd>
+                     <dd
+                       v-if="deliveryWasRedirected(order.delivery)"
