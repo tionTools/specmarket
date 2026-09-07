@@ -1,0 +1,53 @@
+PATCH 59 — перенести кнопку обновления доставки к перевозчику
+
+База patch: main commit bdecf14d6456fb337d38948dc09c9cf632ae1524.
+
+Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+1. Перейди в:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+
+2. Выполни:
+   git fetch origin main chatgpt-patches
+   git rev-parse origin/main
+
+   Ожидается ровно:
+   bdecf14d6456fb337d38948dc09c9cf632ae1524
+
+   Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+3. Выполни:
+   git switch main
+   git merge --ff-only origin/main
+
+4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+5. Получи patch:
+   git show origin/chatgpt-patches:59-move-delivery-refresh-button.patch > .git/PATCH59.patch
+
+6. Выполни:
+   git apply --check .git/PATCH59.patch
+   git apply .git/PATCH59.patch
+   git diff --check
+
+   Если проверка или применение не прошли — остановись. Ничего не исправляй.
+
+7. Добавь в commit ТОЛЬКО:
+   src/pages/HomeView.vue
+
+8. Проверь:
+   git diff --cached --name-only
+
+   Должен быть ровно:
+   src/pages/HomeView.vue
+
+9. Выполни:
+   git commit -m "Move delivery refresh button"
+   git push origin main
+
+10. Сообщи только:
+    - commit SHA;
+    - успешен ли push;
+    - итог git status --short.
+
+Не запускать Deno. Не запускать pnpm type-check/lint/build: Patch уже независимо проверен этими тестами. Не менять AGENTS.md.
