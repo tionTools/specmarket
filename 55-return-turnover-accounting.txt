@@ -1,35 +1,36 @@
 PATCH 55 — исправить оборот при возвратах
 
-Источник истины: текущий main, HEAD должен соответствовать origin/main. На момент подготовки патча main = 17c231b24c4ad0f7dc7a01368be9c490be90a595.
+Источник истины: текущий main. На момент подготовки патча main = 17c231b24c4ad0f7dc7a01368be9c490be90a595.
 
 Цель:
-- физически отправленный заказ с сигналом отмены/возврата НЕ должен исчезать из оборота, пока возврат не принят в CRM;
-- до принятия возврата в обороте остаётся вся оставшаяся сумма заказа;
-- после полного `Принять возврат` заказ исключается из оборота, потому что lifecycle = return_completed и net sale = 0;
-- при частичном принятом возврате заказ остаётся в обороте только на оставшуюся сумму;
-- отмена до физической отправки по-прежнему не входит в оборот;
-- правило должно работать одинаково для Prom / Epicentr / Kasta / Р/С / Сайт, без отдельного исключения только для Kasta.
+- физически отправленный заказ с сигналом отмены/возврата остаётся в отчётном наборе;
+- до принятия возврата оборот учитывает всю оставшуюся сумму;
+- при частичном принятом возврате оборот учитывает только remaining quantity;
+- после полного `Принять возврат` заказ остаётся доступен для расчёта фактического финансового результата, но его оборот равен 0 через `getNetOrderAmount`;
+- отмена до физической отправки не входит в отчёт;
+- правило едино для Prom / Epicentr / Kasta / Р/С / Сайт.
 
-Контрольный кейс:
-Kasta S5TSAE5, 05.09.2026, 1 × 676 грн, printedAt есть, статус `Скасовано / Відмова від отримання`, trackingNormalizedStatus `cancelled`.
-До `Принять возврат`: lifecycle = return_pending, оборот = 676 грн.
-После полного принятия 1/1: lifecycle = return_completed, оборот = 0 грн.
+Контрольный кейс S5TSAE5:
+- 05.09.2026, Kasta, 1 × 676 грн, printedAt есть, статус `Скасовано / Відмова від отримання`;
+- до `Принять возврат`: lifecycle = return_pending, turnover = 676;
+- после полного принятия 1/1: lifecycle = return_completed, turnover = 0;
+- pre-shipment cancellation с одной только ТТН в отчёт не попадает.
 
 Сделать строго следующее:
 
-1. Не трогать `AGENTS.md` и любые посторонние локальные/untracked файлы.
+1. Не трогать `AGENTS.md` и любые посторонние local/untracked файлы.
 
-2. Получить patch из ветки `chatgpt-patches`:
-   `55-return-turnover-accounting.patch`
+2. Получить из ветки `chatgpt-patches` файл `55-return-turnover-accounting.patch`.
 
-3. До применения обязательно выполнить:
+3. До применения выполнить:
    `git apply --check --recount <путь-к-55-return-turnover-accounting.patch>`
-   Если precheck не проходит — НИЧЕГО не менять, не коммитить и не пушить; вернуть точную ошибку.
+   Если precheck не проходит — ничего не менять, не коммитить и не пушить; вернуть точную ошибку.
 
 4. Применить:
    `git apply --recount <путь-к-55-return-turnover-accounting.patch>`
 
 5. Убедиться, что изменены только:
+   - `src/features/orders/shipment-accounting.ts`
    - `src/pages/HomeView.vue`
    - `supabase/functions/_shared/shipment-accounting_test.ts`
 
@@ -41,28 +42,28 @@ Kasta S5TSAE5, 05.09.2026, 1 × 676 грн, printedAt есть, статус `С
    - `git diff --check`
    - `deno test supabase/functions/_shared/shipment-accounting_test.ts`
 
-7. После formatter ещё раз проверить `git diff --name-only`. В задаче должны остаться только два файла из пункта 5. `AGENTS.md` не менять, не откатывать и не включать в commit.
+7. После formatter ещё раз проверить `git diff --name-only`: должны остаться только три файла задачи. `AGENTS.md` не менять, не откатывать и не включать в commit.
 
-8. Статически проверить итоговую логику:
+8. Статически проверить итог:
    - `reportOrders` по-прежнему требует непустую ТТН;
-   - дальше `reportOrders` использует `getOrderLifecycleState(order, displayOrderStatus(order.status))` и `isOrderVisibleInMainList(...)`;
-   - старое исключение `return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)` удалено;
-   - active / return_pending / return_partial входят в отчёт;
-   - cancelled_before_shipment / return_completed не входят;
-   - оборот считается существующим `getNetOrderAmount`, поэтому partial return учитывает только remaining quantity;
-   - контрольный S5TSAE5 до принятия возврата даёт 676 грн, после полного принятия — 0 грн.
+   - затем использует `includeInTurnoverReport(order, displayOrderStatus(order.status))`;
+   - `includeInTurnoverReport` исключает только lifecycle `cancelled_before_shipment`;
+   - active / return_pending / return_partial / return_completed остаются в отчётном наборе;
+   - turnover считается существующим `getNetOrderAmount`;
+   - поэтому pending S5TSAE5 = 676, partial = только remaining amount, completed = 0;
+   - fully accepted return не удаляется из reportOrders, чтобы существующий расчёт фактического финансового результата возврата продолжал работать;
+   - старое Kasta-only исключение `return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)` удалено.
 
-9. Если все проверки зелёные, сделать commit только файлов задачи:
-   `git commit --only src/pages/HomeView.vue supabase/functions/_shared/shipment-accounting_test.ts -m "Fix turnover accounting for pending returns"`
+9. Если всё зелёное, commit только файлов задачи:
+   `git commit --only src/features/orders/shipment-accounting.ts src/pages/HomeView.vue supabase/functions/_shared/shipment-accounting_test.ts -m "Fix turnover accounting for pending returns"`
 
-10. Выполнить:
-    `git push origin main`
+10. Выполнить `git push origin main`.
 
-11. Отдельный deploy Edge Functions не нужен: Edge Functions и migrations этот patch не меняет. Дождаться обычного production workflow после push и сообщить его результат, если он доступен.
+11. Отдельный deploy Edge Functions не нужен. Дождаться обычного production workflow после push и сообщить результат, если доступен.
 
 12. В отчёте сообщить только:
    - полный commit SHA;
    - результаты `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check`, Deno test;
-   - результат push;
-   - результат production workflow, если доступен;
+   - push;
+   - production workflow, если доступен;
    - итоговый `git status --short`.
