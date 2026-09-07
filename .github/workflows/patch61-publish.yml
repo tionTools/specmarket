@@ -1,0 +1,121 @@
+name: Publish Patch 61
+
+on:
+  push:
+    branches: [chatgpt-validate-61]
+    paths:
+      - '.github/workflows/patch61-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: 3457e86afa975cb3509dd7cab48d6425b44f4f01
+      VALIDATION_RUN: '34153837644'
+      PATCH_SHA256: 0628f676147c1809da8e296735aeafeb519c45f3ccf0af41bdd2a553023f5d2a
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify validated source and current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$(gh run view "$VALIDATION_RUN" --json conclusion --jq '.conclusion')" = success
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+
+      - name: Download exact validated canonical patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p /tmp/patch61-artifact
+          gh run download "$VALIDATION_RUN" -n patch61-canonical -D /tmp/patch61-artifact
+          test -s /tmp/patch61-artifact/PATCH61-CANONICAL.patch
+          echo "$PATCH_SHA256  /tmp/patch61-artifact/PATCH61-CANONICAL.patch" | sha256sum -c -
+
+      - name: Publish Patch 61 and minimal Codex instruction
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/patch61-patches origin/chatgpt-patches
+          cp /tmp/patch61-artifact/PATCH61-CANONICAL.patch \
+            /tmp/patch61-patches/61-android-0.3-planned-build.patch
+          cat > /tmp/patch61-patches/61-android-0.3-planned-build.txt <<'EOF'
+          PATCH 61 — Android «Заказы» 0.3, согласованная сборка
+
+          База patch: main commit 3457e86afa975cb3509dd7cab48d6425b44f4f01.
+
+          Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+          1. Перейди в:
+             C:\Users\Вадим\Documents\CRM моя\specmarket
+
+          2. Выполни:
+             git fetch origin main chatgpt-patches
+             git rev-parse origin/main
+
+             Ожидается ровно:
+             3457e86afa975cb3509dd7cab48d6425b44f4f01
+
+             Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+          3. Выполни:
+             git switch main
+             git merge --ff-only origin/main
+
+          4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+          5. Получи patch:
+             git show origin/chatgpt-patches:61-android-0.3-planned-build.patch > .git/PATCH61.patch
+
+          6. Выполни:
+             git apply --check .git/PATCH61.patch
+             git apply .git/PATCH61.patch
+             git diff --check
+
+             Если git apply --check или применение не прошло — остановись. Ничего не исправляй.
+
+          7. Добавь в commit ТОЛЬКО:
+             android/app/build.gradle.kts
+             android/app/src/main/AndroidManifest.xml
+             android/app/src/main/java/ua/orders/crm/Appearance.kt
+             android/app/src/main/java/ua/orders/crm/MainActivity.kt
+             android/app/src/main/java/ua/orders/crm/OrderModels.kt
+             android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+             android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+             android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+             android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+             src/pages/HomeView.vue
+
+          8. Проверь:
+             git diff --cached --name-only
+
+             В staged должны быть ровно эти 10 файлов. AGENTS.md не добавлять.
+
+          9. Commit и push:
+             git commit -m "Build Android Orders 0.3"
+             git push origin main
+
+          10. Ничего больше не запускать: Android tests/lint/APK, web type-check/lint/build и повторное применение patch уже независимо проверены. GitHub сам запустит production deploy и Android APK workflow после push.
+
+          11. Сообщи только:
+              - commit SHA;
+              - успешен ли push;
+              - итог git status --short.
+
+          Не запускать Deno. Не менять AGENTS.md.
+          EOF
+          cd /tmp/patch61-patches
+          git config user.name 'chatgpt-patches'
+          git config user.email 'chatgpt-patches@users.noreply.github.com'
+          git add 61-android-0.3-planned-build.patch 61-android-0.3-planned-build.txt
+          git commit -m 'Add validated Patch 61'
+          git push origin HEAD:chatgpt-patches
