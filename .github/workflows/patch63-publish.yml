@@ -1,0 +1,115 @@
+name: Publish Patch 63
+
+on:
+  push:
+    branches: [chatgpt-validate-63]
+    paths:
+      - '.github/workflows/patch63-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: f3c0dfcddf3be7a2e0e2a1ad5d4110246f44ecbb
+      VALIDATION_RUN: '34157548871'
+      PATCH_SHA256: c989be472ae79a617deedd189e2ec5a632d1909ef19edc4cf174d020e5de093d
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify validation and current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$(gh run view "$VALIDATION_RUN" --json conclusion --jq '.conclusion')" = success
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+
+      - name: Download exact canonical patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p /tmp/patch63
+          gh run download "$VALIDATION_RUN" -n patch63-canonical -D /tmp/patch63
+          test -s /tmp/patch63/PATCH63-CANONICAL.patch
+          echo "$PATCH_SHA256  /tmp/patch63/PATCH63-CANONICAL.patch" | sha256sum -c -
+
+      - name: Publish Patch 63 and instruction
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/patch63-patches origin/chatgpt-patches
+          cp /tmp/patch63/PATCH63-CANONICAL.patch /tmp/patch63-patches/63-android-delivery-status-and-list-restore.patch
+          cat > /tmp/patch63-patches/63-android-delivery-status-and-list-restore.txt <<'EOF'
+          PATCH 63 — Android 0.4: статусы доставки + восстановление списка
+
+          База patch: main commit f3c0dfcddf3be7a2e0e2a1ad5d4110246f44ecbb.
+
+          Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+          1. Перейди в:
+             C:\Users\Вадим\Documents\CRM моя\specmarket
+
+          2. Выполни:
+             git fetch origin main chatgpt-patches
+             git rev-parse origin/main
+
+             Ожидается ровно:
+             f3c0dfcddf3be7a2e0e2a1ad5d4110246f44ecbb
+
+             Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+          3. Выполни:
+             git switch main
+             git merge --ff-only origin/main
+
+          4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+          5. Получи patch:
+             git show origin/chatgpt-patches:63-android-delivery-status-and-list-restore.patch > .git/PATCH63.patch
+
+          6. Выполни:
+             git apply --check .git/PATCH63.patch
+             git apply .git/PATCH63.patch
+             git diff --check
+
+             Если git apply --check или применение не прошло — остановись. Ничего не исправляй.
+
+          7. Добавь в commit ТОЛЬКО:
+             android/app/build.gradle.kts
+             android/app/src/main/java/ua/orders/crm/MainActivity.kt
+             android/app/src/main/java/ua/orders/crm/OrderModels.kt
+             android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+             android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+
+          8. Проверь:
+             git diff --cached --name-only
+
+             В staged должны быть ровно эти 5 файлов. AGENTS.md не добавлять.
+
+          9. Commit и push:
+             git commit -m "Show Android delivery status and preserve order list"
+             git push origin main
+
+          10. Ничего больше не запускать. Android unit tests, lint, APK build, diff-check и чистое повторное применение canonical patch уже независимо проверены.
+
+          11. Сообщи только:
+              - commit SHA;
+              - успешен ли push;
+              - итог git status --short.
+
+          Не запускать Deno. Не менять AGENTS.md.
+          EOF
+          cd /tmp/patch63-patches
+          git config user.name 'chatgpt-patches'
+          git config user.email 'chatgpt-patches@users.noreply.github.com'
+          git add 63-android-delivery-status-and-list-restore.patch 63-android-delivery-status-and-list-restore.txt
+          git commit -m 'Add validated Patch 63'
+          git push origin HEAD:chatgpt-patches
