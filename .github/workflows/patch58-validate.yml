@@ -94,7 +94,7 @@ jobs:
 
       - name: Delivery tracking regression tests
         run: |
-          deno test \
+          deno test --allow-env \
             supabase/functions/sync-delivery-tracking/normalize_test.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-poshta_test.ts
