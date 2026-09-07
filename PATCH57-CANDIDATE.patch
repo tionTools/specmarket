@@ -1,7 +1,8 @@
 diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
 --- a/src/features/orders/types.ts
 +++ b/src/features/orders/types.ts
-@@
+@@ -70,6 +70,8 @@ export interface Delivery {
+   trackingLastCheckedAt?: string
    trackingStatusChangedAt?: string
    trackingDataChangedAt?: string
 +  /** Прогнозируемая дата/время прибытия по данным перевозчика. */
@@ -9,17 +10,11 @@ diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
    trackingLastError?: string
    trackingDestinationCity?: string
    trackingDestinationAddress?: string
-   trackingDestinationBranchNumber?: string
-   trackingDestinationLocationCode?: string
-   trackingDestinationPostalCode?: string
-   printCheckedAt?: string
-   printedAt?: string
- }
 diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/delivery-tracking.ts
 new file mode 100644
 --- /dev/null
 +++ b/src/features/orders/delivery-tracking.ts
-@@
+@@ -0,0 +1,47 @@
 +const normalizedStatusLabels: Record<string, string> = {
 +  returning: 'Возвращается отправителю',
 +  returned: 'Возвращено',
@@ -70,7 +65,8 @@ new file mode 100644
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
-@@
+@@ -60,10 +60,14 @@ import * as XLSX from 'xlsx'
+ import { demoOrders } from '@/features/orders/demoOrders'
  import {
    deliveryTtnForClipboard,
    displayCarrier,
@@ -84,9 +80,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +  secondaryDeliveryStatus,
 +} from '@/features/orders/delivery-tracking'
  import type {
-   Delivery,
-   Order,
-@@
+@@ -5575,9 +5579,55 @@ function orderDateTime(order: Order) {
                <div class="flex items-start justify-between gap-3">
                  <h3 class="text-lg font-semibold">Доставка</h3>
                  <span
