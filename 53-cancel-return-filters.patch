@@ -1,0 +1,268 @@
+diff --git a/src/features/orders/shipment-accounting.ts b/src/features/orders/shipment-accounting.ts
+--- a/src/features/orders/shipment-accounting.ts
++++ b/src/features/orders/shipment-accounting.ts
+@@ -2,6 +2,13 @@
+ import { getRemainingQuantity } from './financials'
+ import { hasPhysicalShipmentMovement as deliveryHasPhysicalMovement } from '../../lib/physical-shipment'
+ 
++export type OrderLifecycleState =
++  | 'active'
++  | 'cancelled_before_shipment'
++  | 'return_pending'
++  | 'return_partial'
++  | 'return_completed'
++
+ const returnStatus = (status: string) =>
+   /скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим/.test(status.toLowerCase())
+ 
+@@ -17,10 +25,38 @@
+     normalizedTracking === 'returned'
+   )
+ }
+ 
++export function getOrderLifecycleState(order: Order, status: string): OrderLifecycleState {
++  const hasSignal = hasReturnSignal(order, status)
++  if (!hasSignal) return 'active'
++
++  if (!hasPhysicalShipmentMovement(order)) return 'cancelled_before_shipment'
++
++  const acceptedReturnQuantity = order.products.reduce(
++    (sum, product) => sum + Math.max(0, product.returnedQuantity ?? 0),
++    0,
++  )
++  const remainingQuantity = order.products.reduce(
++    (sum, product) => sum + getRemainingQuantity(product),
++    0,
++  )
++
++  if (acceptedReturnQuantity <= 0) return 'return_pending'
++  if (remainingQuantity <= 0) return 'return_completed'
++  return 'return_partial'
++}
++
++export function isOrderVisibleInMainList(state: OrderLifecycleState) {
++  return state === 'active' || state === 'return_pending' || state === 'return_partial'
++}
++
++export function isReturnLifecycleState(state: OrderLifecycleState) {
++  return state === 'return_pending' || state === 'return_partial' || state === 'return_completed'
++}
++
+ export function includeInUnpaidShipment(order: Order, status: string, paid: boolean) {
+   if (!order.delivery.ttn.trim() || paid) return false
+-  if (!order.products.some((product) => getRemainingQuantity(product) > 0)) return false
+-  if (!hasReturnSignal(order, status)) return true
+-  return hasPhysicalShipmentMovement(order)
++  const state = getOrderLifecycleState(order, status)
++  if (state === 'cancelled_before_shipment' || state === 'return_completed') return false
++  return order.products.some((product) => getRemainingQuantity(product) > 0)
+ }
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -21,7 +21,13 @@
+   useTimeoutFn,
+   useWindowScroll,
+ } from '@vueuse/core'
+-import { includeInUnpaidShipment } from '../features/orders/shipment-accounting'
++import {
++  getOrderLifecycleState,
++  hasPhysicalShipmentMovement,
++  includeInUnpaidShipment,
++  isOrderVisibleInMainList,
++  isReturnLifecycleState,
++} from '../features/orders/shipment-accounting'
+ import {
+   getNetOrderAmount,
+   getNetOrderCost,
+@@ -101,6 +107,7 @@
+ const isComparingPreviousPeriod = ref(false)
+ const isPlatformSummaryExpanded = ref(false)
+-const isShowingCancelledAndReturned = ref(false)
++const isShowingCancellations = ref(false)
++const isShowingReturns = ref(false)
+ const isShowingUnpaidOnly = ref(false)
+ const expandedOrderId = ref<string | number | null>(null)
+ const deletingOrderId = ref<string | number | null>(null)
+@@ -2819,7 +2826,8 @@
+     registryKeyType.value = keyType
+     isPromRegistryDraft.value = true
+     platformFilter.value = 'all'
+-    isShowingCancelledAndReturned.value = false
++    isShowingCancellations.value = false
++    isShowingReturns.value = false
+     await persistenceQueue
+     await reconcileRemoteOrders(true)
+     applyPromRegistryPreview(entries)
+@@ -3425,15 +3433,19 @@
+ 
+     if (search) return haystack.includes(search) || matchesTtn
+ 
++    const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
+     const matchesPlatform =
+-      isShowingCancelledAndReturned.value ||
++      isShowingCancellations.value ||
++      isShowingReturns.value ||
+       platformFilter.value === 'all' ||
+       orderBusinessPlatform(order) === platformFilter.value
+     const matchesOrderState = isPromRegistryView.value
+       ? true
+-      : isShowingCancelledAndReturned.value
+-        ? isCancelledOrReturned(order)
+-        : !isCancelledOrReturned(order)
++      : isShowingCancellations.value
++        ? lifecycleState === 'cancelled_before_shipment'
++        : isShowingReturns.value
++          ? isReturnLifecycleState(lifecycleState)
++          : isOrderVisibleInMainList(lifecycleState)
+     const orderDate = parseOrderDate(order.date)
+     const matchesPeriod =
+       isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
+@@ -3768,17 +3780,30 @@
+   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+ }
+ 
+-function toggleCancelledAndReturned() {
+-  isShowingCancelledAndReturned.value = !isShowingCancelledAndReturned.value
+-  if (isShowingCancelledAndReturned.value) {
++function toggleCancellations() {
++  isShowingCancellations.value = !isShowingCancellations.value
++  if (isShowingCancellations.value) {
++    isShowingReturns.value = false
+     platformFilter.value = 'all'
+     isShowingUnpaidOnly.value = false
+   }
+ }
+ 
++function toggleReturns() {
++  isShowingReturns.value = !isShowingReturns.value
++  if (isShowingReturns.value) {
++    isShowingCancellations.value = false
++    platformFilter.value = 'all'
++    isShowingUnpaidOnly.value = false
++  }
++}
++
+ function toggleUnpaidOrders() {
+   isShowingUnpaidOnly.value = !isShowingUnpaidOnly.value
+-  if (isShowingUnpaidOnly.value) isShowingCancelledAndReturned.value = false
++  if (isShowingUnpaidOnly.value) {
++    isShowingCancellations.value = false
++    isShowingReturns.value = false
++  }
+ }
+ 
+ function scrollOrdersToTop() {
+@@ -4310,11 +4335,15 @@
+ }
+ 
+ function returnSignalLabel(order: Order) {
++  const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
++  if (lifecycleState === 'cancelled_before_shipment') return null
++  if (lifecycleState === 'return_completed') return 'Возврат принят'
++  if (lifecycleState === 'return_partial') return 'Возврат принят частично'
+   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
+   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
+   if (/повер|возврат|return|refund/i.test(order.status)) return 'Возврат заявлен'
+-  if (order.delivery.printedAt && /скас|отмен|cancel/i.test(order.status))
+-    return 'Отменён после сборки — возможен возврат'
++  if (hasPhysicalShipmentMovement(order) && /скас|отмен|cancel/i.test(order.status))
++    return 'Отменён после отправки — ожидается возврат'
+   return null
+ }
+ 
+@@ -5710,15 +5739,27 @@
+           </select>
+           <button
+             class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
+             :class="
+-              isShowingCancelledAndReturned
++              isShowingCancellations
+                 ? 'border-rose-500 bg-rose-50 text-rose-700'
+                 : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+             "
+             type="button"
+-            @click="toggleCancelledAndReturned"
++            @click="toggleCancellations"
+           >
+-            Отмены и возвраты
++            Отмены
++          </button>
++          <button
++            class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
++            :class="
++              isShowingReturns
++                ? 'border-rose-500 bg-rose-50 text-rose-700'
++                : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
++            "
++            type="button"
++            @click="toggleReturns"
++          >
++            Возвраты
+           </button>
+           <div class="flex items-center gap-2 sm:ml-auto">
+             <label
+@@ -6625,7 +6667,7 @@
+                     {{ returnSignalLabel(order) }} · возврат ожидает принятия
+                   </span>
+                   <button
+-                    v-if="!isGuest && order.delivery.printedAt"
++                    v-if="!isGuest && hasPhysicalShipmentMovement(order)"
+                     :disabled="isSavingReturn"
+                     class="rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                     :class="
+diff --git a/supabase/functions/_shared/shipment-accounting_test.ts b/supabase/functions/_shared/shipment-accounting_test.ts
+--- a/supabase/functions/_shared/shipment-accounting_test.ts
++++ b/supabase/functions/_shared/shipment-accounting_test.ts
+@@ -1,7 +1,10 @@
+ import { getNetOrderAmount } from '../../../src/features/orders/financials.ts'
+ import {
++  getOrderLifecycleState,
+   hasPhysicalShipmentMovement,
+   includeInUnpaidShipment,
++  isOrderVisibleInMainList,
++  isReturnLifecycleState,
+ } from '../../../src/features/orders/shipment-accounting.ts'
+ import type { Order } from '../../../src/features/orders/types.ts'
+ 
+@@ -39,6 +42,10 @@
+   const cancelled = order({})
+   assert(!hasPhysicalShipmentMovement(cancelled))
+   assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
++  const state = getOrderLifecycleState(cancelled, cancelled.status)
++  assert(state === 'cancelled_before_shipment')
++  assert(!isOrderVisibleInMainList(state))
++  assert(!isReturnLifecycleState(state))
+ })
+ 
+ Deno.test('shipped return stays in transit until full accepted return, then is excluded', () => {
+@@ -46,10 +55,18 @@
+   assert(hasPhysicalShipmentMovement(shipped))
+   assert(includeInUnpaidShipment(shipped, shipped.status, false))
+   assert(getNetOrderAmount(shipped) === 676)
++  const pendingState = getOrderLifecycleState(shipped, shipped.status)
++  assert(pendingState === 'return_pending')
++  assert(isOrderVisibleInMainList(pendingState))
++  assert(isReturnLifecycleState(pendingState))
+ 
+   shipped.products[0]!.returnedQuantity = 1
+   assert(getNetOrderAmount(shipped) === 0)
+   assert(!includeInUnpaidShipment(shipped, shipped.status, false))
++  const completedState = getOrderLifecycleState(shipped, shipped.status)
++  assert(completedState === 'return_completed')
++  assert(!isOrderVisibleInMainList(completedState))
++  assert(isReturnLifecycleState(completedState))
+ })
+ 
+ Deno.test('partial accepted return remains in transit only for the remaining quantity', () => {
+@@ -58,6 +75,10 @@
+   partial.products[0]!.returnedQuantity = 1
+   assert(getNetOrderAmount(partial) === 338)
+   assert(includeInUnpaidShipment(partial, partial.status, false))
++  const state = getOrderLifecycleState(partial, partial.status)
++  assert(state === 'return_partial')
++  assert(isOrderVisibleInMainList(state))
++  assert(isReturnLifecycleState(state))
+ })
+ 
+ Deno.test('paid shipment is never included in unpaid shipment amount', () => {
