@@ -1,4 +1,4 @@
-Patch 53 — ДОБИТЬ ФИНАЛ. Выполняй механически. Никаких исследований, новых правок или установки инструментов.
+Patch 53 — ФИНАЛ. Выполняй механически. Никаких исследований, новых правок или установки инструментов.
 
 Проект:
 C:\Users\Вадим\Documents\CRM моя\specmarket
@@ -12,60 +12,15 @@ C:\Users\Вадим\Documents\CRM моя\specmarket
 - Deno: 13 тестов прошли
 - deno check: sync-epicentr-orders и sync-kasta-orders прошли
 
+Android локально НЕ запускать: JDK в этом окружении отсутствует. После push Android будет проверен GitHub Actions, который сам устанавливает Temurin JDK 17 и запускает testDebugUnitTest, lintDebug, assembleDebug.
+
 ВАЖНО:
 - AGENTS.md не трогать и не stage;
 - НЕ включать в commit: PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock, supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql;
 - миграцию FCM НЕ применять;
-- никаких функциональных изменений;
-- если Android-проверка кода падает — не исправлять самостоятельно, показать ошибку и остановиться.
+- никаких функциональных изменений.
 
-1. Android. Ничего не устанавливать.
-
-$JavaCmd = Get-Command java -ErrorAction SilentlyContinue
-if (-not $JavaCmd) {
-  $SearchRoots = @(
-    'C:\Program Files\Eclipse Adoptium',
-    "$env:LOCALAPPDATA\Programs\Eclipse Adoptium",
-    "$env:USERPROFILE\.jdks",
-    'C:\Program Files\Java',
-    'C:\Program Files\Microsoft'
-  )
-  $JavaExe = $null
-  foreach ($Root in $SearchRoots) {
-    if ($JavaExe) { break }
-    if (-not (Test-Path $Root)) { continue }
-    $JavaExe = Get-ChildItem -Path $Root -Filter java.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-  }
-  if (-not $JavaExe) { throw 'Existing JDK not found. Stop; do not install anything.' }
-  $JavaBin = Split-Path $JavaExe.FullName -Parent
-  $env:JAVA_HOME = Split-Path $JavaBin -Parent
-  $env:Path = "$JavaBin;$env:Path"
-}
-
-java -version
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-$ProjectRoot = (Get-Location).Path
-if (Test-Path 'X:\') { throw 'X: is already in use. Stop.' }
-subst X: "$ProjectRoot"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-try {
-  Push-Location 'X:\android'
-  .\gradlew.bat testDebugUnitTest lintDebug assembleDebug --no-daemon
-  $AndroidExit = $LASTEXITCODE
-  Pop-Location
-  if ($AndroidExit -ne 0) { exit $AndroidExit }
-}
-finally {
-  Set-Location $ProjectRoot
-  subst X: /D | Out-Null
-}
-
-git diff --check
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-2. Stage ТОЛЬКО эти файлы:
+1. Stage ТОЛЬКО эти файлы:
 git add -- `
   android/app/build.gradle.kts `
   android/app/src/main/java/ua/orders/crm/MainActivity.kt `
@@ -90,33 +45,23 @@ git add -- `
   supabase/functions/_shared/shipment-accounting_test.ts `
   supabase/functions/sync-epicentr-orders/index.ts `
   supabase/functions/sync-kasta-orders/index.ts
-
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 git diff --cached --check
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $Staged = @(git diff --cached --name-only)
-$Staged
-$Forbidden = @(
-  'AGENTS.md',
-  'PATCH53-REVIEW.txt',
-  'android/PATCH53-SPEC.md',
-  'deno.lock',
-  'supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql'
-)
-foreach ($File in $Forbidden) {
-  if ($Staged -contains $File) { throw "Forbidden staged file: $File" }
-}
+$Forbidden = @('AGENTS.md','PATCH53-REVIEW.txt','android/PATCH53-SPEC.md','deno.lock','supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql')
+foreach ($File in $Forbidden) { if ($Staged -contains $File) { throw "Forbidden staged file: $File" } }
 
-3. Сразу commit + push:
+2. Commit + push:
 git commit -m "feat: update mobile actions themes and return workflow"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $Commit = git rev-parse HEAD
 git push origin main
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-4. Сразу deploy двух изменённых Edge Functions:
+3. Deploy двух изменённых Edge Functions:
 pnpm exec supabase functions deploy sync-epicentr-orders
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 pnpm exec supabase functions deploy sync-kasta-orders
@@ -124,9 +69,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 НЕ делать db push. НЕ применять migration. НЕ настраивать Firebase. НЕ исследовать Kasta contract. НЕ проверять GitHub Actions.
 
-5. В ответ дай только:
+4. В ответ дай только:
 - полный SHA commit;
-- Android: testDebugUnitTest/lintDebug/assembleDebug результат;
 - push result;
-- deploy двух функций;
+- deploy result двух функций;
 - git status --short.
