@@ -1,57 +1,59 @@
-Patch 53 — финальный цикл готовых частей. Выполняй механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+Patch 53 — ДОБИТЬ ФИНАЛ. Выполняй механически. Никаких исследований, новых правок или установки постоянных инструментов.
 
-Работай в текущем незакоммиченном дереве:
+Проект:
 C:\Users\Вадим\Documents\CRM моя\specmarket
 
+Текущее состояние уже прошло: pnpm format, pnpm type-check, pnpm lint, pnpm build, git diff --check. НЕ повторять эти web-проверки.
+
 ВАЖНО:
-- AGENTS.md не изменять и не включать в commit;
+- AGENTS.md не трогать и не stage;
 - НЕ включать в commit: PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock, supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql;
-- миграции сейчас НЕ применять: FCM ещё не реализован полностью;
-- никаких новых функциональных изменений;
-- если любая проверка кода падает — ничего самостоятельно не чинить, показать ошибку и остановиться;
-- если проблема только в отсутствии команды/окружения, использовать только явно указанный ниже fallback, ничего не устанавливать.
+- миграцию FCM НЕ применять;
+- никаких функциональных изменений;
+- если тест/проверка кода падает — не исправлять самостоятельно, показать ошибку и остановиться.
 
-1. Web проверки:
-pnpm format
-pnpm type-check
-pnpm lint
-pnpm build
-git diff --check
-
-2. Deno. Используй уже установленный локальный runtime напрямую, не PATH:
-$Deno = "$env:USERPROFILE\.deno\bin\deno.exe"
-if (!(Test-Path $Deno)) { throw "Deno runtime not found at $Deno; nothing was installed." }
-& $Deno test supabase/functions/_shared/financials_test.ts supabase/functions/_shared/kasta-return_test.ts supabase/functions/_shared/marketplace-accept_test.ts supabase/functions/_shared/shipment-accounting_test.ts
+1. Deno-проверки. Не искать deno.exe и не ставить Deno глобально. Запустить зафиксированную версию 2.9.6 временно через pnpm dlx:
+pnpm dlx deno@2.9.6 test --no-lock supabase/functions/_shared/financials_test.ts supabase/functions/_shared/kasta-return_test.ts supabase/functions/_shared/marketplace-accept_test.ts supabase/functions/_shared/shipment-accounting_test.ts
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $Deno check supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
+pnpm dlx deno@2.9.6 check --no-lock supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-3. Android. Ничего не устанавливать. Сначала проверь java:
+2. Android. Ничего не устанавливать. Использовать имеющийся JDK 17.
 $Java = Get-Command java -ErrorAction SilentlyContinue
 if (!$Java) {
-  $Jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (!$Jdk) { throw 'JDK not found; nothing was installed.' }
+  $Candidates = @(
+    'C:\Program Files\Eclipse Adoptium',
+    "$env:LOCALAPPDATA\Programs\Eclipse Adoptium",
+    'C:\Program Files\Java',
+    'C:\Program Files\Microsoft'
+  )
+  $Jdk = foreach ($Root in $Candidates) {
+    if (Test-Path $Root) { Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'jdk|temurin' } }
+  } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if (!$Jdk) { throw 'Existing JDK not found. Stop; do not install anything.' }
   $env:JAVA_HOME = $Jdk.FullName
   $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 }
+java -version
 
-Чтобы обойти кириллицу в исходном пути, временно подключи свободную букву X: к корню проекта:
-if (Test-Path 'X:\') { throw 'X: is already in use; stop without changes.' }
 $ProjectRoot = (Get-Location).Path
+if (Test-Path 'X:\') { throw 'X: is already in use. Stop.' }
 subst X: "$ProjectRoot"
 try {
   Push-Location X:\android
   .\gradlew.bat testDebugUnitTest lintDebug assembleDebug --no-daemon
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $AndroidExit = $LASTEXITCODE
   Pop-Location
+  if ($AndroidExit -ne 0) { exit $AndroidExit }
 } finally {
   Set-Location $ProjectRoot
   subst X: /D
 }
 
 git diff --check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-4. В commit добавить ТОЛЬКО эти файлы:
+3. Stage ТОЛЬКО эти файлы:
 git add -- `
   android/app/build.gradle.kts `
   android/app/src/main/java/ua/orders/crm/MainActivity.kt `
@@ -77,27 +79,33 @@ git add -- `
   supabase/functions/sync-epicentr-orders/index.ts `
   supabase/functions/sync-kasta-orders/index.ts
 
-Проверь:
 git diff --cached --check
-git diff --cached --name-only
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-В staged НЕ должно быть AGENTS.md, PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock или migration 20260907090000.
+$Staged = git diff --cached --name-only
+$Staged
+$Forbidden = @('AGENTS.md','PATCH53-REVIEW.txt','android/PATCH53-SPEC.md','deno.lock','supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql')
+foreach ($File in $Forbidden) { if ($Staged -contains $File) { throw "Forbidden staged file: $File" } }
 
-5. Если все проверки зелёные:
+4. Сразу commit + push:
 git commit -m "feat: update mobile actions themes and return workflow"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Commit = git rev-parse HEAD
 git push origin main
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-6. После успешного push задеплой только изменённые Edge Functions:
+5. Сразу deploy двух изменённых Edge Functions:
 pnpm exec supabase functions deploy sync-epicentr-orders
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 pnpm exec supabase functions deploy sync-kasta-orders
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-НЕ выполнять db push/migration. НЕ пытаться настраивать Firebase/Kasta write contract.
+НЕ делать db push. НЕ применять migration. НЕ настраивать Firebase. НЕ исследовать Kasta contract. НЕ проверять GitHub Actions.
 
-7. После deploy остановись. В ответ дай только:
+6. В ответ дай только:
 - полный SHA commit;
+- Deno: test/check результат;
+- Android: testDebugUnitTest/lintDebug/assembleDebug результат;
 - push result;
-- результаты web/Deno/Android проверок;
-- deploy result двух Edge Functions;
+- deploy двух функций;
 - git status --short.
-
-Не проверяй GitHub Actions — это сделает ChatGPT отдельно.
