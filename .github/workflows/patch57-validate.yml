@@ -1,0 +1,108 @@
+name: Patch 57 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-57]
+    paths:
+      - 'PATCH57-CANDIDATE.patch'
+      - '.github/workflows/patch57-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply check
+        run: git apply --check --recount PATCH57-CANDIDATE.patch
+
+      - name: Apply candidate
+        run: git apply --recount PATCH57-CANDIDATE.patch
+
+      - name: Validate changed files and whitespace
+        shell: bash
+        run: |
+          git diff --check
+          git diff --name-only | sort | tee /tmp/changed.txt
+          cat > /tmp/expected.txt <<'EOF'
+          src/features/orders/delivery-tracking.ts
+          src/features/orders/types.ts
+          src/pages/HomeView.vue
+          EOF
+          diff -u /tmp/expected.txt /tmp/changed.txt
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 25
+
+      - name: Runtime helper regression
+        shell: bash
+        run: |
+          node --experimental-strip-types --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import {
+            expectedReturnLabel,
+            formatTrackingExpectedDeliveryAt,
+            secondaryDeliveryStatus,
+          } from './src/features/orders/delivery-tracking.ts'
+
+          assert.equal(
+            secondaryDeliveryStatus('Відмова від отримання', 'returning'),
+            'Возвращается отправителю',
+          )
+          assert.equal(
+            secondaryDeliveryStatus('Возвращается отправителю', 'returning'),
+            '',
+          )
+          assert.equal(
+            secondaryDeliveryStatus('Відмова від отримання', 'unknown'),
+            '',
+          )
+          assert.equal(formatTrackingExpectedDeliveryAt('08-09-2026 15:00:00'), '08.09, 15:00')
+          assert.equal(formatTrackingExpectedDeliveryAt('08.09.2026 15:00'), '08.09, 15:00')
+          assert.equal(formatTrackingExpectedDeliveryAt('2026-09-08 15:00:00'), '08.09, 15:00')
+          assert.equal(formatTrackingExpectedDeliveryAt('08-09-2026'), '08.09')
+          assert.equal(
+            expectedReturnLabel('returning', '08-09-2026 15:00:00'),
+            'Ожидается возврат: 08.09, 15:00',
+          )
+          assert.equal(expectedReturnLabel('returned', '08-09-2026 15:00:00'), '')
+          assert.equal(expectedReturnLabel('returning', ''), '')
+          console.log('PATCH57_RUNTIME_OK')
+          NODE
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Web checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - name: Final diff checks and canonical patch
+        shell: bash
+        run: |
+          git diff --check
+          git diff --name-only | sort > /tmp/final-changed.txt
+          diff -u /tmp/expected.txt /tmp/final-changed.txt
+          git diff -- src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue > PATCH57-CANONICAL.patch
+          git apply --check --reverse PATCH57-CANONICAL.patch
+          test -s PATCH57-CANONICAL.patch
+
+      - name: Publish canonical validation artifact on temp branch
+        shell: bash
+        run: |
+          git restore src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue
+          git config user.name 'chatgpt-validation'
+          git config user.email 'chatgpt-validation@users.noreply.github.com'
+          git add PATCH57-CANONICAL.patch
+          git commit -m 'chore: store canonical Patch 57 validation diff'
+          git push origin HEAD:chatgpt-validate-57
