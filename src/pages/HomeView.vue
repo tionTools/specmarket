@@ -1180,13 +1180,17 @@ const reportOrders = computed(() =>
   }),
 )
 const unpaidShipmentAccountingStart = new Date(2026, 7, 1)
+function isUnpaidShipmentOrder(order: Order) {
+  const orderDate = parseOrderDate(order.date)
+  return (
+    orderDate !== null &&
+    orderDate >= unpaidShipmentAccountingStart &&
+    includeInUnpaidShipment(order, displayOrderStatus(order.status), isPaid(order))
+  )
+}
 const unpaidShipmentAmount = computed(() =>
   orders.value
-    .filter((order) => {
-      const orderDate = parseOrderDate(order.date)
-      if (orderDate === null || orderDate < unpaidShipmentAccountingStart) return false
-      return includeInUnpaidShipment(order, displayOrderStatus(order.status), isPaid(order))
-    })
+    .filter(isUnpaidShipmentOrder)
     .reduce((total, order) => total + getNetOrderAmount(order), 0),
 )
 const printRegistryOrders = computed(() => {
@@ -1409,7 +1413,9 @@ const matchingOrders = computed(() => {
           : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
-      isPromRegistryView.value || (orderDate !== null && orderDate >= from && orderDate <= to)
+      isPromRegistryView.value ||
+      isShowingUnpaidOnly.value ||
+      (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
       matchesPlatform &&
       matchesOrderState &&
@@ -1418,12 +1424,10 @@ const matchingOrders = computed(() => {
     )
   })
 })
-const unpaidOrdersCount = computed(
-  () => matchingOrders.value.filter((order) => !isPaid(order)).length,
-)
+const unpaidOrdersCount = computed(() => orders.value.filter(isUnpaidShipmentOrder).length)
 const visibleOrders = computed(() =>
-  isShowingUnpaidOnly.value && !searchQuery.value.trim()
-    ? matchingOrders.value.filter((order) => !isPaid(order))
+  isShowingUnpaidOnly.value
+    ? matchingOrders.value.filter(isUnpaidShipmentOrder)
     : matchingOrders.value,
 )
 
