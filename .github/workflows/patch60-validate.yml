@@ -18,8 +18,8 @@ jobs:
 
       - name: Apply candidate
         run: |
-          git apply --check PATCH60-CANDIDATE.patch
-          git apply PATCH60-CANDIDATE.patch
+          git apply --check --recount PATCH60-CANDIDATE.patch
+          git apply --recount PATCH60-CANDIDATE.patch
 
       - name: Validate scope and whitespace
         shell: bash
