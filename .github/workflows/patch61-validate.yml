@@ -1,0 +1,139 @@
+name: Patch 61 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-61]
+    paths:
+      - 'PATCH61-ADJUST.patch'
+      - '.github/workflows/patch61-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: 3457e86afa975cb3509dd7cab48d6425b44f4f01
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Load previously validated Android candidate
+        shell: bash
+        run: |
+          git fetch origin chatgpt-validate-56
+          git show origin/chatgpt-validate-56:PATCH56-CANDIDATE.patch > /tmp/PATCH56-CANDIDATE.patch
+          test -s /tmp/PATCH56-CANDIDATE.patch
+
+      - name: Apply planned Android 0.3 candidate
+        shell: bash
+        run: |
+          git apply --check --recount /tmp/PATCH56-CANDIDATE.patch
+          git apply --recount /tmp/PATCH56-CANDIDATE.patch
+          git add -N android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          git apply --check --recount PATCH61-ADJUST.patch
+          git apply --recount PATCH61-ADJUST.patch
+
+      - name: Validate changed files and whitespace
+        shell: bash
+        run: |
+          git diff --check
+          git diff --name-only | sort > /tmp/changed.txt
+          cat > /tmp/expected.txt <<'EOF'
+          android/app/build.gradle.kts
+          android/app/src/main/AndroidManifest.xml
+          android/app/src/main/java/ua/orders/crm/Appearance.kt
+          android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          android/app/src/main/java/ua/orders/crm/OrderModels.kt
+          android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+          android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+          src/pages/HomeView.vue
+          EOF
+          sort -o /tmp/expected.txt /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/changed.txt
+          ! grep -Fx 'AGENTS.md' /tmp/changed.txt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Android tests, lint and APK
+        run: |
+          sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+          ./gradlew testDebugUnitTest lintDebug assembleDebug
+        working-directory: android
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 25
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Web checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - name: Regression assertions
+        shell: bash
+        run: |
+          grep -F 'versionCode = 3; versionName = "0.3"' android/app/build.gradle.kts
+          ! grep -F 'vm.showNew' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          ! grep -F 'FilterChip(' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          grep -F 'sortOrdersForDisplay' android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          grep -F 'order("created_at", SortOrder.DESCENDING)' android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+          grep -F 'trackingReturnInProgress' android/app/src/main/java/ua/orders/crm/OrderModels.kt
+          grep -F 'newOrderNotifications' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          grep -F 'newOrderNotificationsStorageKey' src/pages/HomeView.vue
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Build and re-apply canonical Patch 61 from clean main
+        shell: bash
+        run: |
+          git diff "$BASE_SHA" -- \
+            android/app/build.gradle.kts \
+            android/app/src/main/AndroidManifest.xml \
+            android/app/src/main/java/ua/orders/crm/Appearance.kt \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderModels.kt \
+            android/app/src/main/java/ua/orders/crm/OrderNotification.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersRepository.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt \
+            android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt \
+            src/pages/HomeView.vue \
+            > /tmp/PATCH61-CANONICAL.patch
+          test -s /tmp/PATCH61-CANONICAL.patch
+          git worktree add /tmp/patch61-base "$BASE_SHA"
+          cd /tmp/patch61-base
+          git apply --check /tmp/PATCH61-CANONICAL.patch
+          git apply /tmp/PATCH61-CANONICAL.patch
+          git add -N android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          git diff --check
+          git diff --name-only | sort > /tmp/reapplied.txt
+          diff -u /tmp/expected.txt /tmp/reapplied.txt
+          cp /tmp/PATCH61-CANONICAL.patch "$GITHUB_WORKSPACE/PATCH61-CANONICAL.patch"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch61-canonical
+          path: PATCH61-CANONICAL.patch
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orders-android-0.3-validation
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
