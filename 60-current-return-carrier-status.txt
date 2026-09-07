@@ -1,0 +1,62 @@
+PATCH 60 — текущий статус перевозчика при возврате
+
+База patch: main commit f8d2e3f08b9047b94143033df11f6827db4bebb1.
+
+Действуй только механически. Ничего не исследуй, не проектируй и не исправляй самостоятельно.
+
+1. Перейди в:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+
+2. Выполни:
+   git fetch origin main chatgpt-patches
+   git rev-parse origin/main
+
+   Ожидается ровно:
+   f8d2e3f08b9047b94143033df11f6827db4bebb1
+
+   Если SHA другой — остановись и сообщи только новый SHA. Patch не применять.
+
+3. Выполни:
+   git switch main
+   git merge --ff-only origin/main
+
+4. Не трогай AGENTS.md и любые существующие посторонние local/untracked файлы.
+
+5. Получи patch:
+   git show origin/chatgpt-patches:60-current-return-carrier-status.patch > .git/PATCH60.patch
+
+6. Выполни:
+   git apply --check .git/PATCH60.patch
+   git apply .git/PATCH60.patch
+   git diff --check
+
+   Если git apply --check или применение не прошло — остановись. Ничего не исправляй.
+
+7. Добавь в commit ТОЛЬКО:
+   src/features/orders/delivery-tracking.ts
+   src/features/orders/types.ts
+   src/pages/HomeView.vue
+   supabase/functions/sync-delivery-tracking/storage.ts
+   supabase/functions/sync-delivery-tracking/storage_return_test.ts
+
+8. Проверь:
+   git diff --cached --name-only
+
+   В staged должны быть ровно эти 5 файлов. AGENTS.md не добавлять.
+
+9. Commit и push:
+   git commit -m "Show current carrier status during returns"
+   git push origin main
+
+10. После успешного push задеплой только изменённую Edge Function в уже связанный Supabase-проект:
+    pnpm exec supabase functions deploy sync-delivery-tracking
+
+    Если deploy не прошёл — не исследуй причину, просто сообщи ошибку.
+
+11. Сообщи только:
+    - commit SHA;
+    - успешен ли push;
+    - успешен ли deploy sync-delivery-tracking;
+    - итог git status --short.
+
+Не запускать Deno. Не запускать pnpm type-check/lint/build: Patch уже независимо проверен этими тестами. Не менять AGENTS.md.
