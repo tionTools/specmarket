@@ -1,0 +1,37 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index c5b72e5..972c0b3 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -114,8 +114,8 @@ function isCancelledOrReturned(order: Order) {
+ const reportOrders = computed(() =>
+   orders.value.filter((order) => {
+     if (!order.delivery.ttn.trim()) return false
+-    if (!isCancelledOrReturned(order)) return true
+-    return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
++    const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
++    return isOrderVisibleInMainList(lifecycleState)
+   }),
+ )
+ const unpaidShipmentAccountingStart = new Date(2026, 7, 1)
+diff --git a/supabase/functions/_shared/shipment-accounting_test.ts b/supabase/functions/_shared/shipment-accounting_test.ts
+index fe65e5f..f4afecc 100644
+--- a/supabase/functions/_shared/shipment-accounting_test.ts
++++ b/supabase/functions/_shared/shipment-accounting_test.ts
+@@ -45,14 +45,14 @@ Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit mone
+   assert(!isReturnLifecycleState(state))
+ })
+ 
+-Deno.test('shipped return stays in transit until full accepted return, then is excluded', () => {
+-  const shipped = order({ trackingNormalizedStatus: 'returning' })
++Deno.test('S5TSAE5 remains in turnover until its returned quantity is accepted', () => {
++  const shipped = order({ printedAt: '2026-09-05', trackingNormalizedStatus: 'cancelled' })
+   assert(hasPhysicalShipmentMovement(shipped))
+   assert(includeInUnpaidShipment(shipped, shipped.status, false))
+   assert(getNetOrderAmount(shipped) === 676)
+   const pendingState = getOrderLifecycleState(shipped, shipped.status)
+   assert(pendingState === 'return_pending')
+-  assert(isOrderVisibleInMainList(pendingState))
++  assert(Boolean(shipped.delivery.ttn.trim()) && isOrderVisibleInMainList(pendingState))
+   assert(isReturnLifecycleState(pendingState))
+ 
+   shipped.products[0]!.returnedQuantity = 1
