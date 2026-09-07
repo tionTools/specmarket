@@ -14,6 +14,7 @@ import {
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
+import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -654,6 +655,49 @@ Deno.serve(async (request) => {
     full?: unknown
     manual?: unknown
     completeExternalIds?: unknown
+    acceptExternalIds?: unknown
+  }
+  if (body.acceptExternalIds !== undefined) {
+    if (isScheduledRequest || (body as RecordValue).scheduled === true) {
+      return Response.json({ ok: false, message: 'Принятие заказов доступно только пользователю CRM.' }, { status: 403, headers: corsHeaders })
+    }
+    let ids: string[]
+    try { ids = normalizePromExternalIds(body.acceptExternalIds) }
+    catch { return Response.json({ ok: false, message: 'Неверный список ID заказов Prom для принятия.' }, { status: 400, headers: corsHeaders }) }
+    if (body.completeExternalIds !== undefined || body.manual !== undefined || body.externalId !== undefined) {
+      return Response.json({ ok: false, message: 'Нельзя совмещать принятие с другими действиями Prom.' }, { status: 400, headers: corsHeaders })
+    }
+    if (!ids.length) return Response.json({ ok: true, accepted: 0, changedOrderIds: [], alreadyAccepted: [] }, { headers: corsHeaders })
+    try {
+      const result = await acceptPromOrders(ids, {
+        load: async (externalIds) => {
+          const { data, error } = await admin.from('crm_orders').select('id, external_id, status, updated_at').eq('platform', 'Пром').in('external_id', externalIds)
+          if (error) throw error
+          return data ?? []
+        },
+        setReceived: async (ids) => {
+          const response = await fetch('https://my.prom.ua/api/v1/orders/set_status', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'received', ids }),
+            signal: AbortSignal.timeout(30_000),
+          })
+          if (!response.ok) return false
+          const result = await response.json().catch(() => null)
+          return promConfirmedAcceptance(result, ids)
+        },
+        save: async (order) => {
+          const { data, error } = await admin.from('crm_orders').update({ status: 'Принято' })
+            .eq('id', order.id).eq('platform', 'Пром').eq('external_id', order.external_id)
+            .eq('status', order.status).eq('updated_at', order.updated_at).select('id')
+          if (error) throw error
+          return data?.length === 1
+        },
+      })
+      return Response.json(result.body, { status: result.status, headers: corsHeaders })
+    } catch {
+      return Response.json({ ok: false, message: 'Не удалось подтвердить принятие. Обновите заказ и проверьте статус Prom перед повтором.' }, { status: 502, headers: corsHeaders })
+    }
   }
   if (body.completeExternalIds !== undefined && !Array.isArray(body.completeExternalIds)) {
     return Response.json(
@@ -791,7 +835,7 @@ Deno.serve(async (request) => {
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
-  const hashes = new Map(await Promise.all(orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const)))
+  const hashes = new Map<string, string>(await Promise.all(orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const)))
   const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
   const { data: syncRows, error: syncStateError } = externalIds.length
     ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, order_id').eq('platform', 'Пром').in('external_id', externalIds)

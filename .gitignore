@@ -40,3 +40,12 @@ __screenshots__/
 
 .env
 .env.*.local
+
+# Android mobile client
+android/.gradle/
+android/local.properties
+android/**/build/
+android/.idea/
+android/captures/
+*.apk
+*.aab
