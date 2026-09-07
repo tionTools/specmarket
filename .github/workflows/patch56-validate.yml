@@ -21,7 +21,9 @@ jobs:
         run: git apply --check --recount PATCH56-CANDIDATE.patch
 
       - name: Apply candidate
-        run: git apply --recount PATCH56-CANDIDATE.patch
+        run: |
+          git apply --recount PATCH56-CANDIDATE.patch
+          git add -N android/app/src/main/java/ua/orders/crm/OrderNotification.kt
 
       - name: Validate changed files and whitespace
         shell: bash
