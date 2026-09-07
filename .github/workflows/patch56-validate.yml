@@ -18,10 +18,10 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Apply check
-        run: git apply --check PATCH56-CANDIDATE.patch
+        run: git apply --check --recount PATCH56-CANDIDATE.patch
 
       - name: Apply candidate
-        run: git apply PATCH56-CANDIDATE.patch
+        run: git apply --recount PATCH56-CANDIDATE.patch
 
       - name: Validate changed files and whitespace
         shell: bash
