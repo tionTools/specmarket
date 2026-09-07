@@ -1,0 +1,124 @@
+name: Patch 62 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-62]
+    paths:
+      - 'PATCH62-CANDIDATE.patch'
+      - 'PATCH62-ADJUST.patch'
+      - '.github/workflows/patch62-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: c339ec736e4a0cfde1cb34619125e0b68b411167
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify current main base
+        shell: bash
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+
+      - name: Apply Patch 62 candidate
+        shell: bash
+        run: |
+          git apply --check PATCH62-CANDIDATE.patch
+          git apply PATCH62-CANDIDATE.patch
+          git apply --check PATCH62-ADJUST.patch
+          git apply PATCH62-ADJUST.patch
+          git diff --check
+
+      - name: Validate exact diff scope
+        shell: bash
+        run: |
+          git diff --name-only | sort > /tmp/changed.txt
+          cat > /tmp/expected.txt <<'EOF'
+          supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+          supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+          supabase/functions/sync-delivery-tracking/storage.ts
+          supabase/functions/sync-delivery-tracking/storage_return_test.ts
+          EOF
+          sort -o /tmp/expected.txt /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/changed.txt
+          ! grep -Fx 'AGENTS.md' /tmp/changed.txt
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Delivery tracking regression tests
+        shell: bash
+        run: |
+          mapfile -t tests < <(find supabase/functions/sync-delivery-tracking -name '*_test.ts' -print | sort)
+          deno test --allow-env "${tests[@]}"
+
+      - name: Edge Function type check
+        shell: bash
+        run: deno check supabase/functions/sync-delivery-tracking/index.ts
+
+      - name: Live Nova CargoReturn control
+        shell: bash
+        run: |
+          cat >/tmp/request.json <<'EOF'
+          {"apiKey":"","modelName":"TrackingDocument","calledMethod":"getStatusDocuments","methodProperties":{"Documents":[{"DocumentNumber":"20451528497280"},{"DocumentNumber":"59001764954977"}]}}
+          EOF
+          curl -fsS --max-time 20 -H 'Content-Type: application/json' \
+            -d @/tmp/request.json https://api.novaposhta.ua/v2.0/json/ > /tmp/live.json
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/live.json'))
+          rows={str(r.get('Number')):r for r in p.get('data',[])}
+          original=rows['20451528497280']
+          child=rows['59001764954977']
+          assert original.get('LastCreatedOnTheBasisDocumentType') == 'CargoReturn'
+          assert str(original.get('LastCreatedOnTheBasisNumber')) == '59001764954977'
+          assert child.get('Status') and child.get('Status') != original.get('Status')
+          assert child.get('CityRecipient') == 'Циркуни'
+          assert str(child.get('ScheduledDeliveryDate')) == '08-09-2026 15:00:00'
+          print('original=', original.get('Status'))
+          print('return=', child.get('Status'))
+          print('return_eta=', child.get('ScheduledDeliveryDate'))
+          PY
+
+      - name: Static control assertions
+        shell: bash
+        run: |
+          grep -F "LastCreatedOnTheBasisDocumentType" supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+          grep -F "LastCreatedOnTheBasisNumber" supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+          grep -F "relation = 'return'" supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
+          grep -F "result.relation === 'return'" supabase/functions/sync-delivery-tracking/storage.ts
+          grep -F "!['redirect', 'return'].includes(result.relation ?? '')" supabase/functions/sync-delivery-tracking/storage.ts
+
+      - name: Build canonical Patch 62 and clean re-apply
+        shell: bash
+        run: |
+          git diff -- \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
+            supabase/functions/sync-delivery-tracking/storage.ts \
+            supabase/functions/sync-delivery-tracking/storage_return_test.ts \
+            > /tmp/PATCH62-CANONICAL.patch
+          test -s /tmp/PATCH62-CANONICAL.patch
+          git worktree add /tmp/patch62-base "$BASE_SHA"
+          cd /tmp/patch62-base
+          git apply --check /tmp/PATCH62-CANONICAL.patch
+          git apply /tmp/PATCH62-CANONICAL.patch
+          git diff --check
+          git diff --name-only | sort > /tmp/reapplied.txt
+          diff -u /tmp/expected.txt /tmp/reapplied.txt
+          cp /tmp/PATCH62-CANONICAL.patch "$GITHUB_WORKSPACE/PATCH62-CANONICAL.patch"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch62-canonical
+          path: PATCH62-CANONICAL.patch
+          if-no-files-found: error
