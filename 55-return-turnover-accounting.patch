@@ -1,37 +1,87 @@
+diff --git a/src/features/orders/shipment-accounting.ts b/src/features/orders/shipment-accounting.ts
+index 2e48e98..b4482c8 100644
+--- a/src/features/orders/shipment-accounting.ts
++++ b/src/features/orders/shipment-accounting.ts
+@@ -51,6 +51,11 @@ export function isReturnLifecycleState(state: OrderLifecycleState) {
+   return state === 'return_pending' || state === 'return_partial' || state === 'return_completed'
+ }
+ 
++export function includeInTurnoverReport(order: Order, status: string) {
++  if (!order.delivery.ttn.trim()) return false
++  return getOrderLifecycleState(order, status) !== 'cancelled_before_shipment'
++}
++
+ export function includeInUnpaidShipment(order: Order, status: string, paid: boolean) {
+   if (!order.delivery.ttn.trim() || paid) return false
+   const state = getOrderLifecycleState(order, status)
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
-index c5b72e5..972c0b3 100644
+index bbe90d3..bd6218b 100644
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
-@@ -114,8 +114,8 @@ function isCancelledOrReturned(order: Order) {
+@@ -2,6 +2,7 @@ import {
+   getOrderLifecycleState,
+   hasPhysicalShipmentMovement,
+   includeInUnpaidShipment,
++  includeInTurnoverReport,
+   isOrderVisibleInMainList,
+   isReturnLifecycleState,
+ } from '../features/orders/shipment-accounting'
+@@ -109,8 +110,7 @@ import {
  const reportOrders = computed(() =>
    orders.value.filter((order) => {
      if (!order.delivery.ttn.trim()) return false
 -    if (!isCancelledOrReturned(order)) return true
 -    return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)
-+    const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
-+    return isOrderVisibleInMainList(lifecycleState)
++    return includeInTurnoverReport(order, displayOrderStatus(order.status))
    }),
  )
  const unpaidShipmentAccountingStart = new Date(2026, 7, 1)
 diff --git a/supabase/functions/_shared/shipment-accounting_test.ts b/supabase/functions/_shared/shipment-accounting_test.ts
-index fe65e5f..f4afecc 100644
+index fe65e5f..1b61460 100644
 --- a/supabase/functions/_shared/shipment-accounting_test.ts
 +++ b/supabase/functions/_shared/shipment-accounting_test.ts
-@@ -45,14 +45,14 @@ Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit mone
+@@ -3,6 +3,7 @@ import {
+   getOrderLifecycleState,
+   hasPhysicalShipmentMovement,
+   includeInUnpaidShipment,
++  includeInTurnoverReport,
+   isOrderVisibleInMainList,
+   isReturnLifecycleState,
+ } from '../../../src/features/orders/shipment-accounting.ts'
+@@ -39,16 +40,18 @@ Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit mone
+   const cancelled = order({})
+   assert(!hasPhysicalShipmentMovement(cancelled))
+   assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
++  assert(!includeInTurnoverReport(cancelled, cancelled.status))
+   const state = getOrderLifecycleState(cancelled, cancelled.status)
+   assert(state === 'cancelled_before_shipment')
+   assert(!isOrderVisibleInMainList(state))
    assert(!isReturnLifecycleState(state))
  })
  
 -Deno.test('shipped return stays in transit until full accepted return, then is excluded', () => {
 -  const shipped = order({ trackingNormalizedStatus: 'returning' })
-+Deno.test('S5TSAE5 remains in turnover until its returned quantity is accepted', () => {
++Deno.test('S5TSAE5 stays in turnover until return acceptance and then contributes zero', () => {
 +  const shipped = order({ printedAt: '2026-09-05', trackingNormalizedStatus: 'cancelled' })
    assert(hasPhysicalShipmentMovement(shipped))
    assert(includeInUnpaidShipment(shipped, shipped.status, false))
++  assert(includeInTurnoverReport(shipped, shipped.status))
    assert(getNetOrderAmount(shipped) === 676)
    const pendingState = getOrderLifecycleState(shipped, shipped.status)
    assert(pendingState === 'return_pending')
--  assert(isOrderVisibleInMainList(pendingState))
-+  assert(Boolean(shipped.delivery.ttn.trim()) && isOrderVisibleInMainList(pendingState))
-   assert(isReturnLifecycleState(pendingState))
+@@ -57,6 +60,7 @@ Deno.test('shipped return stays in transit until full accepted return, then is e
  
    shipped.products[0]!.returnedQuantity = 1
+   assert(getNetOrderAmount(shipped) === 0)
++  assert(includeInTurnoverReport(shipped, shipped.status))
+   assert(!includeInUnpaidShipment(shipped, shipped.status, false))
+   const completedState = getOrderLifecycleState(shipped, shipped.status)
+   assert(completedState === 'return_completed')
+@@ -68,6 +72,7 @@ Deno.test('partial accepted return remains in transit only for the remaining qua
+   const partial = order({ printedAt: '2026-09-01' }, 2)
+   partial.products[0]!.returnedQuantity = 1
+   assert(getNetOrderAmount(partial) === 338)
++  assert(includeInTurnoverReport(partial, partial.status))
+   assert(includeInUnpaidShipment(partial, partial.status, false))
+   const state = getOrderLifecycleState(partial, partial.status)
+   assert(state === 'return_partial')
