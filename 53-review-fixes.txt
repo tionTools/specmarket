@@ -1,0 +1,58 @@
+Patch 53 — точечное исправление review findings. Это продолжение Patch 53, НЕ Patch 54.
+
+Работай механически. Никаких исследований, архитектурного аудита, поиска API-контрактов, установки инструментов или дополнительных правок.
+
+Проект:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+База Patch 52:
+61edd181cdf9e7b276a6a35fd6128737d9072cfd
+
+ВАЖНО:
+- текущее дерево Patch 53 незакоммичено;
+- commit/push/deploy запрещены;
+- AGENTS.md не трогать, не восстанавливать, не stage;
+- не откатывать весь Patch 53;
+- изменить только перечисленные ниже файлы;
+- если любая команда не выполняется как написано, ничего не чинить самостоятельно: показать ошибку и остановиться.
+
+1. Получи готовый патч:
+git fetch origin chatgpt-patches
+git show origin/chatgpt-patches:53-review-fixes.patch > 53-review-fixes.patch
+
+2. Чтобы убрать только незавершённые самостоятельные review-правки Terra, восстанови из базы Patch52 РОВНО эти tracked-файлы:
+git restore --source=61edd181cdf9e7b276a6a35fd6128737d9072cfd -- android/app/src/main/java/ua/orders/crm/MainActivity.kt android/app/src/main/java/ua/orders/crm/OrderModels.kt android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt src/pages/HomeView.vue supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
+
+3. Удали РОВНО эти untracked helper/test-файлы, потому что готовый патч создаёт их заново:
+Remove-Item -Force -ErrorAction SilentlyContinue `
+  src/features/orders/financials.ts, `
+  src/features/orders/shipment-accounting.ts, `
+  src/lib/physical-shipment.ts, `
+  supabase/functions/_shared/financials_test.ts, `
+  supabase/functions/_shared/kasta-return.ts, `
+  supabase/functions/_shared/kasta-return_test.ts, `
+  supabase/functions/_shared/marketplace-accept.ts, `
+  supabase/functions/_shared/marketplace-accept_test.ts, `
+  supabase/functions/_shared/shipment-accounting_test.ts
+
+Не удалять и не менять другие Patch53-файлы, включая Appearance.kt, appearance.ts, migration, PATCH53-SPEC.md, android build.gradle.kts, OrdersRepository.kt, OrdersViewModel.kt.
+
+4. Примени готовый патч:
+git apply --check 53-review-fixes.patch
+git apply 53-review-fixes.patch
+
+5. Выполни только короткие проверки:
+git diff --check
+deno test supabase/functions/_shared/financials_test.ts supabase/functions/_shared/kasta-return_test.ts supabase/functions/_shared/marketplace-accept_test.ts supabase/functions/_shared/shipment-accounting_test.ts
+deno check supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
+pnpm type-check
+
+НЕ запускать сейчас format/lint/build/Android lint/assemble и не пытаться чинить окружение. Полный цикл будет отдельно после завершения Patch 53.
+
+6. После этого остановись. Не делай commit/push/deploy.
+
+В ответ дай только:
+- применился ли patch;
+- результаты 4 коротких проверок;
+- git status --short;
+- если была ошибка — её точный текст без самостоятельного исправления.
