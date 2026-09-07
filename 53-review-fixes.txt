@@ -16,9 +16,8 @@ C:\Users\Вадим\Documents\CRM моя\specmarket
 - изменить только перечисленные ниже файлы;
 - если любая команда не выполняется как написано, ничего не чинить самостоятельно: показать ошибку и остановиться.
 
-1. Получи готовый патч:
+1. Получи ветку с готовым патчем:
 git fetch origin chatgpt-patches
-git show origin/chatgpt-patches:53-review-fixes.patch > 53-review-fixes.patch
 
 2. Чтобы убрать только незавершённые самостоятельные review-правки Terra, восстанови из базы Patch52 РОВНО эти tracked-файлы:
 git restore --source=61edd181cdf9e7b276a6a35fd6128737d9072cfd -- android/app/src/main/java/ua/orders/crm/MainActivity.kt android/app/src/main/java/ua/orders/crm/OrderModels.kt android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt src/pages/HomeView.vue supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
@@ -37,9 +36,9 @@ Remove-Item -Force -ErrorAction SilentlyContinue `
 
 Не удалять и не менять другие Patch53-файлы, включая Appearance.kt, appearance.ts, migration, PATCH53-SPEC.md, android build.gradle.kts, OrdersRepository.kt, OrdersViewModel.kt.
 
-4. Примени готовый патч:
-git apply --check 53-review-fixes.patch
-git apply 53-review-fixes.patch
+4. Примени готовый патч напрямую из git, не создавая локальную копию patch-файла:
+git show origin/chatgpt-patches:53-review-fixes.patch | git apply --check -
+git show origin/chatgpt-patches:53-review-fixes.patch | git apply -
 
 5. Выполни только короткие проверки:
 git diff --check
