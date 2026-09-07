@@ -6,11 +6,11 @@ Patch 54. Выполнить только механически, без исс�
 
 1. Получить patch из origin/chatgpt-patches и проверить его:
 git fetch origin chatgpt-patches
-git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply --check -
+git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply --check --recount -
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 2. Применить:
-git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply -
+git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply --recount -
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 3. Только проверки:
