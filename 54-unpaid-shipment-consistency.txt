@@ -1,0 +1,40 @@
+Patch 54. Выполнить только механически, без исследований и дополнительных правок.
+
+Текущий проект: C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Не трогать и не stage существующие посторонние файлы, включая AGENTS.md, PATCH53-REVIEW.txt, android/PATCH53-SPEC.md, deno.lock и supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql.
+
+1. Получить patch из origin/chatgpt-patches и проверить его:
+git fetch origin chatgpt-patches
+git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply --check -
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+2. Применить:
+git show origin/chatgpt-patches:54-unpaid-shipment-consistency.patch | git apply -
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+3. Только проверки:
+pnpm type-check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+git diff --check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+4. Stage только:
+git add -- src/pages/HomeView.vue
+git diff --cached --check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+5. Commit + push:
+git commit -m "fix: align unpaid shipment list with total"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Commit = git rev-parse HEAD
+git push origin main
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Ничего не deploy вручную, Android не запускать, Deno не запускать, миграции не применять.
+
+В ответ дать только:
+- полный SHA commit;
+- результат pnpm type-check;
+- результат push;
+- git status --short.
