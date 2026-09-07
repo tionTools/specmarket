@@ -1,7 +1,7 @@
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
-@@ -1180,12 +1180,16 @@ const reportOrders = computed(() =>
+@@ -1180,13 +1180,18 @@ const reportOrders = computed(() =>
    }),
  )
  const unpaidShipmentAccountingStart = new Date(2026, 7, 1)
@@ -24,7 +24,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
      .reduce((total, order) => total + getNetOrderAmount(order), 0),
  )
  const printRegistryOrders = computed(() => {
-@@ -1410,18 +1414,19 @@ const matchingOrders = computed(() => {
+@@ -1409,20 +1414,22 @@ const matchingOrders = computed(() => {
            : isOrderVisibleInMainList(lifecycleState)
      const orderDate = parseOrderDate(order.date)
      const matchesPeriod =
