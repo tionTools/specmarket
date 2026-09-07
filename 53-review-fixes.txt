@@ -13,16 +13,23 @@ C:\Users\Вадим\Documents\CRM моя\specmarket
 - commit/push/deploy запрещены;
 - AGENTS.md не трогать, не восстанавливать, не stage;
 - не откатывать весь Patch 53;
-- изменить только перечисленные ниже файлы;
 - если любая команда не выполняется как написано, ничего не чинить самостоятельно: показать ошибку и остановиться.
 
-1. Получи ветку с готовым патчем:
+1. Обнови только ветку патчей:
 git fetch origin chatgpt-patches
 
-2. Чтобы убрать только незавершённые самостоятельные review-правки Terra, восстанови из базы Patch52 РОВНО эти tracked-файлы:
+2. СНАЧАЛА, не меняя рабочее дерево, проверь готовый patch против текущего Git index (index остаётся базой Patch52). Параметр --recount обязателен: он пересчитывает hunk line counts и устраняет ошибку `patch fragment without header` от вручную изменённых hunk-заголовков.
+
+git show origin/chatgpt-patches:53-review-fixes.patch | git apply --check --cached --recount -
+
+Если эта команда не прошла — НИЧЕГО больше не выполнять. Показать точную ошибку и остановиться.
+
+3. Только после успешного шага 2 восстанови из базы Patch52 РОВНО эти tracked-файлы, потому что готовый patch полностью заменяет незавершённые самостоятельные review-правки Terra в них:
+
 git restore --source=61edd181cdf9e7b276a6a35fd6128737d9072cfd -- android/app/src/main/java/ua/orders/crm/MainActivity.kt android/app/src/main/java/ua/orders/crm/OrderModels.kt android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt src/pages/HomeView.vue supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
 
-3. Удали РОВНО эти untracked helper/test-файлы, потому что готовый патч создаёт их заново:
+4. Удали РОВНО эти untracked helper/test-файлы; готовый patch создаёт их заново:
+
 Remove-Item -Force -ErrorAction SilentlyContinue `
   src/features/orders/financials.ts, `
   src/features/orders/shipment-accounting.ts, `
@@ -34,13 +41,29 @@ Remove-Item -Force -ErrorAction SilentlyContinue `
   supabase/functions/_shared/marketplace-accept_test.ts, `
   supabase/functions/_shared/shipment-accounting_test.ts
 
-Не удалять и не менять другие Patch53-файлы, включая Appearance.kt, appearance.ts, migration, PATCH53-SPEC.md, android build.gradle.kts, OrdersRepository.kt, OrdersViewModel.kt.
+Не удалять и не менять другие Patch53-файлы, включая:
+- android/app/build.gradle.kts
+- android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+- android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+- android/app/src/main/java/ua/orders/crm/Appearance.kt
+- src/global.css
+- src/layouts/MainLayout.vue
+- src/main.ts
+- src/lib/appearance.ts
+- supabase/migrations/20260907090000_mobile_devices_and_order_outbox.sql
+- android/PATCH53-SPEC.md
+- PATCH53-REVIEW.txt
+- deno.lock
+- AGENTS.md
 
-4. Примени готовый патч напрямую из git, не создавая локальную копию patch-файла:
-git show origin/chatgpt-patches:53-review-fixes.patch | git apply --check -
-git show origin/chatgpt-patches:53-review-fixes.patch | git apply -
+5. Примени уже проверенный patch с обязательным пересчётом hunk counts:
 
-5. Выполни только короткие проверки:
+git show origin/chatgpt-patches:53-review-fixes.patch | git apply --recount -
+
+Если применение неожиданно не прошло — ничего самостоятельно не исправлять и остановиться с точным текстом ошибки.
+
+6. Выполни только короткие проверки:
+
 git diff --check
 deno test supabase/functions/_shared/financials_test.ts supabase/functions/_shared/kasta-return_test.ts supabase/functions/_shared/marketplace-accept_test.ts supabase/functions/_shared/shipment-accounting_test.ts
 deno check supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts
@@ -48,9 +71,10 @@ pnpm type-check
 
 НЕ запускать сейчас format/lint/build/Android lint/assemble и не пытаться чинить окружение. Полный цикл будет отдельно после завершения Patch 53.
 
-6. После этого остановись. Не делай commit/push/deploy.
+7. После этого остановись. Не делай commit/push/deploy.
 
 В ответ дай только:
+- результат безопасной проверки шага 2;
 - применился ли patch;
 - результаты 4 коротких проверок;
 - git status --short;
