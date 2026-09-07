@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_SHA: f3c0dfcddf3be7a2e0e2a1ad5d4110246f44ecbb
-      VALIDATION_RUN: '34157548871'
-      PATCH_SHA256: c989be472ae79a617deedd189e2ec5a632d1909ef19edc4cf174d020e5de093d
+      VALIDATION_RUN: '34157916812'
+      PATCH_SHA256: 5bcfb8040c0c4743eed0b5d4a2216649a37847c95edf68660e0f4d2a106bc63e
     steps:
       - uses: actions/checkout@v5
         with:
@@ -111,5 +111,5 @@ jobs:
           git config user.name 'chatgpt-patches'
           git config user.email 'chatgpt-patches@users.noreply.github.com'
           git add 63-android-delivery-status-and-list-restore.patch 63-android-delivery-status-and-list-restore.txt
-          git commit -m 'Add validated Patch 63'
+          git commit -m 'Update validated Patch 63'
           git push origin HEAD:chatgpt-patches
