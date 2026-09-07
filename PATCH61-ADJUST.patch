@@ -1,0 +1,36 @@
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -65,6 +65,9 @@ fun Order.deliveryValue(key: String): String =
+     ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+ 
++fun Order.deliveryFlag(key: String): Boolean =
++    ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
++
+ fun orderStatusTone(order: Order): StatusTone {
+     val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
+     val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
+@@ -74,6 +77,7 @@ fun orderStatusTone(order: Order): StatusTone {
+     val platform = order.platform.orEmpty().trim()
+ 
+     if (
++        order.deliveryFlag("trackingReturnInProgress") ||
+         trackingNormalized in setOf("returning", "returned", "cancelled") ||
+         Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(status) ||
+         Regex("возвращ|повер|return|отмен|скас|cancel|відмов.*одерж").containsMatchIn(trackingStatus) ||
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -40,6 +40,15 @@ class OrderModelsTest {
+     @Test fun android_status_tones_match_web_crm_rules() {
+         assertEquals(StatusTone.BLUE, orderStatusTone(order("Прийнято")))
++        assertEquals(
++            StatusTone.RED,
++            orderStatusTone(order("Прийнято").copy(delivery = buildJsonObject {
++                put("trackingNormalizedStatus", "in_transit")
++                put("trackingReturnInProgress", true)
++            })),
++        )
+         assertEquals(
+             StatusTone.GREEN,
+             orderStatusTone(order("Прийнято").copy(delivery = delivery("trackingNormalizedStatus" to "in_transit"))),
