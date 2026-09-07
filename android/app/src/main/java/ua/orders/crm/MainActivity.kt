@@ -1,12 +1,19 @@
 package ua.orders.crm
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
@@ -16,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -126,6 +132,12 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
+    val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> notificationPermissionGranted = granted }
+
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TextButton(onBack) { Text("Назад") }
         Text("Настройки", style = MaterialTheme.typography.headlineMedium)
@@ -139,19 +151,65 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
                 label = { Text(mode.label) },
             )
         }
+        HorizontalDivider()
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("Уведомления о новых заказах", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (notificationsEnabled && !notificationPermissionGranted)
+                        "Разрешение уведомлений отключено в Android."
+                    else
+                        "Prom, Эпицентр и Kasta.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = notificationsEnabled,
+                onCheckedChange = { enabled ->
+                    scope.launch { context.saveNewOrderNotifications(enabled) }
+                    if (
+                        enabled &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !context.canPostOrderNotifications()
+                    ) {
+                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
+        }
+        Text(
+            "Фоновое уведомление работает, пока Android не остановил процесс приложения. " +
+                "Для гарантированной доставки после полной остановки нужен серверный push.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Button({ vm.logout() }, enabled = !vm.authBusy && vm.acceptingId == null) { Text("Выйти") }
     }
 }
 
+private data class StatusColors(val background: Color, val foreground: Color)
+
 @Composable
-private fun StatusLabel(status: String?) {
-    val color = when (statusTone(status)) {
-        StatusTone.NEW -> Color(0xFF1565C0)
-        StatusTone.NEGATIVE -> Color(0xFFB3261E)
-        StatusTone.COMPLETE -> Color(0xFF1B6B36)
-        StatusTone.ACTIVE -> Color(0xFF965000)
+private fun StatusLabel(order: Order) {
+    val colors = when (orderStatusTone(order)) {
+        StatusTone.BLUE -> StatusColors(Color(0xFFDBEAFE), Color(0xFF1E40AF))
+        StatusTone.GREEN -> StatusColors(Color(0xFFDCFCE7), Color(0xFF166534))
+        StatusTone.ORANGE -> StatusColors(Color(0xFFFFEDD5), Color(0xFF9A3412))
+        StatusTone.RED -> StatusColors(Color(0xFFFEE2E2), Color(0xFF991B1B))
     }
-    Text(status.display(), color = color, style = MaterialTheme.typography.labelLarge)
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = colors.background,
+        contentColor = colors.foreground,
+    ) {
+        Text(
+            displayOrderStatus(order.status).display(),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            color = colors.foreground,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -163,36 +221,42 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
             TextButton(onSettings) { Text("Настройки") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(vm.showNew, { vm.showNew = true }, { Text("Новые") })
-            FilterChip(!vm.showNew, { vm.showNew = false }, { Text("Все") })
             TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") }
         }
-        if (!vm.realtimeConnected) Text("Автообновление подключается. Доступно ручное обновление.",
-            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
-        PullToRefreshBox(isRefreshing = vm.loading, onRefresh = { vm.refresh() }, modifier = Modifier.weight(1f)) {
-            val shown = vm.orders.filter { !vm.showNew || isNewStatus(it.status) }
+        if (!vm.realtimeConnected) Text(
+            "Автообновление подключается. Доступно ручное обновление.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        PullToRefreshBox(
+            isRefreshing = vm.loading,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shown.isEmpty()) item {
-                    Text(if (vm.loading) "Загрузка…" else if (vm.showNew) "В загруженной истории новых заказов нет." else "Заказов пока нет.",
-                        Modifier.padding(vertical = 24.dp))
+                if (vm.orders.isEmpty()) item {
+                    Text(
+                        if (vm.loading) "Загрузка…" else "Заказов пока нет.",
+                        Modifier.padding(vertical = 24.dp),
+                    )
                 }
-                items(shown, key = { it.id }) { order ->
-                    Card(onClick = { vm.open(order.id) }, modifier = Modifier.fillMaxWidth()) {
+                items(vm.orders, key = { it.id }) { order ->
+                    OutlinedCard(
+                        onClick = { vm.open(order.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = if (isNewStatus(order.status)) BorderStroke(2.dp, Color(0xFF60A5FA))
+                            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.titleMedium)
                             Text("${order.orderDate.display()} ${order.orderTime.display()}")
-                            StatusLabel(order.status)
+                            StatusLabel(order)
                             Text(money(order.total()), style = MaterialTheme.typography.titleMedium)
                             Text(order.items.sortedBy { it.position }.joinToString("\n") {
                                 "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
                             }.ifBlank { "—" })
                         }
                     }
-                }
-                item {
-                    if (vm.hasMore) OutlinedButton({ vm.more() },
-                        Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = !vm.loading) { Text("Загрузить ещё") }
-                    else Text("Вся история загружена", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -223,7 +287,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
             item {
                 Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.headlineSmall)
                 Text("${order.orderDate.display()} ${order.orderTime.display()}")
-                StatusLabel(order.status)
+                StatusLabel(order)
                 Text(money(order.total()), style = MaterialTheme.typography.titleLarge)
             }
             item { Text("Товары", style = MaterialTheme.typography.titleMedium) }

@@ -34,7 +34,7 @@ data class Order(
     @SerialName("crm_order_items") val items: List<OrderItem> = emptyList(),
 )
 
-enum class StatusTone { NEW, NEGATIVE, COMPLETE, ACTIVE }
+enum class StatusTone { BLUE, GREEN, ORANGE, RED }
 enum class AcceptRoute(val function: String) {
     PROM("sync-prom-orders"),
     EPICENTR("sync-epicentr-orders"),
@@ -42,14 +42,109 @@ enum class AcceptRoute(val function: String) {
 }
 fun normalizedStatus(status: String?) = status.orEmpty().trim().lowercase(Locale.ROOT)
 fun isNewStatus(status: String?) = normalizedStatus(status) in setOf("новий", "новый", "new", "pending")
-fun statusTone(status: String?): StatusTone {
-    val value = normalizedStatus(status)
-    return when {
-        Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(value) -> StatusTone.NEGATIVE
-        isNewStatus(value) -> StatusTone.NEW
-        Regex("виконан|выполн|completed|delivered|доставлен|отриман|получен").containsMatchIn(value) -> StatusTone.COMPLETE
-        else -> StatusTone.ACTIVE
+
+fun displayOrderStatus(status: String?): String {
+    val value = status.orEmpty().trim()
+    val names = mapOf(
+        "pending" to "Новий",
+        "completed" to "Завершено",
+        "cancelled" to "Скасовано",
+        "received" to "Принято",
+        "delivered" to "Виконано",
+        "new" to "Новий",
+        "confirmed_by_seller" to "Підтверджено продавцем",
+        "confirmed_by_merchant" to "Підтверджено продавцем",
+        "confirmed" to "Підтверджено",
+        "sent" to "Відправлено",
+        "ready_for_pickup" to "Готово до видачі",
+        "finished" to "Завершено",
+        "closed" to "Закрито",
+        "canceled" to "Скасовано",
+        "returned" to "Повернено",
+        "return_request" to "Запит на повернення",
+        "canceled_by_seller" to "Скасовано продавцем",
+        "canceled_by_merchant" to "Скасовано продавцем",
+    )
+    return names[value.lowercase(Locale.ROOT)] ?: value
+}
+
+fun Order.deliveryValue(key: String): String =
+    ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+fun Order.deliveryFlag(key: String): Boolean =
+    ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
+
+fun orderStatusTone(order: Order): StatusTone {
+    val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
+    val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
+    val trackingStatus = order.deliveryValue("trackingStatus").trim().lowercase(Locale.ROOT)
+    val deliveryStatus = order.deliveryValue("status").trim().lowercase(Locale.ROOT)
+    val platform = order.platform.orEmpty().trim()
+
+    if (
+        order.deliveryFlag("trackingReturnInProgress") ||
+        trackingNormalized in setOf("returning", "returned", "cancelled") ||
+        Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(status) ||
+        Regex("возвращ|повер|return|отмен|скас|cancel|відмов.*одерж").containsMatchIn(trackingStatus) ||
+        Regex("возвращ|повер|return|отмен|скас|cancel|відмов.*одерж").containsMatchIn(deliveryStatus)
+    ) return StatusTone.RED
+
+    if (
+        (platform == "Пром" && Regex("виконан|заверш|delivered|completed").containsMatchIn(status)) ||
+        (platform == "Эпицентр" && Regex("заверш|закрит|closed|finished|completed").containsMatchIn(status)) ||
+        (platform in setOf("Каста", "Р/С", "Сайт") &&
+            Regex("закрыт|закрит|closed|finished|completed").containsMatchIn(status))
+    ) return StatusTone.ORANGE
+
+    val carrierConfirmsDelivery =
+        trackingNormalized == "delivered" ||
+            ((trackingNormalized.isBlank() || trackingNormalized == "unknown") &&
+                Regex("получ|отрим|доставлен|доставлено|вруч|delivered|received").containsMatchIn(trackingStatus))
+
+    if (platform != "Пром" && carrierConfirmsDelivery) return StatusTone.ORANGE
+
+    val carrierConfirmsShipment =
+        trackingNormalized in setOf("accepted", "in_transit", "ready_for_pickup", "delivered") ||
+            (trackingNormalized.isBlank() &&
+                Regex("отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received")
+                    .containsMatchIn(trackingStatus))
+
+    if (
+        carrierConfirmsShipment ||
+        (platform in setOf("Каста", "Р/С", "Сайт") && "в дороге" in status)
+    ) return StatusTone.GREEN
+
+    return StatusTone.BLUE
+}
+
+private fun orderDateTimeKey(order: Order): Long {
+    val date = order.orderDate.orEmpty().trim()
+    val dateParts = date.split('.', '-', '/').mapNotNull { it.toIntOrNull() }
+    val (year, month, day) = when {
+        dateParts.size != 3 -> Triple(0, 0, 0)
+        dateParts[0] > 1900 -> Triple(dateParts[0], dateParts[1], dateParts[2])
+        else -> Triple(dateParts[2], dateParts[1], dateParts[0])
     }
+    val timeParts = order.orderTime.orEmpty().trim().split(':').mapNotNull { it.toIntOrNull() }
+    val hour = timeParts.getOrElse(0) { 0 }
+    val minute = timeParts.getOrElse(1) { 0 }
+    return year.toLong() * 100_000_000L +
+        month.toLong() * 1_000_000L +
+        day.toLong() * 10_000L +
+        hour.toLong() * 100L +
+        minute.toLong()
+}
+
+fun sortOrdersForDisplay(orders: List<Order>): List<Order> =
+    orders.sortedWith(
+        compareByDescending<Order> { orderDateTimeKey(it) }
+            .thenByDescending { it.orderNumber ?: Long.MIN_VALUE }
+            .thenByDescending { it.id },
+    )
+
+fun isNewOrderNotificationCandidate(order: Order): Boolean {
+    if (!isNewStatus(order.status)) return false
+    return normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta")
 }
 fun acceptRoute(order: Order, email: String?): AcceptRoute? {
     if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
@@ -78,6 +173,6 @@ fun Order.total(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
 }
 fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
 fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
-fun Order.deliveryField(key: String): String = ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.display()
+fun Order.deliveryField(key: String): String = deliveryValue(key).display()
 fun Order.shipments(): List<JsonObject> = (((delivery as? JsonObject)?.get("shipmentHistory")) as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
 fun JsonObject.field(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull.display()

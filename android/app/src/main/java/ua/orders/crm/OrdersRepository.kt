@@ -51,12 +51,20 @@ class OrdersRepository {
     suspend fun signOut() = client.auth.signOut()
     private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url)")
 
-    suspend fun orders(offset: Long = 0): List<Order> =
-        client.from("crm_orders").select(columns) {
-            order("updated_at", SortOrder.DESCENDING)
-            order("id", SortOrder.DESCENDING)
-            range(offset..offset + 49)
-        }.decodeList()
+    suspend fun orders(): List<Order> {
+        val result = mutableListOf<Order>()
+        var offset = 0L
+        do {
+            val batch = client.from("crm_orders").select(columns) {
+                order("created_at", SortOrder.DESCENDING)
+                order("id", SortOrder.DESCENDING)
+                range(offset..offset + 199)
+            }.decodeList<Order>()
+            result += batch
+            offset += batch.size
+        } while (batch.size == 200)
+        return result
+    }
 
     suspend fun order(id: String): Order? = client.from("crm_orders").select(columns) {
         filter { eq("id", id) }

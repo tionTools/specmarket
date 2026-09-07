@@ -92,6 +92,7 @@ const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
 const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
+const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
 const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
 const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
 const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
@@ -292,6 +293,12 @@ let lastReconciliationAt = 0
 const pendingRemoteOrderIds = new Set<string>()
 const pendingNewOrderIds = new Set<string>()
 const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
+const newOrderNotificationsEnabled = ref(
+  window.localStorage.getItem(newOrderNotificationsStorageKey) !== 'false',
+)
+watch(newOrderNotificationsEnabled, (value) => {
+  window.localStorage.setItem(newOrderNotificationsStorageKey, String(value))
+})
 let nextNewOrderToastId = 0
 let audioContext: AudioContext | undefined
 const stopAudioUnlockListeners = ['pointerdown', 'click', 'keydown'].map((event) =>
@@ -2775,6 +2782,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
 }
 
 function notifyNewOrder(order: Order) {
+  if (!newOrderNotificationsEnabled.value) return
   const toast = {
     id: ++nextNewOrderToastId,
     text: `Новый заказ · ${orderBusinessPlatform(order)} · №${order.displayNumber ?? order.id}`,
@@ -4303,6 +4311,15 @@ function orderDateTime(order: Order) {
           >
             <Plus class="mr-1 inline size-4" aria-hidden="true" /> Новый заказ
           </button>
+          <button
+            v-if="!isGuest"
+            class="whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold shadow-sm transition"
+            :class="newOrderNotificationsEnabled
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
+            type="button"
+            @click="newOrderNotificationsEnabled = !newOrderNotificationsEnabled"
+          >Уведомления: {{ newOrderNotificationsEnabled ? 'вкл' : 'выкл' }}</button>
           <button
             class="ml-1 grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
             type="button"

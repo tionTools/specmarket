@@ -1,32 +1,31 @@
 package ua.orders.crm
 
+import android.app.Application
 import androidx.compose.runtime.*
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class OrdersViewModel : ViewModel() {
+class OrdersViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = OrdersRepository()
     private val requests = Mutex()
     private var realtimeJob: Job? = null
     private var visible = false
-    private var offset = 0L
     var email by mutableStateOf<String?>(null); private set
     var initializing by mutableStateOf(true); private set
     var authBusy by mutableStateOf(false); private set
     var orders by mutableStateOf<List<Order>>(emptyList()); private set
     var loading by mutableStateOf(false); private set
-    var hasMore by mutableStateOf(true); private set
     var message by mutableStateOf<String?>(null); private set
     var realtimeConnected by mutableStateOf(false); private set
     var selectedId by mutableStateOf<String?>(null); private set
     var detail by mutableStateOf<Order?>(null); private set
     var acceptingId by mutableStateOf<String?>(null); private set
-    var showNew by mutableStateOf(true)
 
     init {
         viewModelScope.launch {
@@ -42,6 +41,8 @@ class OrdersViewModel : ViewModel() {
                 } else if (session is SessionStatus.NotAuthenticated) {
                     email = null
                     realtimeJob?.cancel()
+                    realtimeJob = null
+                    realtimeConnected = false
                     clearOrders()
                 }
             }
@@ -50,19 +51,19 @@ class OrdersViewModel : ViewModel() {
 
     fun foreground(active: Boolean) {
         visible = active
-        if (active && email != null) { startRealtime(); refresh() }
-        if (!active) { realtimeJob?.cancel(); realtimeJob = null; realtimeConnected = false }
+        if (email != null) startRealtime()
+        if (active && email != null) refresh()
     }
 
     private fun startRealtime() {
         if (realtimeJob?.isActive == true) return
         realtimeJob = viewModelScope.launch {
-            while (isActive && visible && email != null) {
+            while (isActive && email != null) {
                 try {
                     repository.watch(onConnection = { connected ->
                         val reconnect = connected && !realtimeConnected
                         realtimeConnected = connected
-                        if (reconnect) refresh()
+                        if (reconnect && visible) refresh()
                     }) { change ->
                         requests.withLock {
                             if (change.operation == "DELETE") {
@@ -70,7 +71,10 @@ class OrdersViewModel : ViewModel() {
                                 if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
                             } else {
                                 val order = repository.order(change.order_id)
-                                if (order != null) merge(order)
+                                if (order != null) {
+                                    merge(order)
+                                    if (change.operation == "INSERT") notifyNewOrder(order)
+                                }
                             }
                         }
                     }
@@ -81,12 +85,19 @@ class OrdersViewModel : ViewModel() {
         }
     }
 
-    private fun clearOrders() {
-        orders = emptyList(); selectedId = null; detail = null; offset = 0; hasMore = true
+    private suspend fun notifyNewOrder(order: Order) {
+        if (!isNewOrderNotificationCandidate(order)) return
+        val app = getApplication<Application>()
+        if (!app.newOrderNotifications().first() || !app.canPostOrderNotifications()) return
+        app.showNewOrderNotification(order)
     }
+
+    private fun clearOrders() {
+        orders = emptyList(); selectedId = null; detail = null
+    }
+
     private fun merge(order: Order) {
-        orders = (orders.filterNot { it.id == order.id } + order)
-            .sortedWith(compareByDescending<Order> { it.updatedAt }.thenByDescending { it.id })
+        orders = sortOrdersForDisplay(orders.filterNot { it.id == order.id } + order)
         if (selectedId == order.id) detail = order
     }
 
@@ -99,9 +110,7 @@ class OrdersViewModel : ViewModel() {
                 requests.withLock {
                     val batch = repository.orders()
                     if (email != account) return@withLock
-                    orders = batch
-                    offset = batch.size.toLong()
-                    hasMore = batch.size == 50
+                    orders = sortOrdersForDisplay(batch)
                     selectedId?.let { id ->
                         val updated = repository.order(id)
                         if (email == account && selectedId == id) detail = updated
@@ -109,25 +118,6 @@ class OrdersViewModel : ViewModel() {
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { message = "Не удалось обновить заказы. Проверьте соединение и повторите." }
-            finally { loading = false }
-        }
-    }
-
-    fun more() {
-        if (email == null || loading || !hasMore) return
-        val account = email
-        loading = true
-        viewModelScope.launch {
-            try {
-                requests.withLock {
-                    val batch = repository.orders(offset)
-                    if (email != account) return@withLock
-                    orders = (orders + batch).distinctBy { it.id }
-                    offset += batch.size
-                    hasMore = batch.size == 50
-                }
-            } catch (cancel: CancellationException) { throw cancel }
-            catch (_: Exception) { message = "Не удалось загрузить следующую страницу." }
             finally { loading = false }
         }
     }
