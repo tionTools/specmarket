@@ -1,0 +1,292 @@
+diff --git a/android/PATCH53-SPEC.md b/android/PATCH53-SPEC.md
+new file mode 100644
+index 0000000..5b83ce7
+--- /dev/null
++++ b/android/PATCH53-SPEC.md
+@@ -0,0 +1,286 @@
++# Patch 53 — Android v0.2 + web theme + marketplace accept + per-device push
++
++Base commit: `61edd181cdf9e7b276a6a35fd6128737d9072cfd` (Patch52).
++
++This specification is additive. Preserve all working Patch52 behavior unless this document explicitly changes it.
++
++## Goals
++
++Patch53 must deliver four user-visible changes as one coherent release:
++
++1. Android can accept new orders from **Prom, Epicentr and Kasta**, not Prom only.
++2. Android receives real push notifications for new marketplace orders even when the app is backgrounded/killed, with a **per-device** on/off switch.
++3. Android has selectable appearance: **System / Light / Dark**.
++4. Web/PC CRM has the same selectable appearance: **System / Light / Dark**.
++
++The same Supabase CRM remains the source of truth. Do not add a second order database and do not put marketplace or Firebase server secrets in web/Android clients.
++
++## A. Marketplace acceptance
++
++### Common behavior
++
++For a genuinely new order from Prom, Epicentr or Kasta, Android order details must show one large `Принять` action.
++
++Before changing anything:
++- show an explicit confirmation dialog with marketplace and order number;
++- disable duplicate taps while request is in flight;
++- re-read the order after every outcome;
++- if another browser/phone already accepted it, treat that as an idempotent/current-state result, not an error that can regress status;
++- if the order was cancelled/returned/completed or otherwise became ineligible, return a clear conflict and refresh;
++- only update CRM after the marketplace API has confirmed the transition;
++- protect CRM writes against a concurrent status/update change, following the race-safe pattern already implemented for Prom in Patch52.
++
++Do not implement acceptance by merely writing `crm_orders.status`.
++
++### Prom
++
++Keep the Patch52 `sync-prom-orders` acceptance path and its tests. Do not regress `completeExternalIds`.
++
++### Epicentr
++
++Extend `sync-epicentr-orders` with a dedicated authenticated acceptance action.
++
++Before writing the action, verify the **current official Epicentr Merchant API** and the actual order's allowed transitions. The official API exposes:
++- `GET /v2/oms/orders/{orderId}/allowed-statuses`
++- `POST /v2/oms/orders/{orderId}/change-status/to/{orderStatus}`
++
++Do not hard-code a guessed target if the allowed-status API can resolve the correct seller-confirmation transition. Current CRM mappings include seller-confirmation spellings such as `confirmed_by_seller`, `confirmed_by_merchant` and `confirmed`; reconcile this with the live API contract and use the real allowed target.
++
++Requirements:
++- authenticated user only; guest and cron/scheduled calls cannot accept;
++- strict ID normalization/dedupe/limit;
++- load matching `crm_orders` with platform `Эпицентр`;
++- verify current CRM status is actually new and marketplace transition is allowed;
++- perform the marketplace status transition;
++- verify success from the Epicentr response/current order;
++- then save the mapped accepted/confirmed CRM status with an optimistic concurrency guard;
++- repeat acceptance must be idempotent;
++- API failure must not change CRM;
++- Kasta/Prom IDs cannot be accepted through this path.
++
++### Kasta
++
++Extend `sync-kasta-orders` with a dedicated authenticated acceptance action.
++
++Before implementing the write, verify the **current official Kasta HUB API documentation** and, where safe, the existing account/API behavior. Kasta's order lifecycle uses `Created` -> `ConfirmedBySupplier` for seller confirmation. Do not guess the endpoint, HTTP method or payload from names alone: use the current official contract.
++
++Requirements mirror Epicentr:
++- authenticated user only; guest and cron/scheduled cannot accept;
++- strict ID normalization/dedupe/limit;
++- load matching `crm_orders` with platform `Каста`;
++- only genuinely new/`Created` orders are eligible;
++- marketplace must confirm `ConfirmedBySupplier` before CRM is changed to the existing accepted status (`Принято`);
++- repeat/already accepted is idempotent;
++- API failure does not modify CRM;
++- concurrent CRM change cannot be overwritten.
++
++### Shared Android acceptance
++
++Refactor Android eligibility so it is marketplace-aware rather than `platform == Пром`.
++
++The UI must:
++- allow Prom + new;
++- allow Epicentr + new;
++- allow Kasta + new;
++- reject guest/unauthenticated;
++- reject malformed/mismatched external IDs;
++- reject accepted, active later states, cancelled, returned and completed/final states;
++- route each platform to its own authenticated Edge Function;
++- use the same confirmation UX and common result handling.
++
++Add pure unit tests for all three marketplaces and representative Russian/Ukrainian/API status spellings.
++
++## B. Push notifications per Android device
++
++### User behavior
++
++Android Settings must contain:
++
++`Уведомления на этом устройстве`  [ON/OFF]
++
++This setting is independent for each installed phone. Two phones can use the same Supabase account while only one receives notifications.
++
++The switch must represent actual server routing, not just locally mute sound.
++
++If Android notification permission is denied, show a clear state/message and keep server preference consistent with the user's intent.
++
++### Scope of new-order push
++
++For Patch53, notify on **new Prom, Epicentr and Kasta marketplace orders** created by the normal marketplace sync path. Do not generate pushes for historical/backfill rows, ordinary updates to an existing order, status changes, realtime refreshes or retries.
++
++Do not broaden to `Р/С и Сайт` or manually created orders in this patch unless the existing production flow already has an explicit, reliable "new order" event for them. If such support is added, document and test it separately rather than inferring from arbitrary INSERT/UPDATE activity.
++
++### Device registry
++
++Add a migration for a small per-device table, e.g. `crm_mobile_devices`, with at least:
++- id/device id;
++- `user_id`;
++- FCM registration token;
++- `notifications_enabled`;
++- device label/name if safely available;
++- platform/app version;
++- `last_seen_at`;
++- timestamps.
++
++Requirements:
++- RLS enabled;
++- authenticated user can read/write only their own device rows;
++- service role can read enabled devices for delivery;
++- token rotation updates the same device registration;
++- logout must unregister/disable the local device so a logged-out phone does not keep receiving private order notifications;
++- never expose another user's token.
++
++Use a stable locally generated `device_id` stored in app-private preferences/DataStore. Do not use hardware identifiers.
++
++### Idempotent event/outbox
++
++Do not send push merely because `crm_orders` was updated.
++
++Create a durable idempotent event/outbox design so each new marketplace order can produce at most one logical `new_order` event. The unique key should include order id + event type.
++
++Enqueue only when the corresponding marketplace sync **actually creates** a current new order during the normal sync path. A full historical/backfill import must not create a storm of notifications.
++
++Delivery retries must not create duplicate logical events. Track pending/sent/failed attempts sufficiently to retry transient FCM failures.
++
++Push failure must never fail or roll back marketplace order synchronization.
++
++### FCM sender
++
++Use Firebase Cloud Messaging for background/killed-app delivery.
++
++Server side:
++- marketplace/API/Firebase server credentials remain only in Supabase secrets/server runtime;
++- use the supported FCM HTTP v1 path or current recommended server mechanism;
++- no service account JSON/private key in git, APK, BuildConfig, web bundle or GitHub Actions logs;
++- sender reads enabled device registrations for the authenticated CRM users intended to receive the event;
++- remove/disable invalid FCM tokens when FCM reports a permanently invalid registration;
++- notification payload should contain only the minimum needed for display/navigation: marketplace, order number/display label and internal order id; do not place phone/address/customer secrets in notification payload;
++- tapping the notification opens the corresponding order detail when possible.
++
++Android:
++- obtain/refresh FCM token and upsert it to `crm_mobile_devices`;
++- request Android notification permission where required;
++- implement foreground notification behavior sensibly;
++- on notification tap, open/select the order after session restoration;
++- if session is unavailable, go to login and then resolve the pending order after successful login if safe.
++
++### Firebase configuration boundary
++
++Inspect the repository/environment first for existing Firebase Android/public configuration and FCM server credentials.
++
++If no Firebase project/configuration exists:
++- implement all code/migrations/tests that can be implemented safely;
++- do **not** invent a project, commit a keystore/service-account key, or claim push is operational;
++- stop before claiming Patch53 complete and report the exact public Android Firebase values and Supabase secret(s) still required.
++The task may continue after those values are supplied.
++
++## C. Theme — Android
++
++Add an Appearance selector in Android Settings:
++
++- `Системная`
++- `Светлая`
++- `Тёмная`
++
++Behavior:
++- default for a fresh install: System;
++- persist selection locally per device with DataStore/app-private preferences;
++- System follows current OS dark/light setting dynamically;
++- Light and Dark override the OS;
++- selection applies immediately without restart;
++- login, orders, filters, cards, details, dialogs, snackbar and settings all respect the theme.
++
++Do not merely invert the screen. Define proper Material light/dark color schemes.
++
++Status semantics must remain visually distinct and readable in both modes:
++- new = blue;
++- cancelled/returned = red;
++- completed/received = green;
++- active/intermediate = amber/orange or another established active color.
++Use theme-aware tones with adequate contrast.
++
++## D. Theme — web/PC CRM
++
++Add the same appearance choices to the web CRM:
++
++- `Системная`
++- `Светлая`
++- `Тёмная`
++
++Requirements:
++- default: System when no preference exists;
++- persist in browser localStorage (preference is intentionally per browser/profile/device, not server-global);
++- System follows `prefers-color-scheme` and reacts when the OS theme changes;
++- apply before/at initial paint where practical to avoid a large flash of the wrong theme;
++- integrate the selector into an existing sensible settings/profile/header control rather than creating an unrelated application;
++- do not change business logic or order data.
++
++Audit the whole desktop CRM, not only the page background:
++- shell/sidebar/header;
++- order tables and row states;
++- cards/panels;
++- forms, inputs, selects;
++- dropdowns/popovers/tooltips;
++- dialogs/modals;
++- buttons;
++- registry/reconciliation/price views touched by shared styles;
++- borders/dividers;
++- hover/selected/disabled states;
++- scrollable areas.
++
++Prefer semantic CSS variables/tokens and a single root theme attribute/class over scattered one-off dark overrides.
++
++Preserve business color semantics. A green/red/blue status badge must remain semantically the same in dark mode and retain readable text/contrast.
++
++Add focused unit/static tests for preference resolution and persistence if the current frontend test setup supports them without disproportionate scaffolding.
++
++## E. APK version/update path
++
++Bump Android from Patch52 v0.1 to v0.2 (`versionCode` must increase).
++
++Patch52 CI used the runner's ordinary debug signing. Do not commit a private signing key.
++
++Inspect whether a stable signing configuration already exists outside git. If approved signing credentials are already available, configure CI to use them without exposing secrets and upload the consistently signed APK.
++
++If no stable signing credential exists, keep a buildable debug artifact and explicitly report that this APK may require uninstalling the Patch52 build once because signatures from ephemeral CI debug keystores can differ. Do not fabricate/store a private key in the repository.
++
++## F. Tests and safety
++
++Backend tests must cover at minimum:
++- Prom acceptance regression;
++- Epicentr ID/status eligibility, allowed-transition success, API failure, already accepted, concurrent CRM change;
++- Kasta ID/status eligibility, confirmed-by-supplier success, API failure, already accepted, concurrent CRM change;
++- cross-platform/malformed IDs rejected;
++- push event created once for a newly created normal-sync marketplace order;
++- no push event on update, retry, full historical/backfill or already-existing row;
++- sender retries transient failures and disables/removes permanently invalid FCM tokens without breaking order sync;
++- RLS/device ownership migration policies are statically reviewed.
++
++Android unit tests must cover:
++- accept eligibility/routing for all three marketplaces;
++- final/cancel/return statuses cannot accept;
++- appearance resolution System/Light/Dark;
++- device notification preference model/registration helpers where pure logic exists;
++- existing total/DTO/status tests remain green.
++
++Web checks must cover theme resolution/persistence and existing build/lint/type checks.
++
++## G. Final acceptance
++
++Patch53 is complete only when all applicable parts are real, not placeholders:
++
++- Android accepts new Prom/Epicentr/Kasta orders through verified marketplace APIs.
++- Marketplace confirmation happens before CRM status change.
++- Realtime updates continue to work across web + both phones.
++- Android push works with app foreground/background/killed once Firebase credentials are configured.
++- Notification switch is independent per device and server-enforced.
++- Android System/Light/Dark theme works and persists per phone.
++- Web System/Light/Dark theme works and persists per browser.
++- No secrets were added to client/git.
++- `AGENTS.md` is untouched.
++- Android tests/lint/assemble pass.
++- Deno tests/check pass.
++- `pnpm format`, `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check` pass.
++- required migrations are applied using the project's established Supabase workflow.
++- every changed Edge Function is deployed only after checks pass.
++- GitHub Actions Android build is green and uploads the v0.2 APK artifact.
