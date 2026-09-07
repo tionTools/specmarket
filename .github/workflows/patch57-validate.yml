@@ -95,17 +95,31 @@ jobs:
           git diff --check
           git diff --name-only | sort > /tmp/final-changed.txt
           diff -u /tmp/expected.txt /tmp/final-changed.txt
-          git diff -- src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue > PATCH57-CANONICAL.patch
-          git apply --check --reverse PATCH57-CANONICAL.patch
-          test -s PATCH57-CANONICAL.patch
+          git diff -- src/features/orders/delivery-tracking.ts src/features/orders/types.ts src/pages/HomeView.vue > /tmp/PATCH57-CANONICAL.patch
+          test -s /tmp/PATCH57-CANONICAL.patch
+
+      - name: Re-apply canonical patch from clean main snapshot
+        shell: bash
+        run: |
+          git reset --hard HEAD
+          git clean -fd -- src/features/orders/delivery-tracking.ts
+          cp /tmp/PATCH57-CANONICAL.patch PATCH57-CANONICAL.patch
+          git apply --check PATCH57-CANONICAL.patch
+          git apply PATCH57-CANONICAL.patch
+          git add -N src/features/orders/delivery-tracking.ts
+          git diff --check
+          git diff --name-only | sort > /tmp/reapplied.txt
+          diff -u /tmp/expected.txt /tmp/reapplied.txt
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
 
       - name: Publish canonical validation artifact on temp branch
         shell: bash
         run: |
           git reset --hard HEAD
           git clean -fd -- src/features/orders/delivery-tracking.ts
+          cp /tmp/PATCH57-CANONICAL.patch PATCH57-CANONICAL.patch
           git config user.name 'chatgpt-validation'
           git config user.email 'chatgpt-validation@users.noreply.github.com'
           git add PATCH57-CANONICAL.patch
-          git commit -m 'chore: store canonical Patch 57 validation diff'
+          git commit -m 'chore: refresh canonical Patch 57 validation diff' || true
           git push origin HEAD:chatgpt-validate-57
