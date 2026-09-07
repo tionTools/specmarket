@@ -65,10 +65,10 @@ index 333ab71..f80b912 100644
                  HorizontalDivider()
                  DetailField("Способ оплаты", order.deliveryField("paymentMethod"))
 diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
-index 34d1675..6f31234 100644
+index 34d1675..e245794 100644
 --- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
 +++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
-@@ -74,6 +74,41 @@ fun Order.deliveryValue(key: String): String =
+@@ -74,6 +74,44 @@ fun Order.deliveryValue(key: String): String =
  fun Order.deliveryFlag(key: String): Boolean =
      ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
  
@@ -104,6 +104,9 @@ index 34d1675..6f31234 100644
 +    return DeliveryStatusInfo(stage = stage)
 +}
 +
++fun ordersDuringDetailRefresh(current: List<Order>, fetched: List<Order>, detailOpen: Boolean): List<Order> =
++    if (detailOpen && current.isNotEmpty() && fetched.isEmpty()) current else fetched
++
 +fun ordersAfterClosingDetail(current: List<Order>, beforeDetail: List<Order>): List<Order> =
 +    if (current.isEmpty() && beforeDetail.isNotEmpty()) beforeDetail else current
 +
@@ -111,7 +114,7 @@ index 34d1675..6f31234 100644
      val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
      val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
 diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
-index 9fdfdcd..69e8c65 100644
+index 9fdfdcd..dab9d22 100644
 --- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
 +++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
 @@ -16,6 +16,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
@@ -131,6 +134,15 @@ index 9fdfdcd..69e8c65 100644
      }
  
      private fun merge(order: Order) {
+@@ -110,7 +111,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+                 requests.withLock {
+                     val batch = repository.orders()
+                     if (email != account) return@withLock
+-                    orders = sortOrdersForDisplay(batch)
++                    orders = sortOrdersForDisplay(ordersDuringDetailRefresh(orders, batch, selectedId != null))
+                     selectedId?.let { id ->
+                         val updated = repository.order(id)
+                         if (email == account && selectedId == id) detail = updated
 @@ -123,6 +124,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
      }
  
@@ -139,7 +151,7 @@ index 9fdfdcd..69e8c65 100644
          selectedId = id; detail = orders.find { it.id == id }
          viewModelScope.launch {
              try {
-@@ -132,7 +134,13 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+@@ -132,7 +134,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
              catch (_: Exception) { message = "Не удалось обновить детали. Показаны ранее загруженные данные." }
          }
      }
@@ -149,16 +161,15 @@ index 9fdfdcd..69e8c65 100644
 +        ordersBeforeDetail = emptyList()
 +        selectedId = null
 +        detail = null
-+        if (email != null) refresh()
 +    }
      fun dismissMessage() { message = null }
  
      fun login(email: String, password: String) {
 diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
-index bc82270..506b0c3 100644
+index bc82270..891a9dd 100644
 --- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
 +++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
-@@ -107,6 +107,38 @@ class OrderModelsTest {
+@@ -107,6 +107,46 @@ class OrderModelsTest {
          )
      }
  
@@ -184,6 +195,14 @@ index bc82270..506b0c3 100644
 +        }).deliveryStatusInfo()
 +        assertEquals("Прибула у відділення", ordinary.stage)
 +        assertEquals("", ordinary.current)
++    }
++
++    @Test fun detail_refresh_does_not_replace_a_loaded_list_with_transient_empty_result() {
++        val current = listOf(Order("a"), Order("b"))
++        assertEquals(current, ordersDuringDetailRefresh(current, emptyList(), true))
++        assertTrue(ordersDuringDetailRefresh(current, emptyList(), false).isEmpty())
++        val fetched = listOf(Order("c"))
++        assertEquals(fetched, ordersDuringDetailRefresh(current, fetched, true))
 +    }
 +
 +    @Test fun closing_detail_restores_cached_list_only_if_current_list_was_lost() {
