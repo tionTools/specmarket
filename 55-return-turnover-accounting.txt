@@ -1,0 +1,68 @@
+PATCH 55 — исправить оборот при возвратах
+
+Источник истины: текущий main, HEAD должен соответствовать origin/main. На момент подготовки патча main = 17c231b24c4ad0f7dc7a01368be9c490be90a595.
+
+Цель:
+- физически отправленный заказ с сигналом отмены/возврата НЕ должен исчезать из оборота, пока возврат не принят в CRM;
+- до принятия возврата в обороте остаётся вся оставшаяся сумма заказа;
+- после полного `Принять возврат` заказ исключается из оборота, потому что lifecycle = return_completed и net sale = 0;
+- при частичном принятом возврате заказ остаётся в обороте только на оставшуюся сумму;
+- отмена до физической отправки по-прежнему не входит в оборот;
+- правило должно работать одинаково для Prom / Epicentr / Kasta / Р/С / Сайт, без отдельного исключения только для Kasta.
+
+Контрольный кейс:
+Kasta S5TSAE5, 05.09.2026, 1 × 676 грн, printedAt есть, статус `Скасовано / Відмова від отримання`, trackingNormalizedStatus `cancelled`.
+До `Принять возврат`: lifecycle = return_pending, оборот = 676 грн.
+После полного принятия 1/1: lifecycle = return_completed, оборот = 0 грн.
+
+Сделать строго следующее:
+
+1. Не трогать `AGENTS.md` и любые посторонние локальные/untracked файлы.
+
+2. Получить patch из ветки `chatgpt-patches`:
+   `55-return-turnover-accounting.patch`
+
+3. До применения обязательно выполнить:
+   `git apply --check --recount <путь-к-55-return-turnover-accounting.patch>`
+   Если precheck не проходит — НИЧЕГО не менять, не коммитить и не пушить; вернуть точную ошибку.
+
+4. Применить:
+   `git apply --recount <путь-к-55-return-turnover-accounting.patch>`
+
+5. Убедиться, что изменены только:
+   - `src/pages/HomeView.vue`
+   - `supabase/functions/_shared/shipment-accounting_test.ts`
+
+6. Выполнить проверки строго по порядку:
+   - `pnpm format`
+   - `pnpm type-check`
+   - `pnpm lint`
+   - `pnpm build`
+   - `git diff --check`
+   - `deno test supabase/functions/_shared/shipment-accounting_test.ts`
+
+7. После formatter ещё раз проверить `git diff --name-only`. В задаче должны остаться только два файла из пункта 5. `AGENTS.md` не менять, не откатывать и не включать в commit.
+
+8. Статически проверить итоговую логику:
+   - `reportOrders` по-прежнему требует непустую ТТН;
+   - дальше `reportOrders` использует `getOrderLifecycleState(order, displayOrderStatus(order.status))` и `isOrderVisibleInMainList(...)`;
+   - старое исключение `return order.platform === 'Каста' && Boolean(order.delivery.receivedAt)` удалено;
+   - active / return_pending / return_partial входят в отчёт;
+   - cancelled_before_shipment / return_completed не входят;
+   - оборот считается существующим `getNetOrderAmount`, поэтому partial return учитывает только remaining quantity;
+   - контрольный S5TSAE5 до принятия возврата даёт 676 грн, после полного принятия — 0 грн.
+
+9. Если все проверки зелёные, сделать commit только файлов задачи:
+   `git commit --only src/pages/HomeView.vue supabase/functions/_shared/shipment-accounting_test.ts -m "Fix turnover accounting for pending returns"`
+
+10. Выполнить:
+    `git push origin main`
+
+11. Отдельный deploy Edge Functions не нужен: Edge Functions и migrations этот patch не меняет. Дождаться обычного production workflow после push и сообщить его результат, если он доступен.
+
+12. В отчёте сообщить только:
+   - полный commit SHA;
+   - результаты `pnpm type-check`, `pnpm lint`, `pnpm build`, `git diff --check`, Deno test;
+   - результат push;
+   - результат production workflow, если доступен;
+   - итоговый `git status --short`.
