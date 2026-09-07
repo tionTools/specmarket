@@ -1,0 +1,134 @@
+diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/delivery-tracking.ts
+new file mode 100644
+index 0000000..abdecf9
+--- /dev/null
++++ b/src/features/orders/delivery-tracking.ts
+@@ -0,0 +1,47 @@
++const normalizedStatusLabels: Record<string, string> = {
++  returning: 'Возвращается отправителю',
++  returned: 'Возвращено',
++  cancelled: 'Отменено',
++  delivered: 'Получено',
++  ready_for_pickup: 'Готово к выдаче',
++  in_transit: 'В дороге',
++  accepted: 'Принято перевозчиком',
++  created: 'Запланировано',
++}
++
++export function secondaryDeliveryStatus(rawStatus?: string, normalizedStatus?: string) {
++  const normalized = normalizedStatus?.trim().toLowerCase() ?? ''
++  const label = normalizedStatusLabels[normalized] ?? ''
++  if (!label) return ''
++  const raw = rawStatus?.trim().toLowerCase() ?? ''
++  return raw === label.toLowerCase() ? '' : label
++}
++
++export function formatTrackingExpectedDeliveryAt(value?: string) {
++  const source = value?.trim() ?? ''
++  if (!source) return ''
++
++  const dayFirst = source.match(
++    /^(\d{2})[-.](\d{2})[-.](\d{4})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/,
++  )
++  if (dayFirst) {
++    const [, day, month, , hour, minute] = dayFirst
++    return `${day}.${month}${hour && minute ? `, ${hour}:${minute}` : ''}`
++  }
++
++  const yearFirst = source.match(
++    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/,
++  )
++  if (yearFirst) {
++    const [, , month, day, hour, minute] = yearFirst
++    return `${day}.${month}${hour && minute ? `, ${hour}:${minute}` : ''}`
++  }
++
++  return source
++}
++
++export function expectedReturnLabel(normalizedStatus?: string, expectedDeliveryAt?: string) {
++  if (normalizedStatus?.trim().toLowerCase() !== 'returning') return ''
++  const expected = formatTrackingExpectedDeliveryAt(expectedDeliveryAt)
++  return expected ? `Ожидается возврат: ${expected}` : ''
++}
+diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
+index c0d79cb..9f1f403 100644
+--- a/src/features/orders/types.ts
++++ b/src/features/orders/types.ts
+@@ -70,6 +70,8 @@ export interface Delivery {
+   trackingLastCheckedAt?: string
+   trackingStatusChangedAt?: string
+   trackingDataChangedAt?: string
++  /** Прогнозируемая дата/время прибытия по данным перевозчика. */
++  trackingExpectedDeliveryAt?: string
+   trackingLastError?: string
+   trackingDestinationCity?: string
+   trackingDestinationAddress?: string
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 7c90ad5..b0488c2 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -66,6 +66,10 @@ import {
+   formatUkrainianPhone,
+   orderBusinessPlatform,
+ } from '@/features/orders/display'
++import {
++  expectedReturnLabel,
++  secondaryDeliveryStatus,
++} from '@/features/orders/delivery-tracking'
+ import type {
+   Delivery,
+   Order,
+@@ -5580,6 +5584,52 @@ function orderDateTime(order: Order) {
+                   >{{ deliveryStatusForOrder(order) }}</span
+                 >
+               </div>
++              <div
++                v-if="
++                  secondaryDeliveryStatus(
++                    order.delivery.trackingStatus,
++                    order.delivery.trackingNormalizedStatus,
++                  ) ||
++                  expectedReturnLabel(
++                    order.delivery.trackingNormalizedStatus,
++                    order.delivery.trackingExpectedDeliveryAt,
++                  )
++                "
++                class="mt-2 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs"
++              >
++                <span
++                  v-if="
++                    secondaryDeliveryStatus(
++                      order.delivery.trackingStatus,
++                      order.delivery.trackingNormalizedStatus,
++                    )
++                  "
++                  class="rounded-full bg-rose-100 px-2.5 py-1 font-semibold text-rose-800"
++                >
++                  {{
++                    secondaryDeliveryStatus(
++                      order.delivery.trackingStatus,
++                      order.delivery.trackingNormalizedStatus,
++                    )
++                  }}
++                </span>
++                <span
++                  v-if="
++                    expectedReturnLabel(
++                      order.delivery.trackingNormalizedStatus,
++                      order.delivery.trackingExpectedDeliveryAt,
++                    )
++                  "
++                  class="font-semibold text-slate-600"
++                >
++                  {{
++                    expectedReturnLabel(
++                      order.delivery.trackingNormalizedStatus,
++                      order.delivery.trackingExpectedDeliveryAt,
++                    )
++                  }}
++                </span>
++              </div>
+               <dl class="mt-2 text-sm">
+                 <div class="pb-1">
+                   <div class="space-y-0.5 text-center">
