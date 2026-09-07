@@ -1,0 +1,150 @@
+name: Patch 58 Validation
+
+on:
+  push:
+    branches: [chatgpt-validate-58]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply HomeView candidate
+        run: |
+          git apply --check --recount PATCH58-HOME.patch
+          git apply --recount PATCH58-HOME.patch
+
+      - name: Validate diff scope and whitespace
+        shell: bash
+        run: |
+          BASE=0de1d906fa8e7541be1de41e59cfd124c91cb9b6
+          git diff --check "$BASE" -- \
+            src/features/orders/delivery-tracking.ts \
+            src/pages/HomeView.vue \
+            supabase/functions/sync-delivery-tracking/index.ts \
+            supabase/functions/sync-delivery-tracking/worker.ts \
+            supabase/functions/sync-delivery-tracking/normalize.ts \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+          git diff --name-only "$BASE" -- \
+            src/features/orders/delivery-tracking.ts \
+            src/pages/HomeView.vue \
+            supabase/functions/sync-delivery-tracking/index.ts \
+            supabase/functions/sync-delivery-tracking/worker.ts \
+            supabase/functions/sync-delivery-tracking/normalize.ts \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts | sort > /tmp/changed.txt
+          cat > /tmp/expected.txt <<'EOF'
+          src/features/orders/delivery-tracking.ts
+          src/pages/HomeView.vue
+          supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts
+          supabase/functions/sync-delivery-tracking/index.ts
+          supabase/functions/sync-delivery-tracking/normalize.ts
+          supabase/functions/sync-delivery-tracking/normalize_test.ts
+          supabase/functions/sync-delivery-tracking/worker.ts
+          EOF
+          diff -u /tmp/expected.txt /tmp/changed.txt
+          ! grep -Fx 'AGENTS.md' /tmp/changed.txt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Frontend return helper regression
+        shell: bash
+        run: |
+          node --experimental-strip-types --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import {
+            deliveryReturnStatus,
+            expectedReturnLabel,
+            isReturningDelivery,
+            returnDestinationLabel,
+          } from './src/features/orders/delivery-tracking.ts'
+
+          assert.equal(isReturningDelivery('Відмова від отримання', 'cancelled'), true)
+          assert.equal(isReturningDelivery('Відмова від одержання', 'cancelled'), true)
+          assert.equal(deliveryReturnStatus('Відмова від отримання', 'cancelled'), 'Возвращается отправителю')
+          assert.equal(deliveryReturnStatus('Скасовано', 'cancelled'), '')
+          assert.equal(
+            expectedReturnLabel('Відмова від отримання', 'cancelled', '08-09-2026 15:00:00'),
+            'Ожидается возврат: 08.09, 15:00',
+          )
+          assert.equal(
+            returnDestinationLabel('Відмова від отримання', 'returning', 'Циркуни', 'Відділення 1', true),
+            'Возврат: Циркуни, Відділення 1',
+          )
+          assert.equal(
+            returnDestinationLabel('Відмова від отримання', 'cancelled', 'Київ', 'Відділення 343', false),
+            '',
+          )
+          console.log('PATCH58_FRONTEND_RUNTIME_OK')
+          NODE
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Delivery tracking regression tests
+        run: |
+          deno test \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta_test.ts
+          deno check supabase/functions/sync-delivery-tracking/index.ts
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Web checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - name: Static targeted-refresh assertions
+        shell: bash
+        run: |
+          grep -F "body: { force: true, orderId: remoteId }" src/pages/HomeView.vue
+          grep -F "ordersQuery = ordersQuery.eq('id', orderId)" supabase/functions/sync-delivery-tracking/worker.ts
+          grep -F "runTrackingWorker(admin, forced, orderId || undefined)" supabase/functions/sync-delivery-tracking/index.ts
+          grep -F "title=\"Обновить доставку\"" src/pages/HomeView.vue
+          ! grep -F "secondaryDeliveryStatus" src/pages/HomeView.vue
+
+      - name: Build and re-apply canonical Patch 58 from clean main
+        shell: bash
+        run: |
+          BASE=0de1d906fa8e7541be1de41e59cfd124c91cb9b6
+          git diff "$BASE" -- \
+            src/features/orders/delivery-tracking.ts \
+            src/pages/HomeView.vue \
+            supabase/functions/sync-delivery-tracking/index.ts \
+            supabase/functions/sync-delivery-tracking/worker.ts \
+            supabase/functions/sync-delivery-tracking/normalize.ts \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-return_test.ts \
+            > /tmp/PATCH58-CANONICAL.patch
+          test -s /tmp/PATCH58-CANONICAL.patch
+          git worktree add /tmp/patch58-base "$BASE"
+          cd /tmp/patch58-base
+          git apply --check /tmp/PATCH58-CANONICAL.patch
+          git apply /tmp/PATCH58-CANONICAL.patch
+          git diff --check
+          git diff --name-only | sort > /tmp/reapplied.txt
+          diff -u /tmp/expected.txt /tmp/reapplied.txt
+          cp /tmp/PATCH58-CANONICAL.patch "$GITHUB_WORKSPACE/PATCH58-CANONICAL.patch"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch58-canonical
+          path: PATCH58-CANONICAL.patch
+          if-no-files-found: error
