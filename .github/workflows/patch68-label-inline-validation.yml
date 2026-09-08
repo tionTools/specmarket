@@ -20,7 +20,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = 'abfd4f494a25b347e92774321461cfea3b1bf92c'
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = 'abfd4f494a25b347e92774321461cfea3b1bf92c'
+          git checkout --detach origin/main
           python - <<'PY'
           from pathlib import Path
 
@@ -135,38 +137,28 @@ jobs:
           """
           ))
 
-          replacements.append((
-          """                      <span
-                                v-if="labelSentForCurrentTtn(order)"
-                                class="text-[11px] font-semibold text-emerald-700"
-                              >
-                                Бирка отправлена
-                                {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
-                              </span>
-                            </dd>
-          """,
-          """                      <span
-                                v-if="labelSentForCurrentTtn(order)"
-                                class="text-[11px] font-semibold text-emerald-700"
-                              >
-                                Бирка отправлена
-                                {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
-                              </span>
-                              <p
-                                v-if="labelEmailInlineError(order.id)"
-                                class="max-w-full whitespace-pre-line text-center text-[11px] font-semibold text-red-700"
-                              >
-                                {{ labelEmailInlineError(order.id) }}
-                              </p>
-                            </dd>
-          """
-          ))
-
           for old, new in replacements:
               count = source.count(old)
               if count != 1:
                   raise SystemExit(f'Patch 68 anchor count={count}, expected 1:\n{old[:120]}')
               source = source.replace(old, new)
+
+          marker = 'v-if="labelSentForCurrentTtn(order)"'
+          if source.count(marker) != 1:
+              raise SystemExit(f'Patch 68 sent-status marker count={source.count(marker)}, expected 1')
+          marker_pos = source.index(marker)
+          span_end = source.find('</span>', marker_pos)
+          if span_end < 0:
+              raise SystemExit('Patch 68 sent-status closing span not found')
+          insert_at = span_end + len('</span>')
+          inline_error = """
+                      <p
+                        v-if="labelEmailInlineError(order.id)"
+                        class="max-w-full whitespace-pre-line text-center text-[11px] font-semibold text-red-700"
+                      >
+                        {{ labelEmailInlineError(order.id) }}
+                      </p>"""
+          source = source[:insert_at] + inline_error + source[insert_at:]
 
           path.write_text(source, encoding='utf-8')
           PY
