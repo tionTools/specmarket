@@ -24,15 +24,73 @@ jobs:
           git show origin/chatgpt-patches:66.patch > /tmp/66.patch
           test -s /tmp/66.patch
 
-      - name: Recover and apply hand-authored patch
+      - name: Recover intended Patch 66 tree
         shell: bash
         run: |
           set -euo pipefail
-          # The published file has incorrect hunk line counts. --recount is used only
-          # here to reconstruct the intended tree; the artifact produced below must
-          # pass ordinary `git apply --check` without --recount.
-          git apply --recount --check /tmp/66.patch
-          git apply --recount /tmp/66.patch
+          # The first published file was hand-authored with bad hunk metadata and
+          # one stale HomeView context. Reconstruct its intended tree once here;
+          # the normalized artifact produced later must pass ordinary git apply.
+          git apply --recount --reject /tmp/66.patch || true
+          mapfile -t rejects < <(find . -name '*.rej' -print | sort)
+          if [ "${#rejects[@]}" -ne 1 ] || [ "${rejects[0]}" != './src/pages/HomeView.vue.rej' ]; then
+            printf 'Unexpected reject set:\n%s\n' "${rejects[*]-}"
+            exit 1
+          fi
+          grep -F 'Отправить бирку' src/pages/HomeView.vue.rej >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/pages/HomeView.vue')
+          source = path.read_text(encoding='utf-8')
+          needle = '''                    </button>
+                    </dd>
+                    <dd
+                      v-if="deliveryWasRedirected(order.delivery)"
+                      class="text-xs font-semibold text-violet-700"
+'''
+          replacement = '''                    </button>
+                    </dd>
+                    <dd
+                      v-if="canSendOrderLabel(order)"
+                      class="mt-2 flex flex-col items-center gap-1"
+                    >
+                      <button
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-50"
+                        type="button"
+                        :disabled="isSendingLabelEmail"
+                        @click="openOrderLabelEmail(order)"
+                      >
+                        <Mail class="size-4" aria-hidden="true" />
+                        {{
+                          isSendingLabelEmail && labelEmailOrderId === order.id
+                            ? 'Отправляем…'
+                            : labelSentForCurrentTtn(order)
+                              ? 'Отправить бирку повторно'
+                              : 'Отправить бирку'
+                        }}
+                      </button>
+                      <span
+                        v-if="labelSentForCurrentTtn(order)"
+                        class="text-[11px] font-semibold text-emerald-700"
+                      >
+                        Бирка отправлена {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
+                      </span>
+                    </dd>
+                    <dd
+                      v-if="deliveryWasRedirected(order.delivery)"
+                      class="text-xs font-semibold text-violet-700"
+'''
+          count = source.count(needle)
+          if count != 1:
+              raise SystemExit(f'HomeView insertion anchor count is {count}, expected 1')
+          path.write_text(source.replace(needle, replacement), encoding='utf-8')
+          PY
+          rm src/pages/HomeView.vue.rej
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            find . -name '*.rej' -print
+            exit 1
+          fi
           git diff --check
 
       - name: Guard task scope before tooling
@@ -110,7 +168,7 @@ jobs:
           test -s /tmp/66.fixed.patch
           git reset --hard HEAD
           git clean -fd
-          # This is the acceptance criterion for the file handed to Codex.
+          # Acceptance criterion for the file handed to Codex: no --recount.
           git apply --check /tmp/66.fixed.patch
           git apply /tmp/66.fixed.patch
           git diff --check
