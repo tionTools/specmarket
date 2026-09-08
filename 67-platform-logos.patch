@@ -19,7 +19,7 @@ diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/a
  import androidx.compose.ui.text.font.FontWeight
  import androidx.compose.ui.text.input.KeyboardType
  import androidx.compose.ui.text.input.PasswordVisualTransformation
-@@ -52,6 +55,34 @@ private fun AppearanceHost(content: @Composable () -> Unit) {
+@@ -52,6 +55,35 @@ private fun AppearanceHost(content: @Composable () -> Unit) {
  private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
  private fun amount(value: Double?) = value?.let { BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() } ?: "—"
  
