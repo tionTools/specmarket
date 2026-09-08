@@ -38,14 +38,20 @@ jobs:
           set -euo pipefail
           git fetch origin main chatgpt-patches
           test "$(git rev-parse origin/main)" = '087987a0ff4d93a8490aca40e12cfe5ce07d8f94'
-          rm -rf /tmp/chatgpt-patches
+
+          rm -rf /tmp/main-check /tmp/chatgpt-patches
+          git worktree add --detach /tmp/main-check origin/main
+          cd /tmp/main-check
+          git apply --check /tmp/patch66/66.fixed.patch
+
+          cd "$GITHUB_WORKSPACE"
           git worktree add --detach /tmp/chatgpt-patches origin/chatgpt-patches
           cp /tmp/patch66/66.fixed.patch /tmp/chatgpt-patches/66.patch
+          echo '3242d2a095c2767d40a3ba3db66abc5f8abb01b04c7716a32d2f006d461bd550  /tmp/chatgpt-patches/66.patch' | sha256sum -c -
           cd /tmp/chatgpt-patches
           git config user.name 'Vadonchikus'
           git config user.email '36088047+Vadonchikus@users.noreply.github.com'
           git add 66.patch
-          git diff --cached --check
           test "$(git diff --cached --name-only)" = '66.patch'
           if git diff --cached --quiet; then
             echo '66.patch already current'
