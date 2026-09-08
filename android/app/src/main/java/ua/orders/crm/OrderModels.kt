@@ -74,6 +74,17 @@ fun Order.deliveryValue(key: String): String =
 fun Order.deliveryFlag(key: String): Boolean =
     ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
 
+private fun cancelledOrReturnedForNewBadge(order: Order): Boolean =
+    Regex("скас|отмен|cancel|повер|возврат|return|refund").containsMatchIn(
+        displayOrderStatus(order.status).lowercase(Locale.ROOT),
+    )
+
+/** Matches the Web CRM visual rule: marketplace order stays NEW until a TTN exists. */
+fun isNewOrderVisual(order: Order): Boolean =
+    normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta") &&
+        order.deliveryValue("ttn").trim().isEmpty() &&
+        !cancelledOrReturnedForNewBadge(order)
+
 data class DeliveryStatusInfo(val stage: String = "", val current: String = "")
 
 private fun isGenericReturnTrackingStatus(value: String) =

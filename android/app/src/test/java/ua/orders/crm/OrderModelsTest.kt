@@ -31,6 +31,24 @@ class OrderModelsTest {
         }
     }
 
+    @Test fun visual_new_order_matches_web_crm_ttn_rule() {
+        for (platform in listOf("Пром", "Эпицентр", "Каста")) {
+            assertTrue(isNewOrderVisual(order("Прийнято", platform)))
+            assertFalse(isNewOrderVisual(order("Прийнято", platform).copy(delivery = delivery("ttn" to "20450000000000"))))
+        }
+        assertFalse(isNewOrderVisual(order("Скасовано", "Пром")))
+        assertFalse(isNewOrderVisual(order("Повернено", "Каста")))
+        assertFalse(isNewOrderVisual(order("Новый", "Сайт")))
+        assertFalse(isNewOrderVisual(order("Новый", "Р/С")))
+    }
+
+    @Test fun visual_new_order_is_independent_from_marketplace_acceptance_status() {
+        val acceptedWithoutTtn = order("Принято", "Пром")
+        assertTrue(isNewOrderVisual(acceptedWithoutTtn))
+        assertFalse(isNewStatus(acceptedWithoutTtn.status))
+        assertFalse(canAccept(acceptedWithoutTtn, email))
+    }
+
     @Test fun appearance_resolves_system_and_overrides() {
         assertFalse(Appearance.SYSTEM.isDark(false))
         assertTrue(Appearance.SYSTEM.isDark(true))
