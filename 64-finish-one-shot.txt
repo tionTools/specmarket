@@ -1,0 +1,143 @@
+ФИНАЛЬНОЕ ОДНОРАЗОВОЕ ЗАВЕРШЕНИЕ PATCH 64.
+
+Работай только с уже применённым Patch 64 в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Цель этой инструкции: в одной итерации довести Patch 64 до commit/push и успешного GitHub Actions. Не останавливайся на исправимых локальных инфраструктурных проблемах Windows/Android. Сам устраняй их в рамках правил ниже. Остановиться можно только на реальной ошибке кода/тестов/подписи, невозможности доступа к GitHub, либо если требуется действие пользователя, которое ты технически не можешь выполнить сам.
+
+ТЕКУЩЕЕ СОСТОЯНИЕ, КОТОРОЕ НЕЛЬЗЯ ЛОМАТЬ:
+- Patch 64 уже применён. НЕ применяй 64.patch повторно.
+- Working tree НЕ сбрасывай.
+- Keystore уже создан и проверен вне репозитория. НЕ регенерируй его.
+- Все 4 GitHub release Secrets уже настроены. НЕ удаляй и НЕ перезаписывай их.
+- GitHub CLI уже установлен и авторизован.
+- Temurin JDK 21 уже установлен.
+- Android CLI установлен; найден бинарник:
+  C:\Users\Вадим\AppData\AndroidCLI\android.exe
+- `GRADLE_USER_HOME` используй в writable ASCII-пути.
+- В commit Patch 64 должны войти только эти 6 файлов:
+  1. .github/workflows/android-apk.yml
+  2. android/app/build.gradle.kts
+  3. android/app/src/main/java/ua/orders/crm/Appearance.kt
+  4. android/app/src/main/java/ua/orders/crm/MainActivity.kt
+  5. android/app/src/main/java/ua/orders/crm/OrderModels.kt
+  6. android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+
+1. ПРОВЕРЬ DIFF
+Выполни `git diff --check`, `git diff --name-only`, `git diff --stat`.
+Посторонние локальные изменения не трогай и не включай в commit.
+
+2. ПОДГОТОВЬ ПОСТОЯННЫЕ ASCII-ПУТИ ДЛЯ ЭТОЙ СБОРКИ
+Создай writable каталоги:
+- C:\dev\gradle-home
+- C:\dev\tmp
+- C:\Users\Public\Android\Sdk
+
+Установи в текущем процессе:
+- GRADLE_USER_HOME=C:\dev\gradle-home
+- TEMP=C:\dev\tmp
+- TMP=C:\dev\tmp
+- ANDROID_HOME=C:\Users\Public\Android\Sdk
+- ANDROID_SDK_ROOT=C:\Users\Public\Android\Sdk
+
+Также установи ANDROID_HOME и ANDROID_SDK_ROOT как User environment variables Windows, чтобы будущие процессы видели SDK.
+
+Для проекта используй временный ASCII-path через свободную букву диска (`T:` предпочтительно) с `subst` на текущий repo. Не копируй репозиторий. Если T: занят — выбери другую свободную букву. Все Gradle-команды запускай из `<drive>:\android`.
+
+3. JDK
+Найди установленный Temurin JDK 21 через `where.exe java`, `Get-Command java`, стандартные каталоги Adoptium или реестр Windows. Убедись, что `java -version` работает. Если JAVA_HOME не задан — задай его на найденный JDK 21 в текущем процессе. НОВЫЙ JDK НЕ УСТАНАВЛИВАЙ.
+
+4. ANDROID SDK — ДОВЕДИ ДО РАБОЧЕГО СОСТОЯНИЯ, НЕ ОСТАНАВЛИВАЯСЬ НА HELP EXIT CODE
+Используй уже найденный:
+C:\Users\Вадим\AppData\AndroidCLI\android.exe
+
+Не используй запуск без команды как критерий работоспособности. Bare/help может вернуть non-zero. Сначала попробуй:
+`android.exe --version`
+
+Затем попробуй установить SDK в явный путь официальным Android CLI. Глобальная опция `--sdk` должна идти ДО команды:
+`android.exe --sdk=C:\Users\Public\Android\Sdk sdk install platforms/android-36 build-tools/36.0.0 platform-tools`
+
+Критерий успеха — НЕ только exit code CLI, а фактическое наличие после команды:
+- C:\Users\Public\Android\Sdk\platforms\android-36
+- C:\Users\Public\Android\Sdk\build-tools\36.0.0
+- C:\Users\Public\Android\Sdk\build-tools\36.0.0\apksigner.bat
+
+Если Android CLI не устанавливает пакеты или падает до их появления — НЕ ОСТАНАВЛИВАЙСЯ. Используй официальный fallback Google Command-line Tools + sdkmanager:
+- скачай официальный Windows package commandlinetools-win-15859902_latest.zip с dl.google.com;
+- распакуй его в C:\Users\Public\Android\Sdk\cmdline-tools\latest так, чтобы существовал `...\latest\bin\sdkmanager.bat`;
+- через этот sdkmanager установи с `--sdk_root=C:\Users\Public\Android\Sdk`:
+  `platforms;android-36`, `build-tools;36.0.0`, `platform-tools`;
+- прими необходимые Android SDK licenses. Это разрешённое одноразовое действие build-среды.
+
+Используй только официальные инструменты Google. Android Studio, emulator, system images, NDK и CMake НЕ устанавливай.
+
+5. RELEASE SIGNING
+Используй только существующий keystore и credentials вне repo в соседнем каталоге `android-signing`. Ничего не регенерируй и не выводи секретные значения. Загрузи credentials в переменные:
+- ORDERS_RELEASE_STORE_FILE
+- ORDERS_RELEASE_STORE_PASS
+- ORDERS_RELEASE_ALIAS
+- ORDERS_RELEASE_KEY_PASS
+
+Через `gh secret list --repo tionTools/specmarket` убедись только в наличии 4 release Secrets. Значения не выводи.
+
+6. ЛОКАЛЬНАЯ СБОРКА
+Из ASCII-path `<drive>:\android` выполни одним запуском:
+`.\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease --stacktrace`
+
+Если появляется локальная Windows/sandbox ошибка `Unable to establish loopback connection`, повтори тот же запуск один раз через обычный системный `powershell.exe` или `cmd.exe`, сохранив те же JAVA_HOME, ANDROID_HOME, ANDROID_SDK_ROOT, GRADLE_USER_HOME, TEMP/TMP и ASCII-path.
+
+Если после этого единственная причина невозможности локального запуска — именно sandbox/loopback инфраструктура Codex, НЕ БЛОКИРУЙ Patch 64 навсегда: exact Patch 64 уже был отдельно проверен до публикации на GitHub runner с `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleRelease` и `apksigner verify`. В таком случае разрешено перейти к commit/push, но GitHub Actions становится обязательным финальным gate: workflow должен пройти полностью, иначе задача не завершена.
+
+Если же Gradle доходит до проекта и падает на реальной compile/test/lint/signing ошибке — остановись и сообщи точную ошибку. Код Patch 64 самостоятельно не меняй.
+
+7. ПРОВЕРКА RELEASE APK ЛОКАЛЬНО
+Если assembleRelease локально успешен, выполни:
+`C:\Users\Public\Android\Sdk\build-tools\36.0.0\apksigner.bat verify --print-certs android\app\build\outputs\apk\release\app-release.apk`
+
+Если этот APK подписан успешно — продолжай.
+
+8. COMMIT/PUSH
+Перед commit ещё раз проверь:
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+
+Commit должен содержать ровно 6 файлов Patch 64 и никаких инфраструктурных файлов/credentials/local.properties.
+Commit message:
+`Polish Android orders app and stabilize release updates`
+
+Push в `origin/main`.
+
+9. GITHUB ACTIONS — ОБЯЗАТЕЛЬНЫЙ ФИНАЛЬНЫЙ GATE
+После push найди Android APK workflow для нового main commit и дождись результата.
+Workflow обязан успешно:
+- выполнить tests/lint;
+- собрать release APK;
+- выполнить `apksigner verify`;
+- создать artifact `orders-android-release`.
+
+Если workflow падает — не объявляй задачу выполненной. Прочитай точный failed step/log и, если причина чисто инфраструктурная в workflow и исправляется без изменения бизнес-кода Patch 64, исправь workflow в рамках Patch 64 и доведи run до success. Если требуется изменение Android-кода/логики — остановись и сообщи точную ошибку.
+
+После успешного run скачай `orders-android-release` через gh и повторно проверь APK `apksigner verify --print-certs`. Зафиксируй SHA-256 сертификата подписанта.
+
+10. ЗАВЕРШЕНИЕ
+Удалить только временный `subst` mapping. НЕ удалять:
+- Android SDK;
+- Temurin JDK;
+- GRADLE cache;
+- GitHub CLI;
+- keystore/credentials;
+- GitHub Secrets.
+Это постоянная Android build-инфраструктура для следующих патчей.
+
+Финальный отчёт должен содержать только факты:
+- SHA commit в main;
+- какие локальные проверки реально прошли и был ли использован fallback GitHub Actions из-за sandbox loopback;
+- Android SDK path;
+- GitHub Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что commit содержит только 6 файлов Patch 64;
+- напоминание: переход с 0.4 на 0.5 требует один раз удалить старую версию, установить 0.5 и войти; дальнейшие версии с тем же release key и растущим versionCode должны обновляться поверх приложения.
+
+НЕ ОСТАНАВЛИВАЙСЯ на исправимых вещах вроде PATH, отсутствующей env-переменной, writable cache path, отсутствующего SDK package, help/non-zero Android CLI, необходимости fallback на sdkmanager, необходимости нового shell или ASCII subst. Эти вещи исправляй сам и продолжай до результата.
