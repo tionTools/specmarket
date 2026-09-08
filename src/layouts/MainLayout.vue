@@ -1,11 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
-import {
-  applyAppearance,
-  appearanceStorageKey,
-  parseAppearance,
-  type Appearance,
-} from '../lib/appearance'
+import { onMounted, onScopeDispose } from 'vue'
+import { applyAppearance, appearanceStorageKey, parseAppearance } from '../lib/appearance'
 const rawBuildTime = import.meta.env.VITE_BUILD_TIME?.trim()
 const buildDate = rawBuildTime ? new Date(rawBuildTime) : null
 const buildTime =
@@ -17,27 +12,14 @@ const buildTime =
       }).format(buildDate)
     : ''
 const buildVersion = import.meta.env.VITE_BUILD_SHA?.trim().slice(0, 7) || 'local'
-const appearance = ref<Appearance>(
-  parseAppearance(window.localStorage.getItem(appearanceStorageKey)),
-)
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-const appearanceLabel = computed(
-  () => ({ system: 'Системная', light: 'Светлая', dark: 'Тёмная' })[appearance.value],
-)
-function handleAppearance(event: Event) {
-  appearance.value = (event.target as HTMLSelectElement).value as Appearance
+function currentAppearance() {
+  return parseAppearance(window.localStorage.getItem(appearanceStorageKey))
 }
 function handleSystemTheme() {
-  if (appearance.value === 'system') applyAppearance(appearance.value)
+  if (currentAppearance() === 'system') applyAppearance('system')
 }
-watch(
-  appearance,
-  (value) => {
-    window.localStorage.setItem(appearanceStorageKey, value)
-    applyAppearance(value)
-  },
-  { immediate: true },
-)
+applyAppearance(currentAppearance())
 onMounted(() => systemTheme.addEventListener('change', handleSystemTheme))
 onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme))
 </script>
@@ -51,19 +33,6 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
       class="flex items-center justify-end gap-2 px-4 pb-2 text-right text-[10px] text-[var(--muted)]"
       aria-label="Версія CRM"
     >
-      <label
-        >Оформление
-        <select
-          class="rounded border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text)]"
-          :value="appearance"
-          :aria-label="`Оформление: ${appearanceLabel}`"
-          @change="handleAppearance"
-        >
-          <option value="system">Системная</option>
-          <option value="light">Светлая</option>
-          <option value="dark">Тёмная</option>
-        </select></label
-      >
       <span
         >v{{ buildVersion }}<span v-if="buildTime"> · {{ buildTime }}</span></span
       >

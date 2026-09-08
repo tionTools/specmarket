@@ -46,10 +46,12 @@ import {
   Globe2,
   Link2,
   LogOut,
+  Mail,
   MessageSquare,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Trash2,
   Truck,
   Upload,
@@ -106,6 +108,14 @@ const {
   reset: resetPromRegistryFilePicker,
 } = useFileDialog({
   accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  multiple: false,
+})
+const {
+  files: orderLabelFiles,
+  open: openOrderLabelFilePicker,
+  reset: resetOrderLabelFilePicker,
+} = useFileDialog({
+  accept: '.pdf,application/pdf',
   multiple: false,
 })
 const documentVisibility = useDocumentVisibility()
@@ -168,6 +178,8 @@ const isSyncingKasta = ref(false)
 const isSyncingAllPlatforms = ref(false)
 const isSyncingDelivery = ref(false)
 const syncingDeliveryOrderId = ref<string | null>(null)
+const labelEmailOrderId = ref<Order['id'] | null>(null)
+const isSendingLabelEmail = ref(false)
 const isMarketplaceSyncBusy = computed(
   () =>
     isSyncingAllPlatforms.value ||
@@ -3958,6 +3970,106 @@ async function copyOneCTemplate(delivery: Delivery, orderId: Order['id']) {
   } catch {}
 }
 
+function labelTtnKey(value?: string) {
+  return (value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+}
+
+function canSendOrderLabel(order: Order) {
+  const kind = carrierIcon(order.delivery.carrier)
+  return (
+    !isGuest.value &&
+    Boolean(order.remoteId && order.delivery.ttn.trim()) &&
+    (kind === 'rozetka' || kind === 'meest')
+  )
+}
+
+function labelSentForCurrentTtn(order: Order) {
+  return (
+    Boolean(order.delivery.labelEmailSentAt) &&
+    labelTtnKey(order.delivery.labelEmailSentTtn) === labelTtnKey(order.delivery.ttn)
+  )
+}
+
+function formatLabelEmailSentAt(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('uk-UA', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Europe/Kyiv',
+  }).format(date)
+}
+
+function openOrderLabelEmail(order: Order) {
+  if (!canSendOrderLabel(order) || isSendingLabelEmail.value) return
+  if (
+    labelSentForCurrentTtn(order) &&
+    !window.confirm('Бирка для текущей ТТН уже отправлена. Отправить повторно?')
+  )
+    return
+  labelEmailOrderId.value = order.id
+  resetOrderLabelFilePicker()
+  openOrderLabelFilePicker()
+}
+
+async function functionErrorMessage(error: unknown) {
+  if (!error || typeof error !== 'object') return ''
+  const candidate = error as { context?: unknown; message?: unknown }
+  if (candidate.context instanceof Response) {
+    const payload = (await candidate.context
+      .clone()
+      .json()
+      .catch(() => null)) as { message?: unknown } | null
+    if (typeof payload?.message === 'string') return payload.message
+  }
+  return typeof candidate.message === 'string' ? candidate.message : ''
+}
+
+async function sendOrderLabelEmail(file: File) {
+  const order = orders.value.find((item) => item.id === labelEmailOrderId.value)
+  if (!supabase || !order || !canSendOrderLabel(order) || isSendingLabelEmail.value) return
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    showSyncError('Можно выбрать только PDF-бирку.')
+    return
+  }
+
+  isSendingLabelEmail.value = true
+  const form = new FormData()
+  form.append('orderId', order.remoteId ?? '')
+  form.append('file', file, file.name)
+  const { data, error } = await supabase.functions.invoke('send-order-label-email', {
+    method: 'POST',
+    body: form,
+  })
+  if (error || !data?.ok) {
+    const message =
+      data?.message || (await functionErrorMessage(error)) || 'Не удалось отправить бирку по email.'
+    showSyncError(message)
+    isSendingLabelEmail.value = false
+    return
+  }
+
+  order.delivery.labelEmailSentAt = String(data.sentAt)
+  order.delivery.labelEmailSentTtn = String(data.ttn)
+  order.delivery.labelEmailMessageId = data.messageId ? String(data.messageId) : undefined
+  window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  isSendingLabelEmail.value = false
+  showSyncMessage(`Бирка отправлена на ${String(data.recipient)}.`)
+}
+
+watch(orderLabelFiles, (files) => {
+  const file = files?.[0]
+  if (!file) return
+  void sendOrderLabelEmail(file).finally(() => {
+    resetOrderLabelFilePicker()
+    labelEmailOrderId.value = null
+  })
+})
+
 function openEpicentrOrder(order: Order) {
   if (!order.externalId) return
   closePrintRegistry()
@@ -4256,10 +4368,10 @@ function orderDateTime(order: Order) {
             {{ isPreparingPrintRegistry ? 'Проверяем ТТН…' : 'Реестр печати' }}
           </button>
           <RouterLink
-            class="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
-            to="/prices"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+            to="/settings"
           >
-            Цены
+            <Settings class="size-4" aria-hidden="true" /> Настройки
           </RouterLink>
           <button
             v-if="!isGuest"
@@ -4311,15 +4423,6 @@ function orderDateTime(order: Order) {
           >
             <Plus class="mr-1 inline size-4" aria-hidden="true" /> Новый заказ
           </button>
-          <button
-            v-if="!isGuest"
-            class="whitespace-nowrap rounded-xl border px-3 py-2.5 text-sm font-semibold shadow-sm transition"
-            :class="newOrderNotificationsEnabled
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
-            type="button"
-            @click="newOrderNotificationsEnabled = !newOrderNotificationsEnabled"
-          >Уведомления: {{ newOrderNotificationsEnabled ? 'вкл' : 'выкл' }}</button>
           <button
             class="ml-1 grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
             type="button"
@@ -5817,6 +5920,33 @@ function orderDateTime(order: Order) {
                           >Скопировано</span
                         >
                       </button>
+                    </dd>
+                    <dd
+                      v-if="canSendOrderLabel(order)"
+                      class="mt-2 flex flex-col items-center gap-1"
+                    >
+                      <button
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-50"
+                        type="button"
+                        :disabled="isSendingLabelEmail"
+                        @click="openOrderLabelEmail(order)"
+                      >
+                        <Mail class="size-4" aria-hidden="true" />
+                        {{
+                          isSendingLabelEmail && labelEmailOrderId === order.id
+                            ? 'Отправляем…'
+                            : labelSentForCurrentTtn(order)
+                              ? 'Отправить бирку повторно'
+                              : 'Отправить бирку'
+                        }}
+                      </button>
+                      <span
+                        v-if="labelSentForCurrentTtn(order)"
+                        class="text-[11px] font-semibold text-emerald-700"
+                      >
+                        Бирка отправлена
+                        {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
+                      </span>
                     </dd>
                     <dd
                       v-if="deliveryWasRedirected(order.delivery)"

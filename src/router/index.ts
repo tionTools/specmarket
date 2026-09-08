@@ -10,6 +10,7 @@ const router = createRouter({
       component: MainLayout,
       children: [
         { path: '', component: () => import('@/pages/HomeView.vue') },
+        { path: 'settings', component: () => import('@/pages/SettingsView.vue') },
         { path: 'prices', component: () => import('@/pages/PricesView.vue') },
         { path: 'epicentr-royalty', component: () => import('@/pages/EpicentrRoyaltyView.vue') },
         { path: 'currency-rates', component: () => import('@/pages/CurrencyRatesView.vue') },

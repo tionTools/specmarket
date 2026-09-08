@@ -750,6 +750,18 @@ Deno.serve(async (request) => {
         ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn, { city, address }),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
+        labelEmailSentAt:
+          typeof previousDelivery.labelEmailSentAt === 'string'
+            ? previousDelivery.labelEmailSentAt
+            : undefined,
+        labelEmailSentTtn:
+          typeof previousDelivery.labelEmailSentTtn === 'string'
+            ? previousDelivery.labelEmailSentTtn
+            : undefined,
+        labelEmailMessageId:
+          typeof previousDelivery.labelEmailMessageId === 'string'
+            ? previousDelivery.labelEmailMessageId
+            : undefined,
       },
     }
 

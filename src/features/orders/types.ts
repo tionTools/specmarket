@@ -82,6 +82,10 @@ export interface Delivery {
   trackingDestinationPostalCode?: string
   printCheckedAt?: string
   printedAt?: string
+  /** Последняя успешная отправка PDF-бирки на email. */
+  labelEmailSentAt?: string
+  labelEmailSentTtn?: string
+  labelEmailMessageId?: string
 }
 
 export interface Order {

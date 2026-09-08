@@ -1000,6 +1000,9 @@ Deno.serve(async (request) => {
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
+        labelEmailSentAt: text(previousDelivery.labelEmailSentAt) || undefined,
+        labelEmailSentTtn: text(previousDelivery.labelEmailSentTtn) || undefined,
+        labelEmailMessageId: text(previousDelivery.labelEmailMessageId) || undefined,
       },
     }
     let orderId = existing?.id

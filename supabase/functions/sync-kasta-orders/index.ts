@@ -576,6 +576,9 @@ Deno.serve(async (request) => {
           }),
           printCheckedAt: text(currentDelivery.printCheckedAt) || undefined,
           printedAt: text(currentDelivery.printedAt) || undefined,
+          labelEmailSentAt: text(currentDelivery.labelEmailSentAt) || undefined,
+          labelEmailSentTtn: text(currentDelivery.labelEmailSentTtn) || undefined,
+          labelEmailMessageId: text(currentDelivery.labelEmailMessageId) || undefined,
         },
       })
       let orderId = existing?.id
