@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/android-apk.yml b/.github/workflows/android-apk.yml
-index 3267a4e..7bfbfeb 100644
+index 3267a4e..fd6e62e 100644
 --- a/.github/workflows/android-apk.yml
 +++ b/.github/workflows/android-apk.yml
-@@ -20,10 +20,28 @@ jobs:
+@@ -20,10 +20,29 @@ jobs:
        - uses: gradle/actions/setup-gradle@v4
        - uses: android-actions/setup-android@v3
        - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
@@ -26,7 +26,8 @@ index 3267a4e..7bfbfeb 100644
 +      - run: ./gradlew testDebugUnitTest lintDebug assembleRelease
          working-directory: android
 +      - name: Verify release signature
-+        run: apksigner verify --print-certs android/app/build/outputs/apk/release/app-release.apk
++        run: |
++          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
        - uses: actions/upload-artifact@v4
          with:
 -          name: orders-android-debug
