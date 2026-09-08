@@ -19,7 +19,7 @@ Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka De
    C:\Users\Вадим\Documents\CRM моя\specmarket-p66
    Создать его от актуального origin/main. Если путь уже существует, использовать его только если он чистый и соответствует актуальному origin/main; иначе остановиться.
 4. В worktree создать каталог новой функции:
-   if not exist supabase\functions\send-order-label-email mkdir supabase\functions\send-order-label-email
+   New-Item -ItemType Directory -Force supabase/functions/send-order-label-email | Out-Null
 5. Механически получить четыре НОВЫХ файла из origin/chatgpt-patches. На Windows использовать cmd redirection, чтобы не менять UTF-8/переводы строк:
    cmd /c "git show origin/chatgpt-patches:patches/66/src/pages/SettingsView.vue > src\pages\SettingsView.vue"
    cmd /c "git show origin/chatgpt-patches:patches/66/supabase/functions/_shared/order-label.ts > supabase\functions\_shared\order-label.ts"
@@ -41,7 +41,8 @@ Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka De
    git apply --check 66.apply.patch
    Только при успехе:
    git apply 66.apply.patch
-   Затем удалить временный 66.apply.patch.
+   Затем удалить временный 66.apply.patch:
+   Remove-Item 66.apply.patch
 
 Что должен сделать Patch 66
 - Заменить ВЕРХНЮЮ кнопку «Цены» на кнопку с шестерёнкой «Настройки».
