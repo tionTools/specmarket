@@ -1,0 +1,32 @@
+diff --git a/.github/workflows/android-apk.yml b/.github/workflows/android-apk.yml
+index fd6e62e..d293cab 100644
+--- a/.github/workflows/android-apk.yml
++++ b/.github/workflows/android-apk.yml
+@@ -9,7 +9,7 @@ on:
+       - 'supabase/functions/_shared/prom-order-action*'
+       - '.github/workflows/android-apk.yml'
+ permissions:
+-  contents: read
++  contents: write
+ jobs:
+   build:
+     runs-on: ubuntu-latest
+@@ -46,3 +46,18 @@ jobs:
+           name: orders-android-release
+           path: android/app/build/outputs/apk/release/app-release.apk
+           if-no-files-found: error
++      - name: Publish stable latest APK
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          apk="android/app/build/outputs/apk/release/app-release.apk"
++          tag="android-latest"
++          if gh release view "$tag" >/dev/null 2>&1; then
++            gh release upload "$tag" "$apk#app-release.apk" --clobber
++          else
++            gh release create "$tag" "$apk#app-release.apk" \
++              --title "Latest Android APK" \
++              --notes "Automatically updated from the latest successful Android build." \
++              --latest=false
++          fi
