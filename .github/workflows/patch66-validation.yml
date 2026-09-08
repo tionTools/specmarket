@@ -28,6 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Recover the existing-file part of the malformed published patch.
           git apply --recount --reject /tmp/66.patch || true
           mapfile -t rejects < <(find . -name '*.rej' -print | sort)
           if [ "${#rejects[@]}" -ne 1 ] || [ "${rejects[0]}" != './src/pages/HomeView.vue.rej' ]; then
@@ -87,6 +88,21 @@ jobs:
           path.write_text(source.replace(needle, replacement), encoding='utf-8')
           PY
           rm src/pages/HomeView.vue.rej
+
+          # The current branch copy was also truncated before its four new files.
+          # Recover those new-file hunks from the earlier complete 66.patch blob.
+          git cat-file -e e316dc6442e3459563f9ed3cdc1484e835bea00d^{blob}
+          git cat-file blob e316dc6442e3459563f9ed3cdc1484e835bea00d > /tmp/66.complete-old.patch
+          awk '/^diff --git a\/src\/pages\/SettingsView.vue b\/src\/pages\/SettingsView.vue$/{copy=1} copy' \
+            /tmp/66.complete-old.patch > /tmp/66.new-files.patch
+          test -s /tmp/66.new-files.patch
+          git apply --recount --check /tmp/66.new-files.patch
+          git apply --recount /tmp/66.new-files.patch
+
+          test -f src/pages/SettingsView.vue
+          test -f supabase/functions/_shared/order-label.ts
+          test -f supabase/functions/_shared/order-label_test.ts
+          test -f supabase/functions/send-order-label-email/index.ts
           if find . -name '*.rej' -print -quit | grep -q .; then
             find . -name '*.rej' -print
             exit 1
@@ -124,7 +140,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: pnpm
 
       - name: Install pnpm
         run: npm install --global pnpm@10
