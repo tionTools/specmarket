@@ -1,35 +1,58 @@
 Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka Delivery / Meest
 
 ВАЖНО
-- Это готовый патч. Ничего не исследовать, не перепроектировать и не «улучшать».
+- Это готовый Patch 66. Ничего не исследовать, не перепроектировать и не «улучшать».
 - Не изменять AGENTS.md.
 - Не запускать supabase db push: в Patch 66 НЕТ migrations.
 - Не применять --include-all.
-- Если git apply --check не проходит, остановиться и сообщить точную ошибку. Самостоятельно патч не чинить.
-- Patch 66 подготовлен против main 087987a0ff4d93a8490aca40e12cfe5ce07d8f94. Если origin/main уже продвинулся только Android Patch 64, это допустимо при успешном git apply --check. Если изменены затрагиваемые Web/Supabase-файлы и patch не применим — остановиться.
+- Если любая проверка ниже не проходит, остановиться и сообщить точную ошибку. Самостоятельно патч не чинить.
+- Patch 66 подготовлен против main 087987a0ff4d93a8490aca40e12cfe5ce07d8f94.
+- Если origin/main уже продвинулся только непересекающимися Android-файлами Patch 64, это допустимо при успешном git apply --check. Если изменены затрагиваемые Web/Supabase-файлы и patch не применим — остановиться.
+- ВАЖНО: 66.patch содержит изменения ТОЛЬКО уже существующих файлов. Четыре новых файла лежат как точные payload-файлы в origin/chatgpt-patches:patches/66/... и должны быть механически скопированы без редактирования.
 
 Рабочая схема
 1. Основной проект пользователя:
    C:\Users\Вадим\Documents\CRM моя\specmarket
-2. Выполнить git fetch origin в основном проекте.
+2. В основном проекте выполнить:
+   git fetch origin
 3. Работать в отдельном worktree:
    C:\Users\Вадим\Documents\CRM моя\specmarket-p66
    Создать его от актуального origin/main. Если путь уже существует, использовать его только если он чистый и соответствует актуальному origin/main; иначе остановиться.
-4. Получить 66.patch из origin/chatgpt-patches во временный файл.
-5. В worktree выполнить:
-   git apply --check <путь-к-66.patch>
-   затем только при успехе:
-   git apply <путь-к-66.patch>
+4. В worktree создать каталог новой функции:
+   if not exist supabase\functions\send-order-label-email mkdir supabase\functions\send-order-label-email
+5. Механически получить четыре НОВЫХ файла из origin/chatgpt-patches. На Windows использовать cmd redirection, чтобы не менять UTF-8/переводы строк:
+   cmd /c "git show origin/chatgpt-patches:patches/66/src/pages/SettingsView.vue > src\pages\SettingsView.vue"
+   cmd /c "git show origin/chatgpt-patches:patches/66/supabase/functions/_shared/order-label.ts > supabase\functions\_shared\order-label.ts"
+   cmd /c "git show origin/chatgpt-patches:patches/66/supabase/functions/_shared/order-label_test.ts > supabase\functions\_shared\order-label_test.ts"
+   cmd /c "git show origin/chatgpt-patches:patches/66/supabase/functions/send-order-label-email/index.ts > supabase\functions\send-order-label-email\index.ts"
+6. Сразу проверить, что payload-файлы скопированы БАЙТ-В-БАЙТ. Команды git hash-object должны вернуть ровно:
+   git hash-object src/pages/SettingsView.vue
+     d115a5b9ed01383e2cde836db2f1399b976a00eb
+   git hash-object supabase/functions/_shared/order-label.ts
+     70572b0c908ff6a3116c4bee6985339ca701a956
+   git hash-object supabase/functions/_shared/order-label_test.ts
+     91b5dabcb6a0a8a6f31cfebfa394e6d0956ee6ef
+   git hash-object supabase/functions/send-order-label-email/index.ts
+     b7957f4062a718dfa738fe13d85d7c6455644fcf
+   Если хотя бы один SHA не совпал — остановиться. Файлы вручную не исправлять.
+7. Получить исправленный 66.patch во временный файл:
+   cmd /c "git show origin/chatgpt-patches:66.patch > 66.apply.patch"
+8. Выполнить:
+   git apply --check 66.apply.patch
+   Только при успехе:
+   git apply 66.apply.patch
+   Затем удалить временный 66.apply.patch.
 
 Что должен сделать Patch 66
-- Убрать прямые кнопки/ярлык «Цены» с главной страницы и заменить верхнюю кнопку на шестерёнку «Настройки».
+- Заменить ВЕРХНЮЮ кнопку «Цены» на кнопку с шестерёнкой «Настройки».
+- Боковой фиксированный вертикальный ярлык «ЦЕНЫ» не трогать: он остаётся как быстрый переход.
 - Добавить /settings:
   - общий email для бирок, по умолчанию prozaxist.ocean@gmail.com;
   - email хранится в Supabase Auth user_metadata и поэтому следует за тем же CRM-аккаунтом между устройствами;
   - звуковые уведомления — локально на устройстве;
   - тема System / Light / Dark — локально на устройстве;
   - переходы «Цены и себестоимость» и «Курсы валют».
-- Убрать отдельные переключатели темы из footer и уведомлений из верхней панели, поскольку они переезжают в Settings.
+- Убрать отдельный переключатель темы из footer и отдельную кнопку уведомлений из верхней панели, потому что они переезжают в Settings.
 - Для подходящих заказов добавить «Отправить бирку»:
   - Rozetka Delivery;
   - Meest;
@@ -61,13 +84,32 @@ Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka De
       labelEmailSentAt
       labelEmailSentTtn
       labelEmailMessageId
-  - failure не должна ставить отметку отправки.
+  - отметка сохраняется только после успешного Resend;
+  - сохранение отметки защищено от параллельного изменения заказа через updated_at, чтобы не перезаписать свежий delivery;
+  - если письмо уже отправилось, но отметка безопасно не сохранилась, функция явно сообщает emailSent=true и предупреждает не отправлять повторно до проверки почты.
 - В карточке после успеха показывать «Бирка отправлена» + дата/время.
 - Для текущей ТТН повторная отправка допускается только после confirm.
 - Если ТТН позже изменилась, старая отметка не считается отправкой новой ТТН.
 - sync-prom-orders, sync-epicentr-orders, sync-kasta-orders обязаны сохранять labelEmail* поля при следующих marketplace sync.
 - sync-delivery-tracking уже merge-ит delivery и не требует изменения.
 - Никаких DB migrations в этом Patch.
+
+Файлы Patch 66
+Изменяемые существующие:
+- src/router/index.ts
+- src/features/orders/types.ts
+- src/layouts/MainLayout.vue
+- src/pages/HomeView.vue
+- supabase/config.toml
+- supabase/functions/sync-prom-orders/index.ts
+- supabase/functions/sync-epicentr-orders/index.ts
+- supabase/functions/sync-kasta-orders/index.ts
+Новые точные payload-файлы:
+- src/pages/SettingsView.vue
+- supabase/functions/_shared/order-label.ts
+- supabase/functions/_shared/order-label_test.ts
+- supabase/functions/send-order-label-email/index.ts
+Никаких других файлов в commit быть не должно.
 
 Обязательные проверки после применения
 1. Убедиться:
@@ -79,11 +121,11 @@ Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka De
    pnpm type-check
    pnpm lint
    pnpm build
-3. Запустить unit test извлечения ТТН через установленный Node 24:
+3. Запустить unit test извлечения ТТН:
    node --experimental-strip-types supabase/functions/_shared/order-label_test.ts
 4. Проверить синтаксис Edge Function:
    node --experimental-strip-types --check supabase/functions/send-order-label-email/index.ts
-5. После pnpm format снова:
+5. После format/lint снова выполнить:
    git diff --check
    git status --short
    git diff --stat
@@ -98,11 +140,12 @@ Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka De
    - mismatch блокирует send.
    - guest блокируется.
    - успешный send сохраняет labelEmail* только после Resend HTTP success.
+   - optimistic updated_at guard не позволяет отправке бирки перезаписать параллельно обновлённый delivery.
    - marketplace sync сохраняет labelEmail*.
 7. Не запускать supabase db push.
 
 Commit / push
-- В commit включить ТОЛЬКО файлы Patch 66.
+- В commit включить ТОЛЬКО 12 файлов Patch 66, перечисленных выше.
 - Commit message:
   Add CRM settings and label email sending
 - Перед push выполнить git fetch origin и убедиться, что origin/main не получил конфликтующих Web/Supabase-изменений после создания worktree.
@@ -112,20 +155,21 @@ Commit / push
   git push origin HEAD:main
 
 Deploy
-- После успешного push deploy только новую Edge Function:
+- После успешного push deploy:
   pnpm exec supabase functions deploy send-order-label-email
-- Для сохранения labelEmail* при ближайшей marketplace sync после успешной проверки и push также выполнить:
   pnpm exec supabase functions deploy sync-prom-orders
   pnpm exec supabase functions deploy sync-epicentr-orders
   pnpm exec supabase functions deploy sync-kasta-orders
 - sync-delivery-tracking не deploy-ить: Patch 66 его не меняет.
+- supabase db push НЕ запускать.
 
 Secrets
 - НЕ придумывать и НЕ создавать значения секретов.
-- Для фактической отправки production потребуются уже заданные пользователем:
+- Для фактической отправки production потребуются:
   RESEND_API_KEY
   RESEND_FROM_EMAIL
-- Если этих secrets сейчас нет, код и deploy всё равно завершить, но в финальном отчёте явно написать: «Отправка бирок требует настройки RESEND_API_KEY и RESEND_FROM_EMAIL». Не подставлять onboarding@resend.dev и не хардкодить sender.
+- Если этих secrets сейчас нет, код и deploy всё равно завершить, но в финальном отчёте явно написать: «Отправка бирок требует настройки RESEND_API_KEY и RESEND_FROM_EMAIL».
+- Не подставлять onboarding@resend.dev и не хардкодить sender.
 
 Финальный отчёт
 Коротко сообщить:
