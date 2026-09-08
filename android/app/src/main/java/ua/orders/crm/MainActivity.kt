@@ -1,6 +1,9 @@
 package ua.orders.crm
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -52,6 +55,12 @@ private fun AppearanceHost(content: @Composable () -> Unit) {
 
 private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
 private fun amount(value: Double?) = value?.let { BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() } ?: "—"
+
+private fun openDialer(context: Context, phone: String) {
+    val value = phone.trim()
+    if (value.isBlank()) return
+    context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", value, null)))
+}
 
 @Composable
 fun OrdersApp(vm: OrdersViewModel = viewModel()) {
@@ -428,6 +437,7 @@ private fun DetailField(label: String, value: String) {
 @Composable
 private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     val order = vm.detail
+    val context = LocalContext.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -493,6 +503,12 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 SectionCard("Клиент") {
                     DetailField("Имя", order.customer.display())
                     DetailField("Телефон", order.phone.display())
+                    if (!order.phone.isNullOrBlank()) {
+                        FilledTonalButton(
+                            onClick = { openDialer(context, order.phone) },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                        ) { Text("Позвонить ${order.phone}", fontWeight = FontWeight.SemiBold) }
+                    }
                 }
             }
             item {
