@@ -1,0 +1,109 @@
+Продолжение Patch 64 после локальной ошибки Gradle `java.io.IOException: Unable to establish loopback connection`.
+
+Работай только в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+ВАЖНО: Patch 64 уже применён. Keystore уже создан и проверен вне репозитория. Все четыре GitHub release Secrets уже настроены. НЕ применяй 64.patch повторно, НЕ сбрасывай working tree, НЕ создавай новый keystore, НЕ меняй и НЕ перезаписывай GitHub Secrets.
+
+1. Сначала проверь текущее состояние
+- Убедись, что изменены только 6 файлов Patch 64:
+  - `.github/workflows/android-apk.yml`
+  - `android/app/build.gradle.kts`
+  - `android/app/src/main/java/ua/orders/crm/Appearance.kt`
+  - `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
+  - `android/app/src/main/java/ua/orders/crm/OrderModels.kt`
+  - `android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt`
+- Выполни `git diff --check`.
+- Посторонние локальные изменения не трогай и не включай в commit.
+- Через GitHub CLI проверь только наличие всех четырёх Secrets:
+  - `ORDERS_RELEASE_STORE_B64`
+  - `ORDERS_RELEASE_STORE_PASS`
+  - `ORDERS_RELEASE_ALIAS`
+  - `ORDERS_RELEASE_KEY_PASS`
+  Не выводи их значения.
+
+2. Причина текущей остановки
+Ошибка `java.io.IOException: Unable to establish loopback connection` на Windows может возникать внутри sandbox/agent runtime при Java NIO/Gradle IPC и не означает, что Patch 64 или Android-код неисправны. Не меняй код проекта ради этой ошибки и не устанавливай ещё один JDK.
+
+3. Повтори локальные Gradle-проверки с коротким TEMP/TMP и без daemon
+Создай короткий локальный временный каталог:
+```powershell
+$jtmp = 'C:\jtmp'
+New-Item -ItemType Directory -Force -Path $jtmp | Out-Null
+$oldTemp = $env:TEMP
+$oldTmp = $env:TMP
+$env:TEMP = $jtmp
+$env:TMP = $jtmp
+```
+
+Затем из `android` выполни:
+```powershell
+Push-Location android
+.\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
+Pop-Location
+```
+
+Если эта команда снова падает именно с `Unable to establish loopback connection`, не меняй проект. Зафиксируй полный stacktrace и попробуй тот же build один раз через обычный `powershell.exe`, сохраняя короткие TEMP/TMP и `--no-daemon`, а не через вложенный codex-runtime PowerShell. Не открывай Android Studio и не меняй системный firewall/антивирус.
+
+4. Локальная release-проверка постоянной подписи
+Используй уже существующий keystore и credentials вне репозитория. Ожидаемый каталог — соседний с repo `android-signing`. Ничего не регенерируй.
+
+Загрузи credentials без вывода значений:
+```powershell
+$repoRoot = (Get-Location).Path
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$credentialsFile = Join-Path $signingDir 'orders-release-credentials.txt'
+if (!(Test-Path $keystore) -or !(Test-Path $credentialsFile)) { throw 'Existing release signing files not found; stop without regenerating them.' }
+$cfg = (Get-Content -Raw $credentialsFile | ConvertFrom-StringData)
+$env:ORDERS_RELEASE_STORE_FILE = $keystore
+$env:ORDERS_RELEASE_STORE_PASS = $cfg.password
+$env:ORDERS_RELEASE_ALIAS = $cfg.alias
+$env:ORDERS_RELEASE_KEY_PASS = $cfg.password
+```
+
+С теми же короткими TEMP/TMP выполни:
+```powershell
+Push-Location android
+.\gradlew.bat --no-daemon assembleRelease --stacktrace
+Pop-Location
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"
+```
+
+Ни пароли, ни содержимое keystore не выводи в отчёт.
+
+5. Критерий продолжения
+- Если debug tests/lint/build и release build + `apksigner verify` прошли успешно, считай локальную проверку выполненной и продолжай Patch 64.
+- Если обычный внешний PowerShell также падает с той же loopback-ошибкой, остановись и сообщи точный stacktrace; не коммить.
+- Любая другая ошибка tests/lint/build/signing считается реальной ошибкой и тоже требует остановки без commit/push.
+
+6. Перед commit повторно проверь
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+В commit должны войти только 6 файлов Patch 64.
+
+7. Commit/push
+Если все проверки успешны:
+- commit только этих 6 файлов;
+- message: `Polish Android orders app and stabilize release updates`;
+- push в `origin/main`.
+
+8. После push
+Проверь Android APK workflow для нового main commit. Он обязан:
+- успешно пройти tests/lint;
+- собрать release APK;
+- пройти `apksigner verify`;
+- создать artifact `orders-android-release`.
+
+Скачай artifact и повторно выполни `apksigner verify --print-certs`. Зафиксируй SHA-256 сертификата подписанта.
+
+9. Финальный отчёт
+Сообщи только факты:
+- SHA commit в main;
+- какие локальные проверки прошли;
+- GitHub Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что commit содержит только 6 файлов Patch 64;
+- напоминание: переход с 0.4 на 0.5 требует один раз удалить старую версию, установить 0.5 и войти; последующие версии при том же release-ключе и возрастающем versionCode должны обновляться поверх приложения.
