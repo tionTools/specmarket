@@ -1,7 +1,7 @@
 diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
 --- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
 +++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
-@@ -13,7 +13,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
+@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
  import androidx.activity.compose.setContent
  import androidx.activity.result.contract.ActivityResultContracts
  import androidx.compose.foundation.BorderStroke
