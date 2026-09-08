@@ -16,8 +16,12 @@ jobs:
           git fetch origin main chatgpt-patches
           git checkout --detach origin/main
           git show origin/chatgpt-patches:67.patch > /tmp/67.patch
-          git apply --check /tmp/67.patch
+          git apply --check --verbose /tmp/67.patch
           git apply /tmp/67.patch
+          git add -N \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
           git diff --check
           actual="$(git diff --name-only | sort)"
           expected="$(printf '%s\n' \
