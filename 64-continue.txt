@@ -1,0 +1,23 @@
+Продолжение Patch 64 после остановки из-за отсутствия GitHub CLI.
+
+Работай в локальном проекте C:\Users\Вадим\Documents\CRM моя\specmarket.
+
+Patch 64 уже применён. НЕ сбрасывай working tree, НЕ применяй 64.patch повторно и НЕ начинай задачу заново.
+
+1. Сначала проверь, что в working tree изменены только 6 файлов Patch 64 и `git diff --check` проходит. Если есть другие изменения — не трогай их и не включай в commit.
+
+2. Если команда `gh` отсутствует, установи GitHub CLI.
+Предпочтительный способ на Windows:
+`winget install --id GitHub.cli --exact --source winget --accept-source-agreements --accept-package-agreements`
+
+После установки, если текущий PowerShell ещё не видит `gh`, используй полный путь:
+`C:\Program Files\GitHub CLI\gh.exe`
+
+3. Выполни `gh --version`, затем `gh auth status --hostname github.com`.
+Если GitHub CLI ещё не авторизован, запусти:
+`gh auth login --hostname github.com --web --git-protocol https`
+Если GitHub показывает browser/device-flow подтверждение, покажи пользователю только URL/код подтверждения. После успешной авторизации продолжи тот же Patch 64, не сбрасывая diff.
+
+4. После появления рабочего `gh` продолжи пункт 4 основной инструкции `64.txt` с команды проверки repository Secrets. Все правила основной инструкции по постоянному keystore, неполной конфигурации Secrets, локальным проверкам, commit/push и проверке GitHub Actions остаются обязательными.
+
+5. Не коммить и не пушь до тех пор, пока все четыре обязательных Actions Secrets постоянной подписи не подтверждены или не настроены по основной инструкции Patch 64.
