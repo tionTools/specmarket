@@ -6,12 +6,14 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -56,16 +60,77 @@ private fun AppearanceHost(content: @Composable () -> Unit) {
 private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
 private fun amount(value: Double?) = value?.let { BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() } ?: "—"
 
+@Composable
+private fun PlatformLogo(platform: String?) {
+    val value = platform.orEmpty().trim()
+    val key = normalizedStatus(value)
+    val resource = when (key) {
+        "пром" -> R.drawable.platform_prom
+        "эпицентр", "епіцентр" -> R.drawable.platform_epicentr
+        "каста", "kasta" -> R.drawable.platform_kasta
+        else -> null
+    }
+    if (resource == null) {
+        Text(
+            value.display(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        return
+    }
+    val epicentr = key == "эпицентр" || key == "епіцентр"
+    Image(
+        painter = painterResource(resource),
+        contentDescription = value,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .height(if (epicentr) 22.dp else 18.dp)
+            .widthIn(max = if (epicentr) 96.dp else 82.dp),
+    )
+}
+
 private fun openDialer(context: Context, phone: String) {
     val value = phone.trim()
     if (value.isBlank()) return
     context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", value, null)))
 }
 
+private fun launchExternal(context: Context, uri: Uri): Boolean = try {
+    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    true
+} catch (_: Exception) {
+    false
+}
+
+private fun openViber(context: Context, phone: String) {
+    val value = normalizeCustomerPhone(phone) ?: return
+    val uri = Uri.Builder()
+        .scheme("viber")
+        .authority("chat")
+        .appendQueryParameter("number", value)
+        .build()
+    if (!launchExternal(context, uri)) {
+        Toast.makeText(context, "Viber не установлен или не открыл чат.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun openTelegram(context: Context, phone: String) {
+    val value = normalizeCustomerPhone(phone) ?: return
+    val uri = Uri.Builder()
+        .scheme("tg")
+        .authority("resolve")
+        .appendQueryParameter("phone", value)
+        .build()
+    if (!launchExternal(context, uri) && !launchExternal(context, Uri.parse("https://t.me/$value"))) {
+        Toast.makeText(context, "Telegram не установлен или номер недоступен.", Toast.LENGTH_SHORT).show()
+    }
+}
+
 @Composable
 fun OrdersApp(vm: OrdersViewModel = viewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
+    NotificationPermissionGate(vm)
     var settings by rememberSaveable { mutableStateOf(false) }
     var confirmationId by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -169,6 +234,27 @@ private fun Login(vm: OrdersViewModel) {
     }
 }
 
+@Composable
+private fun NotificationPermissionGate(vm: OrdersViewModel) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = LocalContext.current
+    val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val permissionAsked by context.notificationPermissionAsked().collectAsState(initial = false)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { vm.notificationsPermissionChanged() }
+
+    LaunchedEffect(vm.email, notificationsEnabled, permissionAsked) {
+        if (
+            vm.email != null && notificationsEnabled && !permissionAsked &&
+            !context.canPostOrderNotifications()
+        ) {
+            context.saveNotificationPermissionAsked(true)
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
@@ -179,7 +265,10 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> notificationPermissionGranted = granted }
+    ) { granted ->
+        notificationPermissionGranted = granted
+        vm.notificationsPermissionChanged()
+    }
 
     Scaffold(
         topBar = {
@@ -230,10 +319,14 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
                             checked = notificationsEnabled,
                             onCheckedChange = { enabled ->
                                 scope.launch { context.saveNewOrderNotifications(enabled) }
+                                vm.notificationsSettingChanged(enabled)
                                 if (
                                     enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                                     !context.canPostOrderNotifications()
-                                ) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                ) {
+                                    scope.launch { context.saveNotificationPermissionAsked(true) }
+                                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
                             },
                         )
                     }
@@ -367,7 +460,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                 ) {
                     if (vm.orders.isEmpty()) item {
                         Text(
-                            if (vm.loading) "Загрузка…" else "Заказов пока нет.",
+                            if (vm.loading || !vm.initialLoadComplete) "Загрузка…" else "Заказов пока нет.",
                             Modifier.padding(24.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -396,7 +489,7 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(order.platform.display(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    PlatformLogo(order.platform)
                     Text("№${order.number()}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
                 Text(money(order.total()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -478,7 +571,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
-                                Text(order.platform.display(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                                PlatformLogo(order.platform)
                                 Text("№${order.number()}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                             }
                             Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -503,11 +596,25 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 SectionCard("Клиент") {
                     DetailField("Имя", order.customer.display())
                     DetailField("Телефон", order.phone.display())
-                    if (!order.phone.isNullOrBlank()) {
+                    val phone = order.phone
+                    if (normalizeCustomerPhone(phone) != null) {
                         FilledTonalButton(
-                            onClick = { openDialer(context, order.phone) },
+                            onClick = { openDialer(context, phone.orEmpty()) },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) { Text("Позвонить ${order.phone}", fontWeight = FontWeight.SemiBold) }
+                        ) { Text("Позвонить ${phone.orEmpty()}", fontWeight = FontWeight.SemiBold) }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { openViber(context, phone.orEmpty()) },
+                                modifier = Modifier.weight(1f).height(46.dp),
+                            ) { Text("Viber") }
+                            OutlinedButton(
+                                onClick = { openTelegram(context, phone.orEmpty()) },
+                                modifier = Modifier.weight(1f).height(46.dp),
+                            ) { Text("Telegram") }
+                        }
                     }
                 }
             }

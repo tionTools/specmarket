@@ -66,6 +66,22 @@ class OrdersRepository {
         return result
     }
 
+    suspend fun ordersChangedSince(updatedAt: String): List<Order> {
+        val result = mutableListOf<Order>()
+        var offset = 0L
+        do {
+            val batch = client.from("crm_orders").select(columns) {
+                filter { gte("updated_at", updatedAt) }
+                order("updated_at", SortOrder.ASCENDING)
+                order("id", SortOrder.ASCENDING)
+                range(offset..offset + 199)
+            }.decodeList<Order>()
+            result += batch
+            offset += batch.size
+        } while (batch.size == 200)
+        return result
+    }
+
     suspend fun order(id: String): Order? = client.from("crm_orders").select(columns) {
         filter { eq("id", id) }
         limit(1)
