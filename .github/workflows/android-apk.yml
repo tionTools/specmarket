@@ -9,7 +9,7 @@ on:
       - 'supabase/functions/_shared/prom-order-action*'
       - '.github/workflows/android-apk.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,3 +46,25 @@ jobs:
           name: orders-android-release
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+      - name: Publish stable latest APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          tag="android-latest"
+          version="$(sed -n 's/^[[:space:]]*versionName = "\(.*\)"/\1/p' android/app/build.gradle.kts | head -n 1)"
+          updated="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          title="Android APK готова — v${version}"
+          notes="Последняя успешная Android-сборка. Версия: ${version}. Обновлено: ${updated}. Commit: ${GITHUB_SHA}."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk#app-release.apk" --clobber
+            gh release edit "$tag" \
+              --title "$title" \
+              --notes "$notes"
+          else
+            gh release create "$tag" "$apk#app-release.apk" \
+              --title "$title" \
+              --notes "$notes" \
+              --latest=false
+          fi
