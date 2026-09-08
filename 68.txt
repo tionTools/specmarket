@@ -1,0 +1,130 @@
+Patch 68 — результат отправки бирки прямо в блоке «Доставка»
+
+ВАЖНО
+- Это готовый Patch 68. Ничего не исследовать, не перепроектировать и не «улучшать».
+- Patch 67 уже зарезервирован отдельной Android-задачей; этот Web CRM фикс поэтому имеет номер 68.
+- Patch 68 подготовлен и полностью проверен против main abfd4f494a25b347e92774321461cfea3b1bf92c.
+- Не изменять AGENTS.md.
+- Никаких migrations, Edge Functions или Supabase deploy в этом патче нет.
+- supabase db push НЕ запускать.
+- Если любая проверка ниже не проходит — остановиться и сообщить точную ошибку. Самостоятельно патч не чинить.
+
+Что исправляет Patch 68
+- Результат попытки отправки PDF-бирки показывается непосредственно в блоке «Доставка» того заказа, где нажата кнопка.
+- Успех продолжает отображаться зелёным как «Бирка отправлена <дата/время>».
+- Ошибка отображается красным прямо под кнопкой/успешной отметкой и сохраняет переносы строк ответа сервера.
+- В частности, прямо в карточке должны быть видны:
+  - «Не удалось определить ТТН в бирке. Отправка отменена.»;
+  - mismatch «Бирка не соответствует заказу.» + «ТТН заказа: ...» + «В бирке: ...»;
+  - ошибка фактической отправки email;
+  - ошибка выбора не-PDF файла.
+- Верхняя общая плашка остаётся как дополнительное уведомление, но искать её для понимания результата больше не требуется.
+- При начале новой попытки старая inline-ошибка этого заказа очищается.
+- После успешной отправки inline-ошибка очищается, а зелёная отметка успешной отправки остаётся.
+- Ошибка хранится отдельно для каждого заказа и не должна появляться в других карточках.
+- Почтовая/TTN/Resend логика Patch 66 не меняется.
+
+Файл Patch 68
+- src/pages/HomeView.vue
+
+Проверка ChatGPT перед публикацией
+- current main: abfd4f494a25b347e92774321461cfea3b1bf92c
+- обычный git apply --check нормализованного патча: PASS
+- git diff --check: PASS
+- scope: только src/pages/HomeView.vue
+- AGENTS.md: не затронут
+- migrations: не затронуты
+- pnpm format: PASS (известный посторонний formatter drift delivery-tracking.ts был восстановлен и не входит в patch)
+- pnpm type-check: PASS
+- pnpm lint: PASS
+- pnpm build: PASS
+- deno test supabase/functions/_shared/order-label_test.ts: PASS, 3/3
+- после reset/reapply повторно прошли type-check, lint, build и Deno tests
+- SHA256 68.patch: 5d356a1e9aaea1cf41a89d21ae5c66f589af513f7162c3b6d533469351b01039
+
+Рабочая схема
+1. Основной проект:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+2. Выполнить git fetch origin.
+3. Проверить:
+   git rev-parse origin/main
+   Должно быть ровно:
+   abfd4f494a25b347e92774321461cfea3b1bf92c
+   Если SHA другой — остановиться и сообщить, Patch 68 не применять.
+4. Работать в отдельном worktree:
+   C:\Users\Вадим\Documents\CRM моя\specmarket-p68
+   Создать его от origin/main. Если путь уже существует и не является чистым worktree от указанного SHA — остановиться.
+5. Получить patch во временный файл без ручного редактирования:
+   cmd /c "git show origin/chatgpt-patches:68.patch > 68.apply.patch"
+6. Проверить SHA256:
+   (Get-FileHash -Algorithm SHA256 68.apply.patch).Hash.ToLower()
+   Должно быть:
+   5d356a1e9aaea1cf41a89d21ae5c66f589af513f7162c3b6d533469351b01039
+   Если не совпадает — остановиться.
+7. Выполнить:
+   git apply --check 68.apply.patch
+   Только при успехе:
+   git apply 68.apply.patch
+   Remove-Item 68.apply.patch
+
+Обязательные проверки после применения
+1. Сразу:
+   git diff --check
+   git status --short
+   git diff --name-only
+   В diff должен быть только:
+   src/pages/HomeView.vue
+2. Выполнить:
+   pnpm format
+   Если formatter изменил известный посторонний src/features/orders/delivery-tracking.ts, восстановить ТОЛЬКО его:
+   git checkout HEAD -- src/features/orders/delivery-tracking.ts
+3. Выполнить:
+   pnpm type-check
+   pnpm lint
+   pnpm build
+4. Regression test существующего извлечения ТТН:
+   deno test supabase/functions/_shared/order-label_test.ts
+   Если Deno создаст незапрошенный untracked deno.lock, удалить его и не коммитить.
+5. После всех проверок снова:
+   git diff --check
+   git status --short
+   git diff --name-only
+   git diff --stat
+   git diff
+   Должен остаться ровно один изменённый файл: src/pages/HomeView.vue.
+
+Обязательная статическая проверка поведения
+- ошибка server/API записывается в inline-состояние именно текущего order.id;
+- multiline mismatch сохраняет переносы строк через whitespace-pre-line;
+- «Не удалось определить ТТН...» показывается в блоке «Доставка»;
+- mismatch с «ТТН заказа» и «В бирке» показывается в блоке «Доставка»;
+- не-PDF ошибка показывается в блоке «Доставка»;
+- успешная отправка очищает текущую inline-ошибку;
+- новая попытка очищает старую inline-ошибку перед открытием picker;
+- зелёная «Бирка отправлена <дата/время>» остаётся рабочей;
+- ошибка одного заказа не отображается в другом;
+- существующая верхняя showSyncError/showSyncMessage логика не удалена;
+- backend, recipient, Resend, проверка ТТН и persisted labelEmail* не изменены.
+
+Commit / push
+- В commit включить ТОЛЬКО src/pages/HomeView.vue.
+- Commit message:
+  Show label email feedback in order card
+- Перед push снова выполнить git fetch origin и проверить, что origin/main всё ещё abfd4f494a25b347e92774321461cfea3b1bf92c. Если изменился — остановиться.
+- Push:
+  git push origin HEAD:main
+
+Deploy
+- Никакие Supabase Functions не deploy-ить.
+- supabase db push НЕ запускать.
+- После push обычный Web deploy должен идти существующим проектным механизмом.
+
+Финальный отчёт
+Коротко сообщить:
+- commit SHA;
+- push main success/failure;
+- что diff содержал только src/pages/HomeView.vue;
+- format/type-check/lint/build;
+- Deno tests 3/3;
+- что AGENTS.md не менялся;
+- что Supabase Functions deploy и db push не запускались.
