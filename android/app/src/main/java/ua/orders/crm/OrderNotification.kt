@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import java.math.RoundingMode
 
 private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
 
@@ -37,10 +38,11 @@ fun Context.showNewOrderNotification(order: Order) {
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+    val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
     val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_orders)
-        .setContentTitle("Новый заказ · ${order.platform.display()}")
-        .setContentText("№${order.number()} · ${order.customer.display()}")
+        .setContentTitle("Новый заказ · ${order.platform.display()} · $total")
+        .setContentText("${order.customer.display()} · №${order.number()}")
         .setAutoCancel(true)
         .setContentIntent(pendingIntent)
         .setCategory(Notification.CATEGORY_MESSAGE)

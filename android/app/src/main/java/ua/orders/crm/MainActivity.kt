@@ -370,9 +370,9 @@ private fun StatusLabel(order: Order) {
     if (isNewOrderVisual(order)) {
         Surface(
             shape = RoundedCornerShape(999.dp),
-            color = Color(0xFFF5D0FE),
-            contentColor = Color(0xFF86198F),
-            border = BorderStroke(1.dp, Color(0xFFE879F9)),
+            color = Color(0xFFE879F9),
+            contentColor = Color(0xFF4A044E),
+            border = BorderStroke(1.dp, Color(0xFFC026D3)),
         ) {
             Text(
                 "НОВЫЙ ЗАКАЗ",
@@ -384,10 +384,10 @@ private fun StatusLabel(order: Order) {
         return
     }
     val colors = when (orderStatusTone(order)) {
-        StatusTone.BLUE -> StatusColors(Color(0xFFDBEAFE), Color(0xFF1E40AF))
-        StatusTone.GREEN -> StatusColors(Color(0xFFDCFCE7), Color(0xFF166534))
-        StatusTone.ORANGE -> StatusColors(Color(0xFFFFEDD5), Color(0xFF9A3412))
-        StatusTone.RED -> StatusColors(Color(0xFFFEE2E2), Color(0xFF991B1B))
+        StatusTone.BLUE -> StatusColors(Color(0xFFBFDBFE), Color(0xFF1E3A8A))
+        StatusTone.GREEN -> StatusColors(Color(0xFFBBF7D0), Color(0xFF14532D))
+        StatusTone.ORANGE -> StatusColors(Color(0xFFFED7AA), Color(0xFF7C2D12))
+        StatusTone.RED -> StatusColors(Color(0xFFFECACA), Color(0xFF7F1D1D))
     }
     Surface(shape = RoundedCornerShape(999.dp), color = colors.background, contentColor = colors.foreground) {
         Text(
@@ -606,14 +606,22 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            OutlinedButton(
+                            Button(
                                 onClick = { openViber(context, phone.orEmpty()) },
                                 modifier = Modifier.weight(1f).height(46.dp),
-                            ) { Text("Viber") }
-                            OutlinedButton(
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF7360F2),
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
+                            Button(
                                 onClick = { openTelegram(context, phone.orEmpty()) },
                                 modifier = Modifier.weight(1f).height(46.dp),
-                            ) { Text("Telegram") }
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF229ED9),
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Telegram", fontWeight = FontWeight.SemiBold) }
                         }
                     }
                 }
