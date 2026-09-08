@@ -1,0 +1,126 @@
+name: Patch 66 validation
+
+on:
+  push:
+    branches:
+      - patch66-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Patch 66
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin chatgpt-patches
+          git show origin/chatgpt-patches:66.patch > /tmp/66.patch
+          test -s /tmp/66.patch
+
+      - name: Recover and apply hand-authored patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The published file has incorrect hunk line counts. --recount is used only
+          # here to reconstruct the intended tree; the artifact produced below must
+          # pass ordinary `git apply --check` without --recount.
+          git apply --recount --check /tmp/66.patch
+          git apply --recount /tmp/66.patch
+          git diff --check
+
+      - name: Guard task scope before tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected-files <<'EOF'
+          src/features/orders/types.ts
+          src/layouts/MainLayout.vue
+          src/pages/HomeView.vue
+          src/pages/SettingsView.vue
+          src/router/index.ts
+          supabase/config.toml
+          supabase/functions/_shared/order-label.ts
+          supabase/functions/_shared/order-label_test.ts
+          supabase/functions/send-order-label-email/index.ts
+          supabase/functions/sync-epicentr-orders/index.ts
+          supabase/functions/sync-kasta-orders/index.ts
+          supabase/functions/sync-prom-orders/index.ts
+          EOF
+          sort -o /tmp/expected-files /tmp/expected-files
+          git diff --name-only | sort > /tmp/actual-files
+          diff -u /tmp/expected-files /tmp/actual-files
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/migrations/'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm format
+
+      - name: Type check
+        run: pnpm type-check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Order label unit tests
+        run: deno test supabase/functions/_shared/order-label_test.ts
+
+      - name: Edge Function type check
+        run: deno check supabase/functions/send-order-label-email/index.ts
+
+      - name: Guard task scope after tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --name-only | sort > /tmp/actual-files-after
+          diff -u /tmp/expected-files /tmp/actual-files-after
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/migrations/'
+
+      - name: Generate normalized Patch 66
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary --full-index > /tmp/66.fixed.patch
+          test -s /tmp/66.fixed.patch
+          git reset --hard HEAD
+          git clean -fd
+          # This is the acceptance criterion for the file handed to Codex.
+          git apply --check /tmp/66.fixed.patch
+          git apply /tmp/66.fixed.patch
+          git diff --check
+          git diff --name-only | sort > /tmp/actual-files-reapplied
+          diff -u /tmp/expected-files /tmp/actual-files-reapplied
+          pnpm type-check
+          pnpm build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch66-normalized
+          path: /tmp/66.fixed.patch
+          if-no-files-found: error
