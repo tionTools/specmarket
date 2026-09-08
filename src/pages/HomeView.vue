@@ -179,6 +179,7 @@ const isSyncingAllPlatforms = ref(false)
 const isSyncingDelivery = ref(false)
 const syncingDeliveryOrderId = ref<string | null>(null)
 const labelEmailOrderId = ref<Order['id'] | null>(null)
+const labelEmailErrorByOrderId = ref<Record<string, string>>({})
 const isSendingLabelEmail = ref(false)
 const isMarketplaceSyncBusy = computed(
   () =>
@@ -4004,6 +4005,25 @@ function formatLabelEmailSentAt(value?: string) {
   }).format(date)
 }
 
+function labelEmailInlineError(orderId: Order['id']) {
+  return labelEmailErrorByOrderId.value[String(orderId)] ?? ''
+}
+
+function clearLabelEmailInlineError(orderId: Order['id']) {
+  const key = String(orderId)
+  if (!(key in labelEmailErrorByOrderId.value)) return
+  const next = { ...labelEmailErrorByOrderId.value }
+  delete next[key]
+  labelEmailErrorByOrderId.value = next
+}
+
+function setLabelEmailInlineError(orderId: Order['id'], message: string) {
+  labelEmailErrorByOrderId.value = {
+    ...labelEmailErrorByOrderId.value,
+    [String(orderId)]: message,
+  }
+}
+
 function openOrderLabelEmail(order: Order) {
   if (!canSendOrderLabel(order) || isSendingLabelEmail.value) return
   if (
@@ -4011,6 +4031,7 @@ function openOrderLabelEmail(order: Order) {
     !window.confirm('Бирка для текущей ТТН уже отправлена. Отправить повторно?')
   )
     return
+  clearLabelEmailInlineError(order.id)
   labelEmailOrderId.value = order.id
   resetOrderLabelFilePicker()
   openOrderLabelFilePicker()
@@ -4033,7 +4054,9 @@ async function sendOrderLabelEmail(file: File) {
   const order = orders.value.find((item) => item.id === labelEmailOrderId.value)
   if (!supabase || !order || !canSendOrderLabel(order) || isSendingLabelEmail.value) return
   if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-    showSyncError('Можно выбрать только PDF-бирку.')
+    const message = 'Можно выбрать только PDF-бирку.'
+    setLabelEmailInlineError(order.id, message)
+    showSyncError(message)
     return
   }
 
@@ -4048,6 +4071,7 @@ async function sendOrderLabelEmail(file: File) {
   if (error || !data?.ok) {
     const message =
       data?.message || (await functionErrorMessage(error)) || 'Не удалось отправить бирку по email.'
+    setLabelEmailInlineError(order.id, message)
     showSyncError(message)
     isSendingLabelEmail.value = false
     return
@@ -4057,6 +4081,7 @@ async function sendOrderLabelEmail(file: File) {
   order.delivery.labelEmailSentTtn = String(data.ttn)
   order.delivery.labelEmailMessageId = data.messageId ? String(data.messageId) : undefined
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  clearLabelEmailInlineError(order.id)
   isSendingLabelEmail.value = false
   showSyncMessage(`Бирка отправлена на ${String(data.recipient)}.`)
 }
@@ -5947,6 +5972,12 @@ function orderDateTime(order: Order) {
                         Бирка отправлена
                         {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
                       </span>
+                      <p
+                        v-if="labelEmailInlineError(order.id)"
+                        class="max-w-full whitespace-pre-line text-center text-[11px] font-semibold text-red-700"
+                      >
+                        {{ labelEmailInlineError(order.id) }}
+                      </p>
                     </dd>
                     <dd
                       v-if="deliveryWasRedirected(order.delivery)"
