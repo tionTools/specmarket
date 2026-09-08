@@ -1,0 +1,55 @@
+name: Publish validated Patch 66
+
+on:
+  push:
+    branches:
+      - patch66-validation2
+    paths:
+      - .github/workflows/publish-patch66.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download validated artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/${GITHUB_REPOSITORY}/actions/artifacts/10060147665/zip > /tmp/patch66.zip
+          echo '5e8ceb02f51975a45966edd2482dc5c22a9b4856e73337685f2971c8273c0d00  /tmp/patch66.zip' | sha256sum -c -
+          mkdir -p /tmp/patch66
+          unzip -q /tmp/patch66.zip -d /tmp/patch66
+          test -s /tmp/patch66/66.fixed.patch
+          echo '3242d2a095c2767d40a3ba3db66abc5f8abb01b04c7716a32d2f006d461bd550  /tmp/patch66/66.fixed.patch' | sha256sum -c -
+
+      - name: Publish corrected 66.patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = '087987a0ff4d93a8490aca40e12cfe5ce07d8f94'
+          rm -rf /tmp/chatgpt-patches
+          git worktree add --detach /tmp/chatgpt-patches origin/chatgpt-patches
+          cp /tmp/patch66/66.fixed.patch /tmp/chatgpt-patches/66.patch
+          cd /tmp/chatgpt-patches
+          git config user.name 'Vadonchikus'
+          git config user.email '36088047+Vadonchikus@users.noreply.github.com'
+          git add 66.patch
+          git diff --cached --check
+          test "$(git diff --cached --name-only)" = '66.patch'
+          if git diff --cached --quiet; then
+            echo '66.patch already current'
+            exit 0
+          fi
+          git commit -m 'Replace Patch 66 with validated patch'
+          git push origin HEAD:chatgpt-patches
