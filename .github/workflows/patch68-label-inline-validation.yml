@@ -1,0 +1,235 @@
+name: Patch 68 label inline validation
+
+on:
+  push:
+    branches:
+      - patch68-label-inline-validation3
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Patch 68 from exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 'abfd4f494a25b347e92774321461cfea3b1bf92c'
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/pages/HomeView.vue')
+          source = path.read_text(encoding='utf-8')
+
+          replacements = []
+
+          replacements.append((
+          """const labelEmailOrderId = ref<Order['id'] | null>(null)
+          const isSendingLabelEmail = ref(false)
+          """,
+          """const labelEmailOrderId = ref<Order['id'] | null>(null)
+          const labelEmailErrorByOrderId = ref<Record<string, string>>({})
+          const isSendingLabelEmail = ref(false)
+          """
+          ))
+
+          replacements.append((
+          """function openOrderLabelEmail(order: Order) {
+            if (!canSendOrderLabel(order) || isSendingLabelEmail.value) return
+            if (
+              labelSentForCurrentTtn(order) &&
+              !window.confirm('Бирка для текущей ТТН уже отправлена. Отправить повторно?')
+            )
+              return
+            labelEmailOrderId.value = order.id
+            resetOrderLabelFilePicker()
+            openOrderLabelFilePicker()
+          }
+          """,
+          """function labelEmailInlineError(orderId: Order['id']) {
+            return labelEmailErrorByOrderId.value[String(orderId)] ?? ''
+          }
+
+          function clearLabelEmailInlineError(orderId: Order['id']) {
+            const key = String(orderId)
+            if (!(key in labelEmailErrorByOrderId.value)) return
+            const next = { ...labelEmailErrorByOrderId.value }
+            delete next[key]
+            labelEmailErrorByOrderId.value = next
+          }
+
+          function setLabelEmailInlineError(orderId: Order['id'], message: string) {
+            labelEmailErrorByOrderId.value = {
+              ...labelEmailErrorByOrderId.value,
+              [String(orderId)]: message,
+            }
+          }
+
+          function openOrderLabelEmail(order: Order) {
+            if (!canSendOrderLabel(order) || isSendingLabelEmail.value) return
+            if (
+              labelSentForCurrentTtn(order) &&
+              !window.confirm('Бирка для текущей ТТН уже отправлена. Отправить повторно?')
+            )
+              return
+            clearLabelEmailInlineError(order.id)
+            labelEmailOrderId.value = order.id
+            resetOrderLabelFilePicker()
+            openOrderLabelFilePicker()
+          }
+          """
+          ))
+
+          replacements.append((
+          """  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+              showSyncError('Можно выбрать только PDF-бирку.')
+              return
+            }
+          """,
+          """  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+              const message = 'Можно выбрать только PDF-бирку.'
+              setLabelEmailInlineError(order.id, message)
+              showSyncError(message)
+              return
+            }
+          """
+          ))
+
+          replacements.append((
+          """  if (error || !data?.ok) {
+              const message =
+                data?.message || (await functionErrorMessage(error)) || 'Не удалось отправить бирку по email.'
+              showSyncError(message)
+              isSendingLabelEmail.value = false
+              return
+            }
+          """,
+          """  if (error || !data?.ok) {
+              const message =
+                data?.message || (await functionErrorMessage(error)) || 'Не удалось отправить бирку по email.'
+              setLabelEmailInlineError(order.id, message)
+              showSyncError(message)
+              isSendingLabelEmail.value = false
+              return
+            }
+          """
+          ))
+
+          replacements.append((
+          """  order.delivery.labelEmailMessageId = data.messageId ? String(data.messageId) : undefined
+            window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+            isSendingLabelEmail.value = false
+            showSyncMessage(`Бирка отправлена на ${String(data.recipient)}.`)
+          """,
+          """  order.delivery.labelEmailMessageId = data.messageId ? String(data.messageId) : undefined
+            window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+            clearLabelEmailInlineError(order.id)
+            isSendingLabelEmail.value = false
+            showSyncMessage(`Бирка отправлена на ${String(data.recipient)}.`)
+          """
+          ))
+
+          replacements.append((
+          """                      <span
+                                v-if="labelSentForCurrentTtn(order)"
+                                class="text-[11px] font-semibold text-emerald-700"
+                              >
+                                Бирка отправлена
+                                {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
+                              </span>
+                            </dd>
+          """,
+          """                      <span
+                                v-if="labelSentForCurrentTtn(order)"
+                                class="text-[11px] font-semibold text-emerald-700"
+                              >
+                                Бирка отправлена
+                                {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}
+                              </span>
+                              <p
+                                v-if="labelEmailInlineError(order.id)"
+                                class="max-w-full whitespace-pre-line text-center text-[11px] font-semibold text-red-700"
+                              >
+                                {{ labelEmailInlineError(order.id) }}
+                              </p>
+                            </dd>
+          """
+          ))
+
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'Patch 68 anchor count={count}, expected 1:\n{old[:120]}')
+              source = source.replace(old, new)
+
+          path.write_text(source, encoding='utf-8')
+          PY
+
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          grep -F "labelEmailErrorByOrderId" src/pages/HomeView.vue >/dev/null
+          grep -F "whitespace-pre-line" src/pages/HomeView.vue >/dev/null
+          grep -F "setLabelEmailInlineError(order.id, message)" src/pages/HomeView.vue >/dev/null
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm format
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Existing label regression tests
+        run: deno test supabase/functions/_shared/order-label_test.ts
+
+      - name: Normalize and reapply Patch 68
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary --full-index -- src/pages/HomeView.vue > /tmp/68.patch
+          test -s /tmp/68.patch
+          git reset --hard HEAD
+          git clean -fd
+          git apply --check /tmp/68.patch
+          git apply /tmp/68.patch
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/migrations/'
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          deno test supabase/functions/_shared/order-label_test.ts
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch68-label-inline
+          path: /tmp/68.patch
+          if-no-files-found: error
