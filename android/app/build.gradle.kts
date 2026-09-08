@@ -4,10 +4,39 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val releaseStorePath = providers.environmentVariable("ORDERS_RELEASE_STORE_FILE").orNull
+val releaseStorePass = providers.environmentVariable("ORDERS_RELEASE_STORE_PASS").orNull
+val releaseAlias = providers.environmentVariable("ORDERS_RELEASE_ALIAS").orNull
+val releaseKeyPass = providers.environmentVariable("ORDERS_RELEASE_KEY_PASS").orNull
+val releaseSigningReady = listOf(releaseStorePath, releaseStorePass, releaseAlias, releaseKeyPass)
+    .all { !it.isNullOrBlank() }
+
 android {
     namespace = "ua.orders.crm"
     compileSdk = 37
-    defaultConfig { applicationId = "ua.orders.crm"; minSdk = 26; targetSdk = 36; versionCode = 4; versionName = "0.4" }
+    defaultConfig {
+        applicationId = "ua.orders.crm"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 5
+        versionName = "0.5"
+    }
+    signingConfigs {
+        create("release") {
+            if (releaseSigningReady) {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePass
+                keyAlias = releaseAlias
+                keyPassword = releaseKeyPass
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            if (releaseSigningReady) signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+        }
+    }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
