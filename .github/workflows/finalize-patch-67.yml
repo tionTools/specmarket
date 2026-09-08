@@ -1,0 +1,238 @@
+name: Finalize Patch 67
+on:
+  push:
+    branches: [chatgpt-finalize-67]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: b04099d45d7256645780a335ad2f51076c974e46
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build one final Patch 67 from validated parts
+        run: |
+          set -euo pipefail
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git checkout --detach "$BASE_SHA"
+          git show origin/chatgpt-patches:67.patch > /tmp/67-base.patch
+          git show origin/chatgpt-patches:67-platform-logos.patch > /tmp/67-logos.patch
+          git apply --check --verbose /tmp/67-base.patch
+          git apply /tmp/67-base.patch
+          git apply --check --verbose /tmp/67-logos.patch
+          git apply /tmp/67-logos.patch
+
+          expected="$(printf '%s\n' \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/Appearance.kt \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersRepository.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt | sort)"
+
+          git add \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/Appearance.kt \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersRepository.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+          git diff --cached --check
+          actual="$(git diff --cached --name-only | sort)"
+          test "$actual" = "$expected"
+          test "$(printf '%s\n' "$actual" | wc -l)" -eq 11
+          grep -q 'versionCode = 6' android/app/build.gradle.kts
+          grep -q 'versionName = "0.6"' android/app/build.gradle.kts
+          grep -q 'applicationId = "ua.orders.crm"' android/app/build.gradle.kts
+
+          git diff --cached --binary --find-copies-harder --find-copies=100% > /tmp/67.final.patch
+          test -s /tmp/67.final.patch
+          PATCH_SHA="$(sha256sum /tmp/67.final.patch | awk '{print $1}')"
+          echo "PATCH_SHA=$PATCH_SHA" >> "$GITHUB_ENV"
+
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git apply --check --verbose /tmp/67.final.patch
+          git apply /tmp/67.final.patch
+          git add -N \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          test "$actual" = "$expected"
+
+          cat > /tmp/67.txt <<EOF
+          Patch 67 — Android 0.6: локальный кеш, incremental sync, уведомления, Viber/Telegram и логотипы площадок
+
+          ВАЖНО
+          - Это готовый и отдельно провалидированный Patch 67. Ничего не исследовать, не перепроектировать и не исправлять самостоятельно.
+          - Источник истины: main $BASE_SHA.
+          - Не изменять AGENTS.md.
+          - Не изменять Web CRM, Supabase migrations/functions и GitHub workflow.
+          - Не устанавливать и не перенастраивать JDK/Android SDK/Gradle/signing: постоянная Android-инфраструктура уже настроена.
+          - applicationId остаётся ua.orders.crm.
+          - Android: versionCode 6, versionName 0.6.
+          - Release APK подписывать существующим постоянным release key. Никаких новых keystore/alias/secrets не создавать.
+          - Если любая проверка не проходит — остановиться и сообщить точную ошибку. Не чинить Patch 67 самостоятельно.
+
+          Рабочая схема
+          1. Основной проект:
+             C:\Users\Вадим\Documents\CRM моя\specmarket
+          2. Выполнить в основном проекте:
+             git fetch origin main chatgpt-patches
+          3. Убедиться, что origin/main = $BASE_SHA. Если main уже другой — остановиться и сообщить новый SHA до применения.
+          4. Работать в отдельном worktree:
+             C:\Users\Вадим\Documents\CRM моя\specmarket-p67
+             Создать его от origin/main. Если путь уже существует, использовать только если worktree чистый и стоит ровно на origin/main; иначе остановиться.
+          5. Получить patch без изменения байтов:
+             cmd /c "git show origin/chatgpt-patches:67.patch > 67.apply.patch"
+          6. Проверить SHA-256:
+             certutil -hashfile 67.apply.patch SHA256
+             Ожидаемый SHA-256: $PATCH_SHA
+             Если SHA не совпал — остановиться.
+          7. Выполнить:
+             git apply --check 67.apply.patch
+             git apply 67.apply.patch
+             Remove-Item 67.apply.patch
+
+          Ровно 11 файлов Patch 67
+          - android/app/build.gradle.kts
+          - android/app/src/main/java/ua/orders/crm/Appearance.kt
+          - android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          - android/app/src/main/java/ua/orders/crm/OrderSync.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersCache.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          - android/app/src/main/res/drawable-nodpi/platform_epicentr.png
+          - android/app/src/main/res/drawable-nodpi/platform_kasta.png
+          - android/app/src/main/res/drawable-nodpi/platform_prom.png
+          - android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+
+          Что должен сделать Patch 67
+          - При запуске сразу показывать сохранённые заказы из локального кеша текущего CRM-аккаунта.
+          - Временный пустой ответ сервера не должен очищать уже известный список.
+          - После создания baseline не перезагружать всю CRM при каждом входе: забирать изменения по updated_at и merge по order.id.
+          - Realtime продолжает обновлять/добавлять заказы; после reconnect/возврата в foreground выполняется контрольный sync пропущенных изменений.
+          - Новые ранее неизвестные заказы определять одним правилом с визуальной плашкой НОВЫЙ ЗАКАЗ.
+          - Первый baseline/первая установка не должны массово озвучивать старые заказы.
+          - Новый заказ, пойманный Realtime или найденный контрольным sync, должен дать одно уведомление; повторно один и тот же order.id не озвучивать.
+          - На Android 13+ при включённых уведомлениях корректно запросить POST_NOTIFICATIONS; ожидающее уведомление не терять до выдачи разрешения.
+          - Ограничение сохранить честным: если Android полностью убил процесс, без server push/FCM гарантированного фонового уведомления нет.
+          - В карточке клиента оставить Позвонить и добавить Viber/Telegram по нормализованному международному номеру с безопасным fallback, если приложение не открылось.
+          - В списке и деталях вместо текста Пром/Эпицентр/Каста показывать маленькие реальные логотипы из Web CRM assets; Р/С и Сайт оставить текстом.
+          - Существующую marketplace acceptance/business logic не менять.
+
+          Обязательные проверки
+          1. git status --short — только 11 файлов выше; AGENTS.md не включать.
+          2. git diff --check
+          3. Использовать уже существующую Android-инфраструктуру:
+             - Android SDK: C:\Users\Public\Android\Sdk
+             - GRADLE_USER_HOME: C:\dev\gradle-home
+             - существующий JDK и существующий release keystore из android-signing
+             - для сборки использовать ASCII alias/subst к этому же worktree, не копию проекта.
+          4. Выполнить Android checks:
+             testDebugUnitTest
+             lintDebug
+             assembleDebug
+             assembleRelease
+          5. Проверить release APK через apksigner verify --print-certs.
+             Ожидаемый signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53
+          6. Снова git diff --check, git status --short и итоговый diff. Ровно 11 файлов.
+
+          Контрольные случаи
+          - Кеш уже есть + сервер временно вернул [] => список заказов не исчезает.
+          - Кеш есть + появился новый order.id => новый заказ добавляется без полной перезагрузки старых.
+          - Изменился существующий order.id => запись обновляется, дубликат не создаётся.
+          - Realtime INSERT пропущен, но заказ найден sync после reconnect => заказ появляется и уведомляется один раз.
+          - Первый baseline на устройстве => старые заказы не дают шквал уведомлений.
+          - Prom/Epicentr/Kasta без ТТН и не cancelled/returned => визуальный НОВЫЙ ЗАКАЗ и то же правило для уведомления.
+          - Разрешение POST_NOTIFICATIONS отсутствует => запросить его; после разрешения ожидающее уведомление может быть доставлено, без повторов.
+          - Viber/Telegram получают номер в международном формате +380...; отсутствие приложения не приводит к падению.
+          - Prom/Epicentr/Kasta => логотипы; Р/С/Сайт => текст.
+
+          Commit / push
+          - В commit включить только 11 файлов Patch 67.
+          - Commit message: Stabilize Android order sync and notifications
+          - Перед commit/push снова git fetch origin main.
+          - Если origin/main изменился относительно $BASE_SHA — остановиться и сообщить новый SHA; не решать конфликт самостоятельно.
+          - git add только 11 файлов задачи.
+          - git commit -m "Stabilize Android order sync and notifications"
+          - git push origin HEAD:main
+          - Никаких Supabase deploy/db push для Patch 67.
+
+          После push
+          - Проверить GitHub Actions workflow Android APK для нового commit.
+          - Дождаться success.
+          - Убедиться, что artifact orders-android-release создан.
+          - Сообщить commit SHA, run ID, success/failure, release signer SHA-256 и artifact name.
+          EOF
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Prepare existing release signing
+        env:
+          ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
+          ORDERS_RELEASE_STORE_PASS: ${{ secrets.ORDERS_RELEASE_STORE_PASS }}
+          ORDERS_RELEASE_ALIAS: ${{ secrets.ORDERS_RELEASE_ALIAS }}
+          ORDERS_RELEASE_KEY_PASS: ${{ secrets.ORDERS_RELEASE_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$ORDERS_RELEASE_STORE_B64"
+          test -n "$ORDERS_RELEASE_STORE_PASS"
+          test -n "$ORDERS_RELEASE_ALIAS"
+          test -n "$ORDERS_RELEASE_KEY_PASS"
+          printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=$ORDERS_RELEASE_ALIAS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=$ORDERS_RELEASE_KEY_PASS" >> "$GITHUB_ENV"
+      - name: Test lint debug release exact final patch
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+      - name: Verify permanent signer
+        run: |
+          set -euo pipefail
+          output="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk)"
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -qi 'a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53'
+      - name: Publish final 67.patch and 67.txt to chatgpt-patches
+        run: |
+          set -euo pipefail
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git fetch origin chatgpt-patches
+          git checkout -B publish origin/chatgpt-patches
+          cp /tmp/67.final.patch 67.patch
+          cp /tmp/67.txt 67.txt
+          git rm -f 67-platform-logos.patch || true
+          git add 67.patch 67.txt
+          git diff --cached --check
+          git config user.name "Vadonchikus"
+          git config user.email "36088047+Vadonchikus@users.noreply.github.com"
+          if ! git diff --cached --quiet; then
+            git commit -m "Finalize Patch 67"
+            git push origin HEAD:chatgpt-patches
+          fi
+          echo "Final Patch 67 SHA-256: $PATCH_SHA"
