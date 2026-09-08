@@ -25,9 +25,9 @@ android {
         create("release") {
             if (releaseSigningReady) {
                 storeFile = file(releaseStorePath!!)
-                storePassword = releaseStorePass
-                keyAlias = releaseAlias
-                keyPassword = releaseKeyPass
+                storePassword = releaseStorePass!!
+                keyAlias = releaseAlias!!
+                keyPassword = releaseKeyPass!!
             }
         }
     }
