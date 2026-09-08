@@ -1,0 +1,153 @@
+Продолжение Patch 64 после ошибки `SDK location not found` при локальной Android-сборке через временный ASCII-путь.
+
+Работай только с уже применённым Patch 64 в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+ВАЖНО:
+- Patch 64 уже применён. НЕ применяй 64.patch повторно.
+- Working tree НЕ сбрасывай.
+- Keystore уже создан и проверен вне репозитория. НЕ регенерируй его.
+- Все четыре GitHub release Secrets уже настроены. НЕ удаляй, НЕ меняй и НЕ перезаписывай их.
+- `GRADLE_USER_HOME=C:\jtmp\gradle-home` уже выбран как writable ASCII cache и должен использоваться дальше.
+- Не создавай и не коммить `local.properties` ради этой проверки.
+
+1. Проверь текущий diff
+Убедись, что изменены только 6 файлов Patch 64:
+- `.github/workflows/android-apk.yml`
+- `android/app/build.gradle.kts`
+- `android/app/src/main/java/ua/orders/crm/Appearance.kt`
+- `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
+- `android/app/src/main/java/ua/orders/crm/OrderModels.kt`
+- `android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt`
+
+Выполни `git diff --check` и `git diff --name-only`. Посторонние изменения не трогай.
+
+2. Найди УЖЕ установленный Android SDK
+Сначала проверь, не указан ли SDK в исходном локальном `android\local.properties` (этот файл обычно gitignored):
+```powershell
+$repoRoot = (Get-Location).Path
+$localProps = Join-Path $repoRoot 'android\local.properties'
+$sdk = $null
+if (Test-Path $localProps) {
+    $sdkLine = Get-Content $localProps | Where-Object { $_ -match '^sdk\.dir=' } | Select-Object -First 1
+    if ($sdkLine) {
+        $sdk = ($sdkLine -replace '^sdk\.dir=', '') -replace '\\\\','\'
+    }
+}
+```
+
+Если `$sdk` не найден или путь не существует, проверь по порядку, не выводя лишние данные:
+```powershell
+$candidates = @(
+    $env:ANDROID_HOME,
+    $env:ANDROID_SDK_ROOT,
+    (Join-Path $env:LOCALAPPDATA 'Android\Sdk'),
+    (Join-Path $env:USERPROFILE 'AppData\Local\Android\Sdk')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+if (!$sdk -or !(Test-Path $sdk)) { $sdk = $candidates | Select-Object -First 1 }
+if (!$sdk -or !(Test-Path $sdk)) { throw 'Existing Android SDK not found. Stop without changing project, keystore or Secrets.' }
+```
+
+3. Зафиксируй SDK только в текущем процессе
+```powershell
+$env:ANDROID_HOME = $sdk
+$env:ANDROID_SDK_ROOT = $sdk
+$env:GRADLE_USER_HOME = 'C:\jtmp\gradle-home'
+$env:TEMP = 'C:\jtmp'
+$env:TMP = 'C:\jtmp'
+New-Item -ItemType Directory -Force -Path $env:GRADLE_USER_HOME | Out-Null
+```
+
+Проверь, что SDK содержит `platform-tools` и каталог `platforms`. Для этого проекта нужен Android API 36. Если `platforms\android-36` уже существует — ничего не устанавливай.
+
+Если `platforms\android-36` отсутствует, найди существующий `sdkmanager.bat` внутри SDK, например в `cmdline-tools\latest\bin` или другой установленной версии. Если `sdkmanager.bat` найден, установи только необходимые компоненты этого проекта:
+```powershell
+$sdkmanager = Get-ChildItem $sdk -Recurse -Filter sdkmanager.bat -File | Select-Object -First 1 -ExpandProperty FullName
+if (!$sdkmanager) { throw 'Android SDK exists but sdkmanager.bat is missing and android-36 is not installed. Stop without changing project.' }
+& $sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+if ($LASTEXITCODE -ne 0) { throw 'Android SDK component installation failed.' }
+```
+Не устанавливай новый JDK и не меняй файлы репозитория.
+
+4. Подготовь существующую release-подпись
+```powershell
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$credentialsFile = Join-Path $signingDir 'orders-release-credentials.txt'
+if (!(Test-Path $keystore) -or !(Test-Path $credentialsFile)) { throw 'Existing release signing files not found; stop without regenerating them.' }
+$cfg = (Get-Content -Raw $credentialsFile | ConvertFrom-StringData)
+$env:ORDERS_RELEASE_STORE_FILE = $keystore
+$env:ORDERS_RELEASE_STORE_PASS = $cfg.password
+$env:ORDERS_RELEASE_ALIAS = $cfg.alias
+$env:ORDERS_RELEASE_KEY_PASS = $cfg.password
+```
+Не выводи значения паролей.
+
+5. Создай временный ASCII alias к ТОМУ ЖЕ repo
+Используй свободную букву, например T:, без копирования проекта:
+```powershell
+$drive = 'T:'
+if (Test-Path "$drive\\") { throw 'T: already exists; choose another free drive letter.' }
+cmd /c "subst $drive `"$repoRoot`""
+if (!(Test-Path "$drive\\android")) { throw 'subst mapping failed.' }
+```
+
+6. Выполни все локальные Android-проверки
+Из ASCII-пути и с уже установленными `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `GRADLE_USER_HOME`, `TEMP/TMP`:
+```powershell
+Push-Location T:\android
+.\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease --stacktrace
+Pop-Location
+```
+
+Если использовалась другая буква, используй её вместо T:.
+
+Если снова появляется `Unable to establish loopback connection`, повтори тот же запуск один раз из обычного системного `powershell.exe`, сохранив те же переменные среды и ASCII-path. Если и там та же ошибка — остановись без commit/push и сообщи stacktrace.
+
+Любая другая реальная ошибка tests/lint/build — стоп без commit/push.
+
+7. Проверь release APK
+Найди `apksigner.bat` внутри существующего SDK:
+```powershell
+$apksigner = Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat -File | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+if (!$apksigner) { throw 'apksigner.bat not found in existing Android SDK.' }
+& $apksigner verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"
+if ($LASTEXITCODE -ne 0) { throw 'apksigner verify failed.' }
+```
+
+8. Удали только временный `subst`
+```powershell
+cmd /c "subst T: /D"
+```
+Если использовал другую букву, удали именно её.
+
+9. Критерий commit/push
+Продолжай только если успешно прошли:
+- `testDebugUnitTest`
+- `lintDebug`
+- `assembleDebug`
+- `assembleRelease`
+- `apksigner verify --print-certs`
+- `git diff --check`
+- diff содержит ровно 6 файлов Patch 64.
+
+После этого:
+- commit только 6 файлов Patch 64;
+- message: `Polish Android orders app and stabilize release updates`;
+- push в `origin/main`.
+
+10. После push
+Проверь Android APK workflow для нового main commit. Он должен успешно пройти tests/lint, собрать release APK, проверить подпись и создать artifact `orders-android-release`.
+
+Скачай artifact, повторно выполни `apksigner verify --print-certs` и зафиксируй SHA-256 сертификата подписанта.
+
+11. Итоговый отчёт
+Сообщи только факты:
+- SHA commit в main;
+- какие локальные проверки прошли;
+- какой существующий Android SDK использован;
+- GitHub Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что commit содержит только 6 файлов Patch 64;
+- напоминание: переход с 0.4 на 0.5 требует один раз удалить старую версию, установить 0.5 и войти; последующие версии должны обновляться поверх приложения при том же release-ключе и возрастающем versionCode.
