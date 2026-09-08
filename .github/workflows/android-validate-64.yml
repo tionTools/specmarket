@@ -14,5 +14,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
       - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
-      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+      - name: Prepare temporary release signing
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/orders-release.jks" -storepass patch64test -keypass patch64test -alias orders -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Patch 64 Validation,O=SpecMarket,C=UA"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=patch64test" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=orders" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=patch64test" >> "$GITHUB_ENV"
+      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
         working-directory: android
+      - run: "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
