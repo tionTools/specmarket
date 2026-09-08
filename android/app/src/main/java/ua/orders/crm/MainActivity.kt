@@ -212,6 +212,26 @@ private fun StatusLabel(order: Order) {
     }
 }
 
+@Composable
+private fun DeliveryStatus(order: Order, compact: Boolean = false) {
+    val status = order.deliveryStatusInfo()
+    if (status.stage.isBlank()) return
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "Доставка: ${status.stage}",
+            style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (status.current.isNotBlank()) {
+            Text(
+                "Текущий статус: ${status.current}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
@@ -251,6 +271,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                             Text("${order.platform.display()} · №${order.number()}", style = MaterialTheme.typography.titleMedium)
                             Text("${order.orderDate.display()} ${order.orderTime.display()}")
                             StatusLabel(order)
+                            DeliveryStatus(order, compact = true)
                             Text(money(order.total()), style = MaterialTheme.typography.titleMedium)
                             Text(order.items.sortedBy { it.position }.joinToString("\n") {
                                 "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
@@ -307,9 +328,12 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 Text("Доставка", style = MaterialTheme.typography.titleMedium)
                 for ((key, label) in listOf("carrier" to "Перевозчик", "recipient" to "Получатель",
                     "recipientPhone" to "Телефон получателя", "city" to "Город", "address" to "Адрес",
-                    "ttn" to "ТТН", "payer" to "Плательщик", "trackingStatus" to "Статус доставки")) {
+                    "ttn" to "ТТН", "payer" to "Плательщик")) {
                     DetailField(label, order.deliveryField(key))
                 }
+                val deliveryStatus = order.deliveryStatusInfo()
+                DetailField("Статус доставки", deliveryStatus.stage.display())
+                if (deliveryStatus.current.isNotBlank()) DetailField("Текущий статус", deliveryStatus.current)
                 DetailField("Расход продавца на доставку", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
                 HorizontalDivider()
                 DetailField("Способ оплаты", order.deliveryField("paymentMethod"))

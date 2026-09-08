@@ -16,6 +16,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     private val requests = Mutex()
     private var realtimeJob: Job? = null
     private var visible = false
+    private var ordersBeforeDetail: List<Order> = emptyList()
     var email by mutableStateOf<String?>(null); private set
     var initializing by mutableStateOf(true); private set
     var authBusy by mutableStateOf(false); private set
@@ -93,7 +94,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun clearOrders() {
-        orders = emptyList(); selectedId = null; detail = null
+        orders = emptyList(); ordersBeforeDetail = emptyList(); selectedId = null; detail = null
     }
 
     private fun merge(order: Order) {
@@ -110,7 +111,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 requests.withLock {
                     val batch = repository.orders()
                     if (email != account) return@withLock
-                    orders = sortOrdersForDisplay(batch)
+                    orders = sortOrdersForDisplay(ordersDuringDetailRefresh(orders, batch, selectedId != null))
                     selectedId?.let { id ->
                         val updated = repository.order(id)
                         if (email == account && selectedId == id) detail = updated
@@ -123,6 +124,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun open(id: String) {
+        ordersBeforeDetail = orders
         selectedId = id; detail = orders.find { it.id == id }
         viewModelScope.launch {
             try {
@@ -132,7 +134,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
             catch (_: Exception) { message = "Не удалось обновить детали. Показаны ранее загруженные данные." }
         }
     }
-    fun closeDetail() { selectedId = null; detail = null }
+    fun closeDetail() {
+        orders = ordersAfterClosingDetail(orders, ordersBeforeDetail)
+        ordersBeforeDetail = emptyList()
+        selectedId = null
+        detail = null
+    }
     fun dismissMessage() { message = null }
 
     fun login(email: String, password: String) {

@@ -74,6 +74,44 @@ fun Order.deliveryValue(key: String): String =
 fun Order.deliveryFlag(key: String): Boolean =
     ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.booleanOrNull == true
 
+data class DeliveryStatusInfo(val stage: String = "", val current: String = "")
+
+private fun isGenericReturnTrackingStatus(value: String) =
+    Regex("відмова від (?:одержання|отримання)|^(?:отменено|скасовано|cancelled?)$|возвращается отправителю|повертається відправнику|return(?:ing| to sender)", RegexOption.IGNORE_CASE)
+        .containsMatchIn(value.trim())
+
+fun Order.deliveryStatusInfo(): DeliveryStatusInfo {
+    val raw = deliveryValue("trackingStatus").trim()
+    val normalized = deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
+    val deliveryStatus = deliveryValue("status").trim()
+    val rawImpliesReturn = Regex("відмова від (?:одержання|отримання)|возвращ|поверта|return", RegexOption.IGNORE_CASE)
+        .containsMatchIn(raw)
+    val returning = deliveryFlag("trackingReturnInProgress") || normalized == "returning" || rawImpliesReturn
+    if (returning) {
+        return DeliveryStatusInfo(
+            stage = "Возвращается отправителю",
+            current = raw.takeUnless { it.isBlank() || isGenericReturnTrackingStatus(it) }.orEmpty(),
+        )
+    }
+    if (raw.isNotBlank()) return DeliveryStatusInfo(stage = raw)
+    val stage = when (normalized) {
+        "accepted" -> "Принято перевозчиком"
+        "in_transit" -> "В пути"
+        "ready_for_pickup" -> "Готово к выдаче"
+        "delivered" -> "Получено"
+        "returned" -> "Возвращено"
+        "cancelled" -> "Отменено"
+        else -> deliveryStatus
+    }
+    return DeliveryStatusInfo(stage = stage)
+}
+
+fun ordersDuringDetailRefresh(current: List<Order>, fetched: List<Order>, detailOpen: Boolean): List<Order> =
+    if (detailOpen && current.isNotEmpty() && fetched.isEmpty()) current else fetched
+
+fun ordersAfterClosingDetail(current: List<Order>, beforeDetail: List<Order>): List<Order> =
+    if (current.isEmpty() && beforeDetail.isNotEmpty()) beforeDetail else current
+
 fun orderStatusTone(order: Order): StatusTone {
     val status = displayOrderStatus(order.status).trim().lowercase(Locale.ROOT)
     val trackingNormalized = order.deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)

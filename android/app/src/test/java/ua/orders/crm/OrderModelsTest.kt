@@ -107,6 +107,46 @@ class OrderModelsTest {
         )
     }
 
+    @Test fun delivery_status_exposes_return_stage_and_live_carrier_checkpoint() {
+        val returning = order("Прийнято").copy(delivery = buildJsonObject {
+            put("trackingReturnInProgress", true)
+            put("trackingNormalizedStatus", "in_transit")
+            put("trackingStatus", "Прибула в депо 4")
+        }).deliveryStatusInfo()
+        assertEquals("Возвращается отправителю", returning.stage)
+        assertEquals("Прибула в депо 4", returning.current)
+
+        val staleRefusal = order("Прийнято").copy(delivery = buildJsonObject {
+            put("trackingNormalizedStatus", "cancelled")
+            put("trackingStatus", "Відмова від отримання")
+        }).deliveryStatusInfo()
+        assertEquals("Возвращается отправителю", staleRefusal.stage)
+        assertEquals("", staleRefusal.current)
+
+        val ordinary = order("Прийнято").copy(delivery = buildJsonObject {
+            put("trackingNormalizedStatus", "in_transit")
+            put("trackingStatus", "Прибула у відділення")
+        }).deliveryStatusInfo()
+        assertEquals("Прибула у відділення", ordinary.stage)
+        assertEquals("", ordinary.current)
+    }
+
+    @Test fun detail_refresh_does_not_replace_a_loaded_list_with_transient_empty_result() {
+        val current = listOf(Order("a"), Order("b"))
+        assertEquals(current, ordersDuringDetailRefresh(current, emptyList(), true))
+        assertTrue(ordersDuringDetailRefresh(current, emptyList(), false).isEmpty())
+        val fetched = listOf(Order("c"))
+        assertEquals(fetched, ordersDuringDetailRefresh(current, fetched, true))
+    }
+
+    @Test fun closing_detail_restores_cached_list_only_if_current_list_was_lost() {
+        val cached = listOf(Order("a"), Order("b"))
+        assertEquals(cached, ordersAfterClosingDetail(emptyList(), cached))
+        val current = listOf(Order("c"))
+        assertEquals(current, ordersAfterClosingDetail(current, cached))
+        assertTrue(ordersAfterClosingDetail(emptyList(), emptyList()).isEmpty())
+    }
+
     @Test fun notification_candidate_is_only_new_marketplace_order() {
         assertTrue(isNewOrderNotificationCandidate(order("Новий", "Пром")))
         assertTrue(isNewOrderNotificationCandidate(order("Новый", "Каста")))
