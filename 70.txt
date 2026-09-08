@@ -1,0 +1,56 @@
+Patch 70 — постоянная прямая ссылка на последний Android APK
+
+ВАЖНО
+- Это отдельный инфраструктурный патч; Android-код и versionCode/versionName не меняются.
+- Источник истины при подготовке: main 479ff9f6ffe3f71ea61ce1fe1a257f2f333b5b79.
+- Patch 69 меняет только Android-файлы и с Patch 70 по файлам не пересекается.
+- Не изменять AGENTS.md, Android production-код, Supabase, migrations/functions.
+- Не менять release keystore/secrets.
+
+Что меняет Patch 70
+- Меняет только .github/workflows/android-apk.yml.
+- Даёт workflow contents: write, необходимый для создания/обновления GitHub Release.
+- После успешной сборки и проверки подписи сохраняется прежний artifact orders-android-release.
+- Дополнительно создаётся фиксированный GitHub Release с tag android-latest, если его ещё нет.
+- При следующих успешных Android-сборках asset app-release.apk в android-latest заменяется через gh release upload --clobber.
+- Постоянная ссылка для скачивания:
+  https://github.com/tionTools/specmarket/releases/download/android-latest/app-release.apk
+
+Patch SHA-256
+- 6f3ba95094b44965803938e1cde396cc649fdb3bfbdb33adae30457435547b70
+
+Применение
+1. В C:\Users\Вадим\Documents\CRM моя\specmarket выполнить git fetch origin main chatgpt-patches.
+2. Работать от актуального origin/main в отдельном чистом worktree.
+3. Получить patch без изменения байтов:
+   cmd /c "git show origin/chatgpt-patches:70.patch > 70.apply.patch"
+4. Проверить SHA-256:
+   (Get-FileHash -Algorithm SHA256 70.apply.patch).Hash.ToLower()
+   Ожидаемый SHA-256: 6f3ba95094b44965803938e1cde396cc649fdb3bfbdb33adae30457435547b70
+5. Выполнить:
+   git apply --check 70.apply.patch
+   git apply 70.apply.patch
+   Remove-Item 70.apply.patch
+6. Проверить, что изменён ровно один файл:
+   .github/workflows/android-apk.yml
+7. Выполнить git diff --check.
+8. Статически проверить workflow:
+   - permissions.contents = write;
+   - существующая сборка, signature verification и upload-artifact сохранены;
+   - шаг Publish stable latest APK выполняется только после успешной сборки/подписи;
+   - tag = android-latest;
+   - имя asset = app-release.apk;
+   - существующий release обновляется с --clobber, отсутствующий создаётся.
+9. Commit только .github/workflows/android-apk.yml.
+   Commit message: Publish stable latest Android APK
+10. Перед push снова git fetch origin main. Если main изменился и git apply/check больше не соответствует актуальному workflow — остановиться и сообщить.
+11. Push HEAD:main без force.
+12. Дождаться success workflow Android APK, который должен запуститься из-за изменения самого android-apk.yml.
+13. Проверить:
+   - artifact orders-android-release создан;
+   - release android-latest существует;
+   - asset app-release.apk существует;
+   - прямая ссылка https://github.com/tionTools/specmarket/releases/download/android-latest/app-release.apk отвечает скачиванием APK.
+14. Сообщить commit SHA и GitHub Actions run ID.
+
+Никаких Supabase deploy/db push.
