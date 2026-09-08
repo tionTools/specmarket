@@ -1,0 +1,281 @@
+name: Patch 66 validation 2
+
+on:
+  push:
+    branches:
+      - patch66-validation2
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct intended Patch 66
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin chatgpt-patches
+          git show origin/chatgpt-patches:66.patch > /tmp/66.current.patch
+          git apply --recount --reject /tmp/66.current.patch || true
+
+          mapfile -t rejects < <(find . -name '*.rej' -print | sort)
+          if [ "${#rejects[@]}" -ne 1 ] || [ "${rejects[0]}" != './src/pages/HomeView.vue.rej' ]; then
+            printf 'Unexpected reject set:\n%s\n' "${rejects[*]-}"
+            exit 1
+          fi
+          grep -F 'Отправить бирку' src/pages/HomeView.vue.rej >/dev/null
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/pages/HomeView.vue')
+          source = path.read_text(encoding='utf-8')
+          anchor = '\n'.join([
+              '                    </button>',
+              '                    </dd>',
+              '                    <dd',
+              '                      v-if="deliveryWasRedirected(order.delivery)"',
+              '                      class="text-xs font-semibold text-violet-700"',
+          ]) + '\n'
+          replacement = '\n'.join([
+              '                    </button>',
+              '                    </dd>',
+              '                    <dd',
+              '                      v-if="canSendOrderLabel(order)"',
+              '                      class="mt-2 flex flex-col items-center gap-1"',
+              '                    >',
+              '                      <button',
+              '                        class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-50"',
+              '                        type="button"',
+              '                        :disabled="isSendingLabelEmail"',
+              '                        @click="openOrderLabelEmail(order)"',
+              '                      >',
+              '                        <Mail class="size-4" aria-hidden="true" />',
+              '                        {{',
+              '                          isSendingLabelEmail && labelEmailOrderId === order.id',
+              "                            ? 'Отправляем…'",
+              '                            : labelSentForCurrentTtn(order)',
+              "                              ? 'Отправить бирку повторно'",
+              "                              : 'Отправить бирку'",
+              '                        }}',
+              '                      </button>',
+              '                      <span',
+              '                        v-if="labelSentForCurrentTtn(order)"',
+              '                        class="text-[11px] font-semibold text-emerald-700"',
+              '                      >',
+              '                        Бирка отправлена {{ formatLabelEmailSentAt(order.delivery.labelEmailSentAt) }}',
+              '                      </span>',
+              '                    </dd>',
+              '                    <dd',
+              '                      v-if="deliveryWasRedirected(order.delivery)"',
+              '                      class="text-xs font-semibold text-violet-700"',
+          ]) + '\n'
+          if source.count(anchor) != 1:
+              raise SystemExit(f'HomeView insertion anchor count={source.count(anchor)}, expected 1')
+          path.write_text(source.replace(anchor, replacement), encoding='utf-8')
+          PY
+          rm src/pages/HomeView.vue.rej
+
+          # The current 66.patch was truncated before the four new files. Recover
+          # those exact intended new-file hunks from the earlier complete blob.
+          git cat-file -e e316dc6442e3459563f9ed3cdc1484e835bea00d^{blob}
+          git cat-file blob e316dc6442e3459563f9ed3cdc1484e835bea00d > /tmp/66.complete.patch
+          awk '/^diff --git a\/src\/pages\/SettingsView.vue b\/src\/pages\/SettingsView.vue$/{copy=1} copy' \
+            /tmp/66.complete.patch > /tmp/66.new-files.patch
+          git apply --recount --check /tmp/66.new-files.patch
+          git apply --recount /tmp/66.new-files.patch
+
+          python - <<'PY'
+          from pathlib import Path
+
+          backend = Path('supabase/functions/send-order-label-email/index.ts')
+          source = backend.read_text(encoding='utf-8')
+          old = """async function pdfText(bytes: Uint8Array) {
+            const pdf = await getDocumentProxy(bytes)
+            try {
+              if (pdf.numPages > maxPdfPages) throw new Error('Бирка содержит слишком много страниц.')
+              const extracted = await Promise.race([
+                extractText(pdf, { mergePages: true }),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('Не удалось прочитать PDF за отведённое время.')), 10_000),
+                ),
+              ])
+              return typeof extracted.text === 'string' ? extracted.text : extracted.text.join('\\n')
+            } finally {
+              await pdf.destroy()
+            }
+          }
+          """
+          new = """async function pdfText(bytes: Uint8Array) {
+            const pdf = await getDocumentProxy(bytes)
+            if (pdf.numPages > maxPdfPages) throw new Error('Бирка содержит слишком много страниц.')
+            const extracted = await Promise.race([
+              extractText(pdf, { mergePages: true }),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Не удалось прочитать PDF за отведённое время.')), 10_000),
+              ),
+            ])
+            return extracted.text
+          }
+          """
+          if source.count(old) != 1:
+              raise SystemExit('Expected original pdfText implementation not found exactly once')
+          backend.write_text(source.replace(old, new), encoding='utf-8')
+
+          tests = Path('supabase/functions/_shared/order-label_test.ts')
+          tests.write_text("""import {
+            canonicalOrderLabelTtn,
+            orderLabelCarrier,
+            orderLabelMailText,
+            orderLabelTtns,
+          } from './order-label.ts'
+
+          function assert(value: unknown, message: string): asserts value {
+            if (!value) throw new Error(message)
+          }
+
+          Deno.test('Rozetka label TTN and mail text', () => {
+            const labelText = `
+          Замовлення Prom.ua 426327729
+          6742
+          М. ХАРКІВ М. КИЇВ
+          PRM-251996742
+          1/1
+          `
+            assert(orderLabelCarrier('RozetkaDelivery') === 'rozetka', 'Rozetka carrier must be supported')
+            assert(
+              JSON.stringify(orderLabelTtns('rozetka', labelText)) === JSON.stringify(['PRM-251996742']),
+              'Rozetka label must extract standalone PRM TTN',
+            )
+            assert(canonicalOrderLabelTtn('rozetka', 'prm251996742') === 'PRM-251996742', 'Rozetka TTN normalization')
+            assert(orderLabelMailText('rozetka', 'PRM-251996742') === 'Розетка PRM-251996742', 'Rozetka mail text')
+          })
+
+          Deno.test('Meest label ignores technical barcode and supports Epicentr aliases', () => {
+            const labelText = `
+          1 Рівне
+          723-1356399001001HSU М723-1356399001001HSUИО
+          С1
+          Центр видачі замовлень ЕПІЦЕНТР.ua
+          723-1356399
+          `
+            assert(orderLabelCarrier('Meest') === 'meest', 'Meest carrier must be supported')
+            assert(orderLabelCarrier('parcel_box_epicentr') === 'meest', 'Epicentr parcel box must be Meest')
+            assert(orderLabelCarrier('cvz_epicentr') === 'meest', 'Epicentr CVZ must be Meest')
+            assert(
+              JSON.stringify(orderLabelTtns('meest', labelText)) === JSON.stringify(['723-1356399']),
+              'Meest label must ignore technical barcode',
+            )
+            assert(canonicalOrderLabelTtn('meest', '7231356399') === '723-1356399', 'Meest TTN normalization')
+            assert(orderLabelMailText('meest', '723-1356399') === 'Мист 723-1356399', 'Meest mail text')
+          })
+
+          Deno.test('Unsupported carriers are rejected', () => {
+            assert(orderLabelCarrier('Новая почта') === null, 'Nova Poshta must be unsupported for label email')
+          })
+          """, encoding='utf-8')
+          PY
+
+          test -f src/pages/SettingsView.vue
+          test -f supabase/functions/_shared/order-label.ts
+          test -f supabase/functions/_shared/order-label_test.ts
+          test -f supabase/functions/send-order-label-email/index.ts
+          ! find . -name '*.rej' -print -quit | grep -q .
+          git add -N src/pages/SettingsView.vue \
+            supabase/functions/_shared/order-label.ts \
+            supabase/functions/_shared/order-label_test.ts \
+            supabase/functions/send-order-label-email/index.ts
+          git diff --check
+
+      - name: Guard initial scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected <<'EOF'
+          src/features/orders/types.ts
+          src/layouts/MainLayout.vue
+          src/pages/HomeView.vue
+          src/pages/SettingsView.vue
+          src/router/index.ts
+          supabase/config.toml
+          supabase/functions/_shared/order-label.ts
+          supabase/functions/_shared/order-label_test.ts
+          supabase/functions/send-order-label-email/index.ts
+          supabase/functions/sync-epicentr-orders/index.ts
+          supabase/functions/sync-kasta-orders/index.ts
+          supabase/functions/sync-prom-orders/index.ts
+          EOF
+          sort -o /tmp/expected /tmp/expected
+          git diff --name-only | sort > /tmp/actual
+          diff -u /tmp/expected /tmp/actual
+          ! grep -Fx 'AGENTS.md' /tmp/actual
+          ! grep -E '^supabase/migrations/' /tmp/actual
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm format
+          # Base main contains one formatter drift unrelated to Patch 66.
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          pnpm type-check
+          pnpm lint
+          pnpm build
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Edge checks
+        run: |
+          deno test supabase/functions/_shared/order-label_test.ts
+          deno check --node-modules-dir=auto supabase/functions/send-order-label-email/index.ts
+
+      - name: Guard final scope and normalize patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --name-only | sort > /tmp/actual-after
+          diff -u /tmp/expected /tmp/actual-after
+          ! grep -Fx 'AGENTS.md' /tmp/actual-after
+          ! grep -E '^supabase/migrations/' /tmp/actual-after
+          git diff --binary --full-index > /tmp/66.fixed.patch
+          test -s /tmp/66.fixed.patch
+
+          git reset --hard HEAD
+          git clean -fd
+          git apply --check /tmp/66.fixed.patch
+          git apply /tmp/66.fixed.patch
+          git add -N src/pages/SettingsView.vue \
+            supabase/functions/_shared/order-label.ts \
+            supabase/functions/_shared/order-label_test.ts \
+            supabase/functions/send-order-label-email/index.ts
+          git diff --check
+          git diff --name-only | sort > /tmp/reapplied
+          diff -u /tmp/expected /tmp/reapplied
+          pnpm type-check
+          pnpm build
+          deno test supabase/functions/_shared/order-label_test.ts
+          deno check --node-modules-dir=auto supabase/functions/send-order-label-email/index.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch66-normalized
+          path: /tmp/66.fixed.patch
+          if-no-files-found: error
