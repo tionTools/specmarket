@@ -1,0 +1,137 @@
+Patch 66 — Настройки CRM + отправка PDF-бирок Rozetka Delivery / Meest
+
+ВАЖНО
+- Это готовый патч. Ничего не исследовать, не перепроектировать и не «улучшать».
+- Не изменять AGENTS.md.
+- Не запускать supabase db push: в Patch 66 НЕТ migrations.
+- Не применять --include-all.
+- Если git apply --check не проходит, остановиться и сообщить точную ошибку. Самостоятельно патч не чинить.
+- Patch 66 подготовлен против main 087987a0ff4d93a8490aca40e12cfe5ce07d8f94. Если origin/main уже продвинулся только Android Patch 64, это допустимо при успешном git apply --check. Если изменены затрагиваемые Web/Supabase-файлы и patch не применим — остановиться.
+
+Рабочая схема
+1. Основной проект пользователя:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+2. Выполнить git fetch origin в основном проекте.
+3. Работать в отдельном worktree:
+   C:\Users\Вадим\Documents\CRM моя\specmarket-p66
+   Создать его от актуального origin/main. Если путь уже существует, использовать его только если он чистый и соответствует актуальному origin/main; иначе остановиться.
+4. Получить 66.patch из origin/chatgpt-patches во временный файл.
+5. В worktree выполнить:
+   git apply --check <путь-к-66.patch>
+   затем только при успехе:
+   git apply <путь-к-66.patch>
+
+Что должен сделать Patch 66
+- Убрать прямые кнопки/ярлык «Цены» с главной страницы и заменить верхнюю кнопку на шестерёнку «Настройки».
+- Добавить /settings:
+  - общий email для бирок, по умолчанию prozaxist.ocean@gmail.com;
+  - email хранится в Supabase Auth user_metadata и поэтому следует за тем же CRM-аккаунтом между устройствами;
+  - звуковые уведомления — локально на устройстве;
+  - тема System / Light / Dark — локально на устройстве;
+  - переходы «Цены и себестоимость» и «Курсы валют».
+- Убрать отдельные переключатели темы из footer и уведомлений из верхней панели, поскольку они переезжают в Settings.
+- Для подходящих заказов добавить «Отправить бирку»:
+  - Rozetka Delivery;
+  - Meest;
+  - Epicentr parcel_box / CVZ / pickup point, которые фактически идут Meest.
+- Пользователь выбирает PDF.
+- Edge Function send-order-label-email:
+  - проверяет авторизацию;
+  - guest@gmail.com запрещён;
+  - повторно читает заказ из crm_orders;
+  - не доверяет carrier/TTN/email-body из браузера;
+  - принимает только PDF до 5 МБ и максимум 5 страниц;
+  - извлекает текст PDF через unpdf 1.8.1;
+  - Rozetka: извлекает самостоятельный PRM-...;
+  - Meest: извлекает самостоятельный NNN-NNNNNNN и НЕ принимает длинный технический штрихкод вроде 723-1356399001001HSU;
+  - сравнивает PDF ТТН с текущей ТТН заказа;
+  - mismatch => НЕ отправляет и возвращает:
+      Бирка не соответствует заказу.
+      ТТН заказа: ...
+      В бирке: ...
+  - если ТТН не извлечена => НЕ отправляет;
+  - перед фактической отправкой ещё раз перепроверяет carrier/TTN заказа;
+  - body и subject письма:
+      Розетка PRM-...
+      Мист NNN-NNNNNNN
+  - прикладывает выбранный PDF;
+  - recipient берёт из user_metadata.labelRecipientEmail, fallback prozaxist.ocean@gmail.com;
+  - отправляет через Resend;
+  - при успехе сохраняет в delivery:
+      labelEmailSentAt
+      labelEmailSentTtn
+      labelEmailMessageId
+  - failure не должна ставить отметку отправки.
+- В карточке после успеха показывать «Бирка отправлена» + дата/время.
+- Для текущей ТТН повторная отправка допускается только после confirm.
+- Если ТТН позже изменилась, старая отметка не считается отправкой новой ТТН.
+- sync-prom-orders, sync-epicentr-orders, sync-kasta-orders обязаны сохранять labelEmail* поля при следующих marketplace sync.
+- sync-delivery-tracking уже merge-ит delivery и не требует изменения.
+- Никаких DB migrations в этом Patch.
+
+Обязательные проверки после применения
+1. Убедиться:
+   git status --short
+   В diff нет AGENTS.md и посторонних файлов.
+2. Выполнить:
+   git diff --check
+   pnpm format
+   pnpm type-check
+   pnpm lint
+   pnpm build
+3. Запустить unit test извлечения ТТН через установленный Node 24:
+   node --experimental-strip-types supabase/functions/_shared/order-label_test.ts
+4. Проверить синтаксис Edge Function:
+   node --experimental-strip-types --check supabase/functions/send-order-label-email/index.ts
+5. После pnpm format снова:
+   git diff --check
+   git status --short
+   git diff --stat
+   git diff
+   Проверить, что format/lint не внесли посторонних изменений.
+6. Обязательные контрольные случаи по коду/тесту:
+   - Rozetka пример PRM-251996742 определяется ровно как PRM-251996742.
+   - Meest пример 723-1356399 определяется ровно как 723-1356399.
+   - строка 723-1356399001001HSU не определяется как 723-1356399.
+   - parcel_box_epicentr и cvz_epicentr определяются как Meest.
+   - Новая почта не получает кнопку отправки бирки.
+   - mismatch блокирует send.
+   - guest блокируется.
+   - успешный send сохраняет labelEmail* только после Resend HTTP success.
+   - marketplace sync сохраняет labelEmail*.
+7. Не запускать supabase db push.
+
+Commit / push
+- В commit включить ТОЛЬКО файлы Patch 66.
+- Commit message:
+  Add CRM settings and label email sending
+- Перед push выполнить git fetch origin и убедиться, что origin/main не получил конфликтующих Web/Supabase-изменений после создания worktree.
+- Если origin/main изменился только непересекающимися Android-файлами, rebase текущего commit на актуальный origin/main, повторить обязательные проверки и push.
+- Если появились изменения в файлах Patch 66 — остановиться и сообщить, не решать конфликт самостоятельно.
+- Push:
+  git push origin HEAD:main
+
+Deploy
+- После успешного push deploy только новую Edge Function:
+  pnpm exec supabase functions deploy send-order-label-email
+- Для сохранения labelEmail* при ближайшей marketplace sync после успешной проверки и push также выполнить:
+  pnpm exec supabase functions deploy sync-prom-orders
+  pnpm exec supabase functions deploy sync-epicentr-orders
+  pnpm exec supabase functions deploy sync-kasta-orders
+- sync-delivery-tracking не deploy-ить: Patch 66 его не меняет.
+
+Secrets
+- НЕ придумывать и НЕ создавать значения секретов.
+- Для фактической отправки production потребуются уже заданные пользователем:
+  RESEND_API_KEY
+  RESEND_FROM_EMAIL
+- Если этих secrets сейчас нет, код и deploy всё равно завершить, но в финальном отчёте явно написать: «Отправка бирок требует настройки RESEND_API_KEY и RESEND_FROM_EMAIL». Не подставлять onboarding@resend.dev и не хардкодить sender.
+
+Финальный отчёт
+Коротко сообщить:
+- commit SHA;
+- push main success/failure;
+- какие проверки прошли;
+- deploy send-order-label-email / sync-prom-orders / sync-epicentr-orders / sync-kasta-orders;
+- что db push НЕ запускался;
+- есть ли RESEND_API_KEY / RESEND_FROM_EMAIL (только наличие, значения не показывать), если это можно безопасно проверить; иначе просто указать, что их нужно настроить.
