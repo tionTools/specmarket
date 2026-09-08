@@ -1,0 +1,141 @@
+Patch 65 — исправить повторное уменьшение долга по историческому возврату Prom №419968191
+
+Работай из репозитория:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Эту задачу выполняй в отдельном worktree, чтобы не смешать её с Patch 64/66.
+Не исследуй причину заново и не перепроектируй решение: причина, данные и patch уже проверены. Не адаптируй patch самостоятельно. Если patch не применяется или защитная миграция останавливается — остановись и сообщи точную ошибку.
+
+1. Подготовь отдельный worktree
+- В основной папке проекта выполни `git fetch origin main chatgpt-patches`.
+- Убедись, что `origin/main` доступен.
+- Worktree для этой задачи: `C:\Users\Вадим\Documents\CRM моя\specmarket-p65`.
+- Если эта папка уже существует — ничего не удаляй автоматически; остановись и сообщи об этом.
+- Создай отдельную локальную ветку `codex/patch-65` от актуального `origin/main` и worktree на указанном пути.
+- Все дальнейшие команды задачи выполняй только внутри worktree Patch 65.
+
+Пример:
+```powershell
+$repo = 'C:\Users\Вадим\Documents\CRM моя\specmarket'
+$worktree = 'C:\Users\Вадим\Documents\CRM моя\specmarket-p65'
+Set-Location $repo
+git fetch origin main chatgpt-patches
+if (Test-Path $worktree) { throw "Worktree Patch 65 already exists: $worktree" }
+git worktree add -b codex/patch-65 $worktree origin/main
+Set-Location $worktree
+```
+
+2. Получи и проверь Patch 65
+- Получи `65.patch` из `origin/chatgpt-patches` во временный файл:
+  `git show origin/chatgpt-patches:65.patch > "$env:TEMP\specmarket-65.patch"`
+- Выполни:
+  `git apply --check "$env:TEMP\specmarket-65.patch"`
+- Если проверка не прошла — ничего не применяй и не исправляй patch вручную.
+- Если прошла — примени:
+  `git apply "$env:TEMP\specmarket-65.patch"`
+
+3. Patch должен изменить ровно один файл
+- `supabase/migrations/20260908102500_rebaseline_historical_return_419968191.sql`
+
+Никакой Web CRM бизнес-код, Android, Edge Functions, `AGENTS.md` и другие миграции не должны измениться.
+
+4. Доказанная причина и ожидаемая бизнес-логика
+Факты, которые уже установлены по production DB:
+- последняя сверка: `5ad8f1bf-14ee-413c-98ea-8a66c7386f54`;
+- `created_at = 2026-09-07 09:34:28.656556+00`;
+- `cost_snapshot_usd = 1094.63`;
+- `cost_snapshot_uah = 34000.2`;
+- заказ Prom №419968191: `7b16f029-ccd3-4571-8167-c97b98c56851`;
+- TTN `20451505337585`;
+- одна позиция, 14 шт., `cost_usd = 0.27`;
+- полный принятый возврат 14/14 создан только `2026-09-07 13:59:39.145306+00`, то есть после сверки;
+- себестоимость возврата = `14 × 0.27 = 3.78 USD`;
+- возврат уже был учтён в 1С/Excel до этой сверки, поэтому позднее ручное принятие в CRM повторно уменьшило долг на 3.78 USD.
+
+Правильная коррекция — НЕ менять возврат и НЕ менять формулу будущих возвратов. Нужно только включить эти исторические 3.78 USD в baseline последней сверки, уменьшив `cost_snapshot_usd`:
+- было: `1094.63`;
+- должно стать: `1090.85`;
+- `cost_snapshot_uah` остаётся `34000.2`;
+- `crm_balance_*`, платежи, возврат и заказ не изменяются.
+
+При неизменных остальных данных это возвращает текущий USD-долг с `412.30` к `416.08`:
+`376.88 + (1132.21 - 1090.85) - 2.16 = 416.08`.
+
+Обычные будущие возвраты должны продолжать работать как раньше:
+приняли возврат -> его себестоимость один раз ушла из текущего долга -> следующая сверка фиксирует новый baseline.
+Не добавляй широких правил по возрасту заказа, статусу `canceled` или дате: они могут ошибочно нейтрализовать настоящий будущий возврат старого заказа.
+
+5. Защитная миграция
+Миграция специально должна остановиться через `raise exception`, если production-состояние уже изменилось относительно проверенного:
+- другая последняя сверка;
+- другой timestamp сверки;
+- другой snapshot;
+- не найден проверенный заказ/TTN/возврат;
+- изменились qty/cost_usd/return cost.
+
+Если сработала защита — НЕ обходи её, НЕ меняй значения в migration и НЕ выполняй ручной UPDATE. Сообщи точную ошибку пользователю.
+
+6. Локальные проверки до commit
+Выполни:
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+
+В diff должен быть ровно один migration-файл из пункта 3.
+
+Затем выполни доступные проверки проекта:
+```powershell
+pnpm format
+pnpm type-check
+pnpm lint
+pnpm build
+```
+
+После formatter/linter снова проверь `git status --short` и `git diff --name-only`.
+Если проверки изменили любые файлы кроме migration Patch 65, не включай их в commit; восстанови только эти посторонние изменения до HEAD и снова выполни `git diff --check`, `pnpm type-check` и `pnpm build`.
+
+7. Commit
+- Ещё раз убедись, что изменён только migration Patch 65.
+- Не используй `git add .`.
+- Добавь только:
+  `supabase/migrations/20260908102500_rebaseline_historical_return_419968191.sql`
+- Commit message:
+  `Rebaseline historical supplier return`
+
+8. Перед push синхронизируйся с актуальным main
+Patch 64 или другой безопасный параллельный patch может успеть попасть в `main` после создания worktree.
+После commit:
+- `git fetch origin main`
+- если `origin/main` продвинулся, rebase `codex/patch-65` на актуальный `origin/main`;
+- после rebase повтори `git diff-tree --no-commit-id --name-only -r HEAD`, `git diff --check HEAD^ HEAD`, `pnpm type-check`, `pnpm build`;
+- commit всё равно должен содержать только migration Patch 65.
+
+После этого push текущий HEAD напрямую в `main`:
+`git push origin HEAD:main`
+
+Если push отклонён из-за нового изменения `main`, не force-push. Снова fetch/rebase/check и только потом повтори обычный push.
+
+9. Примени migration в связанный Supabase project
+GitHub Actions Web deploy не применяет Supabase migrations автоматически, поэтому после успешного push нужно выполнить migration через существующую Supabase CLI-конфигурацию проекта.
+
+В worktree Patch 65 выполни:
+`pnpm exec supabase db push`
+
+Если worktree не видит существующий link, не создавай новый Supabase project и не угадывай project ref. Возьми только уже существующий project ref из основной рабочей копии `C:\Users\Вадим\Documents\CRM моя\specmarket\supabase\.temp\project-ref` и свяжи worktree с тем же проектом, затем повтори `pnpm exec supabase db push`.
+
+Любая защитная SQL-ошибка из Patch 65 — стоп. Не обходи её и не выполняй ручной SQL UPDATE.
+
+10. После deploy
+- Убедись, что migration применена успешно.
+- Не меняй строку `crm_order_item_returns` и сам заказ.
+- Не создавай сторно 170.86 UAH: ошибка именно 3.78 USD baseline.
+- Если CRM открыта в браузере, после migration достаточно обновить страницу сверки, чтобы она перечитала текущие данные.
+
+11. Итоговый отчёт
+Сообщи только факты:
+- SHA commit в `main`;
+- SHA `origin/main` перед применением и перед финальным push;
+- что commit содержит ровно один migration-файл;
+- результаты `git diff --check`, `pnpm format`, `pnpm type-check`, `pnpm lint`, `pnpm build`;
+- результат `pnpm exec supabase db push`;
+- подтверждение, что migration изменила только baseline `cost_snapshot_usd` для сверки `5ad8f1bf-14ee-413c-98ea-8a66c7386f54` с 1094.63 до 1090.85 и не меняла обычную логику возвратов.
