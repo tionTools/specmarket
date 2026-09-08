@@ -1,0 +1,136 @@
+Продолжение Patch 64 после остановки Android Gradle Plugin на non-ASCII пути проекта.
+
+Работай только с уже применённым Patch 64 в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+ВАЖНО:
+- Patch 64 уже применён. НЕ применяй 64.patch повторно.
+- Working tree НЕ сбрасывай.
+- Keystore уже создан и проверен вне репозитория. НЕ регенерируй его.
+- Все четыре GitHub release Secrets уже настроены. НЕ удаляй, НЕ меняй и НЕ перезаписывай их.
+- Не переноси и не копируй репозиторий.
+- Не добавляй `android.overridePathCheck` в tracked `gradle.properties` и вообще не меняй файлы проекта ради этой ошибки.
+
+1. Проверь текущее состояние
+Убедись, что изменены только 6 файлов Patch 64:
+- `.github/workflows/android-apk.yml`
+- `android/app/build.gradle.kts`
+- `android/app/src/main/java/ua/orders/crm/Appearance.kt`
+- `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
+- `android/app/src/main/java/ua/orders/crm/OrderModels.kt`
+- `android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt`
+
+Выполни:
+`git diff --check`
+`git diff --name-only`
+
+Посторонние локальные изменения не трогай и не включай в commit.
+
+2. Подготовь короткие TEMP/TMP и существующую release-подпись
+```powershell
+$jtmp = 'C:\jtmp'
+New-Item -ItemType Directory -Force -Path $jtmp | Out-Null
+$env:TEMP = $jtmp
+$env:TMP = $jtmp
+
+$repoRoot = (Get-Location).Path
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$credentialsFile = Join-Path $signingDir 'orders-release-credentials.txt'
+if (!(Test-Path $keystore) -or !(Test-Path $credentialsFile)) { throw 'Existing release signing files not found; stop without regenerating them.' }
+$cfg = (Get-Content -Raw $credentialsFile | ConvertFrom-StringData)
+$env:ORDERS_RELEASE_STORE_FILE = $keystore
+$env:ORDERS_RELEASE_STORE_PASS = $cfg.password
+$env:ORDERS_RELEASE_ALIAS = $cfg.alias
+$env:ORDERS_RELEASE_KEY_PASS = $cfg.password
+```
+Не выводи значения паролей/секретов.
+
+3. Повтори debug-проверки, отключив только AGP path check на этот запуск
+Из каталога repo:
+```powershell
+Push-Location android
+.\gradlew.bat --no-daemon -Dcom.android.build.gradle.overridePathCheck=true -Pandroid.overridePathCheck=true testDebugUnitTest lintDebug assembleDebug --stacktrace
+Pop-Location
+```
+
+Это не должно менять `gradle.properties` или другие файлы проекта.
+
+4. Если команда из пункта 3 снова падает ИМЕННО на `Your project path contains non-ASCII characters`, используй ASCII-псевдопуть к ТОМУ ЖЕ репозиторию через `subst`, без копирования файлов:
+```powershell
+cmd /c "subst S: /D" 2>$null
+cmd /c "subst S: `"$repoRoot`""
+Push-Location S:\android
+.\gradlew.bat --no-daemon -Dcom.android.build.gradle.overridePathCheck=true -Pandroid.overridePathCheck=true testDebugUnitTest lintDebug assembleDebug --stacktrace
+Pop-Location
+```
+
+После завершения всех локальных проверок убери временное отображение:
+`cmd /c "subst S: /D"`
+
+Если `S:` уже занят, используй другую свободную букву диска и зафиксируй это в своём рабочем выводе, но не меняй проект.
+
+5. Release-сборка и проверка подписи
+После успешных debug tests/lint/build выполни release-сборку тем же способом, который прошёл в пункте 3 или 4.
+
+Если обычный путь прошёл:
+```powershell
+Push-Location android
+.\gradlew.bat --no-daemon -Dcom.android.build.gradle.overridePathCheck=true -Pandroid.overridePathCheck=true assembleRelease --stacktrace
+Pop-Location
+```
+
+Если пришлось использовать `subst`, снова смонтируй тот же repo на ту же ASCII-букву и выполни из неё:
+```powershell
+Push-Location S:\android
+.\gradlew.bat --no-daemon -Dcom.android.build.gradle.overridePathCheck=true -Pandroid.overridePathCheck=true assembleRelease --stacktrace
+Pop-Location
+```
+
+Затем из исходного repo проверь APK:
+```powershell
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"
+```
+
+Если `apksigner.bat` по этому точному пути отсутствует, найди установленный `apksigner.bat` внутри `$env:ANDROID_HOME\build-tools\*` и используй существующую версию; ничего не устанавливай ради этого, если подходящая версия уже есть.
+
+6. Критерий продолжения
+Продолжай к commit/push только если:
+- `testDebugUnitTest` прошёл;
+- `lintDebug` прошёл;
+- `assembleDebug` прошёл;
+- `assembleRelease` прошёл;
+- `apksigner verify --print-certs` прошёл;
+- `git diff --check` чист;
+- в diff ровно 6 файлов Patch 64.
+
+Если появляется любая другая реальная ошибка tests/lint/build/signing — остановись без commit/push и сообщи точную ошибку. Не исправляй код самостоятельно.
+
+Если снова появляется `Unable to establish loopback connection`, повтори тот же выбранный ASCII-path запуск один раз из обычного системного `powershell.exe` (не вложенного codex-runtime PowerShell) с `--no-daemon` и `C:\jtmp`. Если и там та же loopback-ошибка — остановись и сообщи stacktrace.
+
+7. Commit/push
+После успешных проверок:
+- повторно `git diff --check`, `git diff --name-only`, `git diff --stat`;
+- commit только 6 файлов Patch 64;
+- commit message: `Polish Android orders app and stabilize release updates`;
+- push в `origin/main`.
+
+8. После push
+Проверь Android APK workflow для нового main commit. Он обязан успешно:
+- выполнить tests/lint;
+- собрать `assembleRelease`;
+- пройти `apksigner verify`;
+- создать artifact `orders-android-release`.
+
+Скачай artifact и повторно проверь `apksigner verify --print-certs`. Зафиксируй SHA-256 сертификата подписанта.
+
+9. Итоговый отчёт
+Сообщи только факты:
+- SHA commit в main;
+- какие локальные проверки прошли;
+- использовался ли обычный путь или временный `subst` ASCII-path;
+- GitHub Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что commit содержит только 6 файлов Patch 64;
+- напоминание: переход с 0.4 на 0.5 требует один раз удалить старую версию, установить 0.5 и войти; последующие версии при том же release-ключе и возрастающем versionCode должны обновляться поверх приложения.
