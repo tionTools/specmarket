@@ -11,6 +11,8 @@ fun mergeOrders(current: List<Order>, changed: List<Order>): List<Order> {
 fun latestOrderUpdatedAt(orders: List<Order>): String? =
     orders.mapNotNull { it.updatedAt?.trim()?.takeIf(String::isNotEmpty) }.maxOrNull()
 
+fun shouldNotifyNewOrder(order: Order): Boolean = isNewOrderVisual(order)
+
 fun normalizeCustomerPhone(phone: String?): String? {
     val raw = phone.orEmpty().trim()
     if (raw.isEmpty()) return null
