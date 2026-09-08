@@ -1,0 +1,144 @@
+Patch 64 — Android 0.5: стабильные обновления, новый заказ до ТТН, новый UI и звонок клиенту
+
+Работай только с локальным проектом:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Источник истины — актуальный origin/main. Не исследуй причину проблемы и не перепроектируй решение: причина и patch уже проверены. Не исправляй patch самостоятельно. Если patch не применяется к актуальному main, остановись и сообщи об этом.
+
+1. Подготовь main
+- Перейди в указанный каталог проекта.
+- Сохрани все посторонние локальные изменения; не удаляй и не включай их в commit.
+- Выполни fetch.
+- Переключись на main и синхронизируй его с origin/main fast-forward.
+- Перед применением Patch 64 убедись, что HEAD основан на текущем origin/main.
+
+2. Получи и проверь Patch 64
+- Получи `64.patch` из `origin/chatgpt-patches` во временный файл, например:
+  `git show origin/chatgpt-patches:64.patch > "$env:TEMP\specmarket-64.patch"`
+- Выполни:
+  `git apply --check "$env:TEMP\specmarket-64.patch"`
+- Если проверка не прошла — ничего не применяй, не адаптируй patch и сообщи точную ошибку.
+- Если прошла — примени:
+  `git apply "$env:TEMP\specmarket-64.patch"`
+
+3. Что должно измениться
+Patch должен затронуть ровно эти 6 файлов:
+- `.github/workflows/android-apk.yml`
+- `android/app/build.gradle.kts`
+- `android/app/src/main/java/ua/orders/crm/Appearance.kt`
+- `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
+- `android/app/src/main/java/ua/orders/crm/OrderModels.kt`
+- `android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt`
+
+Не включай никакие другие файлы.
+
+4. Постоянная подпись Android APK
+Цель: начиная с Android 0.5 все APK должны подписываться одним и тем же постоянным release-ключом. Ключ и пароли нельзя коммитить в репозиторий.
+
+Ожидаемые GitHub Secrets:
+- `ORDERS_RELEASE_STORE_B64`
+- `ORDERS_RELEASE_STORE_PASS`
+- `ORDERS_RELEASE_ALIAS`
+- `ORDERS_RELEASE_KEY_PASS`
+
+Сначала выполни:
+`gh secret list --repo tionTools/specmarket`
+
+Правила:
+- Если все 4 секрета уже существуют — НЕ создавай новый ключ и НЕ перезаписывай секреты. Используй существующую постоянную подпись.
+- Если ни одного из 4 секретов нет — создай один постоянный keystore локально ВНЕ репозитория и один раз запиши его в GitHub Secrets.
+- Если существует только часть из 4 секретов — остановись и сообщи о неполной конфигурации. Не перезаписывай существующие секреты и не генерируй новый ключ.
+- Если `gh` не позволяет читать/записывать Secrets — остановись до commit/push и сообщи об этом. Не пушь workflow, который гарантированно упадёт без секретов.
+
+Если все секреты отсутствуют, создай ключ так:
+
+```powershell
+$repoRoot = (Get-Location).Path
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+New-Item -ItemType Directory -Force -Path $signingDir | Out-Null
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$pass = [Convert]::ToBase64String($bytes)
+$alias = 'orders'
+keytool -genkeypair -v -keystore $keystore -alias $alias -keyalg RSA -keysize 4096 -validity 10000 -storepass $pass -keypass $pass -dname 'CN=Orders Android,O=SpecMarket,C=UA'
+@("alias=$alias","password=$pass") | Set-Content -Encoding UTF8 (Join-Path $signingDir 'orders-release-credentials.txt')
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($keystore))
+gh secret set ORDERS_RELEASE_STORE_B64 --repo tionTools/specmarket --body $b64
+gh secret set ORDERS_RELEASE_STORE_PASS --repo tionTools/specmarket --body $pass
+gh secret set ORDERS_RELEASE_ALIAS --repo tionTools/specmarket --body $alias
+gh secret set ORDERS_RELEASE_KEY_PASS --repo tionTools/specmarket --body $pass
+```
+
+Keystore и `orders-release-credentials.txt` должны остаться вне репозитория. Никогда не показывай значения секретов в отчёте и не добавляй их в Git.
+
+5. Проверь бизнес-логику
+Обязательно проверь:
+- `applicationId` остаётся `ua.orders.crm`.
+- Android версия стала `versionCode = 5`, `versionName = "0.5"`.
+- Prom / Эпицентр / Kasta без ТТН и без отмены/возврата визуально имеют лиловую плашку `НОВЫЙ ЗАКАЗ`.
+- При появлении ТТН лиловая плашка исчезает и дальше показывается обычная CRM-логика цветов/статусов.
+- Р/С и Сайт не считаются визуально новыми по этому правилу.
+- Логика marketplace acceptance не расширена: Kasta acceptance остаётся недоступной; Prom и Epicentr работают по существующим правилам.
+- Уведомления о новых заказах не подменены новой визуальной TTN-логикой.
+- В деталях заказа при непустом номере клиента есть удобная кнопка звонка. Она открывает штатный Android dialer через `ACTION_DIAL` с уже подставленным номером; прямой автозвонок и разрешение `CALL_PHONE` не нужны.
+- Существующие доставка, детализация, принятие заказов и сохранение списка после detail refresh не сломаны.
+
+6. Локальные проверки
+Выполни:
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+
+В diff должны быть только 6 файлов из пункта 3.
+
+Затем:
+```powershell
+Push-Location android
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+Pop-Location
+```
+
+Если в этом запуске ты только что создал новый keystore, дополнительно проверь release-сборку локально:
+```powershell
+$env:ORDERS_RELEASE_STORE_FILE=$keystore
+$env:ORDERS_RELEASE_STORE_PASS=$pass
+$env:ORDERS_RELEASE_ALIAS=$alias
+$env:ORDERS_RELEASE_KEY_PASS=$pass
+Push-Location android
+.\gradlew.bat assembleRelease
+Pop-Location
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"
+```
+
+Любая ошибка тестов, lint, сборки или подписи — стоп. Не коммить и не пушь до исправления причины пользователем/новым patch.
+
+7. Commit и push
+- Ещё раз проверь `git diff --check` и список файлов.
+- В commit включи только 6 файлов Patch 64. Не используй `git add .` и не захватывай посторонние изменения.
+- Commit message: `Polish Android orders app and stabilize release updates`
+- Push в `origin/main`.
+
+8. Проверка GitHub Actions после push
+- Найди Android APK workflow run для нового main commit.
+- Дождись завершения.
+- Он должен успешно выполнить тесты/lint, собрать `assembleRelease`, пройти `apksigner verify` и создать artifact:
+  `orders-android-release`
+- Если workflow упал — не объявляй задачу выполненной. Сообщи точный шаг и ошибку.
+- Если workflow успешен, скачай artifact через `gh run download` и ещё раз проверь APK командой `apksigner verify --print-certs`.
+- Зафиксируй SHA-256 сертификата подписанта в итоговом отчёте. Не публикуй приватный ключ/пароли.
+
+9. Важный переход со старой версии
+Старые Android 0.3/0.4 были собраны с разными одноразовыми debug-ключами. Поэтому переход на первый APK 0.5 с постоянным release-ключом требует один последний чистый переход: удалить старую установленную версию, установить 0.5 и один раз войти в аккаунт. Это неизбежно без старого приватного debug-ключа.
+
+После этого все будущие версии должны сохранять `applicationId = ua.orders.crm`, увеличивать `versionCode` и подписываться тем же постоянным release-ключом. Тогда они будут устанавливаться поверх приложения и сохранять данные/сессию.
+
+10. Итоговый отчёт
+Сообщи только факты:
+- SHA нового commit в main;
+- какие проверки прошли;
+- GitHub Actions run ID и его результат;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что в commit вошли только 6 файлов Patch 64;
+- напоминание о единственном необходимом uninstall/install при переходе с 0.4 на 0.5.
