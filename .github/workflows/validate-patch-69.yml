@@ -1,0 +1,244 @@
+name: Validate Patch 69
+
+on:
+  push:
+    branches: [chatgpt-validation-69]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: 479ff9f6ffe3f71ea61ce1fe1a257f2f333b5b79
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Patch 69
+        run: |
+          set -euo pipefail
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git checkout --detach "$BASE_SHA"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, got {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "android/app/build.gradle.kts",
+              '        versionCode = 6\n        versionName = "0.6"',
+              '        versionCode = 7\n        versionName = "0.7"',
+          )
+
+          replace_once(
+              "android/app/src/main/java/ua/orders/crm/OrderNotification.kt",
+              "import android.os.Build\n",
+              "import android.os.Build\nimport java.math.RoundingMode\n",
+          )
+          replace_once(
+              "android/app/src/main/java/ua/orders/crm/OrderNotification.kt",
+              '''    val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)\n        .setSmallIcon(R.drawable.ic_orders)\n        .setContentTitle("Новый заказ · ${order.platform.display()}")\n        .setContentText("№${order.number()} · ${order.customer.display()}")\n''',
+              '''    val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"\n    val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)\n        .setSmallIcon(R.drawable.ic_orders)\n        .setContentTitle("Новый заказ · ${order.platform.display()} · $total")\n        .setContentText("${order.customer.display()} · №${order.number()}")\n''',
+          )
+
+          main = "android/app/src/main/java/ua/orders/crm/MainActivity.kt"
+          replace_once(main, "            color = Color(0xFFF5D0FE),\n            contentColor = Color(0xFF86198F),\n            border = BorderStroke(1.dp, Color(0xFFE879F9)),", "            color = Color(0xFFE879F9),\n            contentColor = Color(0xFF4A044E),\n            border = BorderStroke(1.dp, Color(0xFFC026D3)),")
+          replace_once(main, "        StatusTone.BLUE -> StatusColors(Color(0xFFDBEAFE), Color(0xFF1E40AF))\n        StatusTone.GREEN -> StatusColors(Color(0xFFDCFCE7), Color(0xFF166534))\n        StatusTone.ORANGE -> StatusColors(Color(0xFFFFEDD5), Color(0xFF9A3412))\n        StatusTone.RED -> StatusColors(Color(0xFFFEE2E2), Color(0xFF991B1B))", "        StatusTone.BLUE -> StatusColors(Color(0xFFBFDBFE), Color(0xFF1E3A8A))\n        StatusTone.GREEN -> StatusColors(Color(0xFFBBF7D0), Color(0xFF14532D))\n        StatusTone.ORANGE -> StatusColors(Color(0xFFFED7AA), Color(0xFF7C2D12))\n        StatusTone.RED -> StatusColors(Color(0xFFFECACA), Color(0xFF7F1D1D))")
+          replace_once(
+              main,
+              '''                            OutlinedButton(\n                                onClick = { openViber(context, phone.orEmpty()) },\n                                modifier = Modifier.weight(1f).height(46.dp),\n                            ) { Text("Viber") }\n                            OutlinedButton(\n                                onClick = { openTelegram(context, phone.orEmpty()) },\n                                modifier = Modifier.weight(1f).height(46.dp),\n                            ) { Text("Telegram") }\n''',
+              '''                            Button(\n                                onClick = { openViber(context, phone.orEmpty()) },\n                                modifier = Modifier.weight(1f).height(46.dp),\n                                colors = ButtonDefaults.buttonColors(\n                                    containerColor = Color(0xFF7360F2),\n                                    contentColor = Color.White,\n                                ),\n                            ) { Text("Viber", fontWeight = FontWeight.SemiBold) }\n                            Button(\n                                onClick = { openTelegram(context, phone.orEmpty()) },\n                                modifier = Modifier.weight(1f).height(46.dp),\n                                colors = ButtonDefaults.buttonColors(\n                                    containerColor = Color(0xFF229ED9),\n                                    contentColor = Color.White,\n                                ),\n                            ) { Text("Telegram", fontWeight = FontWeight.SemiBold) }\n''',
+          )
+          PY
+
+          git diff --check
+          expected="$(printf '%s\n' \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderNotification.kt | sort)"
+          actual="$(git diff --name-only | sort)"
+          test "$actual" = "$expected"
+          grep -q 'versionCode = 7' android/app/build.gradle.kts
+          grep -q 'versionName = "0.7"' android/app/build.gradle.kts
+          grep -Fq '.setContentTitle("Новый заказ · ${order.platform.display()} · $total")' android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          grep -Fq '.setContentText("${order.customer.display()} · №${order.number()}")' android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+          grep -q '0xFF7360F2' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          grep -q '0xFF229ED9' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          grep -q '0xFFE879F9' android/app/src/main/java/ua/orders/crm/MainActivity.kt
+
+          git diff --binary -- \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderNotification.kt > /tmp/69.patch
+          test -s /tmp/69.patch
+          PATCH_SHA="$(sha256sum /tmp/69.patch | awk '{print $1}')"
+          echo "PATCH_SHA=$PATCH_SHA" >> "$GITHUB_ENV"
+
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git apply --check --verbose /tmp/69.patch
+          git apply /tmp/69.patch
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          test "$actual" = "$expected"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+
+      - name: Prepare permanent release signing
+        env:
+          ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
+          ORDERS_RELEASE_STORE_PASS: ${{ secrets.ORDERS_RELEASE_STORE_PASS }}
+          ORDERS_RELEASE_ALIAS: ${{ secrets.ORDERS_RELEASE_ALIAS }}
+          ORDERS_RELEASE_KEY_PASS: ${{ secrets.ORDERS_RELEASE_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$ORDERS_RELEASE_STORE_B64"
+          test -n "$ORDERS_RELEASE_STORE_PASS"
+          test -n "$ORDERS_RELEASE_ALIAS"
+          test -n "$ORDERS_RELEASE_KEY_PASS"
+          printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=$ORDERS_RELEASE_ALIAS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=$ORDERS_RELEASE_KEY_PASS" >> "$GITHUB_ENV"
+
+      - name: Test current-main application
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Verify release signer
+        run: |
+          set -euo pipefail
+          output="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk)"
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -qi 'a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53'
+
+      - name: Validate after projected Patch 68
+        run: |
+          set -euo pipefail
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git show origin/chatgpt-patches:68.patch > /tmp/68.patch
+          git apply --check --verbose /tmp/68.patch
+          git apply /tmp/68.patch
+          git apply --check --verbose /tmp/69.patch
+          git apply /tmp/69.patch
+          git diff --check
+          test "$(git diff --name-only | grep '^android/' | sort)" = "$(printf '%s\n' \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderNotification.kt | sort)"
+          cd android
+          ./gradlew testDebugUnitTest lintDebug assembleRelease
+
+      - name: Publish Patch 69
+        run: |
+          set -euo pipefail
+          cat > /tmp/69.txt <<EOF
+          Patch 69 — Android 0.7: сумма в уведомлении и более контрастные элементы заказа
+
+          ВАЖНО
+          - Patch 68 уже занят отдельной Web CRM задачей; этот Android-патч имеет номер 69.
+          - Patch 69 подготовлен против main $BASE_SHA и отдельно проверен поверх смоделированного Patch 68.
+          - Patch 68 меняет только Web CRM, Patch 69 — только Android; пересечения по файлам нет.
+          - Не изменять AGENTS.md, Web CRM, Supabase, migrations/functions и GitHub workflow.
+          - Не перенастраивать JDK/Android SDK/Gradle/signing и не создавать новый keystore.
+          - applicationId остаётся ua.orders.crm.
+          - Android: versionCode 7, versionName 0.7.
+          - Если git apply --check или любая обязательная проверка не проходит — остановиться и сообщить ошибку, не чинить патч самостоятельно.
+
+          Что меняет Patch 69
+          1. Системное уведомление нового заказа:
+             первая строка: «Новый заказ · <площадка> · <сумма> грн»;
+             вторая строка: «<имя покупателя> · №<номер заказа>».
+             Сумма становится приоритетнее номера заказа и видна в заголовке свёрнутого уведомления.
+          2. Плашки статусов внутри списка и карточки заказа получают более насыщенный фон и более тёмный текст для лучшего контраста.
+             НОВЫЙ ЗАКАЗ: насыщенная фуксия/лиловая заливка вместо очень светлой.
+             Синие/зелёные/оранжевые/красные статусы также на один уровень насыщеннее.
+          3. Кнопка Viber становится залитой фирменным Viber Main Purple #7360F2 с белым текстом.
+          4. Кнопка Telegram становится залитой Telegram blue #229ED9 с белым текстом.
+          5. Никакая логика синхронизации, уведомления «один раз», Realtime, acceptance, Viber/Telegram deep links и бизнес-статусы Patch 67 не меняются.
+
+          Файлы Patch 69 — ровно 3
+          - android/app/build.gradle.kts
+          - android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          - android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+
+          Применение
+          1. В основном проекте C:\Users\Вадим\Documents\CRM моя\specmarket выполнить:
+             git fetch origin main chatgpt-patches
+          2. Работать в отдельном чистом worktree C:\Users\Вадим\Documents\CRM моя\specmarket-p69 от актуального origin/main.
+          3. Получить патч без изменения байтов:
+             cmd /c "git show origin/chatgpt-patches:69.patch > 69.apply.patch"
+          4. Проверить SHA-256:
+             (Get-FileHash -Algorithm SHA256 69.apply.patch).Hash.ToLower()
+             Должно быть: $PATCH_SHA
+          5. Выполнить:
+             git apply --check 69.apply.patch
+             git apply 69.apply.patch
+             Remove-Item 69.apply.patch
+
+          Обязательные проверки
+          - git diff --check
+          - git status --short / git diff --name-only: только 3 файла Patch 69
+          - testDebugUnitTest
+          - lintDebug
+          - assembleDebug
+          - assembleRelease
+          - apksigner verify --print-certs
+          - ожидаемый signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53
+          - после проверок снова git diff --check и ровно 3 файла
+
+          Контрольные случаи
+          - свёрнутое уведомление показывает площадку и сумму в первой строке;
+          - имя и номер заказа остаются во второй строке;
+          - сумма берётся из уже существующего order.total(), без новой бизнес-формулы;
+          - плашка НОВЫЙ ЗАКАЗ заметно контрастнее поверхности карточки;
+          - остальные цветные статусные плашки тоже контрастнее;
+          - Viber: #7360F2, белый текст;
+          - Telegram: #229ED9, белый текст;
+          - кнопки по-прежнему открывают существующие deep links и не падают при отсутствии приложения;
+          - Patch 67 cache/incremental sync/realtime/notification dedup не изменены.
+
+          Commit / push
+          - В commit только 3 файла Patch 69.
+          - Commit message: Improve Android order notification and actions
+          - Перед push: git fetch origin main; убедиться, что git apply/итоговый diff остаются чистыми относительно актуального main.
+          - git push origin HEAD:main
+          - Никаких Supabase deploy/db push.
+
+          После push
+          - дождаться success Android APK workflow;
+          - artifact orders-android-release должен быть создан;
+          - сообщить commit SHA, run ID, signer SHA-256 и artifact name.
+          EOF
+
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git fetch origin chatgpt-patches
+          git checkout -B publish69 origin/chatgpt-patches
+          cp /tmp/69.patch 69.patch
+          cp /tmp/69.txt 69.txt
+          git add 69.patch 69.txt
+          git config user.name "Vadonchikus"
+          git config user.email "36088047+Vadonchikus@users.noreply.github.com"
+          git commit -m "Add Patch 69"
+          git push origin HEAD:chatgpt-patches
+          echo "Patch 69 SHA-256: $PATCH_SHA"
