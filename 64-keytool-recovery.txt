@@ -1,0 +1,134 @@
+Продолжение Patch 64 после остановки из-за отсутствия keytool.
+
+Работай только в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Patch 64 уже применён. НЕ сбрасывай working tree, НЕ применяй 64.patch повторно и НЕ начинай задачу заново.
+
+Исходное подтверждённое состояние перед неудачной командой: все четыре release Secrets отсутствовали. Неудачная команда могла успеть создать часть Secrets после ошибки keytool, поэтому текущая неполная конфигурация относится именно к этому неудачному запуску Patch 64.
+
+1. Сохрани текущий diff
+- Проверь `git status --short`, `git diff --check`, `git diff --name-only`.
+- Не изменяй и не включай в commit посторонние локальные файлы.
+- В Patch 64 должны оставаться ровно 6 файлов задачи.
+
+2. Определи GitHub CLI
+Используй `gh`, если он уже доступен, иначе полный путь:
+`C:\Program Files\GitHub CLI\gh.exe`
+Проверь авторизацию командой `gh auth status --hostname github.com` или эквивалентом через полный путь. Если авторизация потеряна, восстанови её через browser/device flow и продолжи после успешного входа.
+
+3. Восстанови Secrets после неудачного запуска
+Поскольку непосредственно перед неудачной командой было подтверждено отсутствие всех четырёх Secrets и keystore не был создан, удали текущие значения ТОЛЬКО этих четырёх имён, если они успели появиться:
+- `ORDERS_RELEASE_STORE_B64`
+- `ORDERS_RELEASE_STORE_PASS`
+- `ORDERS_RELEASE_ALIAS`
+- `ORDERS_RELEASE_KEY_PASS`
+
+Для каждого имени сначала проверь наличие через `gh secret list --repo tionTools/specmarket`, затем удаляй только найденные значения командой `gh secret delete <NAME> --repo tionTools/specmarket`.
+Не трогай никакие другие Secrets.
+После очистки убедись, что этих четырёх имён нет.
+
+4. Найди рабочий keytool.exe
+Не полагайся на PATH. Ищи в таком порядке:
+- `$env:JAVA_HOME\bin\keytool.exe`, если JAVA_HOME задан;
+- рядом с найденным `java.exe`: путь `<директория java.exe>\keytool.exe`;
+- `C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe`;
+- установленный JDK под `C:\Program Files\Eclipse Adoptium\...\bin\keytool.exe`;
+- установленный JDK под `C:\Program Files\Microsoft\...\bin\keytool.exe`.
+
+Проверь найденный файл запуском:
+`& $keytool -help`
+
+Если рабочего keytool.exe нет, установи JDK 21 через WinGet:
+`winget install --id EclipseAdoptium.Temurin.21.JDK --exact --source winget --accept-source-agreements --accept-package-agreements`
+После установки найди `keytool.exe` под `C:\Program Files\Eclipse Adoptium\...\bin\keytool.exe` и снова проверь `& $keytool -help`.
+Если после этого keytool всё ещё недоступен — остановись без commit/push и сообщи точную ошибку.
+
+5. Создай один постоянный keystore ВНЕ репозитория
+Используй каталог-сосед репозитория:
+`C:\Users\Вадим\Documents\CRM моя\android-signing`
+
+Если после неудачного запуска там существует пустой/некорректный `orders-release.jks`, удали только этот некорректный файл. Если существует валидный keystore, не перегенерируй его без проверки.
+
+Создай новый ключ только если валидного keystore нет:
+
+```powershell
+$repoRoot = (Get-Location).Path
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+New-Item -ItemType Directory -Force -Path $signingDir | Out-Null
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$pass = [Convert]::ToBase64String($bytes)
+$alias = 'orders'
+& $keytool -genkeypair -v -keystore $keystore -alias $alias -keyalg RSA -keysize 4096 -validity 10000 -storepass $pass -keypass $pass -dname 'CN=Orders Android,O=SpecMarket,C=UA'
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $keystore)) { throw 'keytool failed to create keystore' }
+@("alias=$alias","password=$pass") | Set-Content -Encoding UTF8 (Join-Path $signingDir 'orders-release-credentials.txt')
+```
+
+Проверь keystore ДО записи Secrets:
+```powershell
+& $keytool -list -keystore $keystore -alias $alias -storepass $pass
+if ($LASTEXITCODE -ne 0) { throw 'keystore verification failed' }
+```
+
+Keystore и `orders-release-credentials.txt` должны оставаться вне репозитория. Никогда не выводи пароль, base64 keystore или приватный ключ в отчёт/чат/Git.
+
+6. Запиши полный комплект GitHub Secrets только после успешной проверки keystore
+```powershell
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($keystore))
+gh secret set ORDERS_RELEASE_STORE_B64 --repo tionTools/specmarket --body $b64
+gh secret set ORDERS_RELEASE_STORE_PASS --repo tionTools/specmarket --body $pass
+gh secret set ORDERS_RELEASE_ALIAS --repo tionTools/specmarket --body $alias
+gh secret set ORDERS_RELEASE_KEY_PASS --repo tionTools/specmarket --body $pass
+```
+Если используется полный путь к gh.exe, используй его во всех четырёх командах.
+После каждой команды проверяй exit code. При любой ошибке остановись до commit/push.
+Затем `gh secret list --repo tionTools/specmarket` должен показывать все четыре имени. Значения Secrets не выводить.
+
+7. Обязательная локальная release-проверка с тем же keystore
+```powershell
+$env:ORDERS_RELEASE_STORE_FILE=$keystore
+$env:ORDERS_RELEASE_STORE_PASS=$pass
+$env:ORDERS_RELEASE_ALIAS=$alias
+$env:ORDERS_RELEASE_KEY_PASS=$pass
+Push-Location android
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug assembleRelease
+Pop-Location
+```
+Любая ошибка — стоп до commit/push.
+
+Найди установленный `apksigner.bat` (предпочтительно `$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat`; если такого файла нет, найди apksigner.bat в установленном Android SDK build-tools) и выполни:
+`& $apksigner verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"`
+Проверка подписи должна пройти. Зафиксируй только SHA-256 сертификата подписанта, без секретов.
+
+8. Повтори проверки Patch 64
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+- В diff ровно 6 файлов Patch 64.
+- applicationId `ua.orders.crm`.
+- versionCode 5 / versionName 0.5.
+- TTN/new-order логика, Kasta acceptance, ACTION_DIAL и остальные бизнес-требования из `64.txt` должны оставаться выполненными.
+
+9. Commit/push и GitHub Actions
+Только после успешных шагов выше продолжи пункты 7–10 основной инструкции `64.txt`:
+- commit только 6 файлов задачи;
+- message `Polish Android orders app and stabilize release updates`;
+- push в `origin/main`;
+- дождись Android APK workflow;
+- workflow должен успешно собрать release и artifact `orders-android-release`;
+- скачай artifact и повторно проверь `apksigner verify --print-certs`;
+- SHA-256 сертификата artifact должен совпасть с локальной release-сборкой.
+
+Если workflow падает или сертификат не совпадает — не объявляй задачу выполненной.
+
+10. Итоговый отчёт
+Сообщи только факты:
+- SHA commit в main;
+- проверки;
+- Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что в commit ровно 6 файлов Patch 64;
+- напоминание: переход с 0.4 на первый 0.5 требует один раз удалить старую версию, установить 0.5 и войти; дальнейшие версии при той же подписи и увеличенном versionCode должны обновляться поверх приложения.
