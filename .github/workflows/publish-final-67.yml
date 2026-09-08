@@ -1,0 +1,151 @@
+name: Publish Final Patch 67
+on:
+  push:
+    branches: [chatgpt-finalize-67]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: b04099d45d7256645780a335ad2f51076c974e46
+      EXPECTED_PATCH_SHA: f1589bdabf0c01b272240bb585ab40050ca10e03110cf7fbc0097612c98eb7f5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Regenerate and publish already validated final Patch 67
+        run: |
+          set -euo pipefail
+          git fetch origin main chatgpt-patches
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git checkout --detach "$BASE_SHA"
+          git show origin/chatgpt-patches:67.patch > /tmp/67-base.patch
+          git show origin/chatgpt-patches:67-platform-logos.patch > /tmp/67-logos.patch
+          git apply --check /tmp/67-base.patch
+          git apply /tmp/67-base.patch
+          git apply --check /tmp/67-logos.patch
+          git apply /tmp/67-logos.patch
+          git add \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/Appearance.kt \
+            android/app/src/main/java/ua/orders/crm/MainActivity.kt \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersRepository.kt \
+            android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 11
+          git diff --cached --binary --find-copies-harder --find-copies=100% > /tmp/67.final.patch
+          ACTUAL_PATCH_SHA="$(sha256sum /tmp/67.final.patch | awk '{print $1}')"
+          test "$ACTUAL_PATCH_SHA" = "$EXPECTED_PATCH_SHA"
+
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git apply --check /tmp/67.final.patch
+          git apply /tmp/67.final.patch
+          git diff --check
+
+          cat > /tmp/67.txt <<EOF
+          Patch 67 — Android 0.6: локальный кеш, incremental sync, уведомления, Viber/Telegram и логотипы площадок
+
+          ВАЖНО
+          - Это готовый и отдельно провалидированный Patch 67. Ничего не исследовать, не перепроектировать и не исправлять самостоятельно.
+          - Источник истины: main $BASE_SHA.
+          - Не изменять AGENTS.md.
+          - Не изменять Web CRM, Supabase migrations/functions и GitHub workflow.
+          - Не устанавливать и не перенастраивать JDK/Android SDK/Gradle/signing: постоянная Android-инфраструктура уже настроена.
+          - applicationId остаётся ua.orders.crm.
+          - Android: versionCode 6, versionName 0.6.
+          - Release APK подписывать существующим постоянным release key. Никаких новых keystore/alias/secrets не создавать.
+          - Если любая проверка не проходит — остановиться и сообщить точную ошибку. Не чинить Patch 67 самостоятельно.
+
+          Рабочая схема
+          1. Основной проект: C:\Users\Вадим\Documents\CRM моя\specmarket
+          2. Выполнить: git fetch origin main chatgpt-patches
+          3. Убедиться, что origin/main = $BASE_SHA. Если main уже другой — остановиться и сообщить новый SHA до применения.
+          4. Работать в отдельном worktree C:\Users\Вадим\Documents\CRM моя\specmarket-p67 от origin/main. Использовать существующий путь только если worktree чистый и стоит ровно на origin/main.
+          5. Получить patch без изменения байтов:
+             cmd /c "git show origin/chatgpt-patches:67.patch > 67.apply.patch"
+          6. Проверить SHA-256:
+             certutil -hashfile 67.apply.patch SHA256
+             Ожидаемый SHA-256: $EXPECTED_PATCH_SHA
+          7. Затем:
+             git apply --check 67.apply.patch
+             git apply 67.apply.patch
+             Remove-Item 67.apply.patch
+
+          Ровно 11 файлов Patch 67
+          - android/app/build.gradle.kts
+          - android/app/src/main/java/ua/orders/crm/Appearance.kt
+          - android/app/src/main/java/ua/orders/crm/MainActivity.kt
+          - android/app/src/main/java/ua/orders/crm/OrderSync.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersCache.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+          - android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+          - android/app/src/main/res/drawable-nodpi/platform_epicentr.png
+          - android/app/src/main/res/drawable-nodpi/platform_kasta.png
+          - android/app/src/main/res/drawable-nodpi/platform_prom.png
+          - android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+
+          Что должен сделать Patch 67
+          - Сразу показывать сохранённые заказы текущего CRM-аккаунта из локального кеша.
+          - Временный пустой ответ сервера не очищает уже известный список.
+          - После baseline получать изменения по updated_at и merge по order.id вместо полной загрузки CRM при каждом входе.
+          - Realtime обновляет/добавляет заказы; после reconnect/foreground контрольный sync добирает пропущенные изменения.
+          - Правило уведомления совпадает с визуальным НОВЫЙ ЗАКАЗ: Prom/Epicentr/Kasta, нет ТТН, заказ не cancelled/returned.
+          - Первый baseline не озвучивает старые заказы; новый ранее неизвестный order.id уведомляется один раз независимо от Realtime или контрольного sync.
+          - На Android 13+ корректно запросить POST_NOTIFICATIONS; ожидающее уведомление не терять до выдачи разрешения.
+          - Если Android полностью убил процесс, без server push/FCM гарантированного фонового уведомления нет.
+          - В карточке клиента оставить Позвонить и добавить Viber/Telegram по нормализованному международному номеру с безопасным fallback.
+          - В списке и деталях Prom/Epicentr/Kasta показывать маленькими реальными логотипами Web CRM; Р/С и Сайт оставить текстом.
+          - Marketplace acceptance/business logic не менять.
+
+          Обязательные проверки
+          - git status --short: только 11 файлов выше; AGENTS.md не включать.
+          - git diff --check.
+          - Использовать существующие Android SDK C:\Users\Public\Android\Sdk, GRADLE_USER_HOME C:\dev\gradle-home, существующий JDK и release keystore из android-signing; ASCII alias/subst к этому же worktree, не копию.
+          - Выполнить testDebugUnitTest, lintDebug, assembleDebug, assembleRelease.
+          - apksigner verify --print-certs; ожидаемый signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53.
+          - Снова git diff --check, git status --short и итоговый diff: ровно 11 файлов.
+
+          Контрольные случаи
+          - Кеш + временный [] => список не исчезает.
+          - Новый order.id => добавляется без полной перезагрузки старых.
+          - Изменённый order.id => обновляется без дубля.
+          - Пропущенный Realtime INSERT, найденный после reconnect => появляется и уведомляется один раз.
+          - Первый baseline => старые заказы не дают шквал уведомлений.
+          - Prom/Epicentr/Kasta без ТТН и не cancelled/returned => НОВЫЙ ЗАКАЗ и уведомление по одному правилу.
+          - Нет POST_NOTIFICATIONS => запрос разрешения; ожидающее уведомление может быть доставлено после разрешения без повторов.
+          - Viber/Telegram получают международный номер; отсутствие приложения не приводит к падению.
+          - Prom/Epicentr/Kasta => логотипы; Р/С/Сайт => текст.
+
+          Commit / push
+          - Commit только 11 файлов Patch 67.
+          - Commit message: Stabilize Android order sync and notifications
+          - Перед commit/push снова git fetch origin main. Если origin/main изменился относительно $BASE_SHA — остановиться и сообщить новый SHA; конфликт самостоятельно не решать.
+          - git push origin HEAD:main
+          - Никаких Supabase deploy/db push.
+
+          После push
+          - Проверить GitHub Actions Android APK для нового commit и дождаться success.
+          - Убедиться, что artifact orders-android-release создан.
+          - Сообщить commit SHA, run ID, success/failure, release signer SHA-256 и artifact name.
+          EOF
+
+          git reset --hard "$BASE_SHA"
+          git clean -fd
+          git fetch origin chatgpt-patches
+          git checkout -B publish origin/chatgpt-patches
+          cp /tmp/67.final.patch 67.patch
+          cp /tmp/67.txt 67.txt
+          git rm -f 67-platform-logos.patch
+          git add 67.patch 67.txt
+          git config user.name "Vadonchikus"
+          git config user.email "36088047+Vadonchikus@users.noreply.github.com"
+          git commit -m "Finalize Patch 67"
+          git push origin HEAD:chatgpt-patches
