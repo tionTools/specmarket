@@ -23,4 +23,5 @@ jobs:
           echo "ORDERS_RELEASE_KEY_PASS=patch64test" >> "$GITHUB_ENV"
       - run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
         working-directory: android
-      - run: "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+      - run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
