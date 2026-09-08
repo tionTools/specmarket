@@ -100,6 +100,110 @@ jobs:
           test -f supabase/functions/_shared/order-label.ts
           test -f supabase/functions/_shared/order-label_test.ts
           test -f supabase/functions/send-order-label-email/index.ts
+
+          python - <<'PY'
+          from pathlib import Path
+
+          backend = Path('supabase/functions/send-order-label-email/index.ts')
+          source = backend.read_text(encoding='utf-8')
+          old = """async function pdfText(bytes: Uint8Array) {
+            const pdf = await getDocumentProxy(bytes)
+            try {
+              if (pdf.numPages > maxPdfPages) throw new Error('Бирка содержит слишком много страниц.')
+              const extracted = await Promise.race([
+                extractText(pdf, { mergePages: true }),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('Не удалось прочитать PDF за отведённое время.')), 10_000),
+                ),
+              ])
+              return typeof extracted.text === 'string' ? extracted.text : extracted.text.join('\\n')
+            } finally {
+              await pdf.destroy()
+            }
+          }
+          """
+          new = """async function pdfText(bytes: Uint8Array) {
+            const pdf = await getDocumentProxy(bytes)
+            if (pdf.numPages > maxPdfPages) throw new Error('Бирка содержит слишком много страниц.')
+            const extracted = await Promise.race([
+              extractText(pdf, { mergePages: true }),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Не удалось прочитать PDF за отведённое время.')), 10_000),
+              ),
+            ])
+            return extracted.text
+          }
+          """
+          if source.count(old) != 1:
+              raise SystemExit('Expected pdfText implementation not found exactly once')
+          backend.write_text(source.replace(old, new), encoding='utf-8')
+
+          tests = Path('supabase/functions/_shared/order-label_test.ts')
+          tests.write_text("""import {
+            canonicalOrderLabelTtn,
+            orderLabelCarrier,
+            orderLabelMailText,
+            orderLabelTtns,
+          } from './order-label.ts'
+
+          function assert(value: unknown, message: string): asserts value {
+            if (!value) throw new Error(message)
+          }
+
+          Deno.test('Rozetka label extracts standalone PRM TTN and formats mail text', () => {
+            const labelText = `
+          Замовлення Prom.ua 426327729
+          6742
+          М. ХАРКІВ М. КИЇВ
+          PRM-251996742
+          1/1
+          `
+            assert(orderLabelCarrier('RozetkaDelivery') === 'rozetka', 'Rozetka carrier must be supported')
+            assert(
+              JSON.stringify(orderLabelTtns('rozetka', labelText)) === JSON.stringify(['PRM-251996742']),
+              'Rozetka label must extract the standalone PRM TTN',
+            )
+            assert(
+              canonicalOrderLabelTtn('rozetka', 'prm251996742') === 'PRM-251996742',
+              'Rozetka stored TTN must normalize',
+            )
+            assert(
+              orderLabelMailText('rozetka', 'PRM-251996742') === 'Розетка PRM-251996742',
+              'Rozetka mail text must use the required carrier name',
+            )
+          })
+
+          Deno.test('Meest label ignores technical barcode and supports Epicentr delivery aliases', () => {
+            const labelText = `
+          1 Рівне
+          723-1356399001001HSU М723-1356399001001HSUИО
+          С1
+          Центр видачі замовлень ЕПІЦЕНТР.ua
+          723-1356399
+          `
+            assert(orderLabelCarrier('Meest') === 'meest', 'Meest carrier must be supported')
+            assert(orderLabelCarrier('parcel_box_epicentr') === 'meest', 'Epicentr parcel box must be Meest')
+            assert(orderLabelCarrier('cvz_epicentr') === 'meest', 'Epicentr collection point must be Meest')
+            assert(
+              JSON.stringify(orderLabelTtns('meest', labelText)) === JSON.stringify(['723-1356399']),
+              'Meest label must ignore the longer technical barcode',
+            )
+            assert(
+              canonicalOrderLabelTtn('meest', '7231356399') === '723-1356399',
+              'Meest stored TTN without hyphen must normalize',
+            )
+            assert(
+              orderLabelMailText('meest', '723-1356399') === 'Мист 723-1356399',
+              'Meest mail text must use the required carrier name',
+            )
+          })
+
+          Deno.test('Unsupported carriers are rejected', () => {
+            assert(orderLabelCarrier('Новая почта') === null, 'Unsupported carriers must be rejected')
+          })
+          """, encoding='utf-8')
+          PY
+
           if find . -name '*.rej' -print -quit | grep -q .; then
             find . -name '*.rej' -print
             exit 1
@@ -195,6 +299,7 @@ jobs:
           diff -u /tmp/expected-files /tmp/actual-files-reapplied
           pnpm type-check
           pnpm build
+          deno test supabase/functions/_shared/order-label_test.ts
           deno check --node-modules-dir=auto supabase/functions/send-order-label-email/index.ts
 
       - uses: actions/upload-artifact@v4
