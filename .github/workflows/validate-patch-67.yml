@@ -16,12 +16,18 @@ jobs:
           git fetch origin main chatgpt-patches
           git checkout --detach origin/main
           git show origin/chatgpt-patches:67.patch > /tmp/67.patch
+          git show origin/chatgpt-patches:67-platform-logos.patch > /tmp/67-platform-logos.patch
           git apply --check --verbose /tmp/67.patch
           git apply /tmp/67.patch
+          git apply --check --verbose /tmp/67-platform-logos.patch
+          git apply /tmp/67-platform-logos.patch
           git add -N \
             android/app/src/main/java/ua/orders/crm/OrderSync.kt \
             android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
-            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png
           git diff --check
           actual="$(git diff --name-only | sort)"
           expected="$(printf '%s\n' \
@@ -32,6 +38,9 @@ jobs:
             android/app/src/main/java/ua/orders/crm/OrdersCache.kt \
             android/app/src/main/java/ua/orders/crm/OrdersRepository.kt \
             android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt \
+            android/app/src/main/res/drawable-nodpi/platform_prom.png \
+            android/app/src/main/res/drawable-nodpi/platform_epicentr.png \
+            android/app/src/main/res/drawable-nodpi/platform_kasta.png \
             android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt | sort)"
           test "$actual" = "$expected"
           grep -q 'versionCode = 6' android/app/build.gradle.kts
