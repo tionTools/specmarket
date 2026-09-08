@@ -12,16 +12,21 @@ Patch 67 — Android 0.6: локальный кеш, incremental sync, увед�
 - Если любая проверка не проходит — остановиться и сообщить точную ошибку. Не чинить Patch 67 самостоятельно.
 
 Рабочая схема
-1. Основной проект: C:\Users\Вадим\Documents\CRM моя\specmarket
-2. Выполнить: git fetch origin main chatgpt-patches
+1. Основной проект:
+   C:\Users\Вадим\Documents\CRM моя\specmarket
+2. Выполнить в основном проекте:
+   git fetch origin main chatgpt-patches
 3. Убедиться, что origin/main = b04099d45d7256645780a335ad2f51076c974e46. Если main уже другой — остановиться и сообщить новый SHA до применения.
-4. Работать в отдельном worktree C:\Users\Вадим\Documents\CRM моя\specmarket-p67 от origin/main. Использовать существующий путь только если worktree чистый и стоит ровно на origin/main.
+4. Работать в отдельном worktree:
+   C:\Users\Вадим\Documents\CRM моя\specmarket-p67
+   Создать его от origin/main. Если путь уже существует, использовать только если worktree чистый и стоит ровно на origin/main; иначе остановиться.
 5. Получить patch без изменения байтов:
    cmd /c "git show origin/chatgpt-patches:67.patch > 67.apply.patch"
 6. Проверить SHA-256:
    certutil -hashfile 67.apply.patch SHA256
    Ожидаемый SHA-256: f1589bdabf0c01b272240bb585ab40050ca10e03110cf7fbc0097612c98eb7f5
-7. Затем:
+   Если SHA не совпал — остановиться.
+7. Выполнить:
    git apply --check 67.apply.patch
    git apply 67.apply.patch
    Remove-Item 67.apply.patch
@@ -40,45 +45,59 @@ Patch 67 — Android 0.6: локальный кеш, incremental sync, увед�
 - android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
 
 Что должен сделать Patch 67
-- Сразу показывать сохранённые заказы текущего CRM-аккаунта из локального кеша.
-- Временный пустой ответ сервера не очищает уже известный список.
-- После baseline получать изменения по updated_at и merge по order.id вместо полной загрузки CRM при каждом входе.
-- Realtime обновляет/добавляет заказы; после reconnect/foreground контрольный sync добирает пропущенные изменения.
-- Правило уведомления совпадает с визуальным НОВЫЙ ЗАКАЗ: Prom/Epicentr/Kasta, нет ТТН, заказ не cancelled/returned.
-- Первый baseline не озвучивает старые заказы; новый ранее неизвестный order.id уведомляется один раз независимо от Realtime или контрольного sync.
-- На Android 13+ корректно запросить POST_NOTIFICATIONS; ожидающее уведомление не терять до выдачи разрешения.
-- Если Android полностью убил процесс, без server push/FCM гарантированного фонового уведомления нет.
-- В карточке клиента оставить Позвонить и добавить Viber/Telegram по нормализованному международному номеру с безопасным fallback.
-- В списке и деталях Prom/Epicentr/Kasta показывать маленькими реальными логотипами Web CRM; Р/С и Сайт оставить текстом.
-- Marketplace acceptance/business logic не менять.
+- При запуске сразу показывать сохранённые заказы из локального кеша текущего CRM-аккаунта.
+- Временный пустой ответ сервера не должен очищать уже известный список.
+- После создания baseline не перезагружать всю CRM при каждом входе: забирать изменения по updated_at и merge по order.id.
+- Realtime продолжает обновлять/добавлять заказы; после reconnect/возврата в foreground выполняется контрольный sync пропущенных изменений.
+- Новые ранее неизвестные заказы определять одним правилом с визуальной плашкой НОВЫЙ ЗАКАЗ.
+- Первый baseline/первая установка не должны массово озвучивать старые заказы.
+- Новый заказ, пойманный Realtime или найденный контрольным sync, должен дать одно уведомление; повторно один и тот же order.id не озвучивать.
+- На Android 13+ при включённых уведомлениях корректно запросить POST_NOTIFICATIONS; ожидающее уведомление не терять до выдачи разрешения.
+- Ограничение сохранить честным: если Android полностью убил процесс, без server push/FCM гарантированного фонового уведомления нет.
+- В карточке клиента оставить Позвонить и добавить Viber/Telegram по нормализованному международному номеру с безопасным fallback, если приложение не открылось.
+- В списке и деталях вместо текста Пром/Эпицентр/Каста показывать маленькие реальные логотипы из Web CRM assets; Р/С и Сайт оставить текстом.
+- Существующую marketplace acceptance/business logic не менять.
 
 Обязательные проверки
-- git status --short: только 11 файлов выше; AGENTS.md не включать.
-- git diff --check.
-- Использовать существующие Android SDK C:\Users\Public\Android\Sdk, GRADLE_USER_HOME C:\dev\gradle-home, существующий JDK и release keystore из android-signing; ASCII alias/subst к этому же worktree, не копию.
-- Выполнить testDebugUnitTest, lintDebug, assembleDebug, assembleRelease.
-- apksigner verify --print-certs; ожидаемый signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53.
-- Снова git diff --check, git status --short и итоговый diff: ровно 11 файлов.
+1. git status --short — только 11 файлов выше; AGENTS.md не включать.
+2. git diff --check
+3. Использовать уже существующую Android-инфраструктуру:
+   - Android SDK: C:\Users\Public\Android\Sdk
+   - GRADLE_USER_HOME: C:\dev\gradle-home
+   - существующий JDK и существующий release keystore из android-signing
+   - для сборки использовать ASCII alias/subst к этому же worktree, не копию проекта.
+4. Выполнить Android checks:
+   testDebugUnitTest
+   lintDebug
+   assembleDebug
+   assembleRelease
+5. Проверить release APK через apksigner verify --print-certs.
+   Ожидаемый signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53
+6. Снова git diff --check, git status --short и итоговый diff. Ровно 11 файлов.
 
 Контрольные случаи
-- Кеш + временный [] => список не исчезает.
-- Новый order.id => добавляется без полной перезагрузки старых.
-- Изменённый order.id => обновляется без дубля.
-- Пропущенный Realtime INSERT, найденный после reconnect => появляется и уведомляется один раз.
-- Первый baseline => старые заказы не дают шквал уведомлений.
-- Prom/Epicentr/Kasta без ТТН и не cancelled/returned => НОВЫЙ ЗАКАЗ и уведомление по одному правилу.
-- Нет POST_NOTIFICATIONS => запрос разрешения; ожидающее уведомление может быть доставлено после разрешения без повторов.
-- Viber/Telegram получают международный номер; отсутствие приложения не приводит к падению.
+- Кеш уже есть + сервер временно вернул [] => список заказов не исчезает.
+- Кеш есть + появился новый order.id => новый заказ добавляется без полной перезагрузки старых.
+- Изменился существующий order.id => запись обновляется, дубликат не создаётся.
+- Realtime INSERT пропущен, но заказ найден sync после reconnect => заказ появляется и уведомляется один раз.
+- Первый baseline на устройстве => старые заказы не дают шквал уведомлений.
+- Prom/Epicentr/Kasta без ТТН и не cancelled/returned => визуальный НОВЫЙ ЗАКАЗ и то же правило для уведомления.
+- Разрешение POST_NOTIFICATIONS отсутствует => запросить его; после разрешения ожидающее уведомление может быть доставлено, без повторов.
+- Viber/Telegram получают номер в международном формате +380...; отсутствие приложения не приводит к падению.
 - Prom/Epicentr/Kasta => логотипы; Р/С/Сайт => текст.
 
 Commit / push
-- Commit только 11 файлов Patch 67.
+- В commit включить только 11 файлов Patch 67.
 - Commit message: Stabilize Android order sync and notifications
-- Перед commit/push снова git fetch origin main. Если origin/main изменился относительно b04099d45d7256645780a335ad2f51076c974e46 — остановиться и сообщить новый SHA; конфликт самостоятельно не решать.
+- Перед commit/push снова git fetch origin main.
+- Если origin/main изменился относительно b04099d45d7256645780a335ad2f51076c974e46 — остановиться и сообщить новый SHA; не решать конфликт самостоятельно.
+- git add только 11 файлов задачи.
+- git commit -m "Stabilize Android order sync and notifications"
 - git push origin HEAD:main
-- Никаких Supabase deploy/db push.
+- Никаких Supabase deploy/db push для Patch 67.
 
 После push
-- Проверить GitHub Actions Android APK для нового commit и дождаться success.
+- Проверить GitHub Actions workflow Android APK для нового commit.
+- Дождаться success.
 - Убедиться, что artifact orders-android-release создан.
 - Сообщить commit SHA, run ID, success/failure, release signer SHA-256 и artifact name.
