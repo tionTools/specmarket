@@ -1,0 +1,162 @@
+Продолжение Patch 64 после остановки на первом запуске найденного `C:\Users\Вадим\AppData\AndroidCLI\android.exe`.
+
+Работай только с уже применённым Patch 64 в локальном проекте:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+ВАЖНО:
+- Patch 64 уже применён. НЕ применяй 64.patch повторно.
+- Working tree НЕ сбрасывай.
+- Keystore уже создан и проверен вне репозитория. НЕ регенерируй его.
+- Все четыре GitHub release Secrets уже настроены. НЕ удаляй, НЕ меняй и НЕ перезаписывай их.
+- Android CLI уже найден по точному пути `C:\Users\Вадим\AppData\AndroidCLI\android.exe`. НЕ переустанавливай его только из-за non-zero exit code при bare/help запуске.
+
+1. Проверь текущее состояние проекта
+Убедись, что изменены только 6 файлов Patch 64:
+- `.github/workflows/android-apk.yml`
+- `android/app/build.gradle.kts`
+- `android/app/src/main/java/ua/orders/crm/Appearance.kt`
+- `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
+- `android/app/src/main/java/ua/orders/crm/OrderModels.kt`
+- `android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt`
+
+Выполни:
+`git diff --check`
+`git diff --name-only`
+
+2. Не используй bare `android.exe` или `android --help` как health-check
+Предыдущий запуск распаковал embedded installation и показал help, но вернул non-zero. Это само по себе не доказывает неисправность CLI.
+
+Используй точный путь:
+```powershell
+$androidCli = 'C:\Users\Вадим\AppData\AndroidCLI\android.exe'
+if (!(Test-Path $androidCli)) { throw 'Android CLI binary not found at expected path.' }
+& $androidCli --version
+$androidVersionExit = $LASTEXITCODE
+if ($androidVersionExit -ne 0) { throw "android --version failed with exit code $androidVersionExit" }
+```
+
+Если `--version` успешно выводит версию и exit code 0 — продолжай.
+Если `--version` падает — остановись и сообщи точный stdout/stderr и numeric exit code. Не переустанавливай CLI и не меняй проект самостоятельно.
+
+3. Создай постоянный ASCII SDK path
+```powershell
+$sdk = 'C:\Users\Public\Android\Sdk'
+New-Item -ItemType Directory -Force -Path $sdk | Out-Null
+$probe = Join-Path $sdk '.write-test'
+Set-Content -Path $probe -Value 'ok' -Encoding ASCII
+Remove-Item $probe -Force
+```
+
+4. Установи необходимые SDK packages через найденный CLI
+Используй официальный синтаксис Android CLI:
+```powershell
+& $androidCli "--sdk=$sdk" sdk install platforms/android-36 build-tools/36.0.0 platform-tools
+$installExit = $LASTEXITCODE
+if ($installExit -ne 0) { throw "Android SDK install failed with exit code $installExit" }
+```
+
+Если CLI показывает Terms of Service / License Agreement и требуется интерактивное принятие, выполни штатное подтверждение в том же процессе и продолжи установку. Не подменяй это сторонними SDK downloader-ами.
+
+После установки проверь:
+```powershell
+if (!(Test-Path (Join-Path $sdk 'platforms\android-36'))) { throw 'Android platform 36 not installed.' }
+if (!(Test-Path (Join-Path $sdk 'build-tools\36.0.0'))) { throw 'Android build-tools 36.0.0 not installed.' }
+$apksigner = Join-Path $sdk 'build-tools\36.0.0\apksigner.bat'
+if (!(Test-Path $apksigner)) { throw 'apksigner.bat not found.' }
+```
+
+5. Зафиксируй постоянные SDK environment variables
+Только после успешной установки:
+```powershell
+[Environment]::SetEnvironmentVariable('ANDROID_HOME', $sdk, 'User')
+[Environment]::SetEnvironmentVariable('ANDROID_SDK_ROOT', $sdk, 'User')
+$env:ANDROID_HOME = $sdk
+$env:ANDROID_SDK_ROOT = $sdk
+```
+
+6. Подготовь постоянный Gradle cache и короткие TEMP/TMP
+```powershell
+$jtmp = 'C:\jtmp'
+$gradleHome = 'C:\jtmp\gradle-home'
+New-Item -ItemType Directory -Force -Path $jtmp,$gradleHome | Out-Null
+$env:TEMP = $jtmp
+$env:TMP = $jtmp
+$env:GRADLE_USER_HOME = $gradleHome
+```
+
+7. Подготовь существующую release-подпись
+```powershell
+$repoRoot = (Get-Location).Path
+$signingDir = Join-Path (Split-Path -Parent $repoRoot) 'android-signing'
+$keystore = Join-Path $signingDir 'orders-release.jks'
+$credentialsFile = Join-Path $signingDir 'orders-release-credentials.txt'
+if (!(Test-Path $keystore) -or !(Test-Path $credentialsFile)) { throw 'Existing release signing files not found; stop without regenerating them.' }
+$cfg = (Get-Content -Raw $credentialsFile | ConvertFrom-StringData)
+$env:ORDERS_RELEASE_STORE_FILE = $keystore
+$env:ORDERS_RELEASE_STORE_PASS = $cfg.password
+$env:ORDERS_RELEASE_ALIAS = $cfg.alias
+$env:ORDERS_RELEASE_KEY_PASS = $cfg.password
+```
+Не выводи значения секретов.
+
+8. Создай временный ASCII alias к тому же repo
+```powershell
+$drive = 'T:'
+if (Test-Path "$drive\\") { throw 'T: already exists; choose another free drive letter.' }
+cmd /c "subst $drive `"$repoRoot`""
+if (!(Test-Path "$drive\\android")) { throw 'subst mapping failed.' }
+```
+
+9. Полная локальная проверка
+```powershell
+Push-Location T:\android
+.\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease --stacktrace
+$gradleExit = $LASTEXITCODE
+Pop-Location
+if ($gradleExit -ne 0) { throw "Gradle verification failed with exit code $gradleExit" }
+```
+
+Если снова появляется `Unable to establish loopback connection`, повтори один раз из обычного системного PowerShell с теми же `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `GRADLE_USER_HOME`, `TEMP/TMP`, ASCII path и `--no-daemon`. Если и там та же ошибка — остановись и сообщи stacktrace.
+
+10. Проверка подписи
+```powershell
+& $apksigner verify --print-certs "android\app\build\outputs\apk\release\app-release.apk"
+if ($LASTEXITCODE -ne 0) { throw 'apksigner verify failed.' }
+```
+
+11. Удали только временный subst
+```powershell
+cmd /c "subst T: /D"
+```
+Если использовал другую букву — удали именно её.
+
+12. Перед commit
+Повторно:
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --stat`
+
+В diff должны быть только 6 файлов Patch 64.
+
+13. Commit/push
+Если все проверки успешны:
+- commit только 6 файлов Patch 64;
+- message: `Polish Android orders app and stabilize release updates`;
+- push в `origin/main`.
+
+14. После push
+Проверь Android APK workflow для нового main commit. Он обязан успешно пройти tests/lint, собрать release APK, пройти `apksigner verify` и создать artifact `orders-android-release`.
+
+Скачай artifact и повторно проверь `apksigner verify --print-certs`. Зафиксируй SHA-256 сертификата подписанта.
+
+15. Итоговый отчёт
+Сообщи только факты:
+- SHA commit в main;
+- Android CLI version;
+- SDK path `C:\Users\Public\Android\Sdk`;
+- какие локальные проверки прошли;
+- GitHub Actions run ID/result;
+- artifact `orders-android-release`;
+- SHA-256 сертификата подписанта;
+- подтверждение, что commit содержит только 6 файлов Patch 64;
+- напоминание: с 0.4 на 0.5 нужен один uninstall/install и один вход; последующие версии с тем же release-ключом и возрастающим versionCode должны обновляться поверх приложения.
