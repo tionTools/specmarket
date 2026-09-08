@@ -1,0 +1,67 @@
+Patch 69 — Android 0.7: сумма в уведомлении и более контрастные элементы заказа
+
+ВАЖНО
+- Источник истины: main 479ff9f6ffe3f71ea61ce1fe1a257f2f333b5b79.
+- Patch 68 уже применён в main до Patch 67; Patch 69 подготовлен против актуального состояния после них.
+- Не изменять AGENTS.md, Web CRM, Supabase, migrations/functions и GitHub workflow.
+- Не перенастраивать JDK/Android SDK/Gradle/signing и не создавать новый keystore.
+- applicationId остаётся ua.orders.crm.
+- Android: versionCode 7, versionName 0.7.
+- Если любая проверка не проходит — остановиться и сообщить точную ошибку; самостоятельно Patch 69 не чинить.
+
+Что меняет Patch 69
+- Уведомление: первая строка «Новый заказ · <площадка> · <сумма> грн»; вторая «<имя покупателя> · №<номер заказа>».
+- Сумма берётся из существующего order.total(); новой бизнес-формулы нет.
+- Плашка НОВЫЙ ЗАКАЗ получает более насыщенный фон; остальные статусные плашки тоже становятся контрастнее.
+- Viber: залитая кнопка #7360F2 с белым текстом.
+- Telegram: залитая кнопка #229ED9 с белым текстом.
+- Deep links, Realtime, cache/incremental sync, notification dedupe, acceptance и бизнес-статусы не меняются.
+
+Ровно 3 файла
+- android/app/build.gradle.kts
+- android/app/src/main/java/ua/orders/crm/MainActivity.kt
+- android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+
+Применение
+1. В C:\Users\Вадим\Documents\CRM моя\specmarket выполнить: git fetch origin main chatgpt-patches
+2. Убедиться, что origin/main = 479ff9f6ffe3f71ea61ce1fe1a257f2f333b5b79. Если main уже другой — остановиться и сообщить новый SHA до применения.
+3. Работать в отдельном чистом worktree C:\Users\Вадим\Documents\CRM моя\specmarket-p69 от origin/main.
+4. Получить patch без изменения байтов:
+   cmd /c "git show origin/chatgpt-patches:69.patch > 69.apply.patch"
+5. Проверить SHA-256:
+   (Get-FileHash -Algorithm SHA256 69.apply.patch).Hash.ToLower()
+   Ожидаемый SHA-256: e17b7707517cd113c6196d50de8ebe1584d5ccebbed120ea49d107c734111c79
+6. Выполнить:
+   git apply --check 69.apply.patch
+   git apply 69.apply.patch
+   Remove-Item 69.apply.patch
+
+Обязательные проверки
+- git diff --check
+- git status --short и git diff --name-only: только 3 файла Patch 69; AGENTS.md не включать.
+- testDebugUnitTest
+- lintDebug
+- assembleDebug
+- assembleRelease
+- apksigner verify --print-certs
+- signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53
+- после проверок снова git diff --check и ровно 3 файла.
+
+Контрольные случаи
+- В свёрнутом уведомлении площадка и сумма стоят в первой строке; имя и номер — во второй.
+- Плашки заметно контрастнее поверхности карточки.
+- Viber/Telegram имеют заданные заливки и белый текст.
+- Нажатия Viber/Telegram используют прежние deep links и безопасный fallback.
+- Логика Patch 67 не изменена.
+
+Commit / push
+- В commit только 3 файла Patch 69.
+- Commit message: Improve Android order notification and actions
+- Перед commit/push снова git fetch origin main; если origin/main изменился относительно 479ff9f6ffe3f71ea61ce1fe1a257f2f333b5b79 — остановиться.
+- git push origin HEAD:main
+- Никаких Supabase deploy/db push.
+
+После push
+- Дождаться success Android APK workflow.
+- Убедиться, что artifact orders-android-release создан.
+- Сообщить commit SHA, run ID, signer SHA-256 и artifact name.
