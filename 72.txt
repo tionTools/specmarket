@@ -1,0 +1,78 @@
+Patch 72 — Web CRM: реестр платежей не должен скрываться старым поиском + мгновенная кнопка «Наверх»
+
+Работай только с локальным проектом:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Источник истины для этого Patch: текущий main commit
+7cb7bff3ec45c46009913877b95b7b9e6b9b0572
+
+Цель Patch:
+1. Если перед загрузкой реестра платежей был активен контекстный поиск, после успешной загрузки реестра поисковая строка должна очищаться. Реестр должен показываться без маскировки старым searchQuery.
+2. Кнопку «Наверх» переместить с нижнего левого угла к вертикальному центру левого края экрана.
+3. Переход наверх должен быть мгновенным, без smooth-scroll.
+4. Не менять бизнес-логику реестров, финансов, Supabase и Android.
+
+Выполни полностью:
+
+1. Перейди в проект и синхронизируй main:
+   cd "C:\Users\Вадим\Documents\CRM моя\specmarket"
+   git fetch origin
+   git checkout main
+   git pull --ff-only origin main
+
+2. Проверь базу:
+   git rev-parse HEAD
+   Должно быть ровно:
+   7cb7bff3ec45c46009913877b95b7b9e6b9b0572
+   Если main уже другой — STOP, Patch не применять и сообщить новый SHA.
+
+3. Проверь рабочее дерево. Не трогай и не коммить AGENTS.md. Если есть другие незавершённые изменения — STOP.
+
+4. Получи Patch 72 из ветки chatgpt-patches и примени механически:
+   git fetch origin chatgpt-patches
+   git show origin/chatgpt-patches:72.patch > 72.local.patch
+   git apply --check 72.local.patch
+   git apply 72.local.patch
+   Remove-Item 72.local.patch
+
+5. Сразу проверь scope:
+   git diff --check
+   git diff --name-only
+   В diff должен быть только:
+   src/pages/HomeView.vue
+   AGENTS.md не должен попасть в diff.
+
+6. Статически проверь три изменения в src/pages/HomeView.vue:
+   - в handlePromRegistryFile после успешного создания draft есть: searchQuery.value = ''
+   - scrollOrdersToTop использует behavior: 'auto', а не 'smooth'
+   - у кнопки «Наверх» позиционирование содержит top-1/2 и -translate-y-1/2; bottom-5 у этой кнопки отсутствует.
+
+7. Запусти проверки:
+   pnpm format
+   Если formatter снова изменит src/features/orders/delivery-tracking.ts только из-за известного formatter drift — восстанови этот файл из HEAD и не включай его в Patch.
+   pnpm type-check
+   pnpm lint
+   pnpm build
+
+8. После проверок снова:
+   git diff --check
+   git diff --name-only
+   git diff -- src/pages/HomeView.vue
+   В итоговом diff должен остаться только src/pages/HomeView.vue. Любые другие tool-induced изменения восстанови, не коммить их.
+
+9. Не открывай production/localhost и не обходи логин. Для этого Patch достаточно статических проверок и build.
+
+10. Supabase Functions deploy НЕ запускать. supabase db push НЕ запускать. Миграций в Patch нет.
+
+11. Commit/push только файла задачи:
+   git add src/pages/HomeView.vue
+   git commit -m "Fix registry search and scroll-to-top"
+   git push origin main
+
+12. В отчёте укажи:
+   - commit SHA;
+   - push в main успешен/нет;
+   - итоговый список файлов commit;
+   - результаты pnpm format, pnpm type-check, pnpm lint, pnpm build;
+   - что AGENTS.md не изменялся;
+   - что Supabase Functions deploy и db push не запускались.
