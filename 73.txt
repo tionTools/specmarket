@@ -1,0 +1,102 @@
+Patch 73 — Web CRM: реестр платежей должен сбрасывать фильтр «Неоплаченные»
+
+Основной локальный worktree может оставаться грязным. Его НЕ трогать, НЕ чистить, НЕ reset-ить и НЕ stash-ить. Все существующие локальные файлы/изменения, включая AGENTS.md и незавершённые Patch53-артефакты, оставить как есть.
+
+Основной локальный репозиторий:
+C:\Users\Вадим\Documents\CRM моя\specmarket
+
+Источник истины для этого Patch: origin/main commit
+896bad13fe7bc68580e60f3816e990f0b895d570
+
+Patch 73 проверен на этом exact main. Работай через отдельный чистый git worktree.
+
+Цель Patch:
+1. После успешной загрузки реестра платежей сбрасывать также фильтр «Неоплаченные» (`isShowingUnpaidOnly = false`).
+2. Не менять никакую другую логику реестров, финансов, сверки, Supabase или Android.
+
+Выполни полностью:
+
+1. В основном репозитории только обнови remote refs:
+   cd "C:\Users\Вадим\Documents\CRM моя\specmarket"
+   git fetch origin
+
+2. Проверь origin/main:
+   git rev-parse origin/main
+   Должно быть ровно:
+   896bad13fe7bc68580e60f3816e990f0b895d570
+   Если origin/main уже другой — STOP, Patch не применять и сообщить новый SHA.
+
+3. Основной worktree не изменяй. Зафиксируй для отчёта `git status --short`, но не выполняй checkout/reset/clean/stash/pull в основном worktree.
+
+4. Создай отдельный временный worktree:
+   $repo = "C:\Users\Вадим\Documents\CRM моя\specmarket"
+   $wt = "C:\Users\Вадим\Documents\CRM моя\specmarket-patch73"
+   if (Test-Path $wt) { throw "STOP: $wt already exists" }
+   git -C $repo worktree add --detach $wt origin/main
+
+5. Получи Patch 73 и примени только во временном worktree:
+   git -C $repo fetch origin chatgpt-patches
+   git -C $repo show origin/chatgpt-patches:73.patch > "$wt\73.local.patch"
+   git -C $wt apply --check 73.local.patch
+   git -C $wt apply 73.local.patch
+   Remove-Item "$wt\73.local.patch"
+
+6. Проверь scope:
+   git -C $wt diff --check
+   git -C $wt diff --name-only
+   В diff должен быть только:
+   src/pages/HomeView.vue
+
+7. Статически проверь, что в `handlePromRegistryFile`, сразу в блоке сброса фильтров после успешного создания draft, есть:
+   isShowingUnpaidOnly.value = false
+   Остальная логика функции не должна меняться.
+
+8. Запусти проверки во временном worktree:
+   cd $wt
+   pnpm install --frozen-lockfile
+   pnpm format
+   Если formatter изменит src/features/orders/delivery-tracking.ts только из-за известного formatter drift — восстанови только этот файл из HEAD.
+   pnpm type-check
+   pnpm lint
+   pnpm build
+
+9. После проверок снова:
+   git diff --check
+   git diff --name-only
+   git diff -- src/pages/HomeView.vue
+   В итоговом diff должна остаться только одна логическая правка в src/pages/HomeView.vue: добавление `isShowingUnpaidOnly.value = false`.
+   AGENTS.md, Supabase и Android не трогать.
+
+10. Перед commit/push ещё раз:
+    git -C $repo fetch origin
+    git -C $repo rev-parse origin/main
+    Должно оставаться:
+    896bad13fe7bc68580e60f3816e990f0b895d570
+    Если SHA другой — STOP.
+
+11. Supabase Functions deploy НЕ запускать. supabase db push НЕ запускать. Миграций нет.
+
+12. Commit/push только файла задачи:
+    cd $wt
+    git add src/pages/HomeView.vue
+    git commit -m "Reset unpaid filter for registry"
+    git push origin HEAD:main
+
+13. После успешного push удали только временный worktree:
+    cd $repo
+    git worktree remove $wt
+
+14. В отчёте укажи:
+    - commit SHA;
+    - push в main успешен/нет;
+    - итоговый список файлов commit;
+    - результаты pnpm format, pnpm type-check, pnpm lint, pnpm build;
+    - что основной грязный worktree не изменялся;
+    - что AGENTS.md не изменялся;
+    - что Supabase Functions deploy и db push не запускались.
+
+Предварительная проверка ChatGPT:
+- Validation run: 34469898866 — success.
+- Нормализованный Patch 73 применился через `git apply --check` к exact main 896bad13fe7bc68580e60f3816e990f0b895d570.
+- Scope: только src/pages/HomeView.vue.
+- SHA256 73.patch: 13635f6d45b72cc1bc75b1b74f31bf7a46a4162473a9e280cd755454714510b3.
