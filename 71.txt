@@ -1,0 +1,88 @@
+Patch 71 — Android 0.8: мобильный редизайн, локальный поиск, offline-first и новая иконка
+
+ВАЖНО
+- Источник истины: main a405cfb61d236152a1fc965d929c99fdf2886107.
+- Android: versionCode 8, versionName 0.8.
+- applicationId остаётся ua.orders.crm.
+- Не изменять AGENTS.md, Web CRM, Supabase, migrations/functions и GitHub workflow.
+- Не перенастраивать JDK/Android SDK/Gradle/signing и не создавать новый keystore.
+- Если любая проверка не проходит — остановиться и сообщить точную ошибку; самостоятельно Patch 71 не переписывать.
+
+Что меняет Patch 71
+- Общий список: фон приложения заметно темнее белых карточек; карточки компактнее и визуально разделены.
+- В карточке приоритет: площадка + статус + сумма, затем крупно получатель и телефон, затем товары, доставка, внизу дата/время и вторичный номер заказа.
+- Получатель/телефон берутся прежде всего из delivery.recipient / delivery.recipientPhone, с fallback на customer / phone.
+- Предотправочные отмены скрываются из основного списка по той же модели, что Web CRM: отмена/return-signal без фактического движения посылки скрыта; возвраты после движения остаются.
+- Локальный поиск открывается маленькой лупой в верхней панели; ищет по имени/фамилии, обоим телефонам, номеру заказа, ТТН, площадке, товару, размеру и данным доставки; работает по сохранённым данным без Realtime.
+- Большой баннер про ручное обновление убран; при отсутствии Realtime остаётся только маленький статус «Офлайн · сохранённые данные».
+- Offline-first усилен: при неожиданно пустой памяти перед сетевым refresh повторно поднимается дисковый cache; cache хранит last-known-good backup и предпочитает непустой снимок.
+- Экран заказа: компактная шапка; затем Получатель -> Товары -> Доставка -> Оплата -> Дополнительная информация.
+- Доставка больше не дублируется сверху; технические firstSeenAt/lastSeenAt удалены из UI.
+- История отправлений показывается только если записей больше одной и раскрывается по нажатию.
+- Viber/Telegram используют телефон фактического получателя и сохраняют прежние deep links/цвета.
+- Launcher/round icon заменён на чёрную иконку с цветным кольцом и огнём по утверждённому образцу.
+- Realtime, marketplace acceptance, notification dedupe и серверная архитектура не меняются.
+
+Ровно 9 файлов
+- android/app/build.gradle.kts
+- android/app/src/main/AndroidManifest.xml
+- android/app/src/main/java/ua/orders/crm/Appearance.kt
+- android/app/src/main/java/ua/orders/crm/MainActivity.kt
+- android/app/src/main/java/ua/orders/crm/OrderModels.kt
+- android/app/src/main/java/ua/orders/crm/OrdersCache.kt
+- android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+- android/app/src/main/res/drawable/ic_orders.xml
+- android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+
+Patch SHA-256
+- 7744690c2220ea3b2fcfbc4ed0b959ca0df78d55bf3665d4bd808007cad919ed
+
+Применение
+1. В C:\Users\Вадим\Documents\CRM моя\specmarket выполнить: git fetch origin main chatgpt-patches
+2. Убедиться, что origin/main = a405cfb61d236152a1fc965d929c99fdf2886107. Если main другой — остановиться и сообщить новый SHA до применения.
+3. Работать в отдельном чистом worktree C:\Users\Вадим\Documents\CRM моя\specmarket-p71 от origin/main.
+4. Получить patch без изменения байтов:
+   cmd /c "git show origin/chatgpt-patches:71.patch > 71.apply.patch"
+5. Проверить SHA-256:
+   (Get-FileHash -Algorithm SHA256 71.apply.patch).Hash.ToLower()
+   Ожидаемый SHA-256: 7744690c2220ea3b2fcfbc4ed0b959ca0df78d55bf3665d4bd808007cad919ed
+6. Выполнить:
+   git apply --check 71.apply.patch
+   git apply 71.apply.patch
+   Remove-Item 71.apply.patch
+
+Обязательные проверки
+- git diff --check
+- git status --short и git diff --name-only: только 9 файлов Patch 71; AGENTS.md не включать.
+- testDebugUnitTest
+- lintDebug
+- assembleDebug
+- assembleRelease
+- apksigner verify --print-certs
+- signer SHA-256: a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53
+- после проверок снова git diff --check и ровно 9 файлов.
+
+Контрольные случаи
+- Карточки визуально отделены от общего фона.
+- Получатель и телефон заметны; номер заказа вторичен.
+- Поиск находит: recipient/customer, телефон без форматирования, номер заказа, ТТН, товар/размер и данные доставки.
+- Предотправочный отменённый заказ не попадает в основной список.
+- Возврат/возвращающийся заказ после движения посылки остаётся в списке.
+- Без Realtime сохранённые заказы остаются на экране; ручное обновление не требуется для показа cache.
+- В деталях порядок: Получатель -> Товары -> Доставка -> Оплата; firstSeenAt/lastSeenAt не отображаются.
+- История отправлений отсутствует при одной записи и раскрывается при нескольких.
+- Viber/Telegram открываются по телефону получателя.
+- Launcher icon и roundIcon используют новый ic_orders.
+
+Commit / push
+- В commit только 9 файлов Patch 71.
+- Commit message: Redesign Android order workflow and search
+- Перед commit/push снова git fetch origin main; если origin/main изменился относительно a405cfb61d236152a1fc965d929c99fdf2886107 — остановиться.
+- git push origin HEAD:main
+- Никаких Supabase deploy/db push.
+
+После push
+- Дождаться success Android APK workflow.
+- Убедиться, что artifact orders-android-release создан и signer тот же.
+- Убедиться, что release android-latest обновлён и app-release.apk доступен на постоянной странице.
+- Сообщить commit SHA, run ID, signer SHA-256 и artifact name.

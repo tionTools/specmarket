@@ -1,0 +1,912 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 9614995..898c4fa 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -18,8 +18,8 @@ android {
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 7
+-        versionName = "0.7"
++        versionCode = 8
++        versionName = "0.8"
+     }
+     signingConfigs {
+         create("release") {
+@@ -48,6 +48,7 @@ dependencies {
+     implementation("androidx.activity:activity-compose:1.13.0")
+     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+     implementation("androidx.compose.material3:material3")
++    implementation("androidx.compose.material:material-icons-core")
+     implementation("androidx.compose.foundation:foundation")
+     implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
+     implementation("io.github.jan-tennert.supabase:auth-kt")
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index aef9bac..fc7ce39 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -1,7 +1,7 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+-    <application android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_orders" android:label="Заказы" android:theme="@style/Theme.Orders" android:usesCleartextTraffic="false">
++    <application android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_orders" android:roundIcon="@drawable/ic_orders" android:label="Заказы" android:theme="@style/Theme.Orders" android:usesCleartextTraffic="false">
+         <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+     </application>
+ </manifest>
+diff --git a/android/app/src/main/java/ua/orders/crm/Appearance.kt b/android/app/src/main/java/ua/orders/crm/Appearance.kt
+index 38cad38..a3169f8 100644
+--- a/android/app/src/main/java/ua/orders/crm/Appearance.kt
++++ b/android/app/src/main/java/ua/orders/crm/Appearance.kt
+@@ -44,7 +44,7 @@ fun ordersColors(dark: Boolean): ColorScheme = if (dark) {
+         onPrimary = Color.White,
+         secondary = Color(0xFFC026D3),
+         tertiary = Color(0xFF0369A1),
+-        background = Color(0xFFF8FAFC),
++        background = Color(0xFFEEF0F3),
+         surface = Color.White,
+         surfaceVariant = Color(0xFFF1F5F9),
+         onSurface = Color(0xFF0F172A),
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+index 00484c8..38a627e 100644
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Close
++import androidx.compose.material.icons.filled.Search
+ import androidx.compose.foundation.text.selection.SelectionContainer
+ import androidx.compose.material3.*
+ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+@@ -353,10 +356,10 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
+ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+     Card(
+         Modifier.fillMaxWidth(),
+-        shape = RoundedCornerShape(20.dp),
++        shape = RoundedCornerShape(16.dp),
+         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+     ) {
+-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+             content()
+         }
+@@ -366,7 +369,7 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
+ private data class StatusColors(val background: Color, val foreground: Color)
+ 
+ @Composable
+-private fun StatusLabel(order: Order) {
++private fun StatusLabel(order: Order, compact: Boolean = false) {
+     if (isNewOrderVisual(order)) {
+         Surface(
+             shape = RoundedCornerShape(999.dp),
+@@ -375,10 +378,11 @@ private fun StatusLabel(order: Order) {
+             border = BorderStroke(1.dp, Color(0xFFC026D3)),
+         ) {
+             Text(
+-                "НОВЫЙ ЗАКАЗ",
+-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+-                style = MaterialTheme.typography.labelLarge,
++                if (compact) "НОВЫЙ" else "НОВЫЙ ЗАКАЗ",
++                modifier = Modifier.padding(horizontal = if (compact) 8.dp else 11.dp, vertical = 4.dp),
++                style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                 fontWeight = FontWeight.Bold,
++                maxLines = 1,
+             )
+         }
+         return
+@@ -392,80 +396,105 @@ private fun StatusLabel(order: Order) {
+     Surface(shape = RoundedCornerShape(999.dp), color = colors.background, contentColor = colors.foreground) {
+         Text(
+             displayOrderStatus(order.status).display(),
+-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
++            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 4.dp),
+             color = colors.foreground,
+-            style = MaterialTheme.typography.labelLarge,
++            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+             fontWeight = FontWeight.SemiBold,
++            maxLines = 1,
++            overflow = TextOverflow.Ellipsis,
+         )
+     }
+ }
+ 
+-@Composable
+-private fun DeliveryStatus(order: Order, compact: Boolean = false) {
++private fun compactDeliveryLine(order: Order): String {
+     val status = order.deliveryStatusInfo()
+-    if (status.stage.isBlank()) return
+-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+-        Text(
+-            status.stage,
+-            style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
+-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+-            fontWeight = if (compact) FontWeight.Normal else FontWeight.Medium,
+-        )
+-        if (status.current.isNotBlank()) {
+-            Text(status.current, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+-        }
+-    }
++    return listOf(
++        order.deliveryValue("carrier").trim(),
++        status.stage.trim(),
++        status.current.trim(),
++    ).filter(String::isNotBlank).distinct().joinToString(" · ")
+ }
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
++    var searchOpen by rememberSaveable { mutableStateOf(false) }
++    var searchQuery by rememberSaveable { mutableStateOf("") }
++    val visibleOrders = remember(vm.orders, searchQuery) {
++        vm.orders
++            .filter(::isOrderVisibleInMainList)
++            .filter { it.matchesOrderSearch(searchQuery) }
++    }
++
+     Scaffold(
+         topBar = {
+             TopAppBar(
+                 title = {
+-                    Column {
+-                        Text("Заказы", fontWeight = FontWeight.Bold)
+-                        Text(
+-                            if (vm.realtimeConnected) "Онлайн" else "Подключение…",
+-                            style = MaterialTheme.typography.labelSmall,
+-                            color = if (vm.realtimeConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
++                    if (searchOpen) {
++                        TextField(
++                            value = searchQuery,
++                            onValueChange = { searchQuery = it },
++                            modifier = Modifier.fillMaxWidth(),
++                            singleLine = true,
++                            placeholder = { Text("Поиск") },
+                         )
++                    } else {
++                        Column {
++                            Text("Заказы", fontWeight = FontWeight.Bold)
++                            Text(
++                                if (vm.realtimeConnected) "Онлайн" else "Офлайн · сохранённые данные",
++                                style = MaterialTheme.typography.labelSmall,
++                                color = if (vm.realtimeConnected)
++                                    MaterialTheme.colorScheme.primary
++                                else MaterialTheme.colorScheme.onSurfaceVariant,
++                            )
++                        }
+                     }
+                 },
+                 actions = {
+-                    TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") }
++                    IconButton(onClick = {
++                        if (searchOpen) {
++                            searchQuery = ""
++                            searchOpen = false
++                        } else searchOpen = true
++                    }) {
++                        Icon(
++                            if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
++                            contentDescription = if (searchOpen) "Закрыть поиск" else "Поиск",
++                        )
++                    }
+                     TextButton(onSettings) { Text("Настройки") }
+                 },
+             )
+         },
+         containerColor = MaterialTheme.colorScheme.background,
+     ) { padding ->
+-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+-            if (!vm.realtimeConnected) Text(
+-                "Автообновление подключается. Доступно ручное обновление.",
+-                style = MaterialTheme.typography.bodySmall,
+-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+-            )
+-            PullToRefreshBox(
+-                isRefreshing = vm.loading,
+-                onRefresh = { vm.refresh() },
+-                modifier = Modifier.weight(1f),
++        PullToRefreshBox(
++            isRefreshing = vm.loading,
++            onRefresh = { vm.refresh() },
++            modifier = Modifier.fillMaxSize().padding(padding),
++        ) {
++            LazyColumn(
++                Modifier.fillMaxSize().padding(horizontal = 12.dp),
++                verticalArrangement = Arrangement.spacedBy(12.dp),
++                contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
+             ) {
+-                LazyColumn(
+-                    Modifier.fillMaxSize(),
+-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+-                    contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp),
+-                ) {
+-                    if (vm.orders.isEmpty()) item {
++                if (visibleOrders.isEmpty()) {
++                    item {
+                         Text(
+-                            if (vm.loading || !vm.initialLoadComplete) "Загрузка…" else "Заказов пока нет.",
++                            when {
++                                searchQuery.isNotBlank() -> "Ничего не найдено."
++                                vm.orders.isEmpty() && (vm.loading || !vm.initialLoadComplete) -> "Загрузка…"
++                                vm.orders.isEmpty() -> "Сохранённых заказов пока нет."
++                                else -> "Активных заказов нет."
++                            },
+                             Modifier.padding(24.dp),
+                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                         )
+                     }
+-                    items(vm.orders, key = { it.id }) { order -> OrderCard(order) { vm.open(order.id) } }
++                }
++                items(visibleOrders, key = { it.id }) { order ->
++                    OrderCard(order) { vm.open(order.id) }
+                 }
+             }
+         }
+@@ -475,45 +504,74 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+ @Composable
+ private fun OrderCard(order: Order, onClick: () -> Unit) {
+     val newOrder = isNewOrderVisual(order)
++    val recipient = order.recipientName()
++    val recipientPhone = order.recipientPhone()
+     Card(
+         onClick = onClick,
+         modifier = Modifier.fillMaxWidth(),
+-        shape = RoundedCornerShape(22.dp),
++        shape = RoundedCornerShape(16.dp),
+         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+-        elevation = CardDefaults.cardElevation(defaultElevation = if (newOrder) 3.dp else 1.dp),
+-        border = BorderStroke(
+-            if (newOrder) 2.dp else 1.dp,
+-            if (newOrder) Color(0xFFE879F9) else MaterialTheme.colorScheme.outlineVariant,
+-        ),
++        elevation = CardDefaults.cardElevation(defaultElevation = if (newOrder) 2.dp else 1.dp),
++        border = if (newOrder) BorderStroke(1.dp, Color(0xFFD946EF)) else null,
+     ) {
+-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+-                Column(Modifier.weight(1f)) {
++        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                     PlatformLogo(order.platform)
+-                    Text("№${order.number()}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
++                    Spacer(Modifier.width(8.dp))
++                    StatusLabel(order, compact = true)
+                 }
+-                Text(money(order.total()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
++                Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+             }
+-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+-                StatusLabel(order)
++
++            Text(
++                recipient,
++                style = MaterialTheme.typography.titleMedium,
++                fontWeight = FontWeight.Bold,
++                color = MaterialTheme.colorScheme.onSurface,
++            )
++            if (recipientPhone != "—") {
+                 Text(
+-                    "${order.orderDate.display()} · ${order.orderTime.display()}",
+-                    style = MaterialTheme.typography.bodySmall,
+-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    recipientPhone,
++                    style = MaterialTheme.typography.bodyLarge,
++                    fontWeight = FontWeight.SemiBold,
++                    color = MaterialTheme.colorScheme.onSurface,
+                 )
+             }
+-            DeliveryStatus(order, compact = true)
+-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
++
+             Text(
+                 order.items.sortedBy { it.position }.joinToString("\n") {
+                     "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
+                 }.ifBlank { "—" },
+                 style = MaterialTheme.typography.bodyMedium,
+-                maxLines = 4,
++                maxLines = 3,
+                 overflow = TextOverflow.Ellipsis,
+             )
+-            val customerLine = listOf(order.customer.display(), order.phone.display()).filter { it != "—" }.joinToString(" · ")
+-            if (customerLine.isNotBlank()) Text(customerLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++
++            val deliveryLine = compactDeliveryLine(order)
++            if (deliveryLine.isNotBlank()) {
++                Text(
++                    deliveryLine,
++                    style = MaterialTheme.typography.bodyMedium,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    maxLines = 2,
++                    overflow = TextOverflow.Ellipsis,
++                )
++            }
++
++            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
++            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
++                Text(
++                    "${order.orderDate.display()} · ${order.orderTime.display()}",
++                    style = MaterialTheme.typography.labelMedium,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                )
++                Text(
++                    "№${order.number()}",
++                    style = MaterialTheme.typography.labelMedium,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                )
++            }
+         }
+     }
+ }
+@@ -522,7 +580,28 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
+ private fun DetailField(label: String, value: String) {
+     Column(Modifier.padding(vertical = 2.dp)) {
+         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+-        SelectionContainer { Text(value, style = MaterialTheme.typography.bodyLarge) }
++        SelectionContainer {
++            Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
++        }
++    }
++}
++
++@Composable
++private fun DetailsHeader(order: Order) {
++    Column(
++        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
++        verticalArrangement = Arrangement.spacedBy(8.dp),
++    ) {
++        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++            PlatformLogo(order.platform)
++            Spacer(Modifier.width(10.dp))
++            StatusLabel(order, compact = true)
++        }
++        Text(
++            "№${order.number()} · ${order.orderDate.display()} · ${order.orderTime.display()}",
++            style = MaterialTheme.typography.bodyMedium,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++        )
+     }
+ }
+ 
+@@ -531,12 +610,24 @@ private fun DetailField(label: String, value: String) {
+ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+     val order = vm.detail
+     val context = LocalContext.current
++    var extraExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
++    var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
++
+     Scaffold(
+         topBar = {
+             TopAppBar(
+-                title = { Text(order?.let { "Заказ №${it.number()}" } ?: "Заказ", fontWeight = FontWeight.SemiBold) },
++                title = { Text("Заказ", fontWeight = FontWeight.SemiBold) },
+                 navigationIcon = { TextButton({ vm.closeDetail() }) { Text("Назад") } },
+-                actions = { TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") } },
++                actions = {
++                    order?.let {
++                        Text(
++                            money(it.total()),
++                            style = MaterialTheme.typography.titleMedium,
++                            fontWeight = FontWeight.Bold,
++                            modifier = Modifier.padding(end = 12.dp),
++                        )
++                    }
++                },
+             )
+         },
+         bottomBar = {
+@@ -546,7 +637,12 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+                         onClick = { onAccept(order) },
+                         modifier = Modifier.fillMaxWidth().padding(12.dp).height(50.dp),
+                         enabled = vm.acceptingId == null,
+-                    ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять заказ", fontWeight = FontWeight.SemiBold) }
++                    ) {
++                        Text(
++                            if (vm.acceptingId == order.id) "Принятие…" else "Принять заказ",
++                            fontWeight = FontWeight.SemiBold,
++                        )
++                    }
+                 }
+             }
+         },
+@@ -556,58 +652,52 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+             Text("Заказ недоступен или удалён.", Modifier.padding(padding).padding(24.dp))
+             return@Scaffold
+         }
++
++        val recipient = order.recipientName()
++        val recipientPhone = order.recipientPhone()
++        val rawPhone = recipientPhone.takeUnless { it == "—" }.orEmpty()
++        val originalCustomer = order.customer.display()
++        val originalPhone = order.phone.display()
++        val shipments = order.shipments()
++
+         LazyColumn(
+             Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
+             verticalArrangement = Arrangement.spacedBy(12.dp),
+             contentPadding = PaddingValues(bottom = 24.dp),
+         ) {
++            item { DetailsHeader(order) }
++
+             item {
+-                Card(
+-                    Modifier.fillMaxWidth(),
+-                    shape = RoundedCornerShape(22.dp),
+-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+-                    border = if (isNewOrderVisual(order)) BorderStroke(2.dp, Color(0xFFE879F9)) else null,
+-                ) {
+-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+-                            Column {
+-                                PlatformLogo(order.platform)
+-                                Text("№${order.number()}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+-                            }
+-                            Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
++                SectionCard("Получатель") {
++                    Text(
++                        recipient,
++                        style = MaterialTheme.typography.titleLarge,
++                        fontWeight = FontWeight.Bold,
++                        color = MaterialTheme.colorScheme.onSurface,
++                    )
++                    if (recipientPhone != "—") {
++                        SelectionContainer {
++                            Text(
++                                recipientPhone,
++                                style = MaterialTheme.typography.bodyLarge,
++                                fontWeight = FontWeight.SemiBold,
++                                color = MaterialTheme.colorScheme.onSurface,
++                            )
+                         }
+-                        StatusLabel(order)
+-                        Text("${order.orderDate.display()} · ${order.orderTime.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+-                        DeliveryStatus(order)
+-                    }
+-                }
+-            }
+-            item { Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+-            items(order.items.sortedBy { it.position }) { product ->
+-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+-                        Text(product.productName.display(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+-                        DetailField("Размер", product.size.display())
+-                        Text("${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}")
+                     }
+-                }
+-            }
+-            item {
+-                SectionCard("Клиент") {
+-                    DetailField("Имя", order.customer.display())
+-                    DetailField("Телефон", order.phone.display())
+-                    val phone = order.phone
+-                    if (normalizeCustomerPhone(phone) != null) {
++                    if (normalizeCustomerPhone(rawPhone) != null) {
+                         FilledTonalButton(
+-                            onClick = { openDialer(context, phone.orEmpty()) },
++                            onClick = { openDialer(context, rawPhone) },
+                             modifier = Modifier.fillMaxWidth().height(48.dp),
+-                        ) { Text("Позвонить ${phone.orEmpty()}", fontWeight = FontWeight.SemiBold) }
++                        ) {
++                            Text("Позвонить $recipientPhone", fontWeight = FontWeight.SemiBold)
++                        }
+                         Row(
+                             Modifier.fillMaxWidth(),
+                             horizontalArrangement = Arrangement.spacedBy(8.dp),
+                         ) {
+                             Button(
+-                                onClick = { openViber(context, phone.orEmpty()) },
++                                onClick = { openViber(context, rawPhone) },
+                                 modifier = Modifier.weight(1f).height(46.dp),
+                                 colors = ButtonDefaults.buttonColors(
+                                     containerColor = Color(0xFF7360F2),
+@@ -615,7 +705,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+                                 ),
+                             ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
+                             Button(
+-                                onClick = { openTelegram(context, phone.orEmpty()) },
++                                onClick = { openTelegram(context, rawPhone) },
+                                 modifier = Modifier.weight(1f).height(46.dp),
+                                 colors = ButtonDefaults.buttonColors(
+                                     containerColor = Color(0xFF229ED9),
+@@ -626,19 +716,49 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+                     }
+                 }
+             }
++
++            item {
++                Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
++            }
++            items(order.items.sortedBy { it.position }) { product ->
++                Card(
++                    Modifier.fillMaxWidth(),
++                    shape = RoundedCornerShape(14.dp),
++                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
++                ) {
++                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
++                        Text(
++                            product.productName.display(),
++                            style = MaterialTheme.typography.titleMedium,
++                            fontWeight = FontWeight.SemiBold,
++                        )
++                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
++                            Text("Размер ${product.size.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
++                            Text(
++                                "${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
++                                fontWeight = FontWeight.Medium,
++                            )
++                        }
++                    }
++                }
++            }
++
+             item {
+                 SectionCard("Доставка") {
+-                    for ((key, label) in listOf(
+-                        "carrier" to "Перевозчик", "recipient" to "Получатель",
+-                        "recipientPhone" to "Телефон получателя", "city" to "Город", "address" to "Адрес",
+-                        "ttn" to "ТТН", "payer" to "Плательщик",
+-                    )) DetailField(label, order.deliveryField(key))
++                    val carrier = order.deliveryField("carrier")
++                    val city = order.deliveryField("city")
++                    val address = order.deliveryField("address")
++                    val ttn = order.deliveryField("ttn")
+                     val deliveryStatus = order.deliveryStatusInfo()
+-                    DetailField("Статус", deliveryStatus.stage.display())
+-                    if (deliveryStatus.current.isNotBlank()) DetailField("Текущий статус", deliveryStatus.current)
+-                    DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
++                    DetailField("Перевозчик", carrier)
++                    val destination = listOf(city, address).filter { it != "—" }.joinToString(" · ")
++                    if (destination.isNotBlank()) DetailField("Куда", destination)
++                    if (ttn != "—") DetailField("ТТН", ttn)
++                    if (deliveryStatus.stage.isNotBlank()) DetailField("Статус", deliveryStatus.stage)
++                    if (deliveryStatus.current.isNotBlank()) DetailField("Сейчас", deliveryStatus.current)
+                 }
+             }
++
+             item {
+                 SectionCard("Оплата") {
+                     DetailField("Способ", order.deliveryField("paymentMethod"))
+@@ -646,22 +766,73 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+                     DetailField("Сумма", order.deliveryField("paymentAmount"))
+                 }
+             }
+-            if (order.shipments().isNotEmpty()) item { Text("История отправлений", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+-            items(order.shipments()) { shipment ->
+-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+-                        DetailField("ТТН", shipment.field("ttn"))
+-                        DetailField("Перевозчик", shipment.field("carrier"))
+-                        DetailField("Город / адрес", "${shipment.field("city")} · ${shipment.field("address")}")
+-                        DetailField("Первое / последнее изменение", "${shipment.field("firstSeenAt")} · ${shipment.field("lastSeenAt")}")
++
++            item {
++                OutlinedButton(
++                    onClick = { extraExpanded = !extraExpanded },
++                    modifier = Modifier.fillMaxWidth(),
++                ) {
++                    Text(if (extraExpanded) "Скрыть дополнительную информацию" else "Дополнительная информация")
++                }
++            }
++            if (extraExpanded) {
++                item {
++                    SectionCard("Дополнительно") {
++                        if (originalCustomer != recipient || originalPhone != recipientPhone) {
++                            DetailField(
++                                "Клиент",
++                                listOf(originalCustomer, originalPhone)
++                                    .filter { it != "—" }
++                                    .joinToString(" · ")
++                                    .ifBlank { "—" },
++                            )
++                        }
++                        DetailField("Плательщик доставки", order.deliveryField("payer"))
++                        DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
++                    }
++                }
++            }
++
++            if (shipments.size > 1) {
++                item {
++                    OutlinedButton(
++                        onClick = { historyExpanded = !historyExpanded },
++                        modifier = Modifier.fillMaxWidth(),
++                    ) {
++                        Text("История отправлений · ${shipments.size}")
++                    }
++                }
++                if (historyExpanded) {
++                    items(shipments) { shipment ->
++                        Card(
++                            Modifier.fillMaxWidth(),
++                            shape = RoundedCornerShape(14.dp),
++                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
++                        ) {
++                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
++                                DetailField("ТТН", shipment.field("ttn"))
++                                DetailField("Перевозчик", shipment.field("carrier"))
++                                val destination = listOf(shipment.field("city"), shipment.field("address"))
++                                    .filter { it != "—" }
++                                    .joinToString(" · ")
++                                if (destination.isNotBlank()) DetailField("Куда", destination)
++                            }
++                        }
+                     }
+                 }
+             }
++
+             if (!canAccept(order, vm.email)) {
+                 acceptUnavailableReason(order, vm.email)?.let { reason ->
+-                    item { Text(reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) }
++                    item {
++                        Text(
++                            reason,
++                            color = MaterialTheme.colorScheme.onSurfaceVariant,
++                            style = MaterialTheme.typography.bodyMedium,
++                        )
++                    }
+                 }
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+index 21b6384..1fd8aee 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -224,4 +224,68 @@ fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
+ fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
+ fun Order.deliveryField(key: String): String = deliveryValue(key).display()
+ fun Order.shipments(): List<JsonObject> = (((delivery as? JsonObject)?.get("shipmentHistory")) as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
++
++
++fun Order.recipientName(): String =
++    deliveryValue("recipient").trim().ifBlank { customer.orEmpty().trim() }.display()
++
++fun Order.recipientPhone(): String =
++    deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() }.display()
++
++private val returnSignalRegex = Regex(
++    "скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим",
++    RegexOption.IGNORE_CASE,
++)
++
++fun Order.hasPhysicalShipmentMovement(): Boolean {
++    if (deliveryValue("printedAt").trim().isNotEmpty()) return true
++    return deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT) in setOf(
++        "accepted", "in_transit", "ready_for_pickup", "delivered", "returning", "returned",
++    )
++}
++
++fun Order.hasReturnSignal(): Boolean {
++    val normalizedTracking = deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
++    return normalizedTracking in setOf("returning", "returned") ||
++        returnSignalRegex.containsMatchIn(displayOrderStatus(status)) ||
++        returnSignalRegex.containsMatchIn(deliveryValue("trackingStatus")) ||
++        returnSignalRegex.containsMatchIn(deliveryValue("status"))
++}
++
++/** Mirrors Web CRM: cancellation before physical shipment is hidden; returns stay in the main list. */
++fun isOrderVisibleInMainList(order: Order): Boolean =
++    !order.hasReturnSignal() || order.hasPhysicalShipmentMovement()
++
++private fun searchCompact(value: String): String =
++    value.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
++
++fun Order.matchesOrderSearch(query: String): Boolean {
++    val terms = query.trim().lowercase(Locale.ROOT).split(Regex("\\s+")).filter(String::isNotBlank)
++    if (terms.isEmpty()) return true
++    val searchable = buildList {
++        add(id)
++        add(externalId.orEmpty())
++        add(number())
++        add(orderDate.orEmpty())
++        add(orderTime.orEmpty())
++        add(platform.orEmpty())
++        add(displayOrderStatus(status))
++        add(customer.orEmpty())
++        add(phone.orEmpty())
++        add(recipientName())
++        add(recipientPhone())
++        add(delivery?.toString().orEmpty())
++        items.forEach { item ->
++            add(item.productName.orEmpty())
++            add(item.size.orEmpty())
++            add(item.quantity?.toString().orEmpty())
++        }
++    }
++    val plain = searchable.joinToString(" ").lowercase(Locale.ROOT)
++    val compact = searchCompact(searchable.joinToString(" "))
++    return terms.all { term ->
++        plain.contains(term) ||
++            searchCompact(term).takeIf { it.length >= 2 }?.let(compact::contains) == true
++    }
++}
+ fun JsonObject.field(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull.display()
+\ No newline at end of file
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersCache.kt b/android/app/src/main/java/ua/orders/crm/OrdersCache.kt
+index 15369d0..9807403 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersCache.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersCache.kt
+@@ -19,18 +19,32 @@ data class OrdersCacheSnapshot(
+ 
+ class OrdersCache(context: Context) {
+     private val file = File(context.filesDir, "orders-cache.json")
++    private val backup = File(context.filesDir, "orders-cache.backup.json")
+     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+ 
++    private fun readSnapshot(source: File): OrdersCacheSnapshot? {
++        if (!source.isFile) return null
++        return runCatching {
++            json.decodeFromString<OrdersCacheSnapshot>(source.readText(Charsets.UTF_8))
++        }.getOrNull()
++    }
++
+     suspend fun load(account: String): OrdersCacheSnapshot? = withContext(Dispatchers.IO) {
+-        if (!file.isFile) return@withContext null
+-        runCatching { json.decodeFromString<OrdersCacheSnapshot>(file.readText(Charsets.UTF_8)) }
+-            .getOrNull()
+-            ?.takeIf { it.account.equals(account, ignoreCase = true) }
++        val matching = sequenceOf(file, backup)
++            .mapNotNull(::readSnapshot)
++            .filter { it.account.equals(account, ignoreCase = true) }
++            .toList()
++        matching.firstOrNull { it.orders.isNotEmpty() } ?: matching.firstOrNull()
+     }
+ 
+     suspend fun save(account: String, orders: List<Order>, pendingNotificationIds: Set<String>) =
+         withContext(Dispatchers.IO) {
+             file.parentFile?.mkdirs()
++            if (readSnapshot(file) != null) {
++                runCatching {
++                    Files.copy(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING)
++                }
++            }
+             val temporary = File(file.parentFile, "${file.name}.tmp")
+             temporary.writeText(
+                 json.encodeToString(
+@@ -52,5 +66,10 @@ class OrdersCache(context: Context) {
+             } catch (_: AtomicMoveNotSupportedException) {
+                 Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+             }
++            if (!backup.isFile) {
++                runCatching {
++                    Files.copy(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING)
++                }
++            }
+         }
+ }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+index 6d74640..fa862ab 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -188,11 +188,21 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+ 
+     fun refresh() {
+         if (email == null || loading) return
+-        val account = email
++        val account = email ?: return
+         loading = true
+         viewModelScope.launch {
+             try {
+                 requests.withLock {
++                    if (orders.isEmpty()) {
++                        cache.load(account)?.let { cached ->
++                            if (cached.orders.isNotEmpty()) {
++                                orders = sortOrdersForDisplay(cached.orders)
++                                pendingNotificationIds.clear()
++                                pendingNotificationIds.addAll(cached.pendingNotificationIds)
++                                initialLoadComplete = true
++                            }
++                        }
++                    }
+                     val baselineComplete = initialLoadComplete
+                     val knownIds = orders.mapTo(hashSetOf()) { it.id }
+                     val cursor = latestOrderUpdatedAt(orders)
+diff --git a/android/app/src/main/res/drawable/ic_orders.xml b/android/app/src/main/res/drawable/ic_orders.xml
+index 4ea43c3..10a221a 100644
+--- a/android/app/src/main/res/drawable/ic_orders.xml
++++ b/android/app/src/main/res/drawable/ic_orders.xml
+@@ -1,6 +1,27 @@
+ <vector xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+-    <path android:fillColor="#1565C0" android:pathData="M0,0h48v48h-48z" />
+-    <path android:fillColor="#FFFFFF" android:pathData="M12,10h24v30h-24z" />
+-    <path android:fillColor="#1565C0" android:pathData="M18,7h12v8h-12zM17,20h14v3h-14zM17,27h14v3h-14zM17,34h9v3h-9z" />
++    android:width="108dp"
++    android:height="108dp"
++    android:viewportWidth="108"
++    android:viewportHeight="108">
++    <path android:fillColor="#050505" android:pathData="M0,0h108v108h-108z" />
++    <path
++        android:fillColor="@android:color/transparent"
++        android:strokeColor="#221B34"
++        android:strokeWidth="13"
++        android:pathData="M54,12 A42,42 0,1 1 53.9,12" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#5DD9FF" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M22,30 A42,42 0,0 1 54,12" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#7257FF" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M54,12 A42,42 0,0 1 88,31" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#D645FF" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M88,31 A42,42 0,0 1 94,62" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#FF4D62" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M94,62 A42,42 0,0 1 72,92" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#FF8A35" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M72,92 A42,42 0,0 1 28,86" />
++    <path android:fillColor="@android:color/transparent" android:strokeColor="#A548FF" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M28,86 A42,42 0,0 1 22,30" />
++    <path
++        android:fillColor="#FF4D55"
++        android:pathData="M54,28 C65,40 73,48 73,61 C73,75 64,84 54,89 C44,84 35,75 35,61 C35,51 41,43 49,35 C49,44 54,49 59,53 C61,45 59,36 54,28 Z" />
++    <path
++        android:fillColor="#FF8A35"
++        android:pathData="M54,49 C60,55 66,60 66,67 C66,75 60,80 54,84 C48,80 42,75 42,67 C42,61 46,56 51,51 C51,57 54,61 57,63 C59,58 58,53 54,49 Z" />
++    <path
++        android:fillColor="#7C38FF"
++        android:pathData="M54,38 C59,44 62,48 62,53 C62,59 58,63 54,66 C50,63 46,59 46,53 C46,49 49,45 52,41 C52,46 54,49 57,51 C58,46 57,42 54,38 Z" />
+ </vector>
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt b/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+index c4b1372..8837166 100644
+--- a/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+@@ -57,4 +57,61 @@ class OrderSyncTest {
+         assertNull(normalizeCustomerPhone("123"))
+         assertNull(normalizeCustomerPhone(null))
+     }
++
++    @Test fun preferred_recipient_uses_delivery_recipient_with_customer_fallback() {
++        val deliveryRecipient = Order(
++            "recipient",
++            customer = "Покупатель",
++            phone = "0501112233",
++            delivery = buildJsonObject {
++                put("recipient", "Получатель")
++                put("recipientPhone", "0675551122")
++            },
++        )
++        assertEquals("Получатель", deliveryRecipient.recipientName())
++        assertEquals("0675551122", deliveryRecipient.recipientPhone())
++        assertEquals("Покупатель", Order("fallback", customer = "Покупатель").recipientName())
++    }
++
++    @Test fun local_search_matches_name_phone_order_ttn_and_product() {
++        val order = Order(
++            id = "42",
++            orderLabel = "PRM-123456",
++            customer = "Иван Петренко",
++            phone = "+38 (067) 555-11-22",
++            platform = "Пром",
++            delivery = buildJsonObject {
++                put("recipient", "Олег Иванов")
++                put("recipientPhone", "050 777 88 99")
++                put("ttn", "20 4515 2096 5986")
++                put("city", "Харьков")
++            },
++            items = listOf(OrderItem(productName = "PROCERA X-DUOMAX", size = "10")),
++        )
++        assertTrue(order.matchesOrderSearch("иванов"))
++        assertTrue(order.matchesOrderSearch("067555"))
++        assertTrue(order.matchesOrderSearch("123456"))
++        assertTrue(order.matchesOrderSearch("45152096"))
++        assertTrue(order.matchesOrderSearch("duomax 10"))
++        assertFalse(order.matchesOrderSearch("киев"))
++    }
++
++    @Test fun main_list_hides_pre_shipment_cancellation_but_keeps_return_after_movement() {
++        val cancelled = Order(
++            "cancelled",
++            status = "Скасовано",
++            delivery = buildJsonObject { put("trackingNormalizedStatus", "cancelled") },
++        )
++        val returning = Order(
++            "returning",
++            status = "Скасовано",
++            delivery = buildJsonObject {
++                put("trackingNormalizedStatus", "returning")
++                put("printedAt", "2026-09-10T07:00:00Z")
++            },
++        )
++        assertFalse(isOrderVisibleInMainList(cancelled))
++        assertTrue(isOrderVisibleInMainList(returning))
++    }
++
+ }
