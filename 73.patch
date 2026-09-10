@@ -1,0 +1,12 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 577667cecb6a1cbeca508adc79c2d4c808b2fab1..af075e6928bc6aef6b7feb1948ab84661bb55404 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -1133,6 +1133,7 @@ async function handlePromRegistryFile(file: File) {
+     platformFilter.value = 'all'
+     isShowingCancellations.value = false
+     isShowingReturns.value = false
++    isShowingUnpaidOnly.value = false
+     await persistenceQueue
+     await reconcileRemoteOrders(true)
+     applyPromRegistryPreview(entries)
