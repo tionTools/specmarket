@@ -19,18 +19,32 @@ data class OrdersCacheSnapshot(
 
 class OrdersCache(context: Context) {
     private val file = File(context.filesDir, "orders-cache.json")
+    private val backup = File(context.filesDir, "orders-cache.backup.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    private fun readSnapshot(source: File): OrdersCacheSnapshot? {
+        if (!source.isFile) return null
+        return runCatching {
+            json.decodeFromString<OrdersCacheSnapshot>(source.readText(Charsets.UTF_8))
+        }.getOrNull()
+    }
+
     suspend fun load(account: String): OrdersCacheSnapshot? = withContext(Dispatchers.IO) {
-        if (!file.isFile) return@withContext null
-        runCatching { json.decodeFromString<OrdersCacheSnapshot>(file.readText(Charsets.UTF_8)) }
-            .getOrNull()
-            ?.takeIf { it.account.equals(account, ignoreCase = true) }
+        val matching = sequenceOf(file, backup)
+            .mapNotNull(::readSnapshot)
+            .filter { it.account.equals(account, ignoreCase = true) }
+            .toList()
+        matching.firstOrNull { it.orders.isNotEmpty() } ?: matching.firstOrNull()
     }
 
     suspend fun save(account: String, orders: List<Order>, pendingNotificationIds: Set<String>) =
         withContext(Dispatchers.IO) {
             file.parentFile?.mkdirs()
+            if (readSnapshot(file) != null) {
+                runCatching {
+                    Files.copy(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
             val temporary = File(file.parentFile, "${file.name}.tmp")
             temporary.writeText(
                 json.encodeToString(
@@ -51,6 +65,11 @@ class OrdersCache(context: Context) {
                 )
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            if (!backup.isFile) {
+                runCatching {
+                    Files.copy(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         }
 }
