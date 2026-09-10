@@ -1133,6 +1133,7 @@ async function handlePromRegistryFile(file: File) {
     platformFilter.value = 'all'
     isShowingCancellations.value = false
     isShowingReturns.value = false
+    isShowingUnpaidOnly.value = false
     await persistenceQueue
     await reconcileRemoteOrders(true)
     applyPromRegistryPreview(entries)

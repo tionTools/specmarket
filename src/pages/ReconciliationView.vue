@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useNow } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
@@ -69,6 +69,20 @@ function committedNumericValue(value: string) {
   const parsed = parsedNumber(value)
   return parsed === null ? value : String(parsed).replace('.', ',')
 }
+
+function suggestedPaymentDebtUah() {
+  const amount = parsedNumber(paymentTransferredUah.value)
+  const supplierRate = parsedNumber(paymentSupplierRate.value)
+  const debtUsd = parsedNumber(paymentDebtUsd.value)
+  if (amount === null || supplierRate === null || debtUsd === null) return null
+  return amount - debtUsd * supplierRate
+}
+
+watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd], () => {
+  const remainder = suggestedPaymentDebtUah()
+  paymentDebtUah.value =
+    remainder === null ? '' : String(Number(remainder.toFixed(2))).replace('.', ',')
+})
 
 function money(value: number) {
   return new Intl.NumberFormat('uk-UA', {
@@ -154,6 +168,19 @@ const paymentDraftEquivalent = computed(
 const paymentDraftDifference = computed(
   () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
 )
+const paymentDraftHasDifference = computed(() => {
+  const amount = parsedNumber(paymentTransferredUah.value)
+  const supplierRate = parsedNumber(paymentSupplierRate.value)
+  const debtUsd = parsedNumber(paymentDebtUsd.value)
+  const debtUah = parsedNumber(paymentDebtUah.value)
+  return (
+    amount !== null &&
+    supplierRate !== null &&
+    debtUsd !== null &&
+    debtUah !== null &&
+    Math.abs(paymentDraftDifference.value) > 0.01
+  )
+})
 const hasAccountingInput = computed(() =>
   Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
 )
@@ -644,7 +671,7 @@ onMounted(() => {
                 :disabled="isGuest || isSaving"
                 class="rounded-lg border border-slate-300 px-3 py-2"
                 inputmode="decimal"
-                placeholder="Закрыто грн"
+                placeholder="Закрыто грн (авто, можно изменить)"
                 @keydown.enter.prevent="paymentDebtUah = committedNumericValue(paymentDebtUah)"
               />
               <input
@@ -661,6 +688,10 @@ onMounted(() => {
                 >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
                 {{ money(paymentDraftDifference) }} грн</span
               >
+              <p v-if="paymentDraftHasDifference" class="w-full font-semibold text-amber-700">
+                Внимание: распределение отличается от перечисленной суммы на
+                {{ money(Math.abs(paymentDraftDifference)) }} грн. Сохранение разрешено.
+              </p>
               <button
                 :disabled="isGuest || isSaving"
                 class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 font-semibold text-emerald-800 disabled:opacity-50"
