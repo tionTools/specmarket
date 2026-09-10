@@ -1,0 +1,109 @@
+name: Patch 72 web filter and scroll validation
+
+on:
+  push:
+    branches:
+      - patch72-web-filter-scroll-validation3
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Patch 72 from exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '7cb7bff3ec45c46009913877b95b7b9e6b9b0572'
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/pages/HomeView.vue')
+          source = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  "    isPromRegistryDraft.value = true\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n",
+                  "    isPromRegistryDraft.value = true\n    searchQuery.value = ''\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n",
+              ),
+              (
+                  "function scrollOrdersToTop() {\n  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })\n}\n",
+                  "function scrollOrdersToTop() {\n  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })\n}\n",
+              ),
+              (
+                  'class="fixed bottom-5 left-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"',
+                  'class="fixed top-1/2 left-5 z-[85] flex size-12 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"',
+              ),
+          ]
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'Patch 72 anchor count={count}, expected 1: {old[:180]!r}')
+              source = source.replace(old, new)
+          path.write_text(source, encoding='utf-8')
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          grep -F "searchQuery.value = ''" src/pages/HomeView.vue >/dev/null
+          grep -F "window.scrollTo({ top: 0, left: 0, behavior: 'auto' })" src/pages/HomeView.vue >/dev/null
+          grep -F 'class="fixed top-1/2 left-5 z-[85] flex size-12 -translate-y-1/2' src/pages/HomeView.vue >/dev/null
+          ! grep -F "behavior: 'smooth'" src/pages/HomeView.vue >/dev/null
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm format
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          grep -F "searchQuery.value = ''" src/pages/HomeView.vue >/dev/null
+          grep -F "behavior: 'auto'" src/pages/HomeView.vue >/dev/null
+          grep -F 'top-1/2 left-5' src/pages/HomeView.vue >/dev/null
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/'
+
+      - name: Normalize and reapply Patch 72
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary --full-index -- src/pages/HomeView.vue > /tmp/72.patch
+          test -s /tmp/72.patch
+          git reset --hard HEAD
+          git clean -fd
+          git apply --check /tmp/72.patch
+          git apply /tmp/72.patch
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          git checkout HEAD -- src/features/orders/delivery-tracking.ts
+          git diff --check
+          test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch72-web-filter-scroll
+          path: /tmp/72.patch
+          if-no-files-found: error
