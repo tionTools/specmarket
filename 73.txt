@@ -1,4 +1,4 @@
-Patch 73 — Web CRM: реестр платежей должен сбрасывать фильтр «Неоплаченные»
+Patch 73 — Web CRM: полный реестр платежей + автоматическое распределение платежа поставщику
 
 Основной локальный worktree может оставаться грязным. Его НЕ трогать, НЕ чистить, НЕ reset-ить и НЕ stash-ить. Все существующие локальные файлы/изменения, включая AGENTS.md и незавершённые Patch53-артефакты, оставить как есть.
 
@@ -6,13 +6,22 @@ Patch 73 — Web CRM: реестр платежей должен сбрасыв�
 C:\Users\Вадим\Documents\CRM моя\specmarket
 
 Источник истины для этого Patch: origin/main commit
-896bad13fe7bc68580e60f3816e990f0b895d570
+9ed8047d1d0d6bb38c9b401d91a7b82a83ba6d8b
 
-Patch 73 проверен на этом exact main. Работай через отдельный чистый git worktree.
+Важно: дерево этого commit идентично дереву предыдущего рабочего main 896bad13fe7bc68580e60f3816e990f0b895d570; между ними нет итоговых изменений файлов. Работай только от exact origin/main 9ed8047... через отдельный чистый git worktree.
 
-Цель Patch:
-1. После успешной загрузки реестра платежей сбрасывать также фильтр «Неоплаченные» (`isShowingUnpaidOnly = false`).
-2. Не менять никакую другую логику реестров, финансов, сверки, Supabase или Android.
+Цели Patch 73:
+1. После успешной загрузки реестра платежей сбрасывать также фильтр «Неоплаченные» (`isShowingUnpaidOnly = false`), чтобы реестр не маскировался старым фильтром.
+2. В «Сверка → Платежи поставщику» при изменении любой из трёх величин:
+   - перечислено, грн;
+   - курс поставщика;
+   - закрыто USD;
+   автоматически рассчитывать поле «Закрыто грн» по формуле:
+   `Закрыто грн = Перечислено грн - Закрыто USD × Курс поставщика`.
+3. Автоматически рассчитанное поле «Закрыто грн» остаётся обычным редактируемым полем. Пользователь может вручную изменить его перед сохранением. Если после ручной правки меняется перечисленная сумма, курс или USD, автоматический остаток пересчитывается заново.
+4. Если `Закрыто USD × курс + Закрыто грн` отличается от фактически перечисленной суммы больше чем на 0,01 грн, показывать заметное предупреждение с величиной расхождения.
+5. Расхождение НЕ должно блокировать сохранение. Кнопка «Добавить» остаётся доступной по прежним условиям; `addPayment()` не получает проверки на `paymentDraftDifference`/`paymentDraftHasDifference`. В базу сохраняются именно фактически введённые значения `amount_uah`, `supplier_rate`, `debt_usd`, `debt_uah`.
+6. Существующую финансовую модель не менять: USD-долг и UAH-долг после платежа продолжают уменьшаться отдельно на сохранённые `debt_usd` и `debt_uah`. Не менять checkpoint, initial balance, reserve, storno, discrepancy, historical rate, snapshots, saveReconciliation, deletePayment и SQL/Supabase-схему.
 
 Выполни полностью:
 
@@ -23,7 +32,7 @@ Patch 73 проверен на этом exact main. Работай через о
 2. Проверь origin/main:
    git rev-parse origin/main
    Должно быть ровно:
-   896bad13fe7bc68580e60f3816e990f0b895d570
+   9ed8047d1d0d6bb38c9b401d91a7b82a83ba6d8b
    Если origin/main уже другой — STOP, Patch не применять и сообщить новый SHA.
 
 3. Основной worktree не изменяй. Зафиксируй для отчёта `git status --short`, но не выполняй checkout/reset/clean/stash/pull в основном worktree.
@@ -34,59 +43,71 @@ Patch 73 проверен на этом exact main. Работай через о
    if (Test-Path $wt) { throw "STOP: $wt already exists" }
    git -C $repo worktree add --detach $wt origin/main
 
-5. Получи Patch 73 и примени только во временном worktree:
+5. Получи обновлённый Patch 73 и примени только во временном worktree:
    git -C $repo fetch origin chatgpt-patches
    git -C $repo show origin/chatgpt-patches:73.patch > "$wt\73.local.patch"
    git -C $wt apply --check 73.local.patch
    git -C $wt apply 73.local.patch
    Remove-Item "$wt\73.local.patch"
 
-6. Проверь scope:
+6. Сразу проверь scope:
    git -C $wt diff --check
    git -C $wt diff --name-only
-   В diff должен быть только:
+   В diff должны быть ровно два файла:
    src/pages/HomeView.vue
+   src/pages/ReconciliationView.vue
+   AGENTS.md, Supabase, migrations и Android не должны попасть в diff.
 
-7. Статически проверь, что в `handlePromRegistryFile`, сразу в блоке сброса фильтров после успешного создания draft, есть:
-   isShowingUnpaidOnly.value = false
-   Остальная логика функции не должна меняться.
+7. Статически проверь HomeView:
+   - в `handlePromRegistryFile`, после успешного создания draft и рядом с уже существующими сбросами поиска/платформы/отмен/возвратов есть `isShowingUnpaidOnly.value = false`;
+   - остальная логика реестра, reconcile и preview не менялась.
 
-8. Запусти проверки во временном worktree:
+8. Статически проверь ReconciliationView:
+   - импортирован `watch` из Vue;
+   - автоматический остаток считается как `amount - debtUsd * supplierRate`;
+   - watcher следит только за `paymentTransferredUah`, `paymentSupplierRate`, `paymentDebtUsd` и пишет результат в `paymentDebtUah`;
+   - итог округляется до двух знаков перед записью в поле;
+   - поле «Закрыто грн» остаётся с `v-model="paymentDebtUah"`, не readonly/disabled сверх прежних условий;
+   - при ручном отличии показывается `paymentDraftHasDifference` и текст о том, что сохранение разрешено;
+   - в `addPayment()` нет проверки `paymentDraftDifference` или `paymentDraftHasDifference` и существующая вставка `amount_uah`, `supplier_rate`, `debt_usd`, `debt_uah` не менялась;
+   - логика `paidDebt`, `myDebtUsd`, `myDebtUah`, checkpoint/snapshot и `saveReconciliation()` не менялась.
+
+9. Запусти проверки во временном worktree:
    cd $wt
    pnpm install --frozen-lockfile
    pnpm format
-   Если formatter изменит src/features/orders/delivery-tracking.ts только из-за известного formatter drift — восстанови только этот файл из HEAD.
+   Если formatter изменит `src/features/orders/delivery-tracking.ts` только из-за известного formatter drift — восстанови только этот файл из HEAD.
    pnpm type-check
    pnpm lint
    pnpm build
 
-9. После проверок снова:
-   git diff --check
-   git diff --name-only
-   git diff -- src/pages/HomeView.vue
-   В итоговом diff должна остаться только одна логическая правка в src/pages/HomeView.vue: добавление `isShowingUnpaidOnly.value = false`.
-   AGENTS.md, Supabase и Android не трогать.
+10. После проверок снова:
+    git diff --check
+    git diff --name-only
+    git diff -- src/pages/HomeView.vue src/pages/ReconciliationView.vue
+    Итоговый diff должен содержать только описанные изменения двух файлов. Любые tool-induced посторонние изменения восстанови.
 
-10. Перед commit/push ещё раз:
+11. Перед commit/push ещё раз:
     git -C $repo fetch origin
     git -C $repo rev-parse origin/main
     Должно оставаться:
-    896bad13fe7bc68580e60f3816e990f0b895d570
-    Если SHA другой — STOP.
+    9ed8047d1d0d6bb38c9b401d91a7b82a83ba6d8b
+    Если SHA другой — STOP без commit/push.
 
-11. Supabase Functions deploy НЕ запускать. supabase db push НЕ запускать. Миграций нет.
+12. Supabase Functions deploy НЕ запускать. `supabase db push` НЕ запускать. Миграций в Patch нет.
 
-12. Commit/push только файла задачи:
+13. Commit/push только двух файлов задачи:
     cd $wt
-    git add src/pages/HomeView.vue
-    git commit -m "Reset unpaid filter for registry"
+    git add src/pages/HomeView.vue src/pages/ReconciliationView.vue
+    git commit -m "Improve registry and supplier payment allocation"
     git push origin HEAD:main
 
-13. После успешного push удали только временный worktree:
+14. После успешного push удали только временный worktree:
     cd $repo
     git worktree remove $wt
+    Основной грязный worktree и все его старые локальные изменения должны остаться нетронутыми.
 
-14. В отчёте укажи:
+15. В отчёте укажи:
     - commit SHA;
     - push в main успешен/нет;
     - итоговый список файлов commit;
@@ -96,7 +117,9 @@ Patch 73 проверен на этом exact main. Работай через о
     - что Supabase Functions deploy и db push не запускались.
 
 Предварительная проверка ChatGPT:
-- Validation run: 34469898866 — success.
-- Нормализованный Patch 73 применился через `git apply --check` к exact main 896bad13fe7bc68580e60f3816e990f0b895d570.
-- Scope: только src/pages/HomeView.vue.
-- SHA256 73.patch: 13635f6d45b72cc1bc75b1b74f31bf7a46a4162473a9e280cd755454714510b3.
+- Validation run: 34471410524 — success.
+- Нормализованный Patch 73 повторно прошёл `git apply --check`/reapply на exact main 9ed8047d1d0d6bb38c9b401d91a7b82a83ba6d8b.
+- Прошли pnpm format, pnpm type-check, pnpm lint, pnpm build; после reapply повторно прошли type-check/lint/build.
+- Scope: только `src/pages/HomeView.vue` и `src/pages/ReconciliationView.vue`.
+- Нет изменений Supabase, migrations, Android или AGENTS.md.
+- SHA256 нормализованного `73.patch`: 76c2eddb5b8de3d47d0114b876472c7fcb2ea08f3404aac80cd433583a8374c9.
