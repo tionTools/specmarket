@@ -1129,6 +1129,7 @@ async function handlePromRegistryFile(file: File) {
     registrySource.value = source
     registryKeyType.value = keyType
     isPromRegistryDraft.value = true
+    searchQuery.value = ''
     platformFilter.value = 'all'
     isShowingCancellations.value = false
     isShowingReturns.value = false
@@ -1693,7 +1694,7 @@ function toggleUnpaidOrders() {
 }
 
 function scrollOrdersToTop() {
-  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
 
 const summary = computed(() => {
@@ -4343,7 +4344,7 @@ function orderDateTime(order: Order) {
     >
     <button
       v-if="visibleOrders.length > 0 && windowScrollY > 320"
-      class="fixed bottom-5 left-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
+      class="fixed top-1/2 left-5 z-[85] flex size-12 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
       type="button"
       title="Наверх"
       aria-label="Наверх"
