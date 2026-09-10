@@ -23,49 +23,29 @@ jobs:
           test "$(git rev-parse HEAD^)" = '7cb7bff3ec45c46009913877b95b7b9e6b9b0572'
           python - <<'PY'
           from pathlib import Path
-
           path = Path('src/pages/HomeView.vue')
           source = path.read_text(encoding='utf-8')
-
           replacements = [
               (
-                  """    isPromRegistryDraft.value = true
-              platformFilter.value = 'all'
-              isShowingCancellations.value = false
-              isShowingReturns.value = false
-""",
-                  """    isPromRegistryDraft.value = true
-              searchQuery.value = ''
-              platformFilter.value = 'all'
-              isShowingCancellations.value = false
-              isShowingReturns.value = false
-""",
+                  "    isPromRegistryDraft.value = true\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n",
+                  "    isPromRegistryDraft.value = true\n    searchQuery.value = ''\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n",
               ),
               (
-                  """function scrollOrdersToTop() {
-            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
-          }
-""",
-                  """function scrollOrdersToTop() {
-            window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-          }
-""",
+                  "function scrollOrdersToTop() {\n  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })\n}\n",
+                  "function scrollOrdersToTop() {\n  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })\n}\n",
               ),
               (
                   'class="fixed bottom-5 left-5 z-[85] flex size-12 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"',
                   'class="fixed top-1/2 left-5 z-[85] flex size-12 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-lg transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"',
               ),
           ]
-
           for old, new in replacements:
               count = source.count(old)
               if count != 1:
-                  raise SystemExit(f'Patch 72 anchor count={count}, expected 1:\n{old[:180]}')
+                  raise SystemExit(f'Patch 72 anchor count={count}, expected 1: {old[:180]!r}')
               source = source.replace(old, new)
-
           path.write_text(source, encoding='utf-8')
           PY
-
           git diff --check
           test "$(git diff --name-only)" = 'src/pages/HomeView.vue'
           grep -F "searchQuery.value = ''" src/pages/HomeView.vue >/dev/null
