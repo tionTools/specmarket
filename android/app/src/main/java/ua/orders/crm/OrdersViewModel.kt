@@ -188,11 +188,21 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refresh() {
         if (email == null || loading) return
-        val account = email
+        val account = email ?: return
         loading = true
         viewModelScope.launch {
             try {
                 requests.withLock {
+                    if (orders.isEmpty()) {
+                        cache.load(account)?.let { cached ->
+                            if (cached.orders.isNotEmpty()) {
+                                orders = sortOrdersForDisplay(cached.orders)
+                                pendingNotificationIds.clear()
+                                pendingNotificationIds.addAll(cached.pendingNotificationIds)
+                                initialLoadComplete = true
+                            }
+                        }
+                    }
                     val baselineComplete = initialLoadComplete
                     val knownIds = orders.mapTo(hashSetOf()) { it.id }
                     val cursor = latestOrderUpdatedAt(orders)

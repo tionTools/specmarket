@@ -224,4 +224,68 @@ fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
 fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
 fun Order.deliveryField(key: String): String = deliveryValue(key).display()
 fun Order.shipments(): List<JsonObject> = (((delivery as? JsonObject)?.get("shipmentHistory")) as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+
+
+fun Order.recipientName(): String =
+    deliveryValue("recipient").trim().ifBlank { customer.orEmpty().trim() }.display()
+
+fun Order.recipientPhone(): String =
+    deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() }.display()
+
+private val returnSignalRegex = Regex(
+    "скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим",
+    RegexOption.IGNORE_CASE,
+)
+
+fun Order.hasPhysicalShipmentMovement(): Boolean {
+    if (deliveryValue("printedAt").trim().isNotEmpty()) return true
+    return deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT) in setOf(
+        "accepted", "in_transit", "ready_for_pickup", "delivered", "returning", "returned",
+    )
+}
+
+fun Order.hasReturnSignal(): Boolean {
+    val normalizedTracking = deliveryValue("trackingNormalizedStatus").trim().lowercase(Locale.ROOT)
+    return normalizedTracking in setOf("returning", "returned") ||
+        returnSignalRegex.containsMatchIn(displayOrderStatus(status)) ||
+        returnSignalRegex.containsMatchIn(deliveryValue("trackingStatus")) ||
+        returnSignalRegex.containsMatchIn(deliveryValue("status"))
+}
+
+/** Mirrors Web CRM: cancellation before physical shipment is hidden; returns stay in the main list. */
+fun isOrderVisibleInMainList(order: Order): Boolean =
+    !order.hasReturnSignal() || order.hasPhysicalShipmentMovement()
+
+private fun searchCompact(value: String): String =
+    value.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+
+fun Order.matchesOrderSearch(query: String): Boolean {
+    val terms = query.trim().lowercase(Locale.ROOT).split(Regex("\\s+")).filter(String::isNotBlank)
+    if (terms.isEmpty()) return true
+    val searchable = buildList {
+        add(id)
+        add(externalId.orEmpty())
+        add(number())
+        add(orderDate.orEmpty())
+        add(orderTime.orEmpty())
+        add(platform.orEmpty())
+        add(displayOrderStatus(status))
+        add(customer.orEmpty())
+        add(phone.orEmpty())
+        add(recipientName())
+        add(recipientPhone())
+        add(delivery?.toString().orEmpty())
+        items.forEach { item ->
+            add(item.productName.orEmpty())
+            add(item.size.orEmpty())
+            add(item.quantity?.toString().orEmpty())
+        }
+    }
+    val plain = searchable.joinToString(" ").lowercase(Locale.ROOT)
+    val compact = searchCompact(searchable.joinToString(" "))
+    return terms.all { term ->
+        plain.contains(term) ||
+            searchCompact(term).takeIf { it.length >= 2 }?.let(compact::contains) == true
+    }
+}
 fun JsonObject.field(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull.display()

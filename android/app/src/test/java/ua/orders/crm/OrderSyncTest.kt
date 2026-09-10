@@ -57,4 +57,61 @@ class OrderSyncTest {
         assertNull(normalizeCustomerPhone("123"))
         assertNull(normalizeCustomerPhone(null))
     }
+
+    @Test fun preferred_recipient_uses_delivery_recipient_with_customer_fallback() {
+        val deliveryRecipient = Order(
+            "recipient",
+            customer = "Покупатель",
+            phone = "0501112233",
+            delivery = buildJsonObject {
+                put("recipient", "Получатель")
+                put("recipientPhone", "0675551122")
+            },
+        )
+        assertEquals("Получатель", deliveryRecipient.recipientName())
+        assertEquals("0675551122", deliveryRecipient.recipientPhone())
+        assertEquals("Покупатель", Order("fallback", customer = "Покупатель").recipientName())
+    }
+
+    @Test fun local_search_matches_name_phone_order_ttn_and_product() {
+        val order = Order(
+            id = "42",
+            orderLabel = "PRM-123456",
+            customer = "Иван Петренко",
+            phone = "+38 (067) 555-11-22",
+            platform = "Пром",
+            delivery = buildJsonObject {
+                put("recipient", "Олег Иванов")
+                put("recipientPhone", "050 777 88 99")
+                put("ttn", "20 4515 2096 5986")
+                put("city", "Харьков")
+            },
+            items = listOf(OrderItem(productName = "PROCERA X-DUOMAX", size = "10")),
+        )
+        assertTrue(order.matchesOrderSearch("иванов"))
+        assertTrue(order.matchesOrderSearch("067555"))
+        assertTrue(order.matchesOrderSearch("123456"))
+        assertTrue(order.matchesOrderSearch("45152096"))
+        assertTrue(order.matchesOrderSearch("duomax 10"))
+        assertFalse(order.matchesOrderSearch("киев"))
+    }
+
+    @Test fun main_list_hides_pre_shipment_cancellation_but_keeps_return_after_movement() {
+        val cancelled = Order(
+            "cancelled",
+            status = "Скасовано",
+            delivery = buildJsonObject { put("trackingNormalizedStatus", "cancelled") },
+        )
+        val returning = Order(
+            "returning",
+            status = "Скасовано",
+            delivery = buildJsonObject {
+                put("trackingNormalizedStatus", "returning")
+                put("printedAt", "2026-09-10T07:00:00Z")
+            },
+        )
+        assertFalse(isOrderVisibleInMainList(cancelled))
+        assertTrue(isOrderVisibleInMainList(returning))
+    }
+
 }

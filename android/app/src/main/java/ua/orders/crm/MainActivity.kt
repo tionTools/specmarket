@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -353,10 +356,10 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             content()
         }
@@ -366,7 +369,7 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
 private data class StatusColors(val background: Color, val foreground: Color)
 
 @Composable
-private fun StatusLabel(order: Order) {
+private fun StatusLabel(order: Order, compact: Boolean = false) {
     if (isNewOrderVisual(order)) {
         Surface(
             shape = RoundedCornerShape(999.dp),
@@ -375,10 +378,11 @@ private fun StatusLabel(order: Order) {
             border = BorderStroke(1.dp, Color(0xFFC026D3)),
         ) {
             Text(
-                "НОВЫЙ ЗАКАЗ",
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
-                style = MaterialTheme.typography.labelLarge,
+                if (compact) "НОВЫЙ" else "НОВЫЙ ЗАКАЗ",
+                modifier = Modifier.padding(horizontal = if (compact) 8.dp else 11.dp, vertical = 4.dp),
+                style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
             )
         }
         return
@@ -392,80 +396,105 @@ private fun StatusLabel(order: Order) {
     Surface(shape = RoundedCornerShape(999.dp), color = colors.background, contentColor = colors.foreground) {
         Text(
             displayOrderStatus(order.status).display(),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 4.dp),
             color = colors.foreground,
-            style = MaterialTheme.typography.labelLarge,
+            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-@Composable
-private fun DeliveryStatus(order: Order, compact: Boolean = false) {
+private fun compactDeliveryLine(order: Order): String {
     val status = order.deliveryStatusInfo()
-    if (status.stage.isBlank()) return
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            status.stage,
-            style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (compact) FontWeight.Normal else FontWeight.Medium,
-        )
-        if (status.current.isNotBlank()) {
-            Text(status.current, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    return listOf(
+        order.deliveryValue("carrier").trim(),
+        status.stage.trim(),
+        status.current.trim(),
+    ).filter(String::isNotBlank).distinct().joinToString(" · ")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val visibleOrders = remember(vm.orders, searchQuery) {
+        vm.orders
+            .filter(::isOrderVisibleInMainList)
+            .filter { it.matchesOrderSearch(searchQuery) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Заказы", fontWeight = FontWeight.Bold)
-                        Text(
-                            if (vm.realtimeConnected) "Онлайн" else "Подключение…",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (vm.realtimeConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (searchOpen) {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Поиск") },
                         )
+                    } else {
+                        Column {
+                            Text("Заказы", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (vm.realtimeConnected) "Онлайн" else "Офлайн · сохранённые данные",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (vm.realtimeConnected)
+                                    MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 },
                 actions = {
-                    TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") }
+                    IconButton(onClick = {
+                        if (searchOpen) {
+                            searchQuery = ""
+                            searchOpen = false
+                        } else searchOpen = true
+                    }) {
+                        Icon(
+                            if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
+                            contentDescription = if (searchOpen) "Закрыть поиск" else "Поиск",
+                        )
+                    }
                     TextButton(onSettings) { Text("Настройки") }
                 },
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-            if (!vm.realtimeConnected) Text(
-                "Автообновление подключается. Доступно ручное обновление.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-            )
-            PullToRefreshBox(
-                isRefreshing = vm.loading,
-                onRefresh = { vm.refresh() },
-                modifier = Modifier.weight(1f),
+        PullToRefreshBox(
+            isRefreshing = vm.loading,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier.fillMaxSize().padding(padding),
+        ) {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
             ) {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp),
-                ) {
-                    if (vm.orders.isEmpty()) item {
+                if (visibleOrders.isEmpty()) {
+                    item {
                         Text(
-                            if (vm.loading || !vm.initialLoadComplete) "Загрузка…" else "Заказов пока нет.",
+                            when {
+                                searchQuery.isNotBlank() -> "Ничего не найдено."
+                                vm.orders.isEmpty() && (vm.loading || !vm.initialLoadComplete) -> "Загрузка…"
+                                vm.orders.isEmpty() -> "Сохранённых заказов пока нет."
+                                else -> "Активных заказов нет."
+                            },
                             Modifier.padding(24.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    items(vm.orders, key = { it.id }) { order -> OrderCard(order) { vm.open(order.id) } }
+                }
+                items(visibleOrders, key = { it.id }) { order ->
+                    OrderCard(order) { vm.open(order.id) }
                 }
             }
         }
@@ -475,45 +504,74 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
     val newOrder = isNewOrderVisual(order)
+    val recipient = order.recipientName()
+    val recipientPhone = order.recipientPhone()
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (newOrder) 3.dp else 1.dp),
-        border = BorderStroke(
-            if (newOrder) 2.dp else 1.dp,
-            if (newOrder) Color(0xFFE879F9) else MaterialTheme.colorScheme.outlineVariant,
-        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (newOrder) 2.dp else 1.dp),
+        border = if (newOrder) BorderStroke(1.dp, Color(0xFFD946EF)) else null,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     PlatformLogo(order.platform)
-                    Text("№${order.number()}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    StatusLabel(order, compact = true)
                 }
-                Text(money(order.total()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                StatusLabel(order)
+
+            Text(
+                recipient,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (recipientPhone != "—") {
                 Text(
-                    "${order.orderDate.display()} · ${order.orderTime.display()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    recipientPhone,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            DeliveryStatus(order, compact = true)
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
             Text(
                 order.items.sortedBy { it.position }.joinToString("\n") {
                     "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
                 }.ifBlank { "—" },
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 4,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            val customerLine = listOf(order.customer.display(), order.phone.display()).filter { it != "—" }.joinToString(" · ")
-            if (customerLine.isNotBlank()) Text(customerLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            val deliveryLine = compactDeliveryLine(order)
+            if (deliveryLine.isNotBlank()) {
+                Text(
+                    deliveryLine,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    "${order.orderDate.display()} · ${order.orderTime.display()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "№${order.number()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -522,7 +580,28 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
 private fun DetailField(label: String, value: String) {
     Column(Modifier.padding(vertical = 2.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SelectionContainer { Text(value, style = MaterialTheme.typography.bodyLarge) }
+        SelectionContainer {
+            Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun DetailsHeader(order: Order) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            PlatformLogo(order.platform)
+            Spacer(Modifier.width(10.dp))
+            StatusLabel(order, compact = true)
+        }
+        Text(
+            "№${order.number()} · ${order.orderDate.display()} · ${order.orderTime.display()}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -531,12 +610,24 @@ private fun DetailField(label: String, value: String) {
 private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
+    var extraExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
+    var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(order?.let { "Заказ №${it.number()}" } ?: "Заказ", fontWeight = FontWeight.SemiBold) },
+                title = { Text("Заказ", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { TextButton({ vm.closeDetail() }) { Text("Назад") } },
-                actions = { TextButton({ vm.refresh() }, enabled = !vm.loading) { Text("Обновить") } },
+                actions = {
+                    order?.let {
+                        Text(
+                            money(it.total()),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 12.dp),
+                        )
+                    }
+                },
             )
         },
         bottomBar = {
@@ -546,7 +637,12 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                         onClick = { onAccept(order) },
                         modifier = Modifier.fillMaxWidth().padding(12.dp).height(50.dp),
                         enabled = vm.acceptingId == null,
-                    ) { Text(if (vm.acceptingId == order.id) "Принятие…" else "Принять заказ", fontWeight = FontWeight.SemiBold) }
+                    ) {
+                        Text(
+                            if (vm.acceptingId == order.id) "Принятие…" else "Принять заказ",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         },
@@ -556,58 +652,52 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
             Text("Заказ недоступен или удалён.", Modifier.padding(padding).padding(24.dp))
             return@Scaffold
         }
+
+        val recipient = order.recipientName()
+        val recipientPhone = order.recipientPhone()
+        val rawPhone = recipientPhone.takeUnless { it == "—" }.orEmpty()
+        val originalCustomer = order.customer.display()
+        val originalPhone = order.phone.display()
+        val shipments = order.shipments()
+
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
+            item { DetailsHeader(order) }
+
             item {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = if (isNewOrderVisual(order)) BorderStroke(2.dp, Color(0xFFE879F9)) else null,
-                ) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column {
-                                PlatformLogo(order.platform)
-                                Text("№${order.number()}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            }
-                            Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                SectionCard("Получатель") {
+                    Text(
+                        recipient,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (recipientPhone != "—") {
+                        SelectionContainer {
+                            Text(
+                                recipientPhone,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
                         }
-                        StatusLabel(order)
-                        Text("${order.orderDate.display()} · ${order.orderTime.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        DeliveryStatus(order)
                     }
-                }
-            }
-            item { Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-            items(order.items.sortedBy { it.position }) { product ->
-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(product.productName.display(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        DetailField("Размер", product.size.display())
-                        Text("${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}")
-                    }
-                }
-            }
-            item {
-                SectionCard("Клиент") {
-                    DetailField("Имя", order.customer.display())
-                    DetailField("Телефон", order.phone.display())
-                    val phone = order.phone
-                    if (normalizeCustomerPhone(phone) != null) {
+                    if (normalizeCustomerPhone(rawPhone) != null) {
                         FilledTonalButton(
-                            onClick = { openDialer(context, phone.orEmpty()) },
+                            onClick = { openDialer(context, rawPhone) },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) { Text("Позвонить ${phone.orEmpty()}", fontWeight = FontWeight.SemiBold) }
+                        ) {
+                            Text("Позвонить $recipientPhone", fontWeight = FontWeight.SemiBold)
+                        }
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Button(
-                                onClick = { openViber(context, phone.orEmpty()) },
+                                onClick = { openViber(context, rawPhone) },
                                 modifier = Modifier.weight(1f).height(46.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF7360F2),
@@ -615,7 +705,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                                 ),
                             ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
                             Button(
-                                onClick = { openTelegram(context, phone.orEmpty()) },
+                                onClick = { openTelegram(context, rawPhone) },
                                 modifier = Modifier.weight(1f).height(46.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF229ED9),
@@ -626,19 +716,49 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     }
                 }
             }
+
             item {
-                SectionCard("Доставка") {
-                    for ((key, label) in listOf(
-                        "carrier" to "Перевозчик", "recipient" to "Получатель",
-                        "recipientPhone" to "Телефон получателя", "city" to "Город", "address" to "Адрес",
-                        "ttn" to "ТТН", "payer" to "Плательщик",
-                    )) DetailField(label, order.deliveryField(key))
-                    val deliveryStatus = order.deliveryStatusInfo()
-                    DetailField("Статус", deliveryStatus.stage.display())
-                    if (deliveryStatus.current.isNotBlank()) DetailField("Текущий статус", deliveryStatus.current)
-                    DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
+                Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+            items(order.items.sortedBy { it.position }) { product ->
+                Card(
+                    Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(
+                            product.productName.display(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Размер ${product.size.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
                 }
             }
+
+            item {
+                SectionCard("Доставка") {
+                    val carrier = order.deliveryField("carrier")
+                    val city = order.deliveryField("city")
+                    val address = order.deliveryField("address")
+                    val ttn = order.deliveryField("ttn")
+                    val deliveryStatus = order.deliveryStatusInfo()
+                    DetailField("Перевозчик", carrier)
+                    val destination = listOf(city, address).filter { it != "—" }.joinToString(" · ")
+                    if (destination.isNotBlank()) DetailField("Куда", destination)
+                    if (ttn != "—") DetailField("ТТН", ttn)
+                    if (deliveryStatus.stage.isNotBlank()) DetailField("Статус", deliveryStatus.stage)
+                    if (deliveryStatus.current.isNotBlank()) DetailField("Сейчас", deliveryStatus.current)
+                }
+            }
+
             item {
                 SectionCard("Оплата") {
                     DetailField("Способ", order.deliveryField("paymentMethod"))
@@ -646,20 +766,71 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     DetailField("Сумма", order.deliveryField("paymentAmount"))
                 }
             }
-            if (order.shipments().isNotEmpty()) item { Text("История отправлений", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-            items(order.shipments()) { shipment ->
-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        DetailField("ТТН", shipment.field("ttn"))
-                        DetailField("Перевозчик", shipment.field("carrier"))
-                        DetailField("Город / адрес", "${shipment.field("city")} · ${shipment.field("address")}")
-                        DetailField("Первое / последнее изменение", "${shipment.field("firstSeenAt")} · ${shipment.field("lastSeenAt")}")
+
+            item {
+                OutlinedButton(
+                    onClick = { extraExpanded = !extraExpanded },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (extraExpanded) "Скрыть дополнительную информацию" else "Дополнительная информация")
+                }
+            }
+            if (extraExpanded) {
+                item {
+                    SectionCard("Дополнительно") {
+                        if (originalCustomer != recipient || originalPhone != recipientPhone) {
+                            DetailField(
+                                "Клиент",
+                                listOf(originalCustomer, originalPhone)
+                                    .filter { it != "—" }
+                                    .joinToString(" · ")
+                                    .ifBlank { "—" },
+                            )
+                        }
+                        DetailField("Плательщик доставки", order.deliveryField("payer"))
+                        DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
                     }
                 }
             }
+
+            if (shipments.size > 1) {
+                item {
+                    OutlinedButton(
+                        onClick = { historyExpanded = !historyExpanded },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("История отправлений · ${shipments.size}")
+                    }
+                }
+                if (historyExpanded) {
+                    items(shipments) { shipment ->
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                DetailField("ТТН", shipment.field("ttn"))
+                                DetailField("Перевозчик", shipment.field("carrier"))
+                                val destination = listOf(shipment.field("city"), shipment.field("address"))
+                                    .filter { it != "—" }
+                                    .joinToString(" · ")
+                                if (destination.isNotBlank()) DetailField("Куда", destination)
+                            }
+                        }
+                    }
+                }
+            }
+
             if (!canAccept(order, vm.email)) {
                 acceptUnavailableReason(order, vm.email)?.let { reason ->
-                    item { Text(reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) }
+                    item {
+                        Text(
+                            reason,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
         }
