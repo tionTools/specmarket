@@ -23,94 +23,27 @@ jobs:
           git checkout 9ed8047d1d0d6bb38c9b401d91a7b82a83ba6d8b
           python - <<'PY'
           from pathlib import Path
-
           home = Path('src/pages/HomeView.vue')
           source = home.read_text(encoding='utf-8')
           old = "    isPromRegistryDraft.value = true\n    searchQuery.value = ''\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n"
           new = "    isPromRegistryDraft.value = true\n    searchQuery.value = ''\n    platformFilter.value = 'all'\n    isShowingCancellations.value = false\n    isShowingReturns.value = false\n    isShowingUnpaidOnly.value = false\n"
-          count = source.count(old)
-          if count != 1:
-              raise SystemExit(f'HomeView anchor count={count}, expected 1')
+          if source.count(old) != 1:
+              raise SystemExit(f'HomeView anchor count={source.count(old)}, expected 1')
           home.write_text(source.replace(old, new), encoding='utf-8')
-
           recon = Path('src/pages/ReconciliationView.vue')
           source = recon.read_text(encoding='utf-8')
-          replacements = [
-              ("import { computed, onMounted, ref } from 'vue'", "import { computed, onMounted, ref, watch } from 'vue'"),
-              ("""function committedNumericValue(value: string) {
-  const parsed = parsedNumber(value)
-  return parsed === null ? value : String(parsed).replace('.', ',')
-}
-
-function money(value: number) {
-""", """function committedNumericValue(value: string) {
-  const parsed = parsedNumber(value)
-  return parsed === null ? value : String(parsed).replace('.', ',')
-}
-
-function suggestedPaymentDebtUah() {
-  const amount = parsedNumber(paymentTransferredUah.value)
-  const supplierRate = parsedNumber(paymentSupplierRate.value)
-  const debtUsd = parsedNumber(paymentDebtUsd.value)
-  if (amount === null || supplierRate === null || debtUsd === null) return null
-  return amount - debtUsd * supplierRate
-}
-
-watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd], () => {
-  const remainder = suggestedPaymentDebtUah()
-  paymentDebtUah.value =
-    remainder === null ? '' : String(Number(remainder.toFixed(2))).replace('.', ',')
-})
-
-function money(value: number) {
-"""),
-              ("""const paymentDraftDifference = computed(
-  () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
-)
-const hasAccountingInput = computed(() =>
-""", """const paymentDraftDifference = computed(
-  () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
-)
-const paymentDraftHasDifference = computed(() => {
-  const amount = parsedNumber(paymentTransferredUah.value)
-  const supplierRate = parsedNumber(paymentSupplierRate.value)
-  const debtUsd = parsedNumber(paymentDebtUsd.value)
-  const debtUah = parsedNumber(paymentDebtUah.value)
-  return (
-    amount !== null &&
-    supplierRate !== null &&
-    debtUsd !== null &&
-    debtUah !== null &&
-    Math.abs(paymentDraftDifference.value) > 0.01
-  )
-})
-const hasAccountingInput = computed(() =>
-"""),
-              ('placeholder="Закрыто грн"', 'placeholder="Закрыто грн (авто, можно изменить)"'),
-              ("""            <div
-              class=\"mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600\"
-            >
-              <span
-                >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
-                {{ money(paymentDraftDifference) }} грн</span
-              >
-              <button
-""", """            <div
-              class=\"mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600\"
-            >
-              <div>
-                <span
-                  >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
-                  {{ money(paymentDraftDifference) }} грн</span
-                >
-                <p v-if=\"paymentDraftHasDifference\" class=\"mt-1 font-semibold text-amber-700\">
-                  Внимание: распределение отличается от перечисленной суммы на
-                  {{ money(Math.abs(paymentDraftDifference)) }} грн. Сохранение разрешено.
-                </p>
-              </div>
-              <button
-"""),
-          ]
+          replacements = []
+          replacements.append(("import { computed, onMounted, ref } from 'vue'", "import { computed, onMounted, ref, watch } from 'vue'"))
+          helper_anchor = "function money(value: number) {"
+          helper_insert = "function suggestedPaymentDebtUah() {\n  const amount = parsedNumber(paymentTransferredUah.value)\n  const supplierRate = parsedNumber(paymentSupplierRate.value)\n  const debtUsd = parsedNumber(paymentDebtUsd.value)\n  if (amount === null || supplierRate === null || debtUsd === null) return null\n  return amount - debtUsd * supplierRate\n}\n\nwatch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd], () => {\n  const remainder = suggestedPaymentDebtUah()\n  paymentDebtUah.value =\n    remainder === null ? '' : String(Number(remainder.toFixed(2))).replace('.', ',')\n})\n\nfunction money(value: number) {"
+          replacements.append((helper_anchor, helper_insert))
+          warning_anchor = "const hasAccountingInput = computed(() =>"
+          warning_insert = "const paymentDraftHasDifference = computed(() => {\n  const amount = parsedNumber(paymentTransferredUah.value)\n  const supplierRate = parsedNumber(paymentSupplierRate.value)\n  const debtUsd = parsedNumber(paymentDebtUsd.value)\n  const debtUah = parsedNumber(paymentDebtUah.value)\n  return (\n    amount !== null &&\n    supplierRate !== null &&\n    debtUsd !== null &&\n    debtUah !== null &&\n    Math.abs(paymentDraftDifference.value) > 0.01\n  )\n})\nconst hasAccountingInput = computed(() =>"
+          replacements.append((warning_anchor, warning_insert))
+          replacements.append(('placeholder="Закрыто грн"', 'placeholder="Закрыто грн (авто, можно изменить)"'))
+          ui_anchor = "              <button\n                :disabled=\"isGuest || isSaving\"\n                class=\"rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 font-semibold text-emerald-800 disabled:opacity-50\"\n                @click=\"addPayment\""
+          ui_insert = "              <p v-if=\"paymentDraftHasDifference\" class=\"w-full font-semibold text-amber-700\">\n                Внимание: распределение отличается от перечисленной суммы на\n                {{ money(Math.abs(paymentDraftDifference)) }} грн. Сохранение разрешено.\n              </p>\n              <button\n                :disabled=\"isGuest || isSaving\"\n                class=\"rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 font-semibold text-emerald-800 disabled:opacity-50\"\n                @click=\"addPayment\""
+          replacements.append((ui_anchor, ui_insert))
           for old, new in replacements:
               count = source.count(old)
               if count != 1:
@@ -118,24 +51,19 @@ const hasAccountingInput = computed(() =>
               source = source.replace(old, new)
           recon.write_text(source, encoding='utf-8')
           PY
-
           git diff --check
           test "$(git diff --name-only | sort)" = $'src/pages/HomeView.vue\nsrc/pages/ReconciliationView.vue'
-
           python - <<'PY'
           from pathlib import Path
           home = Path('src/pages/HomeView.vue').read_text(encoding='utf-8')
           recon = Path('src/pages/ReconciliationView.vue').read_text(encoding='utf-8')
-
           registry_block = home[home.index('async function handlePromRegistryFile'):home.index('watch(promRegistryFiles')]
           assert "isShowingUnpaidOnly.value = false" in registry_block
-
           assert "watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd]" in recon
           assert "return amount - debtUsd * supplierRate" in recon
           assert 'placeholder="Закрыто грн (авто, можно изменить)"' in recon
           assert 'v-if="paymentDraftHasDifference"' in recon
           assert 'Сохранение разрешено.' in recon
-
           add_start = recon.index('async function addPayment()')
           add_end = recon.index('async function deletePayment', add_start)
           add_payment = recon[add_start:add_end]
