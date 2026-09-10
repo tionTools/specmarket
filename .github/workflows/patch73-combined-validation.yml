@@ -1,0 +1,200 @@
+name: Patch 73 combined validation
+
+on:
+  push:
+    branches:
+      - patch73-registry-unpaid-validation2
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build combined Patch 73 from exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout 896bad13fe7bc68580e60f3816e990f0b895d570
+          python - <<'PY'
+          from pathlib import Path
+
+          home = Path('src/pages/HomeView.vue')
+          source = home.read_text(encoding='utf-8')
+          old = """    isPromRegistryDraft.value = true
+    searchQuery.value = ''
+    platformFilter.value = 'all'
+    isShowingCancellations.value = false
+    isShowingReturns.value = false
+"""
+          new = """    isPromRegistryDraft.value = true
+    searchQuery.value = ''
+    platformFilter.value = 'all'
+    isShowingCancellations.value = false
+    isShowingReturns.value = false
+    isShowingUnpaidOnly.value = false
+"""
+          if source.count(old) != 1:
+              raise SystemExit(f'HomeView anchor count={source.count(old)}, expected 1')
+          home.write_text(source.replace(old, new), encoding='utf-8')
+
+          recon = Path('src/pages/ReconciliationView.vue')
+          source = recon.read_text(encoding='utf-8')
+          replacements = [
+              ("import { computed, onMounted, ref } from 'vue'", "import { computed, onMounted, ref, watch } from 'vue'"),
+              ("""function committedNumericValue(value: string) {
+  const parsed = parsedNumber(value)
+  return parsed === null ? value : String(parsed).replace('.', ',')
+}
+
+function money(value: number) {
+""", """function committedNumericValue(value: string) {
+  const parsed = parsedNumber(value)
+  return parsed === null ? value : String(parsed).replace('.', ',')
+}
+
+function suggestedPaymentDebtUah() {
+  const amount = parsedNumber(paymentTransferredUah.value)
+  const supplierRate = parsedNumber(paymentSupplierRate.value)
+  const debtUsd = parsedNumber(paymentDebtUsd.value)
+  if (amount === null || supplierRate === null || debtUsd === null) return null
+  return amount - debtUsd * supplierRate
+}
+
+watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd], () => {
+  const remainder = suggestedPaymentDebtUah()
+  paymentDebtUah.value =
+    remainder === null ? '' : String(Number(remainder.toFixed(2))).replace('.', ',')
+})
+
+function money(value: number) {
+"""),
+              ("""const paymentDraftDifference = computed(
+  () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
+)
+const hasAccountingInput = computed(() =>
+""", """const paymentDraftDifference = computed(
+  () => numberValue(paymentTransferredUah.value) - paymentDraftEquivalent.value,
+)
+const paymentDraftHasDifference = computed(() => {
+  const amount = parsedNumber(paymentTransferredUah.value)
+  const supplierRate = parsedNumber(paymentSupplierRate.value)
+  const debtUsd = parsedNumber(paymentDebtUsd.value)
+  const debtUah = parsedNumber(paymentDebtUah.value)
+  return (
+    amount !== null &&
+    supplierRate !== null &&
+    debtUsd !== null &&
+    debtUah !== null &&
+    Math.abs(paymentDraftDifference.value) > 0.01
+  )
+})
+const hasAccountingInput = computed(() =>
+"""),
+              ('placeholder="Закрыто грн"', 'placeholder="Закрыто грн (авто, можно изменить)"'),
+              ("""            <div
+              class=\"mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600\"
+            >
+              <span
+                >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
+                {{ money(paymentDraftDifference) }} грн</span
+              >
+              <button
+""", """            <div
+              class=\"mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600\"
+            >
+              <div>
+                <span
+                  >Расчётный эквивалент: {{ money(paymentDraftEquivalent) }} грн · разница:
+                  {{ money(paymentDraftDifference) }} грн</span
+                >
+                <p v-if=\"paymentDraftHasDifference\" class=\"mt-1 font-semibold text-amber-700\">
+                  Внимание: распределение отличается от перечисленной суммы на
+                  {{ money(Math.abs(paymentDraftDifference)) }} грн. Сохранение разрешено.
+                </p>
+              </div>
+              <button
+"""),
+          ]
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'ReconciliationView anchor count={count}, expected 1: {old[:120]!r}')
+              source = source.replace(old, new)
+          recon.write_text(source, encoding='utf-8')
+          PY
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/pages/HomeView.vue\nsrc/pages/ReconciliationView.vue'
+
+          python - <<'PY'
+          from pathlib import Path
+          home = Path('src/pages/HomeView.vue').read_text(encoding='utf-8')
+          recon = Path('src/pages/ReconciliationView.vue').read_text(encoding='utf-8')
+          block = home[home.index('async function handlePromRegistryFile'):home.index('watch(promRegistryFiles')]
+          assert "isShowingUnpaidOnly.value = false" in block
+          assert "watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd]" in recon
+          assert "return amount - debtUsd * supplierRate" in recon
+          assert 'placeholder="Закрыто грн (авто, можно изменить)"' in recon
+          assert 'v-if="paymentDraftHasDifference"' in recon
+          assert 'Сохранение разрешено.' in recon
+          add_start = recon.index('async function addPayment()')
+          add_end = recon.index('async function deletePayment', add_start)
+          add_payment = recon[add_start:add_end]
+          assert 'paymentDraftDifference' not in add_payment
+          assert 'paymentDraftHasDifference' not in add_payment
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm format
+          if ! git diff --quiet -- src/features/orders/delivery-tracking.ts; then git checkout -- src/features/orders/delivery-tracking.ts; fi
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/pages/HomeView.vue\nsrc/pages/ReconciliationView.vue'
+          ! git diff --name-only | grep -Fx 'AGENTS.md'
+          ! git diff --name-only | grep -E '^supabase/'
+          ! git diff --name-only | grep -E '^android/'
+
+      - name: Normalize and reapply combined Patch 73
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary --full-index -- src/pages/HomeView.vue src/pages/ReconciliationView.vue > /tmp/73.patch
+          test -s /tmp/73.patch
+          git reset --hard 896bad13fe7bc68580e60f3816e990f0b895d570
+          git clean -fd
+          git apply --check /tmp/73.patch
+          git apply /tmp/73.patch
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/pages/HomeView.vue\nsrc/pages/ReconciliationView.vue'
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          if ! git diff --quiet -- src/features/orders/delivery-tracking.ts; then git checkout -- src/features/orders/delivery-tracking.ts; fi
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/pages/HomeView.vue\nsrc/pages/ReconciliationView.vue'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patch73-combined
+          path: /tmp/73.patch
+          if-no-files-found: error
