@@ -1,127 +1,16 @@
-diff --git a/supabase/migrations/20260911130000_atomic_order_items.sql b/supabase/migrations/20260911130000_atomic_order_items.sql
-new file mode 100644
---- /dev/null
-+++ b/supabase/migrations/20260911130000_atomic_order_items.sql
-@@ -0,0 +1,29 @@
-+create or replace function public.replace_crm_order_items(p_order_id uuid, p_items jsonb)
-+returns void
-+language plpgsql
-+security definer
-+set search_path = pg_catalog, public
-+as $$
-+begin
-+  if p_items is null or jsonb_typeof(p_items) <> 'array' then
-+    raise exception 'p_items must be a JSON array';
-+  end if;
-+
-+  delete from public.crm_order_items where order_id = p_order_id;
-+
-+  insert into public.crm_order_items (
-+    order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd,
-+    marketplace_product_key, cost_manual, price_item_id,
-+    royalty_percent, royalty_amount, royalty_manual
-+  )
-+  select
-+    p_order_id, item.position, item.product_name, item.size, item.image_url,
-+    item.quantity, item.price, item.cost, item.cost_usd,
-+    item.marketplace_product_key, coalesce(item.cost_manual, false), item.price_item_id,
-+    item.royalty_percent, item.royalty_amount, coalesce(item.royalty_manual, false)
-+  from jsonb_populate_recordset(null::public.crm_order_items, p_items) as item;
-+end;
-+$$;
-+
-+revoke all on function public.replace_crm_order_items(uuid, jsonb) from public, anon, authenticated;
-+grant execute on function public.replace_crm_order_items(uuid, jsonb) to service_role;
-diff --git a/supabase/migrations/20260911131000_crm_authorization_guard.sql b/supabase/migrations/20260911131000_crm_authorization_guard.sql
-new file mode 100644
---- /dev/null
-+++ b/supabase/migrations/20260911131000_crm_authorization_guard.sql
-@@ -0,0 +1,92 @@
-+create or replace function public.crm_can_write()
-+returns boolean
-+language sql
-+stable
-+security definer
-+set search_path = pg_catalog, public
-+as $$
-+  select auth.uid() = '80523d58-a9f5-4de0-8751-d57c84a1897a'::uuid;
-+$$;
-+
-+revoke all on function public.crm_can_write() from public, anon;
-+grant execute on function public.crm_can_write() to authenticated, service_role;
-+
-+create or replace function public.crm_can_read()
-+returns boolean
-+language sql
-+stable
-+security definer
-+set search_path = pg_catalog, public
-+as $$
-+  select auth.uid() in (
-+    '80523d58-a9f5-4de0-8751-d57c84a1897a'::uuid,
-+    '6c450c97-ac5f-4c80-bcdd-a5cc02128bad'::uuid
-+  );
-+$$;
-+
-+revoke all on function public.crm_can_read() from public, anon;
-+grant execute on function public.crm_can_read() to authenticated, service_role;
-+
-+-- Existing CRM policies are permissive. Restrictive guards are ANDed with
-+-- those policies: the owner keeps read/write access, the guest keeps read-only
-+-- access, and any other authenticated account is denied.
-+do $$
-+declare
-+  target record;
-+begin
-+  for target in
-+    select distinct tablename
-+    from pg_policies
-+    where schemaname = 'public'
-+      and upper(cmd) in ('ALL', 'SELECT')
-+      and roles @> array['authenticated'::name]
-+  loop
-+    execute format('alter table public.%I enable row level security', target.tablename);
-+    execute format('drop policy if exists %I on public.%I', 'crm_authorized_select_guard', target.tablename);
-+    execute format(
-+      'create policy %I on public.%I as restrictive for select to authenticated using (public.crm_can_read())',
-+      'crm_authorized_select_guard',
-+      target.tablename
-+    );
-+  end loop;
-+
-+  for target in
-+    select distinct tablename
-+    from pg_policies
-+    where schemaname = 'public'
-+      and upper(cmd) in ('ALL', 'INSERT', 'UPDATE', 'DELETE')
-+      and roles @> array['authenticated'::name]
-+  loop
-+    execute format('alter table public.%I enable row level security', target.tablename);
-+    execute format('drop policy if exists %I on public.%I', 'crm_authorized_insert_guard', target.tablename);
-+    execute format(
-+      'create policy %I on public.%I as restrictive for insert to authenticated with check (public.crm_can_write())',
-+      'crm_authorized_insert_guard',
-+      target.tablename
-+    );
-+    execute format('drop policy if exists %I on public.%I', 'crm_authorized_update_guard', target.tablename);
-+    execute format(
-+      'create policy %I on public.%I as restrictive for update to authenticated using (public.crm_can_write()) with check (public.crm_can_write())',
-+      'crm_authorized_update_guard',
-+      target.tablename
-+    );
-+    execute format('drop policy if exists %I on public.%I', 'crm_authorized_delete_guard', target.tablename);
-+    execute format(
-+      'create policy %I on public.%I as restrictive for delete to authenticated using (public.crm_can_write())',
-+      'crm_authorized_delete_guard',
-+      target.tablename
-+    );
-+  end loop;
-+end
-+$$;
 diff --git a/supabase/functions/_shared/prom-delivery.ts b/supabase/functions/_shared/prom-delivery.ts
+index 2c9a420..1692ad7 100644
 --- a/supabase/functions/_shared/prom-delivery.ts
 +++ b/supabase/functions/_shared/prom-delivery.ts
-@@ -18,7 +18,11 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
+@@ -6,6 +6,7 @@ type ResolvePromShippingInput = {
+   hasSellerDeliveryCost: boolean
+   sellerDeliveryCost: number
+   deliveryProvider: string
++  isPromFreeDelivery: boolean
+   orderAmount: number
+ }
+ 
+@@ -21,7 +22,16 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
      return { shipping: input.sellerDeliveryCost, shippingSource: 'seller-api' }
    }
  
@@ -130,51 +19,109 @@ diff --git a/supabase/functions/_shared/prom-delivery.ts b/supabase/functions/_s
 +    .trim()
 +    .toLowerCase()
 +    .replace(/[\s-]+/g, '_')
-+  if (deliveryProvider === 'rozetka_delivery' || deliveryProvider.includes('rozetka')) {
++  const isRozetkaDelivery =
++    deliveryProvider === 'rozetka_delivery' || deliveryProvider.includes('rozetka')
++  const isNovaPoshta =
++    deliveryProvider.includes('nova') || deliveryProvider.includes('нова')
++
++  if (isRozetkaDelivery) {
      return {
        shipping: input.orderAmount >= 700 ? 30 : 10,
        // Keep the existing persisted source value for compatibility. The
+@@ -30,5 +40,14 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
+     }
+   }
+ 
++  // Prom's Nova Poshta "Дешева доставка" promotion charges the seller
++  // 10 UAH from 200 UAH and 30 UAH from 700 UAH; Prom pays the remainder.
++  if (input.isPromFreeDelivery && isNovaPoshta && input.orderAmount >= 200) {
++    return {
++      shipping: input.orderAmount >= 700 ? 30 : 10,
++      shippingSource: 'prom-promo',
++    }
++  }
++
+   return { shipping: 0, shippingSource: 'none' }
+ }
 diff --git a/supabase/functions/_shared/prom-delivery_test.ts b/supabase/functions/_shared/prom-delivery_test.ts
+index 2de54c7..ca81bbb 100644
 --- a/supabase/functions/_shared/prom-delivery_test.ts
 +++ b/supabase/functions/_shared/prom-delivery_test.ts
-@@ -22,6 +22,20 @@ for (const orderAmount of [700, 1512]) {
-   )
+@@ -11,6 +11,7 @@ function rozDelivery(orderAmount: number) {
+     hasSellerDeliveryCost: false,
+     sellerDeliveryCost: 0,
+     deliveryProvider: 'rozetka_delivery',
++    isPromFreeDelivery: false,
+     orderAmount,
+   })
  }
- 
-+const rozetkaLabelFallback = resolvePromShipping({
+@@ -37,6 +38,7 @@ const manual = resolvePromShipping({
+   hasSellerDeliveryCost: true,
+   sellerDeliveryCost: 17,
+   deliveryProvider: 'rozetka_delivery',
++  isPromFreeDelivery: true,
+   orderAmount: 800,
+ })
+ assert(
+@@ -50,6 +52,7 @@ const sellerApi = resolvePromShipping({
+   hasSellerDeliveryCost: true,
+   sellerDeliveryCost: 17,
+   deliveryProvider: 'rozetka_delivery',
++  isPromFreeDelivery: true,
+   orderAmount: 800,
+ })
+ assert(
+@@ -63,9 +66,45 @@ const otherProvider = resolvePromShipping({
+   hasSellerDeliveryCost: false,
+   sellerDeliveryCost: 0,
+   deliveryProvider: 'nova_poshta',
++  isPromFreeDelivery: false,
+   orderAmount: 240,
+ })
+ assert(
+   otherProvider.shipping === 0 && otherProvider.shippingSource === 'none',
+   'Rozetka tariff fallback must not affect other delivery providers',
+ )
++
++for (const [orderAmount, expected] of [
++  [200, 10],
++  [699.99, 10],
++  [700, 30],
++  [1020, 30],
++] as const) {
++  const result = resolvePromShipping({
++    hasManualShipping: false,
++    manualShipping: 0,
++    hasSellerDeliveryCost: false,
++    sellerDeliveryCost: 0,
++    deliveryProvider: 'Нова Пошта',
++    isPromFreeDelivery: true,
++    orderAmount,
++  })
++  assert(
++    result.shipping === expected && result.shippingSource === 'prom-promo',
++    `Prom Nova Poshta promo order ${orderAmount} UAH must cost seller ${expected} UAH`,
++  )
++}
++
++const novaBelowMinimum = resolvePromShipping({
 +  hasManualShipping: false,
 +  manualShipping: 0,
 +  hasSellerDeliveryCost: false,
 +  sellerDeliveryCost: 0,
-+  deliveryProvider: 'Магазины Rozetka',
-+  orderAmount: 105,
++  deliveryProvider: 'Нова Пошта',
++  isPromFreeDelivery: true,
++  orderAmount: 199.99,
 +})
 +assert(
-+  rozetkaLabelFallback.shipping === 10 &&
-+    rozetkaLabelFallback.shippingSource === 'prom-promo',
-+  'Rozetka carrier label must use the Rozetka Delivery seller tariff',
++  novaBelowMinimum.shipping === 0 && novaBelowMinimum.shippingSource === 'none',
++  'Prom Nova Poshta promo must not charge seller below the 200 UAH promotion minimum',
 +)
-+
- const manual = resolvePromShipping({
-   hasManualShipping: true,
-   manualShipping: 44,
 diff --git a/supabase/functions/save-crm-orders/index.ts b/supabase/functions/save-crm-orders/index.ts
+index 66e60c3..81fb34b 100644
 --- a/supabase/functions/save-crm-orders/index.ts
 +++ b/supabase/functions/save-crm-orders/index.ts
-@@ -106,7 +106,11 @@ Deno.serve(async (request) => {
- 
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = await auth.auth.getUser()
--  if (!user || user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
-+  if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-+  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+  if (accessError || canWrite !== true) {
-+    return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
-+  }
- 
-   const body = await request.json().catch(() => ({})) as { orders?: SavedOrder[] }
-   const orders = Array.isArray(body.orders) ? body.orders : []
-@@ -143,23 +147,20 @@ Deno.serve(async (request) => {
+@@ -145,23 +145,20 @@
      const currentItemsByPositionAndName = new Map(
        (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
      )
@@ -212,103 +159,11 @@ diff --git a/supabase/functions/save-crm-orders/index.ts b/supabase/functions/sa
      saved.push({ orderNumber: order.order_number, remoteId })
    }
    return Response.json({ ok: true, saved }, { headers: corsHeaders })
-diff --git a/supabase/functions/update-order-print-state/index.ts b/supabase/functions/update-order-print-state/index.ts
---- a/supabase/functions/update-order-print-state/index.ts
-+++ b/supabase/functions/update-order-print-state/index.ts
-@@ -24,7 +24,10 @@ Deno.serve(async (request) => {
- 
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = await auth.auth.getUser()
--  if (!user || user.email?.toLowerCase() === 'guest@gmail.com')
-+  if (!user)
-+    return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-+  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+  if (accessError || canWrite !== true)
-     return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
- 
-   const body = await request.json().catch(() => ({})) as { updates?: PrintUpdate[] }
-diff --git a/supabase/functions/send-order-label-email/index.ts b/supabase/functions/send-order-label-email/index.ts
---- a/supabase/functions/send-order-label-email/index.ts
-+++ b/supabase/functions/send-order-label-email/index.ts
-@@ -83,9 +83,10 @@ Deno.serve(async (request) => {
-       { status: 401, headers: corsHeaders },
-     )
-   }
--  if (user.email?.toLowerCase() === 'guest@gmail.com') {
-+  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+  if (accessError || canWrite !== true) {
-     return Response.json(
--      { ok: false, message: 'Гостевой аккаунт не может отправлять бирки.' },
-+      { ok: false, message: 'Нет прав на отправку бирок.' },
-       { status: 403, headers: corsHeaders },
-     )
-   }
-diff --git a/supabase/functions/sync-delivery-tracking/index.ts b/supabase/functions/sync-delivery-tracking/index.ts
---- a/supabase/functions/sync-delivery-tracking/index.ts
-+++ b/supabase/functions/sync-delivery-tracking/index.ts
-@@ -21,7 +21,10 @@ Deno.serve(async (request) => {
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = scheduled ? { data: { user: null } } : await auth.auth.getUser()
-   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
--  if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-+  if (!scheduled) {
-+    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
-+  }
-   const forced = body.force === true && !scheduled && Boolean(user)
-   const orderId = !scheduled && typeof body.orderId === 'string' ? body.orderId.trim() : ''
-   const result = await runTrackingWorker(admin, forced, orderId || undefined)
-diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
---- a/supabase/functions/sync-prom-orders/index.ts
-+++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -644,7 +644,10 @@ Deno.serve(async (request) => {
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
-   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
--  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-+  if (!isScheduledRequest) {
-+    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
-+  }
- 
-   const body = await request.json().catch(() => ({})) as {
-@@ -964,7 +967,7 @@ Deno.serve(async (request) => {
-       manualShipping: number(existing?.shipping),
-       hasSellerDeliveryCost,
-       sellerDeliveryCost: number(sellerDeliveryCost),
--      deliveryProvider: text(deliveryProvider.provider),
-+      deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
-       orderAmount,
-     })
-@@ -1194,10 +1197,8 @@ Deno.serve(async (request) => {
-       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
-       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
-       if (!same(comparableRows, comparableCurrent)) {
--        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
--        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
--        const { error: insertError } = await admin.from('crm_order_items').insert(itemRows)
--        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
-+        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: itemRows })
-+        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
-         if (!orderChanged) updated += 1
-         changedOrderIds.push(orderId)
-       } else if (orderChanged) changedOrderIds.push(orderId)
 diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+index 782080d..e5a68a2 100644
 --- a/supabase/functions/sync-epicentr-orders/index.ts
 +++ b/supabase/functions/sync-epicentr-orders/index.ts
-@@ -335,8 +335,9 @@ Deno.serve(async (request) => {
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
-   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
--  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
--    return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-+  if (!isScheduledRequest) {
-+    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
-   }
- 
-   const body = await request.json().catch(() => ({})) as {
-@@ -868,12 +869,8 @@ Deno.serve(async (request) => {
+@@ -873,12 +873,8 @@
        const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
        const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
        if (!same(comparableSaved, comparableExisting)) {
@@ -324,22 +179,12 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
        }
      }
 diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+index b9bbd03..7e1aa19 100644
 --- a/supabase/functions/sync-kasta-orders/index.ts
 +++ b/supabase/functions/sync-kasta-orders/index.ts
-@@ -388,7 +388,10 @@ Deno.serve(async (request) => {
-   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
-   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
--  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-+  if (!isScheduledRequest) {
-+    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
-+    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
-+  }
- 
-   const body = await request.json().catch(() => ({})) as {
-@@ -669,10 +672,8 @@ Deno.serve(async (request) => {
+@@ -678,7 +678,5 @@
        const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
-       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item })).sort((left, right) => number(left.position) - number(right.position))
        if (!same(comparableSaved, comparableExisting)) {
 -        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
 -        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
@@ -347,6 +192,65 @@ diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/
 -        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
 +        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: savedItems })
 +        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
-         if (!orderChanged) {
-           updated += 1
-           changedOrderIds.add(orderId)
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+index 5720d5f..5555937 100644
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -967,7 +967,8 @@
+       manualShipping: number(existing?.shipping),
+       hasSellerDeliveryCost,
+       sellerDeliveryCost: number(sellerDeliveryCost),
+-      deliveryProvider: text(deliveryProvider.provider),
++      deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
++      isPromFreeDelivery,
+       orderAmount,
+     })
+     const { date, time } = dateParts(order.date_created ?? order.created_at)
+@@ -1193,10 +1194,8 @@
+       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
+       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item })).sort((left, right) => number(left.position) - number(right.position))
+       if (!same(comparableRows, comparableCurrent)) {
+-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+-        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+-        const { error: insertError } = await admin.from('crm_order_items').insert(itemRows)
+-        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
++        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: itemRows })
++        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+         if (!orderChanged) updated += 1
+         changedOrderIds.push(orderId)
+       } else if (orderChanged) changedOrderIds.push(orderId)
+diff --git a/supabase/migrations/20260911130000_atomic_order_items.sql b/supabase/migrations/20260911130000_atomic_order_items.sql
+new file mode 100644
+index 0000000..505a25f
+--- /dev/null
++++ b/supabase/migrations/20260911130000_atomic_order_items.sql
+@@ -0,0 +1,29 @@
++create or replace function public.replace_crm_order_items(p_order_id uuid, p_items jsonb)
++returns void
++language plpgsql
++security definer
++set search_path = pg_catalog, public
++as $$
++begin
++  if p_items is null or jsonb_typeof(p_items) <> 'array' then
++    raise exception 'p_items must be a JSON array';
++  end if;
++
++  delete from public.crm_order_items where order_id = p_order_id;
++
++  insert into public.crm_order_items (
++    order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd,
++    marketplace_product_key, cost_manual, price_item_id,
++    royalty_percent, royalty_amount, royalty_manual
++  )
++  select
++    p_order_id, item.position, item.product_name, item.size, item.image_url,
++    item.quantity, item.price, item.cost, item.cost_usd,
++    item.marketplace_product_key, coalesce(item.cost_manual, false), item.price_item_id,
++    item.royalty_percent, item.royalty_amount, coalesce(item.royalty_manual, false)
++  from jsonb_populate_recordset(null::public.crm_order_items, p_items) as item;
++end;
++$$;
++
++revoke all on function public.replace_crm_order_items(uuid, jsonb) from public, anon, authenticated;
++grant execute on function public.replace_crm_order_items(uuid, jsonb) to service_role;
