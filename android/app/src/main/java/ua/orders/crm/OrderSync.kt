@@ -25,3 +25,13 @@ fun normalizeCustomerPhone(phone: String?): String? {
         else -> "+$digits"
     }
 }
+
+fun formatCustomerPhoneForDisplay(phone: String?): String {
+    val raw = phone.orEmpty().trim()
+    if (raw.isEmpty()) return "—"
+    val normalized = normalizeCustomerPhone(raw) ?: return raw
+    val digits = normalized.filter(Char::isDigit)
+    return if (digits.length == 12 && digits.startsWith("380")) {
+        "+38 ${digits.substring(2, 5)} ${digits.substring(5, 8)} ${digits.substring(8, 10)} ${digits.substring(10, 12)}"
+    } else normalized
+}
