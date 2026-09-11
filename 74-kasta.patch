@@ -1,0 +1,16 @@
+diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+--- a/supabase/functions/sync-kasta-orders/index.ts
++++ b/supabase/functions/sync-kasta-orders/index.ts
+@@ -678,10 +678,8 @@
+       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
+       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+       if (!same(comparableSaved, comparableExisting)) {
+-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+-        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+-        const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
+-        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
++        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: savedItems })
++        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+         if (!orderChanged) {
+           updated += 1
+           changedOrderIds.add(orderId)
