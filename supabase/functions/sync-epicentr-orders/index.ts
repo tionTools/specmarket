@@ -873,12 +873,8 @@ Deno.serve(async (request) => {
       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
       const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
       if (!same(comparableSaved, comparableExisting)) {
-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
-        if (deleteError) return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
-        const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
-        if (insertError) {
-        return Response.json({ ok: false, message: `Не удалось записать позиции: ${insertError.message}` }, { status: 500, headers: corsHeaders })
-        }
+        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: savedItems })
+        if (replaceError) return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${replaceError.message}` }, { status: 500, headers: corsHeaders })
         if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
       }
     }

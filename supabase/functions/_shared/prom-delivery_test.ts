@@ -11,6 +11,7 @@ function rozDelivery(orderAmount: number) {
     hasSellerDeliveryCost: false,
     sellerDeliveryCost: 0,
     deliveryProvider: 'rozetka_delivery',
+    isPromFreeDelivery: false,
     orderAmount,
   })
 }
@@ -37,6 +38,7 @@ const manual = resolvePromShipping({
   hasSellerDeliveryCost: true,
   sellerDeliveryCost: 17,
   deliveryProvider: 'rozetka_delivery',
+  isPromFreeDelivery: true,
   orderAmount: 800,
 })
 assert(
@@ -50,6 +52,7 @@ const sellerApi = resolvePromShipping({
   hasSellerDeliveryCost: true,
   sellerDeliveryCost: 17,
   deliveryProvider: 'rozetka_delivery',
+  isPromFreeDelivery: true,
   orderAmount: 800,
 })
 assert(
@@ -63,9 +66,45 @@ const otherProvider = resolvePromShipping({
   hasSellerDeliveryCost: false,
   sellerDeliveryCost: 0,
   deliveryProvider: 'nova_poshta',
+  isPromFreeDelivery: false,
   orderAmount: 240,
 })
 assert(
   otherProvider.shipping === 0 && otherProvider.shippingSource === 'none',
   'Rozetka tariff fallback must not affect other delivery providers',
+)
+
+for (const [orderAmount, expected] of [
+  [200, 10],
+  [699.99, 10],
+  [700, 30],
+  [1020, 30],
+] as const) {
+  const result = resolvePromShipping({
+    hasManualShipping: false,
+    manualShipping: 0,
+    hasSellerDeliveryCost: false,
+    sellerDeliveryCost: 0,
+    deliveryProvider: 'Нова Пошта',
+    isPromFreeDelivery: true,
+    orderAmount,
+  })
+  assert(
+    result.shipping === expected && result.shippingSource === 'prom-promo',
+    `Prom Nova Poshta promo order ${orderAmount} UAH must cost seller ${expected} UAH`,
+  )
+}
+
+const novaBelowMinimum = resolvePromShipping({
+  hasManualShipping: false,
+  manualShipping: 0,
+  hasSellerDeliveryCost: false,
+  sellerDeliveryCost: 0,
+  deliveryProvider: 'Нова Пошта',
+  isPromFreeDelivery: true,
+  orderAmount: 199.99,
+})
+assert(
+  novaBelowMinimum.shipping === 0 && novaBelowMinimum.shippingSource === 'none',
+  'Prom Nova Poshta promo must not charge seller below the 200 UAH promotion minimum',
 )

@@ -145,23 +145,20 @@ Deno.serve(async (request) => {
     const currentItemsByPositionAndName = new Map(
       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
     )
-    const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', remoteId)
-    if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
-    if (order.items.length) {
-      const { error: insertError } = await admin.from('crm_order_items').insert(order.items.map((item, position) => {
-        const currentItem = currentItemsByPositionAndName.get(`${position}:${item.product_name}`)
-        return {
-          order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
-          price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
-          marketplace_product_key: item.marketplace_product_key ?? currentItem?.marketplace_product_key ?? null,
-          cost_manual: item.cost_manual ?? currentItem?.cost_manual ?? false,
-          price_item_id: item.price_item_id ?? currentItem?.price_item_id ?? null,
-          royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
-          royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
-        }
-      }))
-      if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
-    }
+    const itemRows = order.items.map((item, position) => {
+      const currentItem = currentItemsByPositionAndName.get(`${position}:${item.product_name}`)
+      return {
+        order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
+        price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
+        marketplace_product_key: item.marketplace_product_key ?? currentItem?.marketplace_product_key ?? null,
+        cost_manual: item.cost_manual ?? currentItem?.cost_manual ?? false,
+        price_item_id: item.price_item_id ?? currentItem?.price_item_id ?? null,
+        royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
+        royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
+      }
+    })
+    const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: remoteId, p_items: itemRows })
+    if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
     saved.push({ orderNumber: order.order_number, remoteId })
   }
   return Response.json({ ok: true, saved }, { headers: corsHeaders })

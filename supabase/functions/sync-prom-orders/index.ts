@@ -967,7 +967,8 @@ Deno.serve(async (request) => {
       manualShipping: number(existing?.shipping),
       hasSellerDeliveryCost,
       sellerDeliveryCost: number(sellerDeliveryCost),
-      deliveryProvider: text(deliveryProvider.provider),
+      deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
+      isPromFreeDelivery,
       orderAmount,
     })
     const { date, time } = dateParts(order.date_created ?? order.created_at)
@@ -1193,10 +1194,8 @@ Deno.serve(async (request) => {
       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
       if (!same(comparableRows, comparableCurrent)) {
-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
-        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
-        const { error: insertError } = await admin.from('crm_order_items').insert(itemRows)
-        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
+        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: itemRows })
+        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
         if (!orderChanged) updated += 1
         changedOrderIds.push(orderId)
       } else if (orderChanged) changedOrderIds.push(orderId)
