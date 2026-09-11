@@ -1,0 +1,81 @@
+Patch 75 — reconciliation paste parsing + visual comparison layout
+
+SOURCE OF TRUTH
+- Repository: tionTools/specmarket
+- Required origin/main before apply: f70b0ed609dfba5b57151d0b27e3f96052b6fe20
+- Required 75.patch revision: cee929e361170bd27fc5b9a806fd17449e31566b
+- Scope: only src/pages/ReconciliationView.vue
+- Do not touch AGENTS.md, Supabase, migrations, Edge Functions, Android, secrets, or unrelated files.
+
+GOAL
+1. Numbers pasted with grouping whitespace must parse correctly. Example: `11 352,22` must be treated as `11352.22` instead of 0/invalid.
+2. Reconciliation fields must be visually grouped for direct comparison:
+   - Parameters: Kurs / Bron / Storno
+   - Dollars: Moi dollary directly above Dollary 1C
+   - Hryvnia: Moya grivna directly above Grivna 1C
+   - Totals: Moya summa / Vsego 1C / Moya summa posle storno / 1C dlya sverki
+3. Preserve every existing calculation, save flow, guest read-only behavior, field binding, labels, and business rule. This patch only changes whitespace parsing and presentation order/grouping.
+
+APPLY
+1. Work from an isolated clean worktree based on exact origin/main. Do not alter the user's original dirty worktree.
+2. Run:
+   git fetch origin main
+   git fetch origin +refs/heads/chatgpt-patches:refs/remotes/origin/chatgpt-patches
+3. Verify:
+   git rev-parse origin/main
+   must equal:
+   f70b0ed609dfba5b57151d0b27e3f96052b6fe20
+4. Verify artifact revision:
+   git log -1 --format=%H origin/chatgpt-patches -- 75.patch
+   must equal:
+   cee929e361170bd27fc5b9a806fd17449e31566b
+5. Retrieve the patch without modifying the original worktree:
+   git show origin/chatgpt-patches:75.patch > "$env:TEMP\specmarket-75.patch"
+6. Before changing files:
+   git apply --check "$env:TEMP\specmarket-75.patch"
+   This must PASS. Do not use --3way, --reject, whitespace-fixing flags, or manual adaptation.
+7. Apply:
+   git apply "$env:TEMP\specmarket-75.patch"
+8. Confirm only one tracked source file changed:
+   git diff --name-only
+   Expected exactly:
+   src/pages/ReconciliationView.vue
+
+CHECKS
+Run in this order. Do not auto-fix unrelated files.
+1. git diff --check
+2. pnpm exec oxfmt --check src/pages/ReconciliationView.vue
+3. pnpm type-check
+4. pnpm exec oxlint src/pages/ReconciliationView.vue
+5. pnpm exec eslint src/pages/ReconciliationView.vue
+6. pnpm build
+
+ACCEPTANCE
+- The parser line removes whitespace before decimal parsing.
+- `11 352,22` evaluates as 11352.22; `51,71` remains 51.71; plain `11352,22` remains 11352.22.
+- On desktop the comparison area has four clear groups: Parameters / Dollars / Hryvnia / Totals.
+- Moi dollary is directly above Dollary 1C.
+- Moya grivna is directly above Grivna 1C.
+- All previous v-model/value bindings remain attached to the same variables.
+- No reconciliation formula, save payload, RPC, database, migration, or marketplace code changes.
+- git diff --name-only still shows only src/pages/ReconciliationView.vue after checks.
+
+COMMIT/PUSH
+If and only if every check passes:
+- Commit only src/pages/ReconciliationView.vue
+- Commit message: Fix reconciliation paste parsing and layout
+- Push HEAD to main.
+
+STOP CONDITIONS
+Stop without commit/push if origin/main changed, patch revision differs, git apply --check fails, any check fails, or any unexpected file changes.
+
+FINAL REPORT
+Report:
+- source main SHA
+- 75.patch revision
+- git apply --check result
+- changed files
+- format/type-check/lint/build results
+- commit SHA
+- push result
+- confirmation that Supabase and original dirty worktree were untouched
