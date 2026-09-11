@@ -1,0 +1,232 @@
+diff --git a/supabase/migrations/20260911130000_atomic_order_items.sql b/supabase/migrations/20260911130000_atomic_order_items.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260911130000_atomic_order_items.sql
+@@ -0,0 +1,37 @@
++create or replace function public.replace_crm_order_items(p_order_id uuid, p_items jsonb)
++returns void
++language plpgsql
++security definer
++set search_path = pg_catalog, public
++as $$
++begin
++  if p_items is null or jsonb_typeof(p_items) <> 'array' then
++    raise exception 'p_items must be a JSON array';
++  end if;
++
++  delete from public.crm_order_items where order_id = p_order_id;
++
++  insert into public.crm_order_items (
++    order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd,
++    marketplace_product_key, cost_manual, price_item_id,
++    royalty_percent, royalty_amount, royalty_manual
++  )
++  select
++    p_order_id, item.position, item.product_name, item.size, item.image_url,
++    item.quantity, item.price, item.cost, item.cost_usd,
++    item.marketplace_product_key, coalesce(item.cost_manual, false), item.price_item_id,
++    item.royalty_percent, item.royalty_amount, coalesce(item.royalty_manual, false)
++  from jsonb_populate_recordset(null::public.crm_order_items, p_items) as item;
++end;
++$$;
++
++revoke all on function public.replace_crm_order_items(uuid, jsonb) from public, anon, authenticated;
++grant execute on function public.replace_crm_order_items(uuid, jsonb) to service_role;
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -552,10 +552,24 @@ function parseInputDate(value: string) {
+ }
+ 
+ function parseOrderDate(value: string) {
++  const isoDate = parseInputDate(value)
++  if (isoDate) return isoDate
+   const [day, month, year] = value.split('.').map(Number)
+   if (!year || !month || !day) return null
+   return new Date(year, month - 1, day)
+ }
++
++const orderDraftDateInputValue = computed(() => {
++  const date = parseOrderDate(orderDraft.value.date)
++  return date ? inputDate(date) : ''
++})
++
++function updateOrderDraftDate(event: Event) {
++  const date = parseInputDate((event.target as HTMLInputElement).value)
++  if (!date) return
++  orderDraft.value.date = new Intl.DateTimeFormat('uk-UA').format(date)
++  repriceOrderDraft()
++}
+ 
+ function shiftDateByMonths(value: Date, months: number) {
+   const targetMonth = value.getMonth() + months
+@@ -4267,8 +4281,15 @@ function finishOrderCell(key: string, onCommit?: () => void) {
+ }
+ 
+ function orderDateTime(order: Order) {
+-  const [day, month, year] = order.date.split('.').map(Number)
++  const date = parseOrderDate(order.date)
++  if (!date) return 0
+   const [hours, minutes] = (order.time ?? '00:00').split(':').map(Number)
+-  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0).getTime()
++  return new Date(
++    date.getFullYear(),
++    date.getMonth(),
++    date.getDate(),
++    hours ?? 0,
++    minutes ?? 0,
++  ).getTime()
+ }
+ </script>
+@@ -6276,10 +6297,10 @@ function orderDateTime(order: Order) {
+               <label class="text-sm font-medium text-slate-700">
+                 Дата заказа
+                 <input
+-                  v-model="orderDraft.date"
++                  :value="orderDraftDateInputValue"
+                   class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+                   type="date"
+-                  @change="repriceOrderDraft"
++                  @input="updateOrderDraftDate"
+                 />
+               </label>
+               <label class="text-sm font-medium text-slate-700">
+diff --git a/supabase/functions/_shared/prom-delivery.ts b/supabase/functions/_shared/prom-delivery.ts
+--- a/supabase/functions/_shared/prom-delivery.ts
++++ b/supabase/functions/_shared/prom-delivery.ts
+@@ -18,7 +18,11 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
+     return { shipping: input.sellerDeliveryCost, shippingSource: 'seller-api' }
+   }
+ 
+-  if (input.deliveryProvider.trim().toLowerCase() === 'rozetka_delivery') {
++  const deliveryProvider = input.deliveryProvider
++    .trim()
++    .toLowerCase()
++    .replace(/[\s-]+/g, '_')
++  if (deliveryProvider === 'rozetka_delivery' || deliveryProvider.includes('rozetka')) {
+     return {
+       shipping: input.orderAmount >= 700 ? 30 : 10,
+       // Keep the existing persisted source value for compatibility. The
+diff --git a/supabase/functions/_shared/prom-delivery_test.ts b/supabase/functions/_shared/prom-delivery_test.ts
+--- a/supabase/functions/_shared/prom-delivery_test.ts
++++ b/supabase/functions/_shared/prom-delivery_test.ts
+@@ -22,6 +22,20 @@ for (const orderAmount of [700, 1512]) {
+   )
+ }
+ 
++const rozetkaLabelFallback = resolvePromShipping({
++  hasManualShipping: false,
++  manualShipping: 0,
++  hasSellerDeliveryCost: false,
++  sellerDeliveryCost: 0,
++  deliveryProvider: 'Магазины Rozetka',
++  orderAmount: 105,
++})
++assert(
++  rozetkaLabelFallback.shipping === 10 &&
++    rozetkaLabelFallback.shippingSource === 'prom-promo',
++  'Rozetka carrier label must use the Rozetka Delivery seller tariff',
++)
++
+ const manual = resolvePromShipping({
+   hasManualShipping: true,
+   manualShipping: 44,
+diff --git a/supabase/functions/save-crm-orders/index.ts b/supabase/functions/save-crm-orders/index.ts
+--- a/supabase/functions/save-crm-orders/index.ts
++++ b/supabase/functions/save-crm-orders/index.ts
+@@ -143,23 +143,20 @@ Deno.serve(async (request) => {
+     const currentItemsByPositionAndName = new Map(
+       (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
+     )
+-    const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', remoteId)
+-    if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+-    if (order.items.length) {
+-      const { error: insertError } = await admin.from('crm_order_items').insert(order.items.map((item, position) => {
+-        const currentItem = currentItemsByPositionAndName.get(`${position}:${item.product_name}`)
+-        return {
+-          order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
+-          price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
+-          marketplace_product_key: item.marketplace_product_key ?? currentItem?.marketplace_product_key ?? null,
+-          cost_manual: item.cost_manual ?? currentItem?.cost_manual ?? false,
+-          price_item_id: item.price_item_id ?? currentItem?.price_item_id ?? null,
+-          royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
+-          royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
+-        }
+-      }))
+-      if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
+-    }
++    const itemRows = order.items.map((item, position) => {
++      const currentItem = currentItemsByPositionAndName.get(`${position}:${item.product_name}`)
++      return {
++        order_id: remoteId, position, product_name: item.product_name, size: item.size ?? '', quantity: item.quantity,
++        price: item.price, image_url: item.image_url ?? null, cost: item.cost, cost_usd: item.cost_usd ?? 0,
++        marketplace_product_key: item.marketplace_product_key ?? currentItem?.marketplace_product_key ?? null,
++        cost_manual: item.cost_manual ?? currentItem?.cost_manual ?? false,
++        price_item_id: item.price_item_id ?? currentItem?.price_item_id ?? null,
++        royalty_percent: item.royalty_percent ?? null, royalty_amount: item.royalty_amount ?? null,
++        royalty_manual: item.royalty_manual ?? currentItem?.royalty_manual ?? false,
++      }
++    })
++    const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: remoteId, p_items: itemRows })
++    if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+     saved.push({ orderNumber: order.order_number, remoteId })
+   }
+   return Response.json({ ok: true, saved }, { headers: corsHeaders })
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -964,7 +964,7 @@ Deno.serve(async (request) => {
+       manualShipping: number(existing?.shipping),
+       hasSellerDeliveryCost,
+       sellerDeliveryCost: number(sellerDeliveryCost),
+-      deliveryProvider: text(deliveryProvider.provider),
++      deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
+       orderAmount,
+     })
+@@ -1194,10 +1194,8 @@ Deno.serve(async (request) => {
+       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
+       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+       if (!same(comparableRows, comparableCurrent)) {
+-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+-        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+-        const { error: insertError } = await admin.from('crm_order_items').insert(itemRows)
+-        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
++        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: itemRows })
++        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+         if (!orderChanged) updated += 1
+         changedOrderIds.push(orderId)
+       } else if (orderChanged) changedOrderIds.push(orderId)
+diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+--- a/supabase/functions/sync-epicentr-orders/index.ts
++++ b/supabase/functions/sync-epicentr-orders/index.ts
+@@ -868,12 +868,8 @@ Deno.serve(async (request) => {
+       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
+       const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
+       if (!same(comparableSaved, comparableExisting)) {
+-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+-        if (deleteError) return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${deleteError.message}` }, { status: 500, headers: corsHeaders })
+-        const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
+-        if (insertError) {
+-        return Response.json({ ok: false, message: `Не удалось записать позиции: ${insertError.message}` }, { status: 500, headers: corsHeaders })
+-        }
++        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: savedItems })
++        if (replaceError) return Response.json({ ok: false, message: `Не удалось сохранить позиции: ${replaceError.message}` }, { status: 500, headers: corsHeaders })
+         if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
+       }
+     }
+diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+--- a/supabase/functions/sync-kasta-orders/index.ts
++++ b/supabase/functions/sync-kasta-orders/index.ts
+@@ -669,10 +669,8 @@ Deno.serve(async (request) => {
+       const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
+       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+       if (!same(comparableSaved, comparableExisting)) {
+-        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
+-        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
+-        const { error: insertError } = await admin.from('crm_order_items').insert(savedItems)
+-        if (insertError) return Response.json({ ok: false, message: insertError.message }, { status: 500, headers: corsHeaders })
++        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: savedItems })
++        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+         if (!orderChanged) {
+           updated += 1
+           changedOrderIds.add(orderId)
