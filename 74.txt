@@ -1,4 +1,4 @@
-Patch 74 — confirmed critical audit fixes + Rozetka Delivery fallback
+Patch 74 — verified critical audit fixes + Rozetka Delivery fallback
 
 SOURCE OF TRUTH
 - Repository: tionTools/specmarket
@@ -9,16 +9,22 @@ SOURCE OF TRUTH
   C:\Users\Вадим\Documents\CRM моя\specmarket
 - Do not touch AGENTS.md or unrelated local/untracked files.
 
+VERIFIED AUTH ACCOUNTS
+Production auth.users preflight on 2026-09-11 showed exactly two CRM accounts:
+- owner/write account: user id 80523d58-a9f5-4de0-8751-d57c84a1897a
+- guest/read-only account: user id 6c450c97-ac5f-4c80-bcdd-a5cc02128bad
+Patch 74 must preserve owner full CRM access and guest read-only access. Any other authenticated account must not gain CRM read/write access or be able to invoke privileged write/sync Edge Functions.
+
 SCOPE
-Patch 74 intentionally contains only these confirmed fixes:
-1. Manual-order date handling: HTML date input uses ISO YYYY-MM-DD while CRM stores/displays DD.MM.YYYY. Keep CRM storage canonical and make parsing tolerant of both formats.
+Patch 74 intentionally contains only these fixes:
+1. Authorization hardening: add crm_can_write()/crm_can_read() based on the verified auth user IDs, add restrictive RLS guards to existing authenticated public-table policies, and require crm_can_write() for all user-invoked privileged Edge Functions in the repository. Scheduled cron-secret invocations must keep working.
 2. Atomic crm_order_items replacement: replace separate DELETE + INSERT calls in save-crm-orders, sync-prom-orders, sync-epicentr-orders and sync-kasta-orders with one PostgreSQL RPC transaction.
 3. Prom / Rozetka Delivery fallback: if delivery_provider_data.provider is absent, use the already-resolved carrier/delivery_option value. Recognize labels containing Rozetka while preserving precedence: manual shipping > explicit seller API cost > Rozetka tariff fallback. Add regression coverage for "Магазины Rozetka" and a 105 UAH order => 10 UAH.
 
 OUT OF SCOPE
+- Do not change manual-order date handling in this patch; it is not a reconciliation-critical issue.
 - Do not change reconciliation/TTN accounting: current business rule is intentional.
 - Do not change Android pagination, tracking batching, PricesView persistence, Vue versions, CI/CD, HomeView decomposition, Kasta royalty fallback, Epicentr batching, dark mode, deployment layout, or any Patch53/local artifacts.
-- Do not add auth/RLS hardening in this patch. That is P0 but needs production-user preflight first; do not guess trusted accounts.
 
 REQUIRED WORKFLOW
 1. In PowerShell, from the existing repository only fetch refs; do not modify the working tree:
@@ -46,14 +52,17 @@ REQUIRED WORKFLOW
    git apply "$env:TEMP\specmarket-74.patch"
 
 7. Verify scope. The diff may contain ONLY these files:
-   - src/pages/HomeView.vue
    - supabase/functions/_shared/prom-delivery.ts
    - supabase/functions/_shared/prom-delivery_test.ts
    - supabase/functions/save-crm-orders/index.ts
+   - supabase/functions/send-order-label-email/index.ts
+   - supabase/functions/sync-delivery-tracking/index.ts
    - supabase/functions/sync-prom-orders/index.ts
    - supabase/functions/sync-epicentr-orders/index.ts
    - supabase/functions/sync-kasta-orders/index.ts
+   - supabase/functions/update-order-print-state/index.ts
    - supabase/migrations/20260911130000_atomic_order_items.sql
+   - supabase/migrations/20260911131000_crm_authorization_guard.sql
 
    Run:
    git status --short
@@ -69,17 +78,18 @@ REQUIRED WORKFLOW
    pnpm type-check
    pnpm build
 
-9. Run a non-mutating lint check on the changed frontend/shared TypeScript where supported by the installed CLI. Do NOT run repository-wide commands with --fix and do not allow formatting/lint to modify unrelated files. If no suitable non-mutating command is available, report that limitation instead of changing scripts.
+9. Run focused non-mutating tests/checks where available, including the existing prom-delivery regression test. Do NOT run repository-wide commands with --fix. If Deno is unavailable, report that limitation instead of installing or reconfiguring it.
 
 10. Regression review before commit:
-   - Manual order opened for editing shows its existing DD.MM.YYYY date correctly in the native date control.
-   - Choosing a date stores it back as DD.MM.YYYY; parseOrderDate still accepts legacy DD.MM.YYYY and ISO YYYY-MM-DD.
-   - orderDateTime no longer produces NaN for ISO dates.
+   - Owner account retains CRM read/write access.
+   - Guest account retains read access but cannot write, send labels, change print state, or manually launch marketplace/tracking sync.
+   - A different authenticated user ID fails crm_can_read()/crm_can_write() guards.
+   - Scheduled cron-secret sync calls still bypass user authorization and keep working.
    - Existing manual shipping remains untouched.
    - Explicit Prom seller delivery cost remains higher priority than fallback.
    - "Магазины Rozetka" with order amount 105 resolves to shipping=10 and shippingSource=prom-promo when no manual/API seller cost exists.
    - Order-item replacement sends an empty array correctly and therefore can atomically clear items intentionally.
-   - The RPC is service-role only; authenticated/anon cannot execute it directly.
+   - replace_crm_order_items RPC is service-role only; authenticated/anon cannot execute it directly.
    - Prom/Epicentr/Kasta/manual saving preserve the existing item payload/business fields; only transaction boundary changes.
 
 11. Re-check exact final diff and whitespace:
@@ -94,13 +104,13 @@ REQUIRED WORKFLOW
    If it moved, STOP. Do not rebase or adapt this patch.
 
 13. Commit from the isolated worktree:
-   git add src/pages/HomeView.vue supabase/functions/_shared/prom-delivery.ts supabase/functions/_shared/prom-delivery_test.ts supabase/functions/save-crm-orders/index.ts supabase/functions/sync-prom-orders/index.ts supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts supabase/migrations/20260911130000_atomic_order_items.sql
+   git add supabase/functions/_shared/prom-delivery.ts supabase/functions/_shared/prom-delivery_test.ts supabase/functions/save-crm-orders/index.ts supabase/functions/send-order-label-email/index.ts supabase/functions/sync-delivery-tracking/index.ts supabase/functions/sync-prom-orders/index.ts supabase/functions/sync-epicentr-orders/index.ts supabase/functions/sync-kasta-orders/index.ts supabase/functions/update-order-print-state/index.ts supabase/migrations/20260911130000_atomic_order_items.sql supabase/migrations/20260911131000_crm_authorization_guard.sql
    git commit -m "Fix critical CRM audit findings"
 
 14. Push exactly this detached HEAD to main:
    git push origin HEAD:main
 
-15. Do NOT deploy Supabase migrations or Edge Functions to production automatically as part of this patch application. Report that production activation of the atomic-item and Rozetka-function changes still requires the normal Supabase migration/function deployment step.
+15. Do NOT deploy Supabase migrations or Edge Functions to production automatically as part of this patch application. Report that production activation still requires the normal Supabase migration/function deployment step.
 
 16. Remove only the temporary worktree after a successful push:
    cd "C:\Users\Вадим\Documents\CRM моя\specmarket"
@@ -114,7 +124,7 @@ Return:
 - changed-file list
 - type-check result
 - build result
-- lint/check result or explicit limitation
+- focused test/check result or explicit limitation
 - commit SHA
 - push result
 - confirmation that the original dirty worktree and AGENTS.md were untouched
