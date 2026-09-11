@@ -1,0 +1,170 @@
+name: Validate Patch 76
+on:
+  push:
+    branches: [chatgpt-validation-76]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare Android 0.9 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected 1 match, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'android/app/build.gradle.kts',
+              '        versionCode = 8\n        versionName = "0.8"',
+              '        versionCode = 9\n        versionName = "0.9"',
+          )
+
+          replace_once(
+              'android/app/src/main/java/ua/orders/crm/OrderSync.kt',
+              '''fun normalizeCustomerPhone(phone: String?): String? {
+              val raw = phone.orEmpty().trim()
+              if (raw.isEmpty()) return null
+              val digits = raw.filter(Char::isDigit)
+              if (digits.length < 7) return null
+              return when {
+                  raw.startsWith("+") -> "+$digits"
+                  digits.startsWith("380") -> "+$digits"
+                  digits.length == 10 && digits.startsWith("0") -> "+38$digits"
+                  else -> "+$digits"
+              }
+          }
+          ''',
+              '''fun normalizeCustomerPhone(phone: String?): String? {
+              val raw = phone.orEmpty().trim()
+              if (raw.isEmpty()) return null
+              val digits = raw.filter(Char::isDigit)
+              if (digits.length < 7) return null
+              return when {
+                  raw.startsWith("+") -> "+$digits"
+                  digits.startsWith("380") -> "+$digits"
+                  digits.length == 10 && digits.startsWith("0") -> "+38$digits"
+                  else -> "+$digits"
+              }
+          }
+
+          fun formatCustomerPhoneForDisplay(phone: String?): String {
+              val raw = phone.orEmpty().trim()
+              if (raw.isEmpty()) return "—"
+              val normalized = normalizeCustomerPhone(raw) ?: return raw
+              val digits = normalized.filter(Char::isDigit)
+              return if (digits.matches(Regex("380\\d{9}"))) {
+                  "+38 ${digits.substring(2, 5)} ${digits.substring(5, 8)} ${digits.substring(8, 10)} ${digits.substring(10, 12)}"
+              } else normalized
+          }
+          ''',
+          )
+
+          replace_once(
+              'android/app/src/main/java/ua/orders/crm/OrderModels.kt',
+              '''fun Order.recipientPhone(): String =
+              deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() }.display()
+          ''',
+              '''fun Order.recipientPhone(): String =
+              formatCustomerPhoneForDisplay(
+                  deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() },
+              )
+          ''',
+          )
+
+          replace_once(
+              'android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt',
+              '''        assertNull(normalizeCustomerPhone(null))
+              }
+          ''',
+              '''        assertNull(normalizeCustomerPhone(null))
+              }
+
+              @Test fun ukrainian_phone_display_is_full_international_format() {
+                  assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("380675551122"))
+                  assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("0675551122"))
+                  assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("+38 (067) 555-11-22"))
+                  assertEquals("+4915112345678", formatCustomerPhoneForDisplay("49 151 12345678"))
+                  assertEquals("—", formatCustomerPhoneForDisplay(null))
+              }
+          ''',
+          )
+          replace_once(
+              'android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt',
+              '        assertEquals("0675551122", deliveryRecipient.recipientPhone())',
+              '        assertEquals("+38 067 555 11 22", deliveryRecipient.recipientPhone())',
+          )
+          PY
+          rm android/app/src/main/res/drawable/ic_orders.xml
+          test -f android/app/src/main/res/drawable-nodpi/ic_orders.png
+          echo 'ab5a214cd98293ce8f2aeea0220c781a8a7596a853137324e97146d3ecf21e34  android/app/src/main/res/drawable-nodpi/ic_orders.png' | sha256sum -c -
+      - name: Verify exact scope and whitespace
+        run: |
+          set -euo pipefail
+          git diff --check
+          expected=$(cat <<'EOF'
+          android/app/build.gradle.kts
+          android/app/src/main/java/ua/orders/crm/OrderModels.kt
+          android/app/src/main/java/ua/orders/crm/OrderSync.kt
+          android/app/src/main/res/drawable-nodpi/ic_orders.png
+          android/app/src/main/res/drawable/ic_orders.xml
+          android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+          EOF
+          )
+          actual=$(git diff --name-only 6dd3774910e6338a43673abea0dc8836ec0213ba -- android | sort)
+          test "$actual" = "$(printf '%s\n' "$expected" | sort)"
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Prepare release signing
+        env:
+          ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
+          ORDERS_RELEASE_STORE_PASS: ${{ secrets.ORDERS_RELEASE_STORE_PASS }}
+          ORDERS_RELEASE_ALIAS: ${{ secrets.ORDERS_RELEASE_ALIAS }}
+          ORDERS_RELEASE_KEY_PASS: ${{ secrets.ORDERS_RELEASE_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$ORDERS_RELEASE_STORE_B64"
+          printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=$ORDERS_RELEASE_ALIAS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=$ORDERS_RELEASE_KEY_PASS" >> "$GITHUB_ENV"
+      - name: Android full gate
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+      - name: Verify permanent signer
+        run: |
+          set -euo pipefail
+          output=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk)
+          printf '%s\n' "$output"
+          echo "$output" | grep -qi 'a6:36:24:0c:4b:6a:13:60:6c:15:15:6c:b0:e7:4e:09:6a:99:23:6e:b5:71:5c:0b:34:55:c4:eb:1b:c9:c5:3'
+      - name: Commit validated source only
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add \
+            android/app/build.gradle.kts \
+            android/app/src/main/java/ua/orders/crm/OrderModels.kt \
+            android/app/src/main/java/ua/orders/crm/OrderSync.kt \
+            android/app/src/main/res/drawable-nodpi/ic_orders.png \
+            android/app/src/main/res/drawable/ic_orders.xml \
+            android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Prepare Android 0.9 phone format and approved icon'
+          git push origin HEAD:chatgpt-validation-76
