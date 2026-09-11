@@ -151,7 +151,7 @@ jobs:
           set -euo pipefail
           output=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk)
           printf '%s\n' "$output"
-          echo "$output" | grep -qi 'a6:36:24:0c:4b:6a:13:60:6c:15:15:6c:b0:e7:4e:09:6a:99:23:6e:b5:71:5c:0b:34:55:c4:eb:1b:c9:c5:3'
+          echo "$output" | grep -qi 'a636240c4b6a13606c15156cb0e74e0969a99236eb5715c0b3455c4eb1bc9c53'
       - name: Commit validated source only
         run: |
           set -euo pipefail
