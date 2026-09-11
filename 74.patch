@@ -184,7 +184,7 @@ index b9bbd03..7e1aa19 100644
 +++ b/supabase/functions/sync-kasta-orders/index.ts
 @@ -678,7 +678,5 @@
        const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
-       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item })).sort((left, right) => number(left.position) - number(right.position))
+       const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
        if (!same(comparableSaved, comparableExisting)) {
 -        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
 -        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
@@ -208,7 +208,7 @@ index 5720d5f..5555937 100644
      const { date, time } = dateParts(order.date_created ?? order.created_at)
 @@ -1193,10 +1194,8 @@
        const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
-       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item })).sort((left, right) => number(left.position) - number(right.position))
+       const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
        if (!same(comparableRows, comparableCurrent)) {
 -        const { error: deleteError } = await admin.from('crm_order_items').delete().eq('order_id', orderId)
 -        if (deleteError) return Response.json({ ok: false, message: deleteError.message }, { status: 500, headers: corsHeaders })
