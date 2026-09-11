@@ -108,7 +108,7 @@ jobs:
           )
           PY
           rm android/app/src/main/res/drawable/ic_orders.xml
-          test -f android/app/src/main/res/drawable-nodpi/ic_orders.png
+          cat .github/patch76-icon/part*.b64 | tr -d '\n\r' | base64 --decode > android/app/src/main/res/drawable-nodpi/ic_orders.png
           echo 'ab5a214cd98293ce8f2aeea0220c781a8a7596a853137324e97146d3ecf21e34  android/app/src/main/res/drawable-nodpi/ic_orders.png' | sha256sum -c -
       - name: Verify exact scope and whitespace
         run: |
@@ -139,6 +139,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$ORDERS_RELEASE_STORE_B64"
+          test -n "$ORDERS_RELEASE_STORE_PASS"
+          test -n "$ORDERS_RELEASE_ALIAS"
+          test -n "$ORDERS_RELEASE_KEY_PASS"
           printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
           echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
           echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
