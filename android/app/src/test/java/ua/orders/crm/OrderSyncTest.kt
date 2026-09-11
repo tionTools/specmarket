@@ -58,6 +58,14 @@ class OrderSyncTest {
         assertNull(normalizeCustomerPhone(null))
     }
 
+    @Test fun ukrainian_phone_display_is_full_international_format() {
+        assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("380675551122"))
+        assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("0675551122"))
+        assertEquals("+38 067 555 11 22", formatCustomerPhoneForDisplay("+38 (067) 555-11-22"))
+        assertEquals("+4915112345678", formatCustomerPhoneForDisplay("49 151 12345678"))
+        assertEquals("—", formatCustomerPhoneForDisplay(null))
+    }
+
     @Test fun preferred_recipient_uses_delivery_recipient_with_customer_fallback() {
         val deliveryRecipient = Order(
             "recipient",
@@ -69,7 +77,7 @@ class OrderSyncTest {
             },
         )
         assertEquals("Получатель", deliveryRecipient.recipientName())
-        assertEquals("0675551122", deliveryRecipient.recipientPhone())
+        assertEquals("+38 067 555 11 22", deliveryRecipient.recipientPhone())
         assertEquals("Покупатель", Order("fallback", customer = "Покупатель").recipientName())
     }
 

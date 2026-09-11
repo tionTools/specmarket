@@ -230,7 +230,9 @@ fun Order.recipientName(): String =
     deliveryValue("recipient").trim().ifBlank { customer.orEmpty().trim() }.display()
 
 fun Order.recipientPhone(): String =
-    deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() }.display()
+    formatCustomerPhoneForDisplay(
+        deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() },
+    )
 
 private val returnSignalRegex = Regex(
     "скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим",
