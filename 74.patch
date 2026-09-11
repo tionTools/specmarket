@@ -2,7 +2,7 @@ diff --git a/supabase/migrations/20260911130000_atomic_order_items.sql b/supabas
 new file mode 100644
 --- /dev/null
 +++ b/supabase/migrations/20260911130000_atomic_order_items.sql
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,29 @@
 +create or replace function public.replace_crm_order_items(p_order_id uuid, p_items jsonb)
 +returns void
 +language plpgsql
