@@ -32,65 +32,92 @@ new file mode 100644
 +
 +revoke all on function public.replace_crm_order_items(uuid, jsonb) from public, anon, authenticated;
 +grant execute on function public.replace_crm_order_items(uuid, jsonb) to service_role;
-diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
---- a/src/pages/HomeView.vue
-+++ b/src/pages/HomeView.vue
-@@ -552,10 +552,24 @@ function parseInputDate(value: string) {
- }
- 
- function parseOrderDate(value: string) {
-+  const isoDate = parseInputDate(value)
-+  if (isoDate) return isoDate
-   const [day, month, year] = value.split('.').map(Number)
-   if (!year || !month || !day) return null
-   return new Date(year, month - 1, day)
- }
+diff --git a/supabase/migrations/20260911131000_crm_authorization_guard.sql b/supabase/migrations/20260911131000_crm_authorization_guard.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260911131000_crm_authorization_guard.sql
+@@ -0,0 +1,92 @@
++create or replace function public.crm_can_write()
++returns boolean
++language sql
++stable
++security definer
++set search_path = pg_catalog, public
++as $$
++  select auth.uid() = '80523d58-a9f5-4de0-8751-d57c84a1897a'::uuid;
++$$;
 +
-+const orderDraftDateInputValue = computed(() => {
-+  const date = parseOrderDate(orderDraft.value.date)
-+  return date ? inputDate(date) : ''
-+})
++revoke all on function public.crm_can_write() from public, anon;
++grant execute on function public.crm_can_write() to authenticated, service_role;
 +
-+function updateOrderDraftDate(event: Event) {
-+  const date = parseInputDate((event.target as HTMLInputElement).value)
-+  if (!date) return
-+  orderDraft.value.date = new Intl.DateTimeFormat('uk-UA').format(date)
-+  repriceOrderDraft()
-+}
- 
- function shiftDateByMonths(value: Date, months: number) {
-   const targetMonth = value.getMonth() + months
-@@ -4267,8 +4281,15 @@ function finishOrderCell(key: string, onCommit?: () => void) {
- }
- 
- function orderDateTime(order: Order) {
--  const [day, month, year] = order.date.split('.').map(Number)
-+  const date = parseOrderDate(order.date)
-+  if (!date) return 0
-   const [hours, minutes] = (order.time ?? '00:00').split(':').map(Number)
--  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0).getTime()
-+  return new Date(
-+    date.getFullYear(),
-+    date.getMonth(),
-+    date.getDate(),
-+    hours ?? 0,
-+    minutes ?? 0,
-+  ).getTime()
- }
- </script>
-@@ -6276,10 +6297,10 @@ function orderDateTime(order: Order) {
-               <label class="text-sm font-medium text-slate-700">
-                 Дата заказа
-                 <input
--                  v-model="orderDraft.date"
-+                  :value="orderDraftDateInputValue"
-                   class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
-                   type="date"
--                  @change="repriceOrderDraft"
-+                  @input="updateOrderDraftDate"
-                 />
-               </label>
-               <label class="text-sm font-medium text-slate-700">
++create or replace function public.crm_can_read()
++returns boolean
++language sql
++stable
++security definer
++set search_path = pg_catalog, public
++as $$
++  select auth.uid() in (
++    '80523d58-a9f5-4de0-8751-d57c84a1897a'::uuid,
++    '6c450c97-ac5f-4c80-bcdd-a5cc02128bad'::uuid
++  );
++$$;
++
++revoke all on function public.crm_can_read() from public, anon;
++grant execute on function public.crm_can_read() to authenticated, service_role;
++
++-- Existing CRM policies are permissive. Restrictive guards are ANDed with
++-- those policies: the owner keeps read/write access, the guest keeps read-only
++-- access, and any other authenticated account is denied.
++do $$
++declare
++  target record;
++begin
++  for target in
++    select distinct tablename
++    from pg_policies
++    where schemaname = 'public'
++      and upper(cmd) in ('ALL', 'SELECT')
++      and roles @> array['authenticated'::name]
++  loop
++    execute format('alter table public.%I enable row level security', target.tablename);
++    execute format('drop policy if exists %I on public.%I', 'crm_authorized_select_guard', target.tablename);
++    execute format(
++      'create policy %I on public.%I as restrictive for select to authenticated using (public.crm_can_read())',
++      'crm_authorized_select_guard',
++      target.tablename
++    );
++  end loop;
++
++  for target in
++    select distinct tablename
++    from pg_policies
++    where schemaname = 'public'
++      and upper(cmd) in ('ALL', 'INSERT', 'UPDATE', 'DELETE')
++      and roles @> array['authenticated'::name]
++  loop
++    execute format('alter table public.%I enable row level security', target.tablename);
++    execute format('drop policy if exists %I on public.%I', 'crm_authorized_insert_guard', target.tablename);
++    execute format(
++      'create policy %I on public.%I as restrictive for insert to authenticated with check (public.crm_can_write())',
++      'crm_authorized_insert_guard',
++      target.tablename
++    );
++    execute format('drop policy if exists %I on public.%I', 'crm_authorized_update_guard', target.tablename);
++    execute format(
++      'create policy %I on public.%I as restrictive for update to authenticated using (public.crm_can_write()) with check (public.crm_can_write())',
++      'crm_authorized_update_guard',
++      target.tablename
++    );
++    execute format('drop policy if exists %I on public.%I', 'crm_authorized_delete_guard', target.tablename);
++    execute format(
++      'create policy %I on public.%I as restrictive for delete to authenticated using (public.crm_can_write())',
++      'crm_authorized_delete_guard',
++      target.tablename
++    );
++  end loop;
++end
++$$;
 diff --git a/supabase/functions/_shared/prom-delivery.ts b/supabase/functions/_shared/prom-delivery.ts
 --- a/supabase/functions/_shared/prom-delivery.ts
 +++ b/supabase/functions/_shared/prom-delivery.ts
@@ -134,7 +161,20 @@ diff --git a/supabase/functions/_shared/prom-delivery_test.ts b/supabase/functio
 diff --git a/supabase/functions/save-crm-orders/index.ts b/supabase/functions/save-crm-orders/index.ts
 --- a/supabase/functions/save-crm-orders/index.ts
 +++ b/supabase/functions/save-crm-orders/index.ts
-@@ -143,23 +143,20 @@ Deno.serve(async (request) => {
+@@ -106,7 +106,11 @@ Deno.serve(async (request) => {
+ 
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = await auth.auth.getUser()
+-  if (!user || user.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
++  if (!user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
++  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++  if (accessError || canWrite !== true) {
++    return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
++  }
+ 
+   const body = await request.json().catch(() => ({})) as { orders?: SavedOrder[] }
+   const orders = Array.isArray(body.orders) ? body.orders : []
+@@ -143,23 +147,20 @@ Deno.serve(async (request) => {
      const currentItemsByPositionAndName = new Map(
        (currentItems ?? []).map((item) => [`${item.position}:${item.product_name}`, item]),
      )
@@ -172,10 +212,67 @@ diff --git a/supabase/functions/save-crm-orders/index.ts b/supabase/functions/sa
      saved.push({ orderNumber: order.order_number, remoteId })
    }
    return Response.json({ ok: true, saved }, { headers: corsHeaders })
+diff --git a/supabase/functions/update-order-print-state/index.ts b/supabase/functions/update-order-print-state/index.ts
+--- a/supabase/functions/update-order-print-state/index.ts
++++ b/supabase/functions/update-order-print-state/index.ts
+@@ -24,7 +24,10 @@ Deno.serve(async (request) => {
+ 
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = await auth.auth.getUser()
+-  if (!user || user.email?.toLowerCase() === 'guest@gmail.com')
++  if (!user)
++    return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
++  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++  if (accessError || canWrite !== true)
+     return Response.json({ ok: false, message: 'Нет прав на изменение заказов.' }, { status: 403, headers: corsHeaders })
+ 
+   const body = await request.json().catch(() => ({})) as { updates?: PrintUpdate[] }
+diff --git a/supabase/functions/send-order-label-email/index.ts b/supabase/functions/send-order-label-email/index.ts
+--- a/supabase/functions/send-order-label-email/index.ts
++++ b/supabase/functions/send-order-label-email/index.ts
+@@ -83,9 +83,10 @@ Deno.serve(async (request) => {
+       { status: 401, headers: corsHeaders },
+     )
+   }
+-  if (user.email?.toLowerCase() === 'guest@gmail.com') {
++  const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++  if (accessError || canWrite !== true) {
+     return Response.json(
+-      { ok: false, message: 'Гостевой аккаунт не может отправлять бирки.' },
++      { ok: false, message: 'Нет прав на отправку бирок.' },
+       { status: 403, headers: corsHeaders },
+     )
+   }
+diff --git a/supabase/functions/sync-delivery-tracking/index.ts b/supabase/functions/sync-delivery-tracking/index.ts
+--- a/supabase/functions/sync-delivery-tracking/index.ts
++++ b/supabase/functions/sync-delivery-tracking/index.ts
+@@ -21,7 +21,10 @@ Deno.serve(async (request) => {
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = scheduled ? { data: { user: null } } : await auth.auth.getUser()
+   if (!scheduled && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!scheduled && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++  if (!scheduled) {
++    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
++  }
+   const forced = body.force === true && !scheduled && Boolean(user)
+   const orderId = !scheduled && typeof body.orderId === 'string' ? body.orderId.trim() : ''
+   const result = await runTrackingWorker(admin, forced, orderId || undefined)
 diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
 --- a/supabase/functions/sync-prom-orders/index.ts
 +++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -964,7 +964,7 @@ Deno.serve(async (request) => {
+@@ -644,7 +644,10 @@ Deno.serve(async (request) => {
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++  if (!isScheduledRequest) {
++    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
++  }
+ 
+   const body = await request.json().catch(() => ({})) as {
+@@ -964,7 +967,7 @@ Deno.serve(async (request) => {
        manualShipping: number(existing?.shipping),
        hasSellerDeliveryCost,
        sellerDeliveryCost: number(sellerDeliveryCost),
@@ -183,7 +280,7 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +      deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
        orderAmount,
      })
-@@ -1194,10 +1194,8 @@ Deno.serve(async (request) => {
+@@ -1194,10 +1197,8 @@ Deno.serve(async (request) => {
        const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
        const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
        if (!same(comparableRows, comparableCurrent)) {
@@ -199,7 +296,19 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
 --- a/supabase/functions/sync-epicentr-orders/index.ts
 +++ b/supabase/functions/sync-epicentr-orders/index.ts
-@@ -868,12 +868,8 @@ Deno.serve(async (request) => {
+@@ -335,8 +335,9 @@ Deno.serve(async (request) => {
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
+-    return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++  if (!isScheduledRequest) {
++    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
+   }
+ 
+   const body = await request.json().catch(() => ({})) as {
+@@ -868,12 +869,8 @@ Deno.serve(async (request) => {
        const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
        const comparableExisting = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => Number(left.position) - Number(right.position))
        if (!same(comparableSaved, comparableExisting)) {
@@ -217,7 +326,18 @@ diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functio
 diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
 --- a/supabase/functions/sync-kasta-orders/index.ts
 +++ b/supabase/functions/sync-kasta-orders/index.ts
-@@ -669,10 +669,8 @@ Deno.serve(async (request) => {
+@@ -388,7 +388,10 @@ Deno.serve(async (request) => {
+   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
+   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
+-  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
++  if (!isScheduledRequest) {
++    const { data: canWrite, error: accessError } = await auth.rpc('crm_can_write')
++    if (accessError || canWrite !== true) return Response.json({ ok: false, message: 'Нет прав на запуск синхронизации.' }, { status: 403, headers: corsHeaders })
++  }
+ 
+   const body = await request.json().catch(() => ({})) as {
+@@ -669,10 +672,8 @@ Deno.serve(async (request) => {
        const comparableSaved = savedItems.map(({ order_id: _orderId, ...item }) => item)
        const comparableExisting = previousItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
        if (!same(comparableSaved, comparableExisting)) {
