@@ -17,16 +17,22 @@ git fetch origin main chatgpt-patches
 Проверь, что origin/main существует. Для Patch 77 используй:
 C:\Users\Вадим\Documents\CRM моя\specmarket-p77
 
-Если папка уже существует — не удаляй её автоматически, остановись и сообщи.
+Если этот worktree уже существует после предыдущей неудачной попытки `git apply --check`, его можно переиспользовать ТОЛЬКО если одновременно выполнено всё ниже:
+- он привязан к ветке `codex/patch-77`;
+- HEAD находится на базе `8e5986b267d0ddce93fd78b4c5b9a78898db0b84`;
+- `git status --short` пуст;
+- Patch 77 ранее не применялся.
 
-Создай ветку codex/patch-77 от origin/main и отдельный worktree. На момент подготовки Patch 77 origin/main должен быть ровно:
+Если эти условия не выполняются — ничего не удаляй и остановись с точным состоянием worktree.
+
+Если worktree ещё не существует — создай ветку codex/patch-77 от origin/main и отдельный worktree. На момент подготовки Patch 77 origin/main должен быть ровно:
 8e5986b267d0ddce93fd78b4c5b9a78898db0b84
 
 Если SHA уже другой — НЕ применяй patch автоматически. Остановись и сообщи новый SHA, чтобы проверить совместимость с актуальным main.
 
 2. Получи Patch 77
 
-В worktree:
+Обязательно заново получи исправленный файл Patch 77 после `git fetch origin chatgpt-patches`:
 
 git show origin/chatgpt-patches:77.patch > "$env:TEMP\specmarket-77.patch"
 git apply --check "$env:TEMP\specmarket-77.patch"
@@ -92,7 +98,7 @@ pnpm build
 После formatter/linter снова проверь git status --short, git diff --name-only и git diff --check.
 Никаких посторонних файлов в diff быть не должно.
 
-Patch 77 уже был предварительно проверен GitHub Actions: format, type-check, oxlint, eslint, build, scope, git diff --check и git apply --check на базовом main прошли успешно.
+Исправленный `77.patch` byte-for-byte совпадает с предварительно сгенерированным validation patch (blob SHA `f7e6dd35bb8318da6f6698439cb92b8966c62be8`). Для этого validation patch GitHub Actions успешно прошли: format, type-check, oxlint, eslint, build, scope, git diff --check и отдельный `git apply --check` на чистой базе main.
 
 7. Commit
 
