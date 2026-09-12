@@ -1,0 +1,65 @@
+name: Build Patch 77 ready commit
+on:
+  push:
+    branches:
+      - patch-77-ready
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate source changes
+        run: |
+          set -euo pipefail
+          python .github/patch77/prepare.py
+          git add -N supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
+          git diff --check
+          actual=$(git diff --name-only | sort)
+          expected=$(printf '%s\n' \
+            src/pages/ReconciliationView.vue \
+            src/features/reconciliation/ReconciliationHistoryTable.vue \
+            src/features/reconciliation/types.ts \
+            supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql | sort)
+          test "$actual" = "$expected"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format changed files
+        run: pnpm exec oxfmt src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
+      - name: Validate
+        run: |
+          set -euo pipefail
+          pnpm type-check
+          pnpm exec oxlint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
+          pnpm exec eslint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
+          pnpm build
+          git diff --check
+          actual=$(git diff --name-only | sort)
+          expected=$(printf '%s\n' \
+            src/pages/ReconciliationView.vue \
+            src/features/reconciliation/ReconciliationHistoryTable.vue \
+            src/features/reconciliation/types.ts \
+            supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql | sort)
+          test "$actual" = "$expected"
+      - name: Commit exactly Patch 77 source files
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/pages/ReconciliationView.vue \
+            src/features/reconciliation/ReconciliationHistoryTable.vue \
+            src/features/reconciliation/types.ts \
+            supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
+          git commit -m 'Add currency-aware reconciliation storno'
+          git push origin HEAD:patch-77-ready
