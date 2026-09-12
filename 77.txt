@@ -6,43 +6,60 @@ Patch 77 — раздельное сторно USD/грн в сверке
 Работай из репозитория:
 C:\Users\Вадим\Documents\CRM моя\specmarket
 
-Не трогай, не stash и не коммить пользовательский AGENTS.md в основной рабочей копии. Выполняй Patch 77 в отдельном чистом worktree.
+Не трогай, не stash и не коммить пользовательский AGENTS.md. Используй существующий чистый worktree Patch 77:
+C:\Users\Вадим\Documents\CRM моя\specmarket-p77
 
-1. Подготовь отдельный worktree
+Если worktree чистый, HEAD = 8e5986b267d0ddce93fd78b4c5b9a78898db0b84 и Patch 77 ещё не применялся — переиспользуй его. Ничего не удаляй и не создавай заново.
 
-В основной папке проекта:
+1. Обнови refs и заново извлеки Patch 77
 
 git fetch origin main chatgpt-patches
 
-Проверь, что origin/main существует. Для Patch 77 используй:
-C:\Users\Вадим\Documents\CRM моя\specmarket-p77
-
-Если этот worktree уже существует после предыдущей неудачной попытки `git apply --check`, его можно переиспользовать ТОЛЬКО если одновременно выполнено всё ниже:
-- он привязан к ветке `codex/patch-77`;
-- HEAD находится на базе `8e5986b267d0ddce93fd78b4c5b9a78898db0b84`;
-- `git status --short` пуст;
-- Patch 77 ранее не применялся.
-
-Если эти условия не выполняются — ничего не удаляй и остановись с точным состоянием worktree.
-
-Если worktree ещё не существует — создай ветку codex/patch-77 от origin/main и отдельный worktree. На момент подготовки Patch 77 origin/main должен быть ровно:
-8e5986b267d0ddce93fd78b4c5b9a78898db0b84
-
-Если SHA уже другой — НЕ применяй patch автоматически. Остановись и сообщи новый SHA, чтобы проверить совместимость с актуальным main.
-
-2. Получи Patch 77
-
-Обязательно заново получи исправленный файл Patch 77 после `git fetch origin chatgpt-patches`:
-
 git show origin/chatgpt-patches:77.patch > "$env:TEMP\specmarket-77.patch"
-git apply --check "$env:TEMP\specmarket-77.patch"
 
-Если git apply --check не прошёл — ничего не исправляй вручную и остановись.
-Если прошёл:
+Проверь SHA blob patch-файла:
 
-git apply "$env:TEMP\specmarket-77.patch"
+git hash-object "$env:TEMP\specmarket-77.patch"
 
-3. Patch должен изменить ровно четыре файла
+Ожидается:
+f7e6dd35bb8318da6f6698439cb92b8966c62be8
+
+Если SHA другой — остановись.
+
+2. Проверка базы по Git-объектам
+
+Проверь именно blob SHA трёх изменяемых существующих файлов в HEAD:
+
+git rev-parse HEAD:src/features/reconciliation/ReconciliationHistoryTable.vue
+git rev-parse HEAD:src/features/reconciliation/types.ts
+git rev-parse HEAD:src/pages/ReconciliationView.vue
+
+Ожидаются соответственно:
+8e60795d1d3c2b82fbbf061f2c4be77ecf68ba39
+dd211f350a8f237f709ae90896b231011b625a68
+066d967c4197d21ad8bd98d0192dc7f7ad08abc4
+
+Эти SHA соответствуют old-index Patch 77. Если любой не совпадает — остановись.
+
+3. Применение Patch 77
+
+Для Patch 77 НЕ использовать обычный `git apply --check`: на локальном Windows worktree он уже дважды дал ложный context failure при совпадающих Git blob SHA.
+
+Используй Git three-way application по old-index blob-объектам patch:
+
+git apply --3way --check "$env:TEMP\specmarket-77.patch"
+
+Если эта проверка прошла:
+
+git apply --3way "$env:TEMP\specmarket-77.patch"
+
+`--3way` может автоматически добавить изменения в index. Сразу после успешного применения только сними staged-состояние, не откатывая файлы:
+
+git reset
+
+Если `git apply --3way --check` не проходит — ничего вручную не исправляй и остановись с полной ошибкой.
+
+4. Patch должен изменить ровно четыре файла
 
 src/pages/ReconciliationView.vue
 src/features/reconciliation/types.ts
@@ -51,40 +68,33 @@ supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
 
 AGENTS.md, Android, Edge Functions, другие migrations и остальные файлы не менять.
 
-4. Бизнес-логика Patch 77
+5. Бизнес-логика
 
-Сверка получает раздельное сторно USD и грн.
-
-- Если заполнено только «Сторно грн», меняется только гривневая часть долга.
-- Если пользователь вводит «Сторно USD», поле «Сторно грн» автоматически получает противоположный гривневый эквивалент по текущему курсу CRM, округлённый до копеек:
+- «Сторно грн» меняет только гривневую часть долга.
+- При вводе «Сторно USD» поле «Сторно грн» автоматически получает противоположный гривневый эквивалент по текущему курсу CRM, округлённый до копеек:
   сторно_грн = -(сторно_USD × курс).
-- Автоматически рассчитанное сторно грн можно вручную изменить при необходимости.
-- После сторно отдельно рассчитываются остаток USD и остаток грн.
-- Общий эквивалент считается уже из скорректированных валютных остатков.
-- В блоке «Не сходится» показываются три величины: расхождение USD, расхождение грн и общий гривневый эквивалент.
-- В истории вместо одной колонки «Сторно» должны быть «Сторно USD» и «Сторно грн».
-- Старые записи получают adjustment_usd = 0 и сохраняют существующее adjustment_uah без переписывания истории.
+- Автоматически рассчитанное сторно грн можно вручную изменить.
+- После сторно отдельно считаются остаток USD и остаток грн.
+- Общий эквивалент считается из скорректированных валютных остатков.
+- «Не сходится» показывает отдельно USD, грн и общий гривневый эквивалент.
+- В истории две колонки: «Сторно USD» и «Сторно грн».
+- Старые записи получают adjustment_usd = 0 и сохраняют существующее adjustment_uah.
 
-Контрольный кейс текущей ситуации при курсе 45,20:
-- до сторно: 69,13 USD и 11 614,42 грн;
-- 1С: 69,40 USD и 11 602,22 грн;
-- ввод «Сторно USD» = +0,27;
-- «Сторно грн» автоматически = -12,20;
-- после сторно: 69,40 USD и 11 602,22 грн;
-- отдельные расхождения USD и грн должны стать 0,00, общий эквивалент — 0,00 с учётом округления.
+Контрольный кейс при курсе 45,20:
+до сторно 69,13 USD / 11 614,42 грн;
+1С 69,40 USD / 11 602,22 грн;
+Сторно USD +0,27 -> Сторно грн автоматически -12,20;
+после сторно 69,40 USD / 11 602,22 грн;
+расхождения USD, грн и общий итог = 0,00 с учётом округления.
 
-5. Миграция
+6. Миграция
 
-Patch добавляет только одну колонку:
+Patch добавляет только:
 
 alter table public.crm_reconciliations
   add column if not exists adjustment_usd numeric not null default 0;
 
-Это изменение схемы обязательно для работы сторно USD.
-
-6. Проверки перед commit
-
-Выполни:
+7. Проверки перед commit
 
 git diff --check
 git diff --name-only
@@ -95,67 +105,69 @@ pnpm exec oxlint src/pages/ReconciliationView.vue src/features/reconciliation/Re
 pnpm exec eslint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
 pnpm build
 
-После formatter/linter снова проверь git status --short, git diff --name-only и git diff --check.
-Никаких посторонних файлов в diff быть не должно.
+После formatter/linter снова проверь:
+git status --short
+git diff --name-only
+git diff --check
 
-Исправленный `77.patch` byte-for-byte совпадает с предварительно сгенерированным validation patch (blob SHA `f7e6dd35bb8318da6f6698439cb92b8966c62be8`). Для этого validation patch GitHub Actions успешно прошли: format, type-check, oxlint, eslint, build, scope, git diff --check и отдельный `git apply --check` на чистой базе main.
+Diff должен содержать только четыре файла Patch 77.
 
-7. Commit
+Сам patch уже прошёл GitHub Actions: format, type-check, oxlint, eslint, build, scope, git diff --check и git apply --check на чистой базе main.
 
-Не используй git add .
-Добавь только четыре файла Patch 77.
+8. Commit
+
+Не использовать `git add .`.
+Добавить только четыре файла Patch 77.
 
 Commit message:
 Add currency-aware reconciliation storno
 
-8. Перед push
+9. Перед push
 
 git fetch origin main
 
-Если origin/main продвинулся после создания worktree, не force-push. Rebase на актуальный origin/main и повтори:
+Если origin/main продвинулся — без force-push. Rebase на актуальный origin/main и повтори:
 - git diff-tree --no-commit-id --name-only -r HEAD
 - git diff --check HEAD^ HEAD
 - pnpm type-check
 - pnpm build
 
-Если rebase даёт конфликт — остановись и сообщи, не перепроектируй Patch 77 самостоятельно.
+При конфликте rebase остановись и сообщи.
 
-9. Push
-
-После успешных проверок:
+10. Push
 
 git push origin HEAD:main
 
-Используй только существующий SSH-доступ GitHub. Не переключай origin на HTTPS, не запускай браузерную авторизацию и не создавай новые credentials. Если SSH push не работает — остановись и сообщи причину.
+Только существующий SSH-доступ GitHub. Не переключаться на HTTPS, не запускать браузерную авторизацию и не создавать credentials. Если SSH push не работает — остановись.
 
-10. Применить Supabase migration
+11. Supabase migration
 
-Обычный frontend deploy не применяет Supabase migrations. После успешного push выполни в worktree Patch 77:
+После успешного push:
 
 pnpm exec supabase db push
 
 Используй только уже связанный Supabase project. Если worktree не видит link, возьми существующий project ref из:
 C:\Users\Вадим\Documents\CRM моя\specmarket\supabase\.temp\project-ref
 
-Не создавай новый Supabase project и не угадывай project ref.
-Если db push падает — остановись и пришли точную ошибку.
+Не создавать новый Supabase project и не угадывать project ref. При ошибке db push остановись и пришли её полностью.
 
-11. После deploy
+12. После deploy
 
-Убедись, что production frontend deploy завершился успешно и migration применена. Старые сверки не удалять и не переписывать.
+Убедись, что production frontend deploy успешен и migration применена. Старые сверки не удалять и не переписывать.
 
-Для исправления текущего исторического перекоса после выкладки Patch 77 пользователь должен создать ОДНУ новую сверку с актуальными на тот момент данными 1С. Если цифры остались как в контрольном кейсе, ввести:
+Для исправления текущего перекоса после выкладки Patch 77 создать ОДНУ новую сверку с актуальными значениями 1С. Если цифры остались прежними:
 - Доллары 1С: 69,40
 - Гривна 1С: 11 602,22
 - Сторно USD: +0,27
-- проверить, что Сторно грн автоматически стало -12,20
-- проверить, что «USD после сторно» = 69,40 и «Гривна после сторно» = 11 602,22
-- проверить отдельные расхождения USD = 0,00, грн = 0,00 и общий итог = 0,00
-- нажать «Зафиксировать сверку».
+- Сторно грн должно автоматически стать -12,20
+- USD после сторно: 69,40
+- Гривна после сторно: 11 602,22
+- отдельные расхождения и общий итог: 0,00
+- затем «Зафиксировать сверку».
 
-Если к моменту исправления уже появились новые заказы, платежи или возвраты и текущие цифры изменились, НЕ использовать слепо 69,40 / 11 602,22. Ввести актуальные значения 1С и сторнировать фактическую текущую валютную разницу.
+Если к этому моменту цифры изменились из-за новых заказов, платежей или возвратов — использовать актуальные значения 1С и фактическую текущую валютную разницу, а не старые числа.
 
-12. Итоговый отчёт
+13. Итоговый отчёт
 
 Сообщи:
 - SHA commit в main;
