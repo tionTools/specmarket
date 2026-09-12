@@ -52,6 +52,7 @@ const paymentNote = ref('')
 const accountingUsd = ref('')
 const accountingUah = ref('')
 const reserveUah = ref('')
+const adjustmentUsd = ref('')
 const adjustmentUah = ref('')
 
 function parsedNumber(value: string) {
@@ -82,6 +83,13 @@ watch([paymentTransferredUah, paymentSupplierRate, paymentDebtUsd], () => {
   const remainder = suggestedPaymentDebtUah()
   paymentDebtUah.value =
     remainder === null ? '' : String(Number(remainder.toFixed(2))).replace('.', ',')
+})
+
+watch([adjustmentUsd, usdRate], () => {
+  if (!adjustmentUsd.value.trim()) return
+  const usd = parsedNumber(adjustmentUsd.value)
+  if (usd === null || usdRate.value <= 0) return
+  adjustmentUah.value = String(Number((-usd * usdRate.value).toFixed(2))).replace('.', ',')
 })
 
 function money(value: number) {
@@ -159,7 +167,11 @@ const accountingTotal = computed(
 const accountingForComparison = computed(
   () => accountingTotal.value - numberValue(reserveUah.value),
 )
-const myNumberAfterAdjustment = computed(() => myNumber.value + numberValue(adjustmentUah.value))
+const myDebtUsdAfterAdjustment = computed(() => myDebtUsd.value + numberValue(adjustmentUsd.value))
+const myDebtUahAfterAdjustment = computed(() => myDebtUah.value + numberValue(adjustmentUah.value))
+const myNumberAfterAdjustment = computed(
+  () => myDebtUsdAfterAdjustment.value * usdRate.value + myDebtUahAfterAdjustment.value,
+)
 const paymentDraftEquivalent = computed(
   () =>
     numberValue(paymentDebtUsd.value) * numberValue(paymentSupplierRate.value) +
@@ -184,8 +196,22 @@ const paymentDraftHasDifference = computed(() => {
 const hasAccountingInput = computed(() =>
   Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
 )
+const discrepancyUsd = computed(() =>
+  hasAccountingInput.value
+    ? numberValue(accountingUsd.value) - myDebtUsdAfterAdjustment.value
+    : null,
+)
+const discrepancyUah = computed(() =>
+  hasAccountingInput.value
+    ? numberValue(accountingUah.value) -
+      numberValue(reserveUah.value) -
+      myDebtUahAfterAdjustment.value
+    : null,
+)
 const discrepancy = computed(() =>
-  hasAccountingInput.value ? accountingForComparison.value - myNumberAfterAdjustment.value : null,
+  discrepancyUsd.value === null || discrepancyUah.value === null
+    ? null
+    : discrepancyUsd.value * usdRate.value + discrepancyUah.value,
 )
 const history = computed(() => reconciliations.value)
 
@@ -388,12 +414,14 @@ async function saveReconciliation() {
   const accountingUsdValue = accountingUsd.value.trim() ? parsedNumber(accountingUsd.value) : 0
   const accountingUahValue = accountingUah.value.trim() ? parsedNumber(accountingUah.value) : 0
   const reserveValue = reserveUah.value.trim() ? parsedNumber(reserveUah.value) : 0
-  const adjustmentValue = adjustmentUah.value.trim() ? parsedNumber(adjustmentUah.value) : 0
+  const adjustmentUsdValue = adjustmentUsd.value.trim() ? parsedNumber(adjustmentUsd.value) : 0
+  const adjustmentUahValue = adjustmentUah.value.trim() ? parsedNumber(adjustmentUah.value) : 0
   if (
     accountingUsdValue === null ||
     accountingUahValue === null ||
     reserveValue === null ||
-    adjustmentValue === null ||
+    adjustmentUsdValue === null ||
+    adjustmentUahValue === null ||
     accountingUsdValue < 0 ||
     accountingUahValue < 0 ||
     reserveValue < 0 ||
@@ -412,12 +440,13 @@ async function saveReconciliation() {
     accounting_total: accountingTotal.value,
     reserve_uah: reserveValue,
     crm_balance_before_adjustment: myNumber.value,
-    adjustment_uah: adjustmentValue,
+    adjustment_usd: adjustmentUsdValue,
+    adjustment_uah: adjustmentUahValue,
     crm_balance_after_adjustment: myNumberAfterAdjustment.value,
     crm_balance_usd_before_adjustment: myDebtUsd.value,
     crm_balance_uah_before_adjustment: myDebtUah.value,
-    crm_balance_usd_after_adjustment: myDebtUsd.value,
-    crm_balance_uah_after_adjustment: myDebtUah.value + adjustmentValue,
+    crm_balance_usd_after_adjustment: myDebtUsdAfterAdjustment.value,
+    crm_balance_uah_after_adjustment: myDebtUahAfterAdjustment.value,
     discrepancy_uah: discrepancy.value,
     cost_snapshot_usd: currentCostUsd.value,
     cost_snapshot_uah: currentCostUah.value,
@@ -430,6 +459,7 @@ async function saveReconciliation() {
   accountingUsd.value = ''
   accountingUah.value = ''
   reserveUah.value = ''
+  adjustmentUsd.value = ''
   adjustmentUah.value = ''
   notice.value = 'Сверка зафиксирована. Итоговое сальдо стало новой точкой отсчёта.'
   await load()
@@ -548,15 +578,6 @@ onMounted(() => {
                     placeholder="0,00"
                     @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
                 /></label>
-                <label class="text-sm font-medium text-slate-600"
-                  >Сторно<input
-                    v-model="adjustmentUah"
-                    :disabled="isGuest"
-                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
-                    inputmode="decimal"
-                    placeholder="+/- 0,00"
-                    @keydown.enter.prevent="adjustmentUah = committedNumericValue(adjustmentUah)"
-                /></label>
               </div>
 
               <div class="grid content-start gap-3">
@@ -576,6 +597,21 @@ onMounted(() => {
                     placeholder="0,00"
                     @keydown.enter.prevent="accountingUsd = committedNumericValue(accountingUsd)"
                 /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >Сторно USD<input
+                    v-model="adjustmentUsd"
+                    :disabled="isGuest"
+                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                    inputmode="decimal"
+                    placeholder="+/- 0,00"
+                    @keydown.enter.prevent="adjustmentUsd = committedNumericValue(adjustmentUsd)"
+                /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >USD после сторно<input
+                    :value="money(myDebtUsdAfterAdjustment)"
+                    readonly
+                    class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
+                /></label>
               </div>
 
               <div class="grid content-start gap-3">
@@ -594,6 +630,21 @@ onMounted(() => {
                     inputmode="decimal"
                     placeholder="0,00"
                     @keydown.enter.prevent="accountingUah = committedNumericValue(accountingUah)"
+                /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >Сторно грн<input
+                    v-model="adjustmentUah"
+                    :disabled="isGuest"
+                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                    inputmode="decimal"
+                    placeholder="+/- 0,00"
+                    @keydown.enter.prevent="adjustmentUah = committedNumericValue(adjustmentUah)"
+                /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >Гривна после сторно<input
+                    :value="money(myDebtUahAfterAdjustment)"
+                    readonly
+                    class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
                 /></label>
               </div>
 
@@ -630,7 +681,8 @@ onMounted(() => {
               class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4"
             >
               <strong v-if="hasAccountingInput"
-                >Не сходится: {{ money(discrepancy ?? 0) }} грн</strong
+                >Не сходится: USD {{ money(discrepancyUsd ?? 0) }} · грн
+                {{ money(discrepancyUah ?? 0) }} · итого {{ money(discrepancy ?? 0) }} грн</strong
               >
               <strong v-else class="text-slate-500">Введите данные 1С</strong>
               <button

@@ -12,6 +12,7 @@ export type Reconciliation = {
   crm_balance_usd_after_adjustment: number
   crm_balance_uah_after_adjustment: number
   crm_balance_before_adjustment: number
+  adjustment_usd: number
   adjustment_uah: number
   crm_balance_after_adjustment: number
   discrepancy_uah: number

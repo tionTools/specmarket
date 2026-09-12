@@ -80,8 +80,15 @@ const columns = (() => {
       ),
     },
     {
-      id: 'adjustment',
-      header: 'Сторно',
+      id: 'adjustmentUsd',
+      header: 'Сторно USD',
+      cell: valueCell((item) =>
+        item.kind === 'initial' ? '—' : props.money(Number(item.adjustment_usd ?? 0)),
+      ),
+    },
+    {
+      id: 'adjustmentUah',
+      header: 'Сторно грн',
       cell: valueCell((item) =>
         item.kind === 'initial' ? '—' : props.money(Number(item.adjustment_uah)),
       ),
@@ -126,7 +133,7 @@ const table = useTable<typeof features, Reconciliation>({
 
 <template>
   <div v-if="history.length" class="mt-4 overflow-x-auto">
-    <table class="w-full min-w-[72rem] text-left text-sm">
+    <table class="w-full min-w-[78rem] text-left text-sm">
       <thead class="text-slate-500">
         <tr v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
           <th v-for="header in headerGroup.headers" :key="header.id" class="pb-2">
