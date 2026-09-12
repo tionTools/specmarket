@@ -139,6 +139,7 @@ index 066d967..bde976a 100644
      cost_snapshot_usd: currentCostUsd.value,
      cost_snapshot_uah: currentCostUah.value,
 @@ -430,6 +459,7 @@ async function saveReconciliation() {
+   accountingUsd.value = ''
    accountingUah.value = ''
    reserveUah.value = ''
 +  adjustmentUsd.value = ''
