@@ -1,74 +1,92 @@
 Patch 77 — раздельное сторно USD/грн в сверке
 
-База Patch 77:
+ВАЖНО: .patch-файл больше НЕ применять. Для Patch 77 подготовлен готовый Git commit с уже применёнными и проверенными изменениями.
+
+База main:
 8e5986b267d0ddce93fd78b4c5b9a78898db0b84
 
-Работай из репозитория:
-C:\Users\Вадим\Documents\CRM моя\specmarket
+Готовый commit Patch 77:
+b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
 
-Не трогай, не stash и не коммить пользовательский AGENTS.md. Используй существующий чистый worktree Patch 77:
+Готовая чистая ветка:
+patch-77-ready-clean
+
+Commit b436973 является ровно одним commit поверх 8e5986b и содержит ровно четыре файла:
+- src/pages/ReconciliationView.vue
+- src/features/reconciliation/types.ts
+- src/features/reconciliation/ReconciliationHistoryTable.vue
+- supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
+
+Никаких helper/workflow/AGENTS.md файлов в этом commit нет.
+
+Работай из существующего чистого worktree:
 C:\Users\Вадим\Documents\CRM моя\specmarket-p77
 
-Если worktree чистый, HEAD = 8e5986b267d0ddce93fd78b4c5b9a78898db0b84 и Patch 77 ещё не применялся — переиспользуй его. Ничего не удаляй и не создавай заново.
+AGENTS.md в основной рабочей копии не трогать, не stash, не коммить.
 
-1. Обнови refs и заново извлеки Patch 77
+1. Обнови refs
 
-git fetch origin main chatgpt-patches
+git fetch origin main patch-77-ready-clean
 
-git show origin/chatgpt-patches:77.patch > "$env:TEMP\specmarket-77.patch"
+2. Проверь исходное состояние worktree
 
-Проверь SHA blob patch-файла:
+HEAD должен быть:
+8e5986b267d0ddce93fd78b4c5b9a78898db0b84
 
-git hash-object "$env:TEMP\specmarket-77.patch"
+git status --short должен быть пуст.
+
+Если HEAD другой или worktree не чистый — остановись и сообщи точное состояние. Ничего не удаляй и не исправляй автоматически.
+
+3. НЕ использовать 77.patch, git apply, git apply --3way или ручное внесение изменений.
+
+Проверь готовый remote commit:
+
+git rev-parse origin/patch-77-ready-clean
 
 Ожидается:
-f7e6dd35bb8318da6f6698439cb92b8966c62be8
+b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
 
-Если SHA другой — остановись.
+Проверь его parent:
 
-2. Проверка базы по Git-объектам
+git rev-parse origin/patch-77-ready-clean^
 
-Проверь именно blob SHA трёх изменяемых существующих файлов в HEAD:
+Ожидается:
+8e5986b267d0ddce93fd78b4c5b9a78898db0b84
 
-git rev-parse HEAD:src/features/reconciliation/ReconciliationHistoryTable.vue
-git rev-parse HEAD:src/features/reconciliation/types.ts
-git rev-parse HEAD:src/pages/ReconciliationView.vue
+4. Прими готовый commit только fast-forward
 
-Ожидаются соответственно:
-8e60795d1d3c2b82fbbf061f2c4be77ecf68ba39
-dd211f350a8f237f709ae90896b231011b625a68
-066d967c4197d21ad8bd98d0192dc7f7ad08abc4
+На ветке codex/patch-77 в worktree выполни:
 
-Эти SHA соответствуют old-index Patch 77. Если любой не совпадает — остановись.
+git merge --ff-only origin/patch-77-ready-clean
 
-3. Применение Patch 77
+Это должно просто передвинуть HEAD с 8e5986b на b436973 без patch application и без merge commit.
 
-Для Patch 77 НЕ использовать обычный `git apply --check`: на локальном Windows worktree он уже дважды дал ложный context failure при совпадающих Git blob SHA.
+После этого:
 
-Используй Git three-way application по old-index blob-объектам patch:
+git rev-parse HEAD
 
-git apply --3way --check "$env:TEMP\specmarket-77.patch"
+должен вернуть:
+b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
 
-Если эта проверка прошла:
+5. Проверь scope готового commit
 
-git apply --3way "$env:TEMP\specmarket-77.patch"
+git diff-tree --no-commit-id --name-only -r HEAD
 
-`--3way` может автоматически добавить изменения в index. Сразу после успешного применения только сними staged-состояние, не откатывая файлы:
+Должны быть ровно четыре файла:
+- src/pages/ReconciliationView.vue
+- src/features/reconciliation/types.ts
+- src/features/reconciliation/ReconciliationHistoryTable.vue
+- supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
 
-git reset
+Проверь:
 
-Если `git apply --3way --check` не проходит — ничего вручную не исправляй и остановись с полной ошибкой.
+git diff --check HEAD^ HEAD
 
-4. Patch должен изменить ровно четыре файла
+git status --short
 
-src/pages/ReconciliationView.vue
-src/features/reconciliation/types.ts
-src/features/reconciliation/ReconciliationHistoryTable.vue
-supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql
+Worktree после fast-forward должен оставаться чистым.
 
-AGENTS.md, Android, Edge Functions, другие migrations и остальные файлы не менять.
-
-5. Бизнес-логика
+6. Бизнес-логика Patch 77
 
 - «Сторно грн» меняет только гривневую часть долга.
 - При вводе «Сторно USD» поле «Сторно грн» автоматически получает противоположный гривневый эквивалент по текущему курсу CRM, округлённый до копеек:
@@ -87,60 +105,37 @@ AGENTS.md, Android, Edge Functions, другие migrations и остальны�
 после сторно 69,40 USD / 11 602,22 грн;
 расхождения USD, грн и общий итог = 0,00 с учётом округления.
 
-6. Миграция
+7. Проверки
 
-Patch добавляет только:
+Не форматировать код повторно и не изменять commit. Только проверки:
 
-alter table public.crm_reconciliations
-  add column if not exists adjustment_usd numeric not null default 0;
-
-7. Проверки перед commit
-
-git diff --check
-git diff --name-only
-git diff --stat
-pnpm exec oxfmt src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
 pnpm type-check
 pnpm exec oxlint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
 pnpm exec eslint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
 pnpm build
-
-После formatter/linter снова проверь:
+git diff --check HEAD^ HEAD
 git status --short
-git diff --name-only
-git diff --check
 
-Diff должен содержать только четыре файла Patch 77.
+Если какая-либо проверка падает — не исправлять код Patch 77 самостоятельно. Остановиться и сообщить точную ошибку.
 
-Сам patch уже прошёл GitHub Actions: format, type-check, oxlint, eslint, build, scope, git diff --check и git apply --check на чистой базе main.
-
-8. Commit
-
-Не использовать `git add .`.
-Добавить только четыре файла Patch 77.
-
-Commit message:
-Add currency-aware reconciliation storno
-
-9. Перед push
+8. Перед push
 
 git fetch origin main
 
-Если origin/main продвинулся — без force-push. Rebase на актуальный origin/main и повтори:
-- git diff-tree --no-commit-id --name-only -r HEAD
-- git diff --check HEAD^ HEAD
-- pnpm type-check
-- pnpm build
+origin/main всё ещё должен быть:
+8e5986b267d0ddce93fd78b4c5b9a78898db0b84
 
-При конфликте rebase остановись и сообщи.
+Если main продвинулся — не push и не rebase самостоятельно; остановись и сообщи новый SHA для повторной проверки совместимости.
 
-10. Push
+9. Push
+
+Если все проверки зелёные и origin/main не изменился:
 
 git push origin HEAD:main
 
-Только существующий SSH-доступ GitHub. Не переключаться на HTTPS, не запускать браузерную авторизацию и не создавать credentials. Если SSH push не работает — остановись.
+Используй только существующий SSH-доступ GitHub. Не переключай origin на HTTPS, не запускай браузерную авторизацию и не создавай новые credentials. Если SSH push не работает — остановись и сообщи причину.
 
-11. Supabase migration
+10. Supabase migration
 
 После успешного push:
 
@@ -151,7 +146,7 @@ C:\Users\Вадим\Documents\CRM моя\specmarket\supabase\.temp\project-ref
 
 Не создавать новый Supabase project и не угадывать project ref. При ошибке db push остановись и пришли её полностью.
 
-12. После deploy
+11. После deploy
 
 Убедись, что production frontend deploy успешен и migration применена. Старые сверки не удалять и не переписывать.
 
@@ -167,11 +162,12 @@ C:\Users\Вадим\Documents\CRM моя\specmarket\supabase\.temp\project-ref
 
 Если к этому моменту цифры изменились из-за новых заказов, платежей или возвратов — использовать актуальные значения 1С и фактическую текущую валютную разницу, а не старые числа.
 
-13. Итоговый отчёт
+12. Итоговый отчёт
 
 Сообщи:
 - SHA commit в main;
-- SHA origin/main перед применением и перед финальным push;
+- SHA origin/main перед fast-forward и перед финальным push;
+- что HEAD = b43697312b10c77d782962b7cf5e7a3ca4a0c6d5;
 - что commit содержит ровно четыре файла Patch 77;
 - результаты diff-check/type-check/linters/build;
 - результат production deploy;
