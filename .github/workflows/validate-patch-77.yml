@@ -43,7 +43,7 @@ jobs:
           pnpm exec eslint src/pages/ReconciliationView.vue src/features/reconciliation/ReconciliationHistoryTable.vue src/features/reconciliation/types.ts
       - name: Build
         run: pnpm build
-      - name: Verify final scope and generate patch
+      - name: Verify final scope and generated patch applicability
         run: |
           set -euo pipefail
           git diff --check
@@ -54,18 +54,25 @@ jobs:
             src/features/reconciliation/types.ts \
             supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql | sort)
           test "$actual" = "$expected"
-          git diff --binary HEAD -- \
+          git diff --binary 8e5986b267d0ddce93fd78b4c5b9a78898db0b84 -- \
             src/pages/ReconciliationView.vue \
             src/features/reconciliation/ReconciliationHistoryTable.vue \
             src/features/reconciliation/types.ts \
             supabase/migrations/20260912100000_reconciliation_usd_adjustment.sql \
             > .github/patch77/generated-77.patch
           test -s .github/patch77/generated-77.patch
-      - name: Publish generated validation patch
+          git worktree add --detach /tmp/specmarket-p77-check 8e5986b267d0ddce93fd78b4c5b9a78898db0b84
+          git -C /tmp/specmarket-p77-check apply --check "$GITHUB_WORKSPACE/.github/patch77/generated-77.patch"
+          git worktree remove /tmp/specmarket-p77-check
+      - name: Publish generated validation patch if changed
         run: |
           set -euo pipefail
           git add .github/patch77/generated-77.patch
+          if git diff --cached --quiet; then
+            echo 'Validated patch content unchanged.'
+            exit 0
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Generate validated Patch 77 [skip ci]'
+          git commit -m 'Refresh validated Patch 77 [skip ci]'
           git push origin HEAD:chatgpt-validation-77
