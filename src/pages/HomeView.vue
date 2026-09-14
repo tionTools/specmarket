@@ -4007,19 +4007,83 @@ function formatLabelEmailSentAt(value?: string) {
   }).format(date)
 }
 
-function formatDeliveryStatusChangedAt(value?: string) {
-  if (!value) return ''
-  const date = new Date(value)
+const deliveryStatusEventDateTimeFormatter = new Intl.DateTimeFormat('uk-UA', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Europe/Kyiv',
+})
+
+function isValidDeliveryStatusLocalDate(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+) {
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute
+  )
+}
+
+function formatDeliveryStatusEventAt(value?: string) {
+  const source = value?.trim() ?? ''
+  if (!source) return ''
+
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(source)
+  const dayFirst = hasExplicitTimezone
+    ? null
+    : source.match(/^(\d{2})[-.](\d{2})[-.](\d{4})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/)
+  if (dayFirst) {
+    const [, day, month, year, hour, minute] = dayFirst
+    if (
+      hour &&
+      minute &&
+      isValidDeliveryStatusLocalDate(
+        Number(year),
+        Number(month),
+        Number(day),
+        Number(hour),
+        Number(minute),
+      )
+    ) {
+      return `${hour}:${minute} ${day}.${month}.${year}`
+    }
+    return ''
+  }
+
+  const yearFirst = hasExplicitTimezone
+    ? null
+    : source.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/)
+  if (yearFirst) {
+    const [, year, month, day, hour, minute] = yearFirst
+    if (
+      hour &&
+      minute &&
+      isValidDeliveryStatusLocalDate(
+        Number(year),
+        Number(month),
+        Number(day),
+        Number(hour),
+        Number(minute),
+      )
+    ) {
+      return `${hour}:${minute} ${day}.${month}.${year}`
+    }
+    return ''
+  }
+
+  const date = new Date(source)
   if (!Number.isFinite(date.getTime())) return ''
-  const parts = new Intl.DateTimeFormat('uk-UA', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: 'Europe/Kyiv',
-  }).formatToParts(date)
+  const parts = deliveryStatusEventDateTimeFormatter.formatToParts(date)
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
   return `${part('hour')}:${part('minute')} ${part('day')}.${part('month')}.${part('year')}`
 }
@@ -5106,9 +5170,9 @@ function orderDateTime(order: Order) {
                   :class="statusBadgeClass(order)"
                   >{{ deliveryStatusForOrder(order) }}</span
                 ><span
-                  v-if="formatDeliveryStatusChangedAt(order.delivery.trackingStatusChangedAt)"
+                  v-if="order.delivery.trackingStatus?.trim() && order.delivery.trackingEventAt"
                   class="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-none tabular-nums text-slate-400"
-                  >{{ formatDeliveryStatusChangedAt(order.delivery.trackingStatusChangedAt) }}</span
+                  >{{ formatDeliveryStatusEventAt(order.delivery.trackingEventAt) }}</span
                 ></span
               ></span
             ><span class="flex items-center justify-end gap-2"
