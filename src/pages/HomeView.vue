@@ -4007,6 +4007,23 @@ function formatLabelEmailSentAt(value?: string) {
   }).format(date)
 }
 
+function formatDeliveryStatusChangedAt(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('uk-UA', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'Europe/Kyiv',
+  }).formatToParts(date)
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
+  return `${part('hour')}:${part('minute')} ${part('day')}.${part('month')}.${part('year')}`
+}
+
 function labelEmailInlineError(orderId: Order['id']) {
   return labelEmailErrorByOrderId.value[String(orderId)] ?? ''
 }
@@ -5083,10 +5100,16 @@ function orderDateTime(order: Order) {
                 v-if="isUnopenedNewOrder(order)"
                 class="whitespace-nowrap rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black tracking-wide text-white shadow-md ring-2 ring-fuchsia-200"
                 >НОВЫЙ ЗАКАЗ</span
-              ><span
-                class="w-fit rounded-full px-2.5 py-1 text-xs font-semibold lg:w-full lg:line-clamp-2 lg:leading-5"
-                :class="statusBadgeClass(order)"
-                >{{ deliveryStatusForOrder(order) }}</span
+              ><span class="relative w-fit lg:w-full"
+                ><span
+                  class="block w-fit rounded-full px-2.5 py-1 text-xs font-semibold lg:w-full lg:line-clamp-2 lg:leading-5"
+                  :class="statusBadgeClass(order)"
+                  >{{ deliveryStatusForOrder(order) }}</span
+                ><span
+                  v-if="formatDeliveryStatusChangedAt(order.delivery.trackingStatusChangedAt)"
+                  class="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-none tabular-nums text-slate-400"
+                  >{{ formatDeliveryStatusChangedAt(order.delivery.trackingStatusChangedAt) }}</span
+                ></span
               ></span
             ><span class="flex items-center justify-end gap-2"
               ><CarrierLogo
