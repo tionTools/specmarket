@@ -1,0 +1,47 @@
+Patch 79 — фактическое время события перевозчика
+
+База main: 70f5dde060e4b36489365761216dbafead9fcaba
+
+Причина: Patch 78 выводит delivery.trackingStatusChangedAt — момент, когда CRM заметила новый статус. Нужно выводить delivery.trackingEventAt — фактическое время события перевозчика.
+
+Проверено по текущему backend: Nova Poshta, Укрпочта, Meest и Rozetka Delivery уже сохраняют trackingEventAt. Supabase менять не нужно.
+
+Scope:
+- src/pages/HomeView.vue
+- src/features/orders/delivery-tracking.ts
+- src/features/orders/types.ts
+
+Что должно получиться:
+- UI использует trackingEventAt, не trackingStatusChangedAt.
+- Нет неточного fallback на trackingStatusChangedAt, trackingDataChangedAt или trackingLastCheckedAt.
+- Timestamp показывается только при наличии trackingStatus и trackingEventAt.
+- Формат HH:MM DD.MM.YYYY.
+- DD-MM-YYYY, DD.MM.YYYY и YYYY-MM-DD без timezone сохраняют исходное локальное carrier-время.
+- ISO с Z/offset переводится в Europe/Kyiv.
+- Невалидная дата не показывается.
+- Intl.DateTimeFormat создаётся один раз в feature-модуле.
+- В template formatter вызывается один раз; v-if formatter не вызывает.
+- Центрирование, absolute layout и line-clamp-2 из Patch 78 сохраняются.
+
+Проверенные примеры formatter:
+14-09-2026 12:11:00 -> 12:11 14.09.2026
+14.09.2026 18:52:03 -> 18:52 14.09.2026
+2026-09-14 12:11:00 -> 12:11 14.09.2026
+2026-09-14T15:52:00Z -> 18:52 14.09.2026
+2026-09-14T18:52:00+03:00 -> 18:52 14.09.2026
+invalid -> пусто
+
+Codex:
+1. Не трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
+2. Обнови refs и убедись, что origin/main всё ещё равен базе выше. Если нет — остановись и сообщи, не адаптируй Patch 79 самостоятельно.
+3. Прочитай AGENTS.md и .agents/skills/frontend/SKILL.md.
+4. Получи 79.patch из origin/chatgpt-patches.
+5. Выполни git apply --check. При ошибке остановись без ручного исправления патча.
+6. Примени patch. До форматирования diff должен содержать только три scope-файла.
+7. Выполни pnpm format. Если formatter изменил файлы вне scope, восстанови только эти конкретные вне-scope файлы из HEAD. Не использовать массовый reset/clean/restore.
+8. Выполни pnpm type-check, pnpm lint, pnpm build. После lint снова убери только возможный вне-scope spillover.
+9. Финальный git diff --check должен быть чистым, git diff --name-only — ровно три scope-файла. AGENTS.md не изменять.
+10. Перед commit снова обнови origin/main. Если база изменилась — остановись без rebase/adaptation.
+11. Commit должен включать только три scope-файла. Push в main через существующий SSH-доступ; при проблеме с SSH остановись.
+12. Supabase deploy не нужен. После push дождись обычного Deploy to Production.
+13. Сообщи commit SHA, результаты format/type-check/lint/build, список файлов, deploy status и подтверждение, что основной worktree не затронут.
