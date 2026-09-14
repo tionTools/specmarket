@@ -16,35 +16,96 @@ Scope:
 - Supabase не менять
 - Android не менять
 
-Предварительно проверено ChatGPT:
-- актуальный main = b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
-- 77 уже занят; выбран свободный Patch 78
-- patch context соответствует текущему HomeView.vue
-- git apply --check на точном извлечённом контексте проходит
-- форматтер: 2026-09-14T14:05:00Z -> 17:05 14.09.2026 для Europe/Kyiv
-- diff содержит только изменение HomeView.vue
+ВАЖНО ПО ТЕКУЩЕЙ ЛОКАЛЬНОЙ КОПИИ:
+Основной worktree C:\Users\Вадим\Documents\CRM моя\specmarket сейчас грязный и находится на d684773. Его НЕ менять, НЕ чистить, НЕ stash, НЕ reset, НЕ checkout и НЕ удалять пользовательские файлы. Изменения AGENTS.md и untracked-файлы в нём оставить как есть.
 
-Codex:
-1. Работай в C:\Users\Вадим\Documents\CRM моя\specmarket.
-2. Обнови refs и убедись, что origin/main и локальный HEAD = b43697312b10c77d782962b7cf5e7a3ca4a0c6d5. Worktree должен быть чистым. Если main изменился или worktree не чистый — остановись и сообщи, ничего не адаптируй самостоятельно.
-3. Получи 78.patch и 78.txt из ветки chatgpt-patches.
-4. Выполни git apply --check 78.patch. Если check не проходит — остановись и пришли ошибку, не исправляй патч вручную.
-5. Примени git apply 78.patch.
-6. Проверь git diff --check и git diff --name-only. Должен быть ровно один файл: src/pages/HomeView.vue.
-7. Выполни проверки проекта в порядке из AGENTS.md:
+Codex — продолжение Patch 78:
+1. Из основной папки только обнови refs:
+   cd "C:\Users\Вадим\Documents\CRM моя\specmarket"
+   git fetch origin main chatgpt-patches
+
+2. Проверь удалённый main:
+   git rev-parse origin/main
+   Ожидается:
+   b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
+   Если SHA другой — остановись и сообщи новый SHA. Ничего не адаптируй самостоятельно.
+
+3. Создай ОТДЕЛЬНЫЙ чистый worktree, не затрагивая основной:
+   C:\Users\Вадим\Documents\CRM моя\specmarket-p78
+
+   Сначала проверь, что такой путь не существует. Если уже существует — остановись и сообщи, не удаляй его.
+
+   Затем:
+   git worktree add -b codex/patch-78 "C:\Users\Вадим\Documents\CRM моя\specmarket-p78" origin/main
+   cd "C:\Users\Вадим\Documents\CRM моя\specmarket-p78"
+
+4. Проверь чистую базу:
+   git rev-parse HEAD
+   должен быть:
+   b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
+
+   git status --short
+   должен быть пуст.
+
+5. Не копируй 78.patch в основной worktree. Примени его потоком из ветки chatgpt-patches:
+   git show origin/chatgpt-patches:78.patch | git apply --check -
+   Если check падает — остановись и пришли ошибку полностью.
+
+   Если check успешен:
+   git show origin/chatgpt-patches:78.patch | git apply -
+
+6. Сразу проверь scope:
+   git diff --check
+   git diff --name-only
+   Должен быть ровно один файл:
+   src/pages/HomeView.vue
+   Если есть что-то ещё — остановись.
+
+7. Прочитай и соблюдай AGENTS.md из ЧИСТОГО worktree. Для Vue/TypeScript также прочитай repo-local frontend skill, как требует AGENTS.md.
+
+8. Выполни проверки проекта в порядке AGENTS.md:
    pnpm format
    pnpm type-check
    pnpm lint
    pnpm build
-8. После pnpm format ещё раз проверь diff: не должно появиться изменений вне src/pages/HomeView.vue. Если появились — не коммить и остановись.
-9. Проверь бизнес-логику вручную по коду:
+
+9. После pnpm format и после всех проверок снова выполни:
+   git diff --check
+   git diff --name-only
+   git status --short
+
+   Допустимо изменение только:
+   src/pages/HomeView.vue
+   Если formatter или любая команда изменила другие файлы — ничего не коммить, остановиться и сообщить список файлов.
+
+10. Контроль логики:
    - timestamp выводится только при валидном trackingStatusChangedAt;
    - используется Europe/Kyiv;
    - формат HH:MM DD.MM.YYYY;
    - timestamp имеет absolute top-full left-1/2 -translate-x-1/2;
-   - сама status-плашка остаётся с прежним line-clamp-2;
-   - отдельная grid-строка не создаётся, высота карточки не должна увеличиваться.
-10. Перед commit сделай git fetch origin main. Если origin/main уже не b43697312b10c77d782962b7cf5e7a3ca4a0c6d5 — остановись, не rebase и не адаптируй самостоятельно.
-11. Если всё зелёное, commit и push в main через существующий SSH-доступ GitHub. Не переключаться на HTTPS, не запускать browser auth, не создавать credentials.
-12. Supabase deploy не нужен.
-13. После push дождись обычного frontend deploy через GitHub Actions и сообщи SHA commit, результаты format/type-check/lint/build, что diff = только HomeView.vue, deploy status и подтверждение, что AGENTS.md не затронут.
+   - центрируется относительно status-плашки;
+   - сама status-плашка сохраняет прежний line-clamp-2;
+   - отдельная grid-строка не создаётся;
+   - высота карточки не должна увеличиваться из-за timestamp.
+
+11. Перед commit ещё раз:
+   git fetch origin main
+   git rev-parse origin/main
+   Должен всё ещё быть:
+   b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
+   Если main продвинулся — остановись, не rebase и не адаптируй самостоятельно.
+
+12. Если всё зелёное, создай commit только для src/pages/HomeView.vue. AGENTS.md не менять и не коммить. Затем push:
+   git push origin HEAD:main
+
+   Используй только существующий SSH-доступ GitHub. Не переключай origin на HTTPS, не запускай browser auth и не создавай credentials. Если SSH push не работает — остановись и сообщи причину.
+
+13. Supabase deploy не нужен.
+
+14. После push дождись обычного frontend deploy через GitHub Actions и сообщи:
+   - SHA commit в main;
+   - SHA origin/main непосредственно перед push;
+   - результаты format/type-check/lint/build;
+   - что diff содержит только src/pages/HomeView.vue;
+   - deploy status;
+   - подтверждение, что основной грязный worktree, его AGENTS.md и пользовательские untracked-файлы не затронуты.
