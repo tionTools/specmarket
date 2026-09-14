@@ -1,0 +1,50 @@
+Patch 78 — время последней смены статуса доставки под плашкой
+
+База main:
+b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
+
+Что меняется:
+1. В списке заказов под плашкой «Состояние отгрузки» показывается время последней фактической смены статуса доставки из delivery.trackingStatusChangedAt.
+2. Формат: HH:MM DD.MM.YYYY в часовом поясе Europe/Kyiv, например 17:05 14.09.2026.
+3. Время центрируется строго относительно плашки статуса, а не прижимается вправо.
+4. Время вынесено через absolute positioning, поэтому не добавляет отдельную строку в grid и не увеличивает высоту карточки заказа.
+5. Если trackingStatusChangedAt отсутствует или невалиден, время не показывается.
+
+Scope:
+- только src/pages/HomeView.vue
+- AGENTS.md не трогать
+- Supabase не менять
+- Android не менять
+
+Предварительно проверено ChatGPT:
+- актуальный main = b43697312b10c77d782962b7cf5e7a3ca4a0c6d5
+- 77 уже занят; выбран свободный Patch 78
+- patch context соответствует текущему HomeView.vue
+- git apply --check на точном извлечённом контексте проходит
+- форматтер: 2026-09-14T14:05:00Z -> 17:05 14.09.2026 для Europe/Kyiv
+- diff содержит только изменение HomeView.vue
+
+Codex:
+1. Работай в C:\Users\Вадим\Documents\CRM моя\specmarket.
+2. Обнови refs и убедись, что origin/main и локальный HEAD = b43697312b10c77d782962b7cf5e7a3ca4a0c6d5. Worktree должен быть чистым. Если main изменился или worktree не чистый — остановись и сообщи, ничего не адаптируй самостоятельно.
+3. Получи 78.patch и 78.txt из ветки chatgpt-patches.
+4. Выполни git apply --check 78.patch. Если check не проходит — остановись и пришли ошибку, не исправляй патч вручную.
+5. Примени git apply 78.patch.
+6. Проверь git diff --check и git diff --name-only. Должен быть ровно один файл: src/pages/HomeView.vue.
+7. Выполни проверки проекта в порядке из AGENTS.md:
+   pnpm format
+   pnpm type-check
+   pnpm lint
+   pnpm build
+8. После pnpm format ещё раз проверь diff: не должно появиться изменений вне src/pages/HomeView.vue. Если появились — не коммить и остановись.
+9. Проверь бизнес-логику вручную по коду:
+   - timestamp выводится только при валидном trackingStatusChangedAt;
+   - используется Europe/Kyiv;
+   - формат HH:MM DD.MM.YYYY;
+   - timestamp имеет absolute top-full left-1/2 -translate-x-1/2;
+   - сама status-плашка остаётся с прежним line-clamp-2;
+   - отдельная grid-строка не создаётся, высота карточки не должна увеличиваться.
+10. Перед commit сделай git fetch origin main. Если origin/main уже не b43697312b10c77d782962b7cf5e7a3ca4a0c6d5 — остановись, не rebase и не адаптируй самостоятельно.
+11. Если всё зелёное, commit и push в main через существующий SSH-доступ GitHub. Не переключаться на HTTPS, не запускать browser auth, не создавать credentials.
+12. Supabase deploy не нужен.
+13. После push дождись обычного frontend deploy через GitHub Actions и сообщи SHA commit, результаты format/type-check/lint/build, что diff = только HomeView.vue, deploy status и подтверждение, что AGENTS.md не затронут.
