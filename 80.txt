@@ -1,0 +1,46 @@
+Patch 80 — корректный разбор времени события Nova Poshta
+
+База main: d0719731530c778a4dff74461bfdf4434702cb19
+
+Причина:
+Patch 79 правильно переключил UI на delivery.trackingEventAt, но formatter не учитывает реальный формат Nova Poshta DateScan: `HH:MM DD.MM.YYYY` (например `12:11 14.09.2026` и `15:52 12.09.2026`).
+
+Из-за fallback `new Date(source)` получаются два дефекта:
+- день > 12: строка становится Invalid Date, поэтому время вообще не показывается;
+- день <= 12: V8 может интерпретировать `DD.MM` как `MM.DD`, поэтому `15:52 12.09.2026` превращается в `15:52 09.12.2026`.
+
+Scope:
+- src/pages/HomeView.vue
+
+Что меняет Patch 80:
+- до остальных локальных форматов явно распознаёт Nova Poshta time-first: `HH:MM DD.MM.YYYY` и `HH:MM DD-MM-YYYY`, с необязательными секундами;
+- валидирует компоненты даты через существующий isValidDeliveryStatusLocalDate;
+- для неизвестных строк без явного timezone больше НЕ вызывает `new Date(source)`, чтобы браузер не угадывал локальный формат;
+- ISO с Z/offset по-прежнему разбирается через Date и переводится в Europe/Kyiv;
+- layout, центрирование timestamp, trackingEventAt и render-оптимизация Patch 79 не меняются;
+- backend/Supabase не менять: trackingEventAt уже содержит нужное carrier-время.
+
+Обязательные проверки formatter после применения:
+- `12:11 14.09.2026` -> `12:11 14.09.2026`
+- `15:52 12.09.2026` -> `15:52 12.09.2026` (НЕ `09.12.2026`)
+- `12:36 07.04.2023` -> `12:36 07.04.2023`
+- `14.09.2026 18:52:03` -> `18:52 14.09.2026`
+- `2026-09-14 12:11:00` -> `12:11 14.09.2026`
+- `2026-09-14T15:52:00Z` -> `18:52 14.09.2026` (Europe/Kyiv)
+- invalid -> пустая строка
+
+Codex:
+1. Основной грязный worktree не трогать. Работать в отдельном чистом worktree от origin/main.
+2. Fetch refs и убедиться, что origin/main всё ещё `d0719731530c778a4dff74461bfdf4434702cb19`. Если нет — стоп, ничего самостоятельно не адаптировать.
+3. Прочитать AGENTS.md и .agents/skills/frontend/SKILL.md.
+4. Заново получить 80.patch из origin/chatgpt-patches.
+5. Выполнить `git apply --check 80.patch`. Если не проходит — стоп без ручного исправления.
+6. Применить patch. До форматирования `git diff --name-only` должен показывать только `src/pages/HomeView.vue`.
+7. Выполнить `pnpm format`. Если formatter изменит файлы вне scope, восстановить только конкретные вне-scope файлы из HEAD. Не использовать `reset --hard`, `git clean`, `git restore .` и другие массовые команды.
+8. Выполнить `pnpm type-check`, `pnpm lint`, `pnpm build`. После lint снова проверить spillover.
+9. Проверить перечисленные выше примеры formatter; особенно два реальных Nova Poshta кейса `12:11 14.09.2026` и `15:52 12.09.2026`.
+10. Финальный `git diff --check` чистый; `git diff --name-only` — ровно `src/pages/HomeView.vue`; AGENTS.md не менять.
+11. Перед commit снова fetch origin/main. Если база изменилась — стоп без rebase/adaptation.
+12. Commit только `src/pages/HomeView.vue`, push в main через существующий SSH. При проблеме с SSH — стоп.
+13. Supabase deploy НЕ нужен. Дождаться обычного Deploy to Production.
+14. В отчёте: commit SHA, format/type-check/lint/build, проверка реальных Nova форматов, список файлов, deploy status, подтверждение что основной worktree не тронут.
