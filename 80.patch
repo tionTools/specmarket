@@ -1,0 +1,37 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -4039,6 +4039,25 @@ function formatDeliveryStatusEventAt(value?: string) {
+   if (!source) return ''
+ 
+   const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(source)
++  const timeFirst = hasExplicitTimezone
++    ? null
++    : source.match(/^(\d{2}):(\d{2})(?::\d{2})?\s+(\d{2})[-.](\d{2})[-.](\d{4})$/)
++  if (timeFirst) {
++    const [, hour, minute, day, month, year] = timeFirst
++    if (
++      isValidDeliveryStatusLocalDate(
++        Number(year),
++        Number(month),
++        Number(day),
++        Number(hour),
++        Number(minute),
++      )
++    ) {
++      return `${hour}:${minute} ${day}.${month}.${year}`
++    }
++    return ''
++  }
++
+   const dayFirst = hasExplicitTimezone
+     ? null
+     : source.match(/^(\d{2})[-.](\d{2})[-.](\d{4})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/)
+@@ -4081,6 +4100,7 @@ function formatDeliveryStatusEventAt(value?: string) {
+     return ''
+   }
+ 
++  if (!hasExplicitTimezone) return ''
+   const date = new Date(source)
+   if (!Number.isFinite(date.getTime())) return ''
+   const parts = deliveryStatusEventDateTimeFormatter.formatToParts(date)
