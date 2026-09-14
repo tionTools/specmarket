@@ -1,0 +1,41 @@
+Patch 81 — статус изменения адреса должен быть зелёным как доставка в пути
+
+База main: b10f3adccd9c4b8960786f6eaa5efd5a43cd55b8
+
+Причина подтверждена в текущем HomeView.vue: orderStatusTone() считает зелёными только normalized accepted/in_transit/ready_for_pickup/delivered. Статус Nova Poshta «Змінено адресу» приходит с trackingNormalizedStatus=unknown и не совпадает с текущим fallback-regex; поэтому функция падает в default blue. Нормализованный forwarding также не входит в зелёный список.
+
+Scope:
+- src/pages/HomeView.vue
+
+Что должно получиться:
+- «Змінено адресу» / изменение адреса / переадресация у перевозчика окрашиваются зелёным, как статус «в дороге».
+- normalized forwarding окрашивается зелёным.
+- raw carrier fallback применяется также при trackingNormalizedStatus=unknown, а не только при пустом normalized status.
+- Текст статуса не менять.
+- Красные return/cancel statuses не менять.
+- Полученная доставка: для не-Prom остаётся orange; для Prom остаётся green до подтверждения завершения на площадке.
+- Обычный неизвестный статус вроде «Очікує оформлення» не должен автоматически становиться зелёным.
+- Никаких изменений backend/Supabase/Android.
+
+Проверенные логические случаи:
+- unknown + «Змінено адресу» -> green
+- forwarding + «Переадресовано» -> green
+- in_transit + «Відправлення у дорозі» -> green
+- empty + «Змінено адресу» -> green
+- unknown + «Очікує оформлення» -> не green
+
+Codex:
+1. Не трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
+2. Обнови refs и проверь, что origin/main всё ещё равен b10f3adccd9c4b8960786f6eaa5efd5a43cd55b8. Если нет — остановись и сообщи; Patch 81 самостоятельно не адаптировать.
+3. Прочитай AGENTS.md и .agents/skills/frontend/SKILL.md.
+4. Получи 81.patch из origin/chatgpt-patches.
+5. Выполни git apply --check 81.patch. Если не проходит — остановись без ручного исправления.
+6. Примени patch. До форматирования git diff --name-only должен содержать только src/pages/HomeView.vue.
+7. Выполни pnpm format. Если formatter изменит файлы вне scope, восстанови только эти конкретные вне-scope файлы из HEAD. Не использовать reset --hard, git clean, restore . и другие массовые команды.
+8. Выполни pnpm type-check, pnpm lint, pnpm build. После lint снова проверь и убери только возможный вне-scope spillover.
+9. Проверь вручную логику orderStatusTone на пяти случаях выше и убедись, что return/cancel остаются red, а non-Prom delivered остаётся orange.
+10. Финальный git diff --check должен быть чистым; git diff --name-only — ровно src/pages/HomeView.vue. AGENTS.md не изменять.
+11. Перед commit снова fetch origin/main. Если база изменилась — остановись без rebase/adaptation.
+12. Commit только src/pages/HomeView.vue. Push в main через существующий SSH-доступ. Если SSH push не работает — остановись, не переходи на HTTPS и не создавай credentials.
+13. Supabase deploy не нужен. После push дождись обычного Deploy to Production.
+14. В отчёте укажи commit SHA, результаты format/type-check/lint/build, итоговый список файлов, deploy status и подтверждение, что основной dirty worktree не затронут.
