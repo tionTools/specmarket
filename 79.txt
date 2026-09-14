@@ -2,46 +2,61 @@ Patch 79 — фактическое время события перевозчи
 
 База main: 70f5dde060e4b36489365761216dbafead9fcaba
 
-Причина: Patch 78 выводит delivery.trackingStatusChangedAt — момент, когда CRM заметила новый статус. Нужно выводить delivery.trackingEventAt — фактическое время события перевозчика.
+Причина:
+Patch 78 выводит delivery.trackingStatusChangedAt — момент, когда CRM заметила новый статус. Нужно выводить delivery.trackingEventAt — фактическое время последнего tracking-события по данным перевозчика.
 
-Проверено по текущему backend: Nova Poshta, Укрпочта, Meest и Rozetka Delivery уже сохраняют trackingEventAt. Supabase менять не нужно.
+Текущая версия 79.patch пересобрана после неудачного git apply --check старой версии. Старый patch не применять. Обязательно заново получить 79.patch из origin/chatgpt-patches.
+
+Проверено по текущему backend:
+- Nova Poshta сохраняет trackingEventAt из DateScan/RecipientDateTime.
+- Укрпочта сохраняет trackingEventAt из latest.date.
+- Meest сохраняет trackingEventAt из latest.eventDateTime.
+- Rozetka Delivery сохраняет trackingEventAt из latest.date/fallback.
+- Supabase deploy не нужен: backend уже пишет нужное поле.
 
 Scope:
 - src/pages/HomeView.vue
-- src/features/orders/delivery-tracking.ts
 - src/features/orders/types.ts
 
 Что должно получиться:
 - UI использует trackingEventAt, не trackingStatusChangedAt.
-- Нет неточного fallback на trackingStatusChangedAt, trackingDataChangedAt или trackingLastCheckedAt.
+- Нет fallback на trackingStatusChangedAt, trackingDataChangedAt или trackingLastCheckedAt.
 - Timestamp показывается только при наличии trackingStatus и trackingEventAt.
 - Формат HH:MM DD.MM.YYYY.
-- DD-MM-YYYY, DD.MM.YYYY и YYYY-MM-DD без timezone сохраняют исходное локальное carrier-время.
+- Локальные carrier timestamps DD-MM-YYYY, DD.MM.YYYY и YYYY-MM-DD без timezone сохраняют исходное локальное время события.
 - ISO с Z/offset переводится в Europe/Kyiv.
-- Невалидная дата не показывается.
-- Intl.DateTimeFormat создаётся один раз в feature-модуле.
+- Невалидная дата даёт пустую строку.
+- Intl.DateTimeFormat создаётся один раз, а не на каждый вызов formatter.
 - В template formatter вызывается один раз; v-if formatter не вызывает.
 - Центрирование, absolute layout и line-clamp-2 из Patch 78 сохраняются.
 
-Проверенные примеры formatter:
-14-09-2026 12:11:00 -> 12:11 14.09.2026
-14.09.2026 18:52:03 -> 18:52 14.09.2026
-2026-09-14 12:11:00 -> 12:11 14.09.2026
-2026-09-14T15:52:00Z -> 18:52 14.09.2026
-2026-09-14T18:52:00+03:00 -> 18:52 14.09.2026
-invalid -> пусто
+Предварительно проверено ChatGPT:
+- patch собран против точных фрагментов main 70f5dde060e4b36489365761216dbafead9fcaba;
+- локальный git apply --check исправленной версии проходит;
+- git diff --check после применения чистый;
+- diff содержит ровно два scope-файла;
+- formatter:
+  14-09-2026 12:11:00 -> 12:11 14.09.2026
+  14.09.2026 18:52:03 -> 18:52 14.09.2026
+  2026-09-14 12:11:00 -> 12:11 14.09.2026
+  2026-09-14T15:52:00Z -> 18:52 14.09.2026
+  2026-09-14T18:52:00+03:00 -> 18:52 14.09.2026
+  invalid -> пусто
+  2026-02-31 10:00:00 -> пусто
 
 Codex:
-1. Не трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
-2. Обнови refs и убедись, что origin/main всё ещё равен базе выше. Если нет — остановись и сообщи, не адаптируй Patch 79 самостоятельно.
+1. Не трогай основной грязный worktree. Используй отдельный чистый worktree от origin/main.
+2. Обнови refs и убедись, что origin/main всё ещё 70f5dde060e4b36489365761216dbafead9fcaba. Если нет — остановись и сообщи, Patch 79 самостоятельно не адаптируй.
 3. Прочитай AGENTS.md и .agents/skills/frontend/SKILL.md.
-4. Получи 79.patch из origin/chatgpt-patches.
-5. Выполни git apply --check. При ошибке остановись без ручного исправления патча.
-6. Примени patch. До форматирования diff должен содержать только три scope-файла.
-7. Выполни pnpm format. Если formatter изменил файлы вне scope, восстанови только эти конкретные вне-scope файлы из HEAD. Не использовать массовый reset/clean/restore.
-8. Выполни pnpm type-check, pnpm lint, pnpm build. После lint снова убери только возможный вне-scope spillover.
-9. Финальный git diff --check должен быть чистым, git diff --name-only — ровно три scope-файла. AGENTS.md не изменять.
-10. Перед commit снова обнови origin/main. Если база изменилась — остановись без rebase/adaptation.
-11. Commit должен включать только три scope-файла. Push в main через существующий SSH-доступ; при проблеме с SSH остановись.
-12. Supabase deploy не нужен. После push дождись обычного Deploy to Production.
-13. Сообщи commit SHA, результаты format/type-check/lint/build, список файлов, deploy status и подтверждение, что основной worktree не затронут.
+4. ЗАНОВО получи 79.patch и 79.txt из origin/chatgpt-patches. Не используй ранее сохранённую копию 79.patch. Актуальный blob SHA 79.patch: a0a18ab1f496f79e1f1581accf695a55c1b0d55f.
+5. Выполни git apply --check 79.patch. При любой ошибке остановись без ручного исправления.
+6. Примени patch. До форматирования git diff --name-only должен показывать ровно:
+   src/features/orders/types.ts
+   src/pages/HomeView.vue
+7. Выполни pnpm format. Если formatter изменил файлы вне scope, восстанови только эти конкретные вне-scope файлы из HEAD. Не использовать reset --hard, git clean или массовый restore.
+8. Выполни pnpm type-check, pnpm lint, pnpm build. После lint снова проверь scope и убери только возможный автоматический spillover вне scope.
+9. Финальный git diff --check должен быть чистым; git diff --name-only — ровно два scope-файла. AGENTS.md не изменять.
+10. Перед commit сделай git fetch origin main. Если origin/main уже не база выше — остановись без rebase/adaptation.
+11. Commit должен включать только два scope-файла. Push в main через существующий SSH-доступ. Если SSH push не работает — остановись, не переходи на HTTPS и не создавай credentials.
+12. Supabase deploy не нужен. После push дождись Deploy to Production.
+13. В финальном отчёте укажи commit SHA, результаты format/type-check/lint/build, финальный список файлов, deploy status и подтверждение, что основной грязный worktree не затронут.
