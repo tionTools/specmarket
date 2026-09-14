@@ -3640,9 +3640,11 @@ function orderStatusTone(order: Order): OrderStatusTone {
   if (order.platform !== 'Пром' && carrierConfirmsDelivery) return 'orange'
 
   const carrierConfirmsShipment =
-    ['accepted', 'in_transit', 'ready_for_pickup', 'delivered'].includes(trackingNormalized) ||
-    (!trackingNormalized &&
-      /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
+    ['accepted', 'in_transit', 'forwarding', 'ready_for_pickup', 'delivered'].includes(
+      trackingNormalized,
+    ) ||
+    ((!trackingNormalized || trackingNormalized === 'unknown') &&
+      /отправ|відправ|в дорог|в дороз|на пути|на шляху|готов.*выдач|готов.*видач|получ|отрим|достав|вруч|принят.*перевоз|прийнят.*перевіз|змін.*адрес|измен.*адрес|переадрес|forward|accepted|in[_ -]?transit|ready[_ -]?for[_ -]?pickup|delivered|received/.test(
         trackingStatus,
       ))
 
