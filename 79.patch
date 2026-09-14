@@ -1,8 +1,28 @@
-diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/delivery-tracking.ts
---- a/src/features/orders/delivery-tracking.ts
-+++ b/src/features/orders/delivery-tracking.ts
-@@ -1,3 +1,72 @@
-+const trackingStatusEventDateTimeFormatter = new Intl.DateTimeFormat('uk-UA', {
+diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
+index 2dd6f11..4f9e938 100644
+--- a/src/features/orders/types.ts
++++ b/src/features/orders/types.ts
+@@ -72,6 +72,8 @@
+   trackingLastCheckedAt?: string
+   trackingStatusChangedAt?: string
+   trackingDataChangedAt?: string
++  /** Фактическое время последнего tracking-события по данным перевозчика. */
++  trackingEventAt?: string
+   /** Прогнозируемая дата/время прибытия по данным перевозчика. */
+   trackingExpectedDeliveryAt?: string
+   trackingLastError?: string
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index efe8a63..e3e2070 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -4007,19 +4007,83 @@ function formatLabelEmailSentAt(value?: string) {
+   }).format(date)
+ }
+ 
+-function formatDeliveryStatusChangedAt(value?: string) {
+-  if (!value) return ''
+-  const date = new Date(value)
++const deliveryStatusEventDateTimeFormatter = new Intl.DateTimeFormat('uk-UA', {
 +  day: '2-digit',
 +  month: '2-digit',
 +  year: 'numeric',
@@ -12,7 +32,7 @@ diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/deli
 +  timeZone: 'Europe/Kyiv',
 +})
 +
-+function isValidTrackingLocalDate(
++function isValidDeliveryStatusLocalDate(
 +  year: number,
 +  month: number,
 +  day: number,
@@ -29,26 +49,32 @@ diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/deli
 +  )
 +}
 +
-+export function formatTrackingStatusEventAt(value?: string) {
++function formatDeliveryStatusEventAt(value?: string) {
 +  const source = value?.trim() ?? ''
 +  if (!source) return ''
 +
-+  const dayFirst = source.match(
-+    /^(\d{2})[-.](\d{2})[-.](\d{4})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/,
-+  )
++  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(source)
++  const dayFirst = hasExplicitTimezone
++    ? null
++    : source.match(/^(\d{2})[-.](\d{2})[-.](\d{4})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/)
 +  if (dayFirst) {
 +    const [, day, month, year, hour, minute] = dayFirst
 +    if (
 +      hour &&
 +      minute &&
-+      isValidTrackingLocalDate(Number(year), Number(month), Number(day), Number(hour), Number(minute))
++      isValidDeliveryStatusLocalDate(
++        Number(year),
++        Number(month),
++        Number(day),
++        Number(hour),
++        Number(minute),
++      )
 +    ) {
 +      return `${hour}:${minute} ${day}.${month}.${year}`
 +    }
 +    return ''
 +  }
 +
-+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(source)
 +  const yearFirst = hasExplicitTimezone
 +    ? null
 +    : source.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/)
@@ -57,7 +83,13 @@ diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/deli
 +    if (
 +      hour &&
 +      minute &&
-+      isValidTrackingLocalDate(Number(year), Number(month), Number(day), Number(hour), Number(minute))
++      isValidDeliveryStatusLocalDate(
++        Number(year),
++        Number(month),
++        Number(day),
++        Number(hour),
++        Number(minute),
++      )
 +    ) {
 +      return `${hour}:${minute} ${day}.${month}.${year}`
 +    }
@@ -65,45 +97,7 @@ diff --git a/src/features/orders/delivery-tracking.ts b/src/features/orders/deli
 +  }
 +
 +  const date = new Date(source)
-+  if (!Number.isFinite(date.getTime())) return ''
-+  const parts = trackingStatusEventDateTimeFormatter.formatToParts(date)
-+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
-+  return `${part('hour')}:${part('minute')} ${part('day')}.${part('month')}.${part('year')}`
-+}
-+
- function isGenericReturnTrackingStatus(value: string) {
-   return /відмова від (?:одержання|отримання)|^(?:отменено|скасовано|cancelled?)$|возвращается отправителю|повертається відправнику|return(?:ing| to sender)/i.test(
-     value,
-diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
---- a/src/features/orders/types.ts
-+++ b/src/features/orders/types.ts
-@@ -60,5 +60,7 @@
-   trackingLastCheckedAt?: string
-   trackingStatusChangedAt?: string
-   trackingDataChangedAt?: string
-+  /** Фактическое время последнего tracking-события по данным перевозчика. */
-+  trackingEventAt?: string
-   /** Прогнозируемая дата/время прибытия по данным перевозчика. */
-   trackingExpectedDeliveryAt?: string
-diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
---- a/src/pages/HomeView.vue
-+++ b/src/pages/HomeView.vue
-@@ -66,6 +66,7 @@ import {
-   currentReturnTrackingStatus,
-   deliveryReturnStatus,
-   expectedReturnLabel,
-+  formatTrackingStatusEventAt,
-   returnDestinationLabel,
- } from '@/features/orders/delivery-tracking'
- 
-@@ -4000,23 +4001,6 @@ function formatLabelEmailSentAt(value?: string) {
-   }).format(date)
- }
- 
--function formatDeliveryStatusChangedAt(value?: string) {
--  if (!value) return ''
--  const date = new Date(value)
--  if (!Number.isFinite(date.getTime())) return ''
+   if (!Number.isFinite(date.getTime())) return ''
 -  const parts = new Intl.DateTimeFormat('uk-UA', {
 -    day: '2-digit',
 -    month: '2-digit',
@@ -113,14 +107,11 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 -    hourCycle: 'h23',
 -    timeZone: 'Europe/Kyiv',
 -  }).formatToParts(date)
--  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
--  return `${part('hour')}:${part('minute')} ${part('day')}.${part('month')}.${part('year')}`
--}
--
- function labelEmailInlineError(orderId: Order['id']) {
-   return labelEmailErrorByOrderId.value[String(orderId)] ?? ''
++  const parts = deliveryStatusEventDateTimeFormatter.formatToParts(date)
+   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
+   return `${part('hour')}:${part('minute')} ${part('day')}.${part('month')}.${part('year')}`
  }
-@@ -5107,8 +5091,8 @@ function labelEmailInlineError(orderId: Order['id']) {
+@@ -5047,9 +5111,9 @@ function clearLabelEmailInlineError(orderId: Order['id']) {
                    :class="statusBadgeClass(order)"
                    >{{ deliveryStatusForOrder(order) }}</span
                  ><span
@@ -128,6 +119,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +                  v-if="order.delivery.trackingStatus?.trim() && order.delivery.trackingEventAt"
                    class="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-none tabular-nums text-slate-400"
 -                  >{{ formatDeliveryStatusChangedAt(order.delivery.trackingStatusChangedAt) }}</span
-+                  >{{ formatTrackingStatusEventAt(order.delivery.trackingEventAt) }}</span
++                  >{{ formatDeliveryStatusEventAt(order.delivery.trackingEventAt) }}</span
                  ></span
                ></span
+             ><span class="flex items-center justify-end gap-2"
