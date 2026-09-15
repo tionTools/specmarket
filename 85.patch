@@ -1,4 +1,5 @@
 diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 334c45c..922fe9e 100644
 --- a/android/app/build.gradle.kts
 +++ b/android/app/build.gradle.kts
 @@ -18,8 +18,8 @@ android {
@@ -13,9 +14,10 @@ diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
      signingConfigs {
          create("release") {
 diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+index a1aa6b3..0292b61 100644
 --- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
 +++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
-@@ -6,9 +6,12 @@ fun isNewOrderNotificationCandidate(order: Order): Boolean {
+@@ -196,9 +196,12 @@ fun isNewOrderNotificationCandidate(order: Order): Boolean {
      return normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta")
  }
  fun acceptRoute(order: Order, email: String?): AcceptRoute? {
@@ -31,9 +33,10 @@ diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/ap
          "эпицентр", "епіцентр" -> AcceptRoute.EPICENTR.takeIf { externalId.matches(Regex("[1-9][0-9]*")) }
          // Reserved for the confirmed Kasta write contract. It must stay unavailable until then.
 diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+index eb03523..e2781db 100644
 --- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
 +++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
-@@ -18,4 +18,13 @@ class OrderModelsTest {
+@@ -31,6 +31,15 @@ class OrderModelsTest {
          }
      }
  
@@ -47,7 +50,10 @@ diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/androi
 +    }
 +
      @Test fun visual_new_order_matches_web_crm_ttn_rule() {
+         for (platform in listOf("Пром", "Эпицентр", "Каста")) {
+             assertTrue(isNewOrderVisual(order("Прийнято", platform)))
 diff --git a/supabase/functions/_shared/prom-order-action.ts b/supabase/functions/_shared/prom-order-action.ts
+index e6ca300..8a5e899 100644
 --- a/supabase/functions/_shared/prom-order-action.ts
 +++ b/supabase/functions/_shared/prom-order-action.ts
 @@ -15,7 +15,7 @@ export type PromOrderState = 'new' | 'alreadyAccepted' | 'forbidden'
@@ -60,9 +66,13 @@ diff --git a/supabase/functions/_shared/prom-order-action.ts b/supabase/function
    return 'forbidden'
  }
 diff --git a/supabase/functions/_shared/prom-order-action_test.ts b/supabase/functions/_shared/prom-order-action_test.ts
+index 6d1aa95..d239ed5 100644
 --- a/supabase/functions/_shared/prom-order-action_test.ts
 +++ b/supabase/functions/_shared/prom-order-action_test.ts
-@@ -1,5 +1,5 @@
+@@ -14,8 +14,8 @@ Deno.test('Prom IDs: normalization, deduplication, blanks and trust boundary', (
+   }
+ })
+ 
 -Deno.test('Prom eligibility rejects final, unknown and misleading accepted spellings', () => {
 -  for (const status of ['Новий', 'Новый', 'new', 'pending', ' PENDING ']) {
 +Deno.test('Prom eligibility accepts paid new orders and rejects final, unknown and misleading accepted spellings', () => {
@@ -70,7 +80,7 @@ diff --git a/supabase/functions/_shared/prom-order-action_test.ts b/supabase/fun
      assert(classifyPromOrderStatus(status) === 'new')
      assert(canAcceptPromOrder('Пром', status))
      for (const platform of ['Каста', 'Kasta', 'Эпицентр', 'Epicentr']) assert(!canAcceptPromOrder(platform, status))
-@@ -11,8 +11,8 @@ Deno.test('Prom eligibility rejects final, unknown and misleading accepted spell
+@@ -45,8 +45,8 @@ Deno.test('HTTP success alone or partial processed_ids does not confirm acceptan
    }
  })
  
