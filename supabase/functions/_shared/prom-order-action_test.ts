@@ -14,8 +14,8 @@ Deno.test('Prom IDs: normalization, deduplication, blanks and trust boundary', (
   }
 })
 
-Deno.test('Prom eligibility rejects final, unknown and misleading accepted spellings', () => {
-  for (const status of ['Новий', 'Новый', 'new', 'pending', ' PENDING ']) {
+Deno.test('Prom eligibility accepts paid new orders and rejects final, unknown and misleading accepted spellings', () => {
+  for (const status of ['Новий', 'Новый', 'new', 'pending', ' PENDING ', 'paid', ' PAID ']) {
     assert(classifyPromOrderStatus(status) === 'new')
     assert(canAcceptPromOrder('Пром', status))
     for (const platform of ['Каста', 'Kasta', 'Эпицентр', 'Epicentr']) assert(!canAcceptPromOrder(platform, status))
@@ -45,8 +45,8 @@ Deno.test('HTTP success alone or partial processed_ids does not confirm acceptan
   }
 })
 
-Deno.test('new orders call Prom before persisting; accepted orders are idempotent', async () => {
-  const { ports, calls } = fixture(['Новий', 'Принято'])
+Deno.test('paid new orders call Prom before persisting; accepted orders are idempotent', async () => {
+  const { ports, calls } = fixture(['paid', 'Принято'])
   const result = await acceptPromOrders(['1', '2'], ports)
   assert(result.status === 200 && result.body.accepted === 1)
   assert(JSON.stringify(calls) === '["api:1","save:uuid-1"]')

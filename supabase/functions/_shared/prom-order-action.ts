@@ -15,7 +15,7 @@ export type PromOrderState = 'new' | 'alreadyAccepted' | 'forbidden'
 
 export function classifyPromOrderStatus(value: unknown): PromOrderState {
   const status = text(value).trim().toLowerCase()
-  if (['новий', 'новый', 'new', 'pending'].includes(status)) return 'new'
+  if (['новий', 'новый', 'new', 'pending', 'paid'].includes(status)) return 'new'
   if (['принято', 'принят', 'прийнято', 'received', 'accepted'].includes(status)) return 'alreadyAccepted'
   return 'forbidden'
 }

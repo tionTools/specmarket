@@ -31,6 +31,15 @@ class OrderModelsTest {
         }
     }
 
+    @Test fun prom_paid_status_is_acceptable_only_for_prom() {
+        val paidProm = order("paid", "Пром")
+        assertFalse(isNewStatus(paidProm.status))
+        assertEquals(AcceptRoute.PROM, acceptRoute(paidProm, email))
+        assertTrue(canAccept(paidProm, email))
+        assertNull(acceptRoute(order("paid", "Эпицентр").copy(externalId = "123"), email))
+        assertNull(acceptRoute(order("paid", "Каста").copy(externalId = "kasta:123"), email))
+    }
+
     @Test fun visual_new_order_matches_web_crm_ttn_rule() {
         for (platform in listOf("Пром", "Эпицентр", "Каста")) {
             assertTrue(isNewOrderVisual(order("Прийнято", platform)))

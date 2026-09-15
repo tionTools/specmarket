@@ -196,9 +196,12 @@ fun isNewOrderNotificationCandidate(order: Order): Boolean {
     return normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta")
 }
 fun acceptRoute(order: Order, email: String?): AcceptRoute? {
-    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
+    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true)) return null
+    val platform = order.platform.orEmpty().trim().lowercase(Locale.ROOT)
+    val acceptableStatus = isNewStatus(order.status) || (platform == "пром" && normalizedStatus(order.status) == "paid")
+    if (!acceptableStatus) return null
     val externalId = order.externalId.orEmpty()
-    return when (order.platform.orEmpty().trim().lowercase(Locale.ROOT)) {
+    return when (platform) {
         "пром" -> AcceptRoute.PROM.takeIf { externalId.matches(Regex("prom:[1-9][0-9]*")) }
         "эпицентр", "епіцентр" -> AcceptRoute.EPICENTR.takeIf { externalId.matches(Regex("[1-9][0-9]*")) }
         // Reserved for the confirmed Kasta write contract. It must stay unavailable until then.
