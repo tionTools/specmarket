@@ -1,0 +1,65 @@
+Patch 82 — Android: Realtime должен реально перезапускаться после background/экрана сна
+
+База main: 5a0a2c18fbbbae3743e4f7996fc55bd76e46b282
+
+Причина подтверждена по текущему коду:
+- MainActivity вызывает foreground(true) на ON_RESUME и foreground(false) на ON_PAUSE.
+- OrdersViewModel.foreground(false) сейчас НЕ останавливает Realtime: он безусловно вызывает startRealtime(), если пользователь авторизован.
+- startRealtime() отказывается создавать новую подписку, пока старый realtimeJob считает себя active.
+- Поэтому после background/сна экрана может сохраниться старый job/канал со статусом SUBSCRIBED («Онлайн»), хотя события order_changed уже фактически не доходят. Ручной refresh работает отдельно и поэтому подтягивает новые заказы.
+- android/PATCH52-AUDIT.md прямо описывает ожидаемую модель как «подписка во foreground, отключение во background»; текущая реализация ей не соответствует.
+
+Важно: гипотезу про отсутствие realtime.setAuth НЕ применять. Supabase Kotlin 3.6.0 RealtimeChannel.subscribe() сам получает JWT через Config.accessToken/Auth. Этот Patch не меняет auth/backend/Supabase.
+
+Scope:
+- android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+- android/app/build.gradle.kts
+
+Что меняется:
+1. ON_PAUSE / foreground(false):
+   - visible=false;
+   - realtimeConnected=false;
+   - текущий realtimeJob отменяется;
+   - новый Realtime в background не запускается.
+2. ON_RESUME / foreground(true):
+   - startRealtime() запускается только когда visible=true и есть аккаунт;
+   - если предыдущий job уже отменён, новая coroutine сначала ждёт previousJob.join(), чтобы старый repository.watch() успел удалить старый channel и не было гонки двух каналов с topic crm:orders;
+   - затем создаётся свежая подписка;
+   - существующий refresh на resume сохраняется как страховка.
+3. Realtime retry-loop работает только пока приложение foreground.
+4. versionCode: 9 -> 10; versionName: 0.9 -> 0.10 для обновляемого APK.
+
+Не менять:
+- OrdersRepository.watch() и формат broadcast order_changed;
+- Supabase migrations/functions;
+- frontend;
+- notification semantics: это всё ещё локальный Realtime, не FCM push после полной остановки процесса;
+- applicationId ua.orders.crm;
+- signing key / signing infrastructure.
+
+Проверки логики:
+- foreground(false) никогда не запускает startRealtime;
+- при pause realtimeJob получает cancel и realtimeConnected становится false;
+- после resume новый job не начинает watch, пока предыдущий job не завершил cleanup;
+- если приложение остаётся foreground, обычные reconnect/retry внутри текущего job сохраняются;
+- refresh на resume остаётся;
+- logout/session loss по-прежнему отменяет realtimeJob;
+- никаких изменений бизнес-логики заказов, принятия Prom, Kasta/Epicentr.
+
+Codex:
+1. НЕ трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
+2. Fetch refs и проверь, что origin/main всё ещё ровно 5a0a2c18fbbbae3743e4f7996fc55bd76e46b282. Если изменился — остановись, Patch 82 вручную не адаптировать.
+3. Прочитай AGENTS.md, android/README.md и android/PATCH52-AUDIT.md. AGENTS.md не изменять.
+4. Получи 82.patch из origin/chatgpt-patches.
+5. Выполни git apply --check 82.patch. При любой ошибке остановись без ручного исправления Patch.
+6. Примени Patch. Сразу проверь git diff --name-only — должны быть ровно два scope-файла.
+7. Проверь описанные выше lifecycle-сценарии по коду. Особо проверь отсутствие race: previousJob.join() выполняется до нового repository.watch().
+8. Используй существующее постоянное Android build/signing окружение и ASCII alias/junction проекта. Не пересоздавай JDK/Gradle/keystore и не меняй credentials.
+9. Выполни Android проверки минимум: testDebugUnitTest, lintDebug, assembleRelease и проверку release-подписи. Если существует постоянный android-check.ps1 — используй его как штатный путь и сообщи результаты. Не запускай Deno/Supabase deploy: backend не меняется.
+10. Финально: git diff --check чистый; git diff --name-only ровно:
+   android/app/build.gradle.kts
+   android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+11. Перед commit снова fetch origin/main и убедись, что база не изменилась.
+12. Commit только этих двух файлов. Push в main через существующий GitHub SSH. При проблеме SSH — остановись; HTTPS/browser auth/new credentials запрещены.
+13. После push дождись GitHub Actions «Android APK». Он должен выполнить testDebugUnitTest + lintDebug + assembleRelease, проверить подпись и обновить stable android-latest APK. Supabase deploy не нужен.
+14. В отчёте: commit SHA, локальные Android checks, итоговый список файлов, Android APK workflow/status, версия 0.10/versionCode 10, подтверждение release signature и что основной dirty worktree/AGENTS/untracked не затронуты.
