@@ -55,7 +55,7 @@ diff --git a/src/features/reconciliation/ReconciliationHistoryTable.vue b/src/fe
  import type { Reconciliation } from './types'
  
  const props = defineProps<{
-@@ -88,9 +89,12 @@ const columns = (() => {
+@@ -75,9 +76,12 @@ const columns = (() => {
      {
        id: 'reserve',
        header: 'Бронь',
@@ -85,14 +85,14 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
  import type { Reconciliation } from '@/features/reconciliation/types'
  import {
    currencyRateForDate,
-@@ -50,6 +54,7 @@ const paymentNote = ref('')
+@@ -52,5 +56,6 @@ const paymentNote = ref('')
  const accountingUsd = ref('')
  const accountingUah = ref('')
 +const reserveUsd = ref('')
  const reserveUah = ref('')
  const adjustmentUsd = ref('')
  const adjustmentUah = ref('')
-@@ -157,14 +162,23 @@ const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
+@@ -164,14 +169,23 @@ const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
  const accountingTotal = computed(
    () => numberValue(accountingUsd.value) * usdRate.value + numberValue(accountingUah.value),
  )
@@ -119,7 +119,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
  const paymentDraftEquivalent = computed(
    () =>
      numberValue(paymentDebtUsd.value) * numberValue(paymentSupplierRate.value) +
-@@ -196,20 +212,14 @@ const hasAccountingInput = computed(() =>
+@@ -197,21 +211,13 @@ const hasAccountingInput = computed(() =>
    Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
  )
  const discrepancyUsd = computed(() =>
@@ -144,7 +144,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
  )
  const history = computed(() => reconciliations.value)
  
-@@ -261,6 +271,7 @@ async function load() {
+@@ -261,6 +267,7 @@ async function load() {
    reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({
      ...item,
      kind: item.kind as Reconciliation['kind'],
@@ -152,7 +152,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
    })) as Reconciliation[]
    payments.value = paymentsResult.data ?? []
    const currentCosts = (totalsResult.data ?? {}) as { usd?: number; uah?: number }
-@@ -390,18 +401,21 @@ async function saveReconciliation() {
+@@ -413,18 +420,21 @@ async function saveReconciliation() {
    }
    const accountingUsdValue = accountingUsd.value.trim() ? parsedNumber(accountingUsd.value) : 0
    const accountingUahValue = accountingUah.value.trim() ? parsedNumber(accountingUah.value) : 0
@@ -177,7 +177,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
      usdRate.value <= 0
    ) {
      error.value = 'Проверьте числовые значения и текущий курс CRM.'
-@@ -410,7 +424,8 @@ async function saveReconciliation() {
+@@ -438,7 +448,8 @@ async function saveReconciliation() {
      accounting_usd: accountingUsdValue,
      accounting_uah: accountingUahValue,
      accounting_total: accountingTotal.value,
@@ -187,7 +187,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
      crm_balance_before_adjustment: myNumber.value,
      adjustment_usd: adjustmentUsdValue,
      adjustment_uah: adjustmentUahValue,
-@@ -430,6 +445,7 @@ async function saveReconciliation() {
+@@ -458,6 +469,7 @@ async function saveReconciliation() {
    }
    accountingUsd.value = ''
    accountingUah.value = ''
@@ -195,7 +195,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
    reserveUah.value = ''
    adjustmentUsd.value = ''
    adjustmentUah.value = ''
-@@ -575,15 +591,6 @@ onMounted(() => {
+@@ -569,15 +581,6 @@ onMounted(() => {
                      readonly
                      class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
                  /></label>
@@ -211,7 +211,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
                </div>
  
                <div class="grid content-start gap-3">
-@@ -609,6 +616,16 @@ onMounted(() => {
+@@ -597,6 +600,15 @@ onMounted(() => {
                      placeholder="0,00"
                      @keydown.enter.prevent="accountingUsd = committedNumericValue(accountingUsd)"
                  /></label>
@@ -227,7 +227,7 @@ diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
                  <label class="text-sm font-medium text-slate-600"
                    >Сторно USD<input
                      v-model="adjustmentUsd"
-@@ -643,6 +660,16 @@ onMounted(() => {
+@@ -631,6 +643,15 @@ onMounted(() => {
                      placeholder="0,00"
                      @keydown.enter.prevent="accountingUah = committedNumericValue(accountingUah)"
                  /></label>
