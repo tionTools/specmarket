@@ -74,14 +74,24 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun foreground(active: Boolean) {
         visible = active
-        if (email != null) startRealtime()
-        if (active && email != null) refresh()
+        if (!active) {
+            realtimeConnected = false
+            realtimeJob?.cancel()
+            return
+        }
+        if (email != null) {
+            startRealtime()
+            refresh()
+        }
     }
 
     private fun startRealtime() {
-        if (realtimeJob?.isActive == true) return
+        if (!visible || email == null) return
+        val previousJob = realtimeJob
+        if (previousJob?.isActive == true) return
         realtimeJob = viewModelScope.launch {
-            while (isActive && email != null) {
+            previousJob?.join()
+            while (isActive && visible && email != null) {
                 try {
                     repository.watch(onConnection = { connected ->
                         val reconnect = connected && !realtimeConnected
