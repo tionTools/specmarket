@@ -2,7 +2,14 @@ Patch 85 — Prom: оплаченный новый заказ status=paid мож
 
 База main: 10615241e89f4b7d7e2fe792f00d92f26061e3cd
 Patch file: 85.patch
-Patch SHA-256: cdb273359c1dd92523e1f3e2f29308a7f631da0697d82aa35c9368df11d03a2d
+Patch SHA-256: 90965e23f8198d838625f0c73ceff38ed29f78a57206b7fcf4b5399bc2f1e790
+
+Исправление публикации:
+- первая версия 85.patch была остановлена на git apply --check из-за неверно сформированных hunk-позиций в supabase/functions/_shared/prom-order-action_test.ts;
+- код в main не применялся и не менялся;
+- 85.patch пересобран реальным git diff по точным исходным фрагментам базы;
+- локально проверены git apply --check, git apply и git diff --check — PASS;
+- текущий SHA-256 выше заменяет старый cdb273…d03a2d.
 
 Причина подтверждена на заказе Prom №427904460:
 - crm_orders.external_id = prom:427904460 — корректный;
@@ -53,7 +60,7 @@ Codex:
 1. НЕ трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
 2. Выполни fetch и проверь, что origin/main всё ещё ровно 10615241e89f4b7d7e2fe792f00d92f26061e3cd. Если main изменился — остановись; Patch 85 вручную не адаптировать.
 3. Прочитай AGENTS.md и android/README.md. AGENTS.md не изменять.
-4. Получи 85.patch из origin/chatgpt-patches и проверь SHA-256: cdb273359c1dd92523e1f3e2f29308a7f631da0697d82aa35c9368df11d03a2d.
+4. Получи свежий 85.patch из origin/chatgpt-patches и проверь SHA-256: 90965e23f8198d838625f0c73ceff38ed29f78a57206b7fcf4b5399bc2f1e790.
 5. Выполни git apply --check 85.patch. При любой ошибке остановись без ручного исправления, --reject или редизайна Patch.
 6. Примени Patch. Сразу проверь git diff --name-only: должны быть ровно 5 scope-файлов из списка выше.
 7. Проверь бизнес-сценарии выше по коду. Особо: paid разрешён только для platform=Пром, а серверный classifyPromOrderStatus('paid') == new.
