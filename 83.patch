@@ -1,0 +1,252 @@
+diff --git a/src/features/reconciliation/calculations.ts b/src/features/reconciliation/calculations.ts
+new file mode 100644
+--- /dev/null
++++ b/src/features/reconciliation/calculations.ts
+@@ -0,0 +1,30 @@
++export type ReconciliationComparisonInput = {
++  accountingUsd: number
++  accountingUah: number
++  reserveUsd: number
++  reserveUah: number
++  myDebtUsdAfterAdjustment: number
++  myDebtUahAfterAdjustment: number
++  usdRate: number
++}
++
++export function reconciliationReserveUsd(value: number | null | undefined) {
++  return Number(value ?? 0)
++}
++
++export function calculateReconciliationComparison(input: ReconciliationComparisonInput) {
++  const accountingUsdForComparison = input.accountingUsd - input.reserveUsd
++  const accountingUahForComparison = input.accountingUah - input.reserveUah
++  const discrepancyUsd = accountingUsdForComparison - input.myDebtUsdAfterAdjustment
++  const discrepancyUah = accountingUahForComparison - input.myDebtUahAfterAdjustment
++
++  return {
++    accountingUsdForComparison,
++    accountingUahForComparison,
++    accountingForComparison:
++      accountingUsdForComparison * input.usdRate + accountingUahForComparison,
++    discrepancyUsd,
++    discrepancyUah,
++    discrepancyTotalUah: discrepancyUsd * input.usdRate + discrepancyUah,
++  }
++}
+diff --git a/src/features/reconciliation/types.ts b/src/features/reconciliation/types.ts
+--- a/src/features/reconciliation/types.ts
++++ b/src/features/reconciliation/types.ts
+@@ -6,6 +6,7 @@ export type Reconciliation = {
+   accounting_usd: number
+   accounting_uah: number
+   accounting_total: number
++  reserve_usd: number
+   reserve_uah: number
+   crm_balance_usd_before_adjustment: number
+   crm_balance_uah_before_adjustment: number
+diff --git a/src/features/reconciliation/ReconciliationHistoryTable.vue b/src/features/reconciliation/ReconciliationHistoryTable.vue
+--- a/src/features/reconciliation/ReconciliationHistoryTable.vue
++++ b/src/features/reconciliation/ReconciliationHistoryTable.vue
+@@ -2,6 +2,7 @@
+ import { computed, h } from 'vue'
+ import { FlexRender, tableFeatures, useTable, type ColumnDef } from '@tanstack/vue-table'
+ 
++import { reconciliationReserveUsd } from './calculations'
+ import type { Reconciliation } from './types'
+ 
+ const props = defineProps<{
+@@ -88,9 +89,12 @@ const columns = (() => {
+     {
+       id: 'reserve',
+       header: 'Бронь',
+-      cell: valueCell((item) =>
+-        item.kind === 'initial' ? '—' : props.money(Number(item.reserve_uah)),
+-      ),
++      cell: valueCell((item) => {
++        if (item.kind === 'initial') return '—'
++        return `$${props.money(reconciliationReserveUsd(item.reserve_usd))} + ${props.money(
++          Number(item.reserve_uah),
++        )} грн`
++      }),
+     },
+     {
+       id: 'adjustmentUsd',
+diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
+--- a/src/pages/ReconciliationView.vue
++++ b/src/pages/ReconciliationView.vue
+@@ -5,6 +5,10 @@ import { useRouter } from 'vue-router'
+ import { ArrowLeft } from '@lucide/vue'
+ 
+ import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'
++import {
++  calculateReconciliationComparison,
++  reconciliationReserveUsd,
++} from '@/features/reconciliation/calculations'
+ import type { Reconciliation } from '@/features/reconciliation/types'
+ import {
+   currencyRateForDate,
+@@ -50,6 +54,7 @@ const paymentNote = ref('')
+ const accountingUsd = ref('')
+ const accountingUah = ref('')
++const reserveUsd = ref('')
+ const reserveUah = ref('')
+ const adjustmentUsd = ref('')
+ const adjustmentUah = ref('')
+@@ -157,14 +162,23 @@ const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.value)
+ const accountingTotal = computed(
+   () => numberValue(accountingUsd.value) * usdRate.value + numberValue(accountingUah.value),
+ )
+-const accountingForComparison = computed(
+-  () => accountingTotal.value - numberValue(reserveUah.value),
+-)
+ const myDebtUsdAfterAdjustment = computed(() => myDebtUsd.value + numberValue(adjustmentUsd.value))
+ const myDebtUahAfterAdjustment = computed(() => myDebtUah.value + numberValue(adjustmentUah.value))
+ const myNumberAfterAdjustment = computed(
+   () => myDebtUsdAfterAdjustment.value * usdRate.value + myDebtUahAfterAdjustment.value,
+ )
++const comparison = computed(() =>
++  calculateReconciliationComparison({
++    accountingUsd: numberValue(accountingUsd.value),
++    accountingUah: numberValue(accountingUah.value),
++    reserveUsd: numberValue(reserveUsd.value),
++    reserveUah: numberValue(reserveUah.value),
++    myDebtUsdAfterAdjustment: myDebtUsdAfterAdjustment.value,
++    myDebtUahAfterAdjustment: myDebtUahAfterAdjustment.value,
++    usdRate: usdRate.value,
++  }),
++)
++const accountingForComparison = computed(() => comparison.value.accountingForComparison)
+ const paymentDraftEquivalent = computed(
+   () =>
+     numberValue(paymentDebtUsd.value) * numberValue(paymentSupplierRate.value) +
+@@ -196,20 +212,14 @@ const hasAccountingInput = computed(() =>
+   Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
+ )
+ const discrepancyUsd = computed(() =>
+-  hasAccountingInput.value
+-    ? numberValue(accountingUsd.value) - myDebtUsdAfterAdjustment.value
+-    : null,
++  hasAccountingInput.value ? comparison.value.discrepancyUsd : null,
+ )
+ const discrepancyUah = computed(() =>
+-  hasAccountingInput.value
+-    ? numberValue(accountingUah.value) -
+-      numberValue(reserveUah.value) -
+-      myDebtUahAfterAdjustment.value
+-    : null,
++  hasAccountingInput.value ? comparison.value.discrepancyUah : null,
+ )
+ const discrepancy = computed(() =>
+-  discrepancyUsd.value === null || discrepancyUah.value === null
+-    ? null
+-    : discrepancyUsd.value * usdRate.value + discrepancyUah.value,
++  hasAccountingInput.value ? comparison.value.discrepancyTotalUah : null,
+ )
+ const history = computed(() => reconciliations.value)
+ 
+@@ -261,6 +271,7 @@ async function load() {
+   reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({
+     ...item,
+     kind: item.kind as Reconciliation['kind'],
++    reserve_usd: reconciliationReserveUsd(item.reserve_usd),
+   })) as Reconciliation[]
+   payments.value = paymentsResult.data ?? []
+   const currentCosts = (totalsResult.data ?? {}) as { usd?: number; uah?: number }
+@@ -390,18 +401,21 @@ async function saveReconciliation() {
+   }
+   const accountingUsdValue = accountingUsd.value.trim() ? parsedNumber(accountingUsd.value) : 0
+   const accountingUahValue = accountingUah.value.trim() ? parsedNumber(accountingUah.value) : 0
+-  const reserveValue = reserveUah.value.trim() ? parsedNumber(reserveUah.value) : 0
++  const reserveUsdValue = reserveUsd.value.trim() ? parsedNumber(reserveUsd.value) : 0
++  const reserveUahValue = reserveUah.value.trim() ? parsedNumber(reserveUah.value) : 0
+   const adjustmentUsdValue = adjustmentUsd.value.trim() ? parsedNumber(adjustmentUsd.value) : 0
+   const adjustmentUahValue = adjustmentUah.value.trim() ? parsedNumber(adjustmentUah.value) : 0
+   if (
+     accountingUsdValue === null ||
+     accountingUahValue === null ||
+-    reserveValue === null ||
++    reserveUsdValue === null ||
++    reserveUahValue === null ||
+     adjustmentUsdValue === null ||
+     adjustmentUahValue === null ||
+     accountingUsdValue < 0 ||
+     accountingUahValue < 0 ||
+-    reserveValue < 0 ||
++    reserveUsdValue < 0 ||
++    reserveUahValue < 0 ||
+     usdRate.value <= 0
+   ) {
+     error.value = 'Проверьте числовые значения и текущий курс CRM.'
+@@ -410,7 +424,8 @@ async function saveReconciliation() {
+     accounting_usd: accountingUsdValue,
+     accounting_uah: accountingUahValue,
+     accounting_total: accountingTotal.value,
+-    reserve_uah: reserveValue,
++    reserve_usd: reserveUsdValue,
++    reserve_uah: reserveUahValue,
+     crm_balance_before_adjustment: myNumber.value,
+     adjustment_usd: adjustmentUsdValue,
+     adjustment_uah: adjustmentUahValue,
+@@ -430,6 +445,7 @@ async function saveReconciliation() {
+   }
+   accountingUsd.value = ''
+   accountingUah.value = ''
++  reserveUsd.value = ''
+   reserveUah.value = ''
+   adjustmentUsd.value = ''
+   adjustmentUah.value = ''
+@@ -575,15 +591,6 @@ onMounted(() => {
+                     readonly
+                     class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
+                 /></label>
+-                <label class="text-sm font-medium text-slate-600"
+-                  >Бронь<input
+-                    v-model="reserveUah"
+-                    :disabled="isGuest"
+-                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+-                    inputmode="decimal"
+-                    placeholder="0,00"
+-                    @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
+-                /></label>
+               </div>
+ 
+               <div class="grid content-start gap-3">
+@@ -609,6 +616,16 @@ onMounted(() => {
+                     placeholder="0,00"
+                     @keydown.enter.prevent="accountingUsd = committedNumericValue(accountingUsd)"
+                 /></label>
++                <label class="text-sm font-medium text-slate-600"
++                  >Бронь USD<input
++                    v-model="reserveUsd"
++                    :disabled="isGuest"
++                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
++                    inputmode="decimal"
++                    placeholder="0,00"
++                    @keydown.enter.prevent="reserveUsd = committedNumericValue(reserveUsd)"
++                /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Сторно USD<input
+                     v-model="adjustmentUsd"
+@@ -643,6 +660,16 @@ onMounted(() => {
+                     placeholder="0,00"
+                     @keydown.enter.prevent="accountingUah = committedNumericValue(accountingUah)"
+                 /></label>
++                <label class="text-sm font-medium text-slate-600"
++                  >Бронь грн<input
++                    v-model="reserveUah"
++                    :disabled="isGuest"
++                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
++                    inputmode="decimal"
++                    placeholder="0,00"
++                    @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
++                /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Сторно грн<input
+                     v-model="adjustmentUah"
+diff --git a/supabase/migrations/20260915170000_reconciliation_usd_reserve.sql b/supabase/migrations/20260915170000_reconciliation_usd_reserve.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260915170000_reconciliation_usd_reserve.sql
+@@ -0,0 +1,2 @@
++alter table public.crm_reconciliations
++  add column if not exists reserve_usd numeric not null default 0;
