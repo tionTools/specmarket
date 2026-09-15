@@ -18,8 +18,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - run: sdkmanager 'platform-tools' 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Prepare release signing
         env:
           ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
