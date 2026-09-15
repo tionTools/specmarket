@@ -1,0 +1,83 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -18,8 +18,8 @@ android {
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 11
+-        versionName = "0.11"
++        versionCode = 12
++        versionName = "0.12"
+     }
+     signingConfigs {
+         create("release") {
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -6,9 +6,12 @@ fun isNewOrderNotificationCandidate(order: Order): Boolean {
+     return normalizedStatus(order.platform) in setOf("пром", "эпицентр", "епіцентр", "каста", "kasta")
+ }
+ fun acceptRoute(order: Order, email: String?): AcceptRoute? {
+-    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true) || !isNewStatus(order.status)) return null
++    if (email.isNullOrBlank() || email.equals("guest@gmail.com", true)) return null
++    val platform = order.platform.orEmpty().trim().lowercase(Locale.ROOT)
++    val acceptableStatus = isNewStatus(order.status) || (platform == "пром" && normalizedStatus(order.status) == "paid")
++    if (!acceptableStatus) return null
+     val externalId = order.externalId.orEmpty()
+-    return when (order.platform.orEmpty().trim().lowercase(Locale.ROOT)) {
++    return when (platform) {
+         "пром" -> AcceptRoute.PROM.takeIf { externalId.matches(Regex("prom:[1-9][0-9]*")) }
+         "эпицентр", "епіцентр" -> AcceptRoute.EPICENTR.takeIf { externalId.matches(Regex("[1-9][0-9]*")) }
+         // Reserved for the confirmed Kasta write contract. It must stay unavailable until then.
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -18,4 +18,13 @@ class OrderModelsTest {
+         }
+     }
+ 
++    @Test fun prom_paid_status_is_acceptable_only_for_prom() {
++        val paidProm = order("paid", "Пром")
++        assertFalse(isNewStatus(paidProm.status))
++        assertEquals(AcceptRoute.PROM, acceptRoute(paidProm, email))
++        assertTrue(canAccept(paidProm, email))
++        assertNull(acceptRoute(order("paid", "Эпицентр").copy(externalId = "123"), email))
++        assertNull(acceptRoute(order("paid", "Каста").copy(externalId = "kasta:123"), email))
++    }
++
+     @Test fun visual_new_order_matches_web_crm_ttn_rule() {
+diff --git a/supabase/functions/_shared/prom-order-action.ts b/supabase/functions/_shared/prom-order-action.ts
+--- a/supabase/functions/_shared/prom-order-action.ts
++++ b/supabase/functions/_shared/prom-order-action.ts
+@@ -15,7 +15,7 @@ export type PromOrderState = 'new' | 'alreadyAccepted' | 'forbidden'
+ 
+ export function classifyPromOrderStatus(value: unknown): PromOrderState {
+   const status = text(value).trim().toLowerCase()
+-  if (['новий', 'новый', 'new', 'pending'].includes(status)) return 'new'
++  if (['новий', 'новый', 'new', 'pending', 'paid'].includes(status)) return 'new'
+   if (['принято', 'принят', 'прийнято', 'received', 'accepted'].includes(status)) return 'alreadyAccepted'
+   return 'forbidden'
+ }
+diff --git a/supabase/functions/_shared/prom-order-action_test.ts b/supabase/functions/_shared/prom-order-action_test.ts
+--- a/supabase/functions/_shared/prom-order-action_test.ts
++++ b/supabase/functions/_shared/prom-order-action_test.ts
+@@ -1,5 +1,5 @@
+-Deno.test('Prom eligibility rejects final, unknown and misleading accepted spellings', () => {
+-  for (const status of ['Новий', 'Новый', 'new', 'pending', ' PENDING ']) {
++Deno.test('Prom eligibility accepts paid new orders and rejects final, unknown and misleading accepted spellings', () => {
++  for (const status of ['Новий', 'Новый', 'new', 'pending', ' PENDING ', 'paid', ' PAID ']) {
+     assert(classifyPromOrderStatus(status) === 'new')
+     assert(canAcceptPromOrder('Пром', status))
+     for (const platform of ['Каста', 'Kasta', 'Эпицентр', 'Epicentr']) assert(!canAcceptPromOrder(platform, status))
+@@ -11,8 +11,8 @@ Deno.test('Prom eligibility rejects final, unknown and misleading accepted spell
+   }
+ })
+ 
+-Deno.test('new orders call Prom before persisting; accepted orders are idempotent', async () => {
+-  const { ports, calls } = fixture(['Новий', 'Принято'])
++Deno.test('paid new orders call Prom before persisting; accepted orders are idempotent', async () => {
++  const { ports, calls } = fixture(['paid', 'Принято'])
+   const result = await acceptPromOrders(['1', '2'], ports)
+   assert(result.status === 200 && result.body.accepted === 1)
+   assert(JSON.stringify(calls) === '["api:1","save:uuid-1"]')
