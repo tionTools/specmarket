@@ -5,6 +5,15 @@ $ErrorActionPreference = 'Stop'
 $EnvRoot = 'C:\specmarket-android-env'
 $Run = Join-Path $EnvRoot "runs\\$RunId"
 function Set-Stage([string]$Value) { Set-Content -LiteralPath "$Run\\stage" -Value $Value -Encoding ascii }
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
+        finally { $sha.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
 function Invoke-Native([string]$Name, [string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory) {
     Set-Stage $Name; $out = "$Run\\$Name.out.log"; $err = "$Run\\$Name.err.log"
     $argumentLine = ($Arguments | ForEach-Object { '"{0}"' -f $_.Replace('"', '\"') }) -join ' '
@@ -27,7 +36,7 @@ function Get-Jdk {
 function Get-SourceManifest([string]$Root) {
     Get-ChildItem -LiteralPath $Root -File -Recurse | Where-Object { $_.FullName -notmatch '[\\/](build|\.gradle)[\\/]' } | Sort-Object FullName | ForEach-Object {
         $relative = $_.FullName.Substring($Root.Length).TrimStart([char]92)
-        '{0}|{1}|{2}' -f $relative, $_.Length, (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        '{0}|{1}|{2}' -f $relative, $_.Length, (Get-Sha256 $_.FullName)
     }
 }
 
@@ -59,7 +68,7 @@ try {
     foreach ($task in @('testDebugUnitTest', 'lintDebug', 'assembleRelease')) { Invoke-Native $task (Join-Path $snapshot 'gradlew.bat') @($task, '--no-daemon', '--console=plain', '--stacktrace') $snapshot }
     $apk = Get-ChildItem -LiteralPath "$snapshot\\app\\build\\outputs\\apk\\release" -Filter '*.apk' -File | Select-Object -First 1
     if (-not $apk) { throw 'release APK is missing' }
-    $artifactHash = (Get-FileHash -LiteralPath $apk.FullName -Algorithm SHA256).Hash
+    $artifactHash = Get-Sha256 $apk.FullName
     if ($signingMode -eq 'LOCAL') {
         Invoke-Native 'apksigner' (Join-Path $sdk 'build-tools\\36.0.0\\apksigner.bat') @('verify', '--print-certs', $apk.FullName) $snapshot
         $signatureStage = 'apksigner=0'; $state = 'SUCCESS'
