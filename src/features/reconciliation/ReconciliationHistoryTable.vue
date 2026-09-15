@@ -2,6 +2,7 @@
 import { computed, h } from 'vue'
 import { FlexRender, tableFeatures, useTable, type ColumnDef } from '@tanstack/vue-table'
 
+import { reconciliationReserveUsd } from './calculations'
 import type { Reconciliation } from './types'
 
 const props = defineProps<{
@@ -75,9 +76,12 @@ const columns = (() => {
     {
       id: 'reserve',
       header: 'Бронь',
-      cell: valueCell((item) =>
-        item.kind === 'initial' ? '—' : props.money(Number(item.reserve_uah)),
-      ),
+      cell: valueCell((item) => {
+        if (item.kind === 'initial') return '—'
+        return `$${props.money(reconciliationReserveUsd(item.reserve_usd))} + ${props.money(
+          Number(item.reserve_uah),
+        )} грн`
+      }),
     },
     {
       id: 'adjustmentUsd',

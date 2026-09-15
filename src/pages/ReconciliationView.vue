@@ -5,6 +5,10 @@ import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 
 import ReconciliationHistoryTable from '@/features/reconciliation/ReconciliationHistoryTable.vue'
+import {
+  calculateReconciliationComparison,
+  reconciliationReserveUsd,
+} from '@/features/reconciliation/calculations'
 import type { Reconciliation } from '@/features/reconciliation/types'
 import {
   currencyRateForDate,
@@ -51,6 +55,7 @@ const paymentDebtUah = ref('')
 const paymentNote = ref('')
 const accountingUsd = ref('')
 const accountingUah = ref('')
+const reserveUsd = ref('')
 const reserveUah = ref('')
 const adjustmentUsd = ref('')
 const adjustmentUah = ref('')
@@ -69,6 +74,30 @@ function numberValue(value: string) {
 function committedNumericValue(value: string) {
   const parsed = parsedNumber(value)
   return parsed === null ? value : String(parsed).replace('.', ',')
+}
+
+const reconciliationTabOrder = [
+  'reconciliation-accounting-usd',
+  'reconciliation-accounting-uah',
+  'reconciliation-reserve-usd',
+  'reconciliation-reserve-uah',
+  'reconciliation-adjustment-usd',
+  'reconciliation-adjustment-uah',
+] as const
+
+function moveReconciliationFocus(event: KeyboardEvent) {
+  const current = event.currentTarget as HTMLElement | null
+  if (!current?.id) return
+  const currentIndex = reconciliationTabOrder.indexOf(
+    current.id as (typeof reconciliationTabOrder)[number],
+  )
+  if (currentIndex < 0) return
+  const nextId = reconciliationTabOrder[currentIndex + (event.shiftKey ? -1 : 1)]
+  if (!nextId) return
+  const next = document.getElementById(nextId)
+  if (!(next instanceof HTMLInputElement)) return
+  event.preventDefault()
+  next.focus()
 }
 
 function suggestedPaymentDebtUah() {
@@ -164,14 +193,23 @@ const myNumber = computed(() => myDebtUsd.value * usdRate.value + myDebtUah.valu
 const accountingTotal = computed(
   () => numberValue(accountingUsd.value) * usdRate.value + numberValue(accountingUah.value),
 )
-const accountingForComparison = computed(
-  () => accountingTotal.value - numberValue(reserveUah.value),
-)
 const myDebtUsdAfterAdjustment = computed(() => myDebtUsd.value + numberValue(adjustmentUsd.value))
 const myDebtUahAfterAdjustment = computed(() => myDebtUah.value + numberValue(adjustmentUah.value))
 const myNumberAfterAdjustment = computed(
   () => myDebtUsdAfterAdjustment.value * usdRate.value + myDebtUahAfterAdjustment.value,
 )
+const comparison = computed(() =>
+  calculateReconciliationComparison({
+    accountingUsd: numberValue(accountingUsd.value),
+    accountingUah: numberValue(accountingUah.value),
+    reserveUsd: numberValue(reserveUsd.value),
+    reserveUah: numberValue(reserveUah.value),
+    myDebtUsdAfterAdjustment: myDebtUsdAfterAdjustment.value,
+    myDebtUahAfterAdjustment: myDebtUahAfterAdjustment.value,
+    usdRate: usdRate.value,
+  }),
+)
+const accountingForComparison = computed(() => comparison.value.accountingForComparison)
 const paymentDraftEquivalent = computed(
   () =>
     numberValue(paymentDebtUsd.value) * numberValue(paymentSupplierRate.value) +
@@ -197,21 +235,13 @@ const hasAccountingInput = computed(() =>
   Boolean(accountingUsd.value.trim() || accountingUah.value.trim()),
 )
 const discrepancyUsd = computed(() =>
-  hasAccountingInput.value
-    ? numberValue(accountingUsd.value) - myDebtUsdAfterAdjustment.value
-    : null,
+  hasAccountingInput.value ? comparison.value.discrepancyUsd : null,
 )
 const discrepancyUah = computed(() =>
-  hasAccountingInput.value
-    ? numberValue(accountingUah.value) -
-      numberValue(reserveUah.value) -
-      myDebtUahAfterAdjustment.value
-    : null,
+  hasAccountingInput.value ? comparison.value.discrepancyUah : null,
 )
 const discrepancy = computed(() =>
-  discrepancyUsd.value === null || discrepancyUah.value === null
-    ? null
-    : discrepancyUsd.value * usdRate.value + discrepancyUah.value,
+  hasAccountingInput.value ? comparison.value.discrepancyTotalUah : null,
 )
 const history = computed(() => reconciliations.value)
 
@@ -261,6 +291,7 @@ async function load() {
   reconciliations.value = (reconciliationsResult.data ?? []).map((item) => ({
     ...item,
     kind: item.kind as Reconciliation['kind'],
+    reserve_usd: reconciliationReserveUsd(item.reserve_usd),
   })) as Reconciliation[]
   payments.value = paymentsResult.data ?? []
   const currentCosts = (totalsResult.data ?? {}) as { usd?: number; uah?: number }
@@ -413,18 +444,21 @@ async function saveReconciliation() {
   }
   const accountingUsdValue = accountingUsd.value.trim() ? parsedNumber(accountingUsd.value) : 0
   const accountingUahValue = accountingUah.value.trim() ? parsedNumber(accountingUah.value) : 0
-  const reserveValue = reserveUah.value.trim() ? parsedNumber(reserveUah.value) : 0
+  const reserveUsdValue = reserveUsd.value.trim() ? parsedNumber(reserveUsd.value) : 0
+  const reserveUahValue = reserveUah.value.trim() ? parsedNumber(reserveUah.value) : 0
   const adjustmentUsdValue = adjustmentUsd.value.trim() ? parsedNumber(adjustmentUsd.value) : 0
   const adjustmentUahValue = adjustmentUah.value.trim() ? parsedNumber(adjustmentUah.value) : 0
   if (
     accountingUsdValue === null ||
     accountingUahValue === null ||
-    reserveValue === null ||
+    reserveUsdValue === null ||
+    reserveUahValue === null ||
     adjustmentUsdValue === null ||
     adjustmentUahValue === null ||
     accountingUsdValue < 0 ||
     accountingUahValue < 0 ||
-    reserveValue < 0 ||
+    reserveUsdValue < 0 ||
+    reserveUahValue < 0 ||
     usdRate.value <= 0
   ) {
     error.value = 'Проверьте числовые значения и текущий курс CRM.'
@@ -438,7 +472,8 @@ async function saveReconciliation() {
     accounting_usd: accountingUsdValue,
     accounting_uah: accountingUahValue,
     accounting_total: accountingTotal.value,
-    reserve_uah: reserveValue,
+    reserve_usd: reserveUsdValue,
+    reserve_uah: reserveUahValue,
     crm_balance_before_adjustment: myNumber.value,
     adjustment_usd: adjustmentUsdValue,
     adjustment_uah: adjustmentUahValue,
@@ -458,6 +493,7 @@ async function saveReconciliation() {
   }
   accountingUsd.value = ''
   accountingUah.value = ''
+  reserveUsd.value = ''
   reserveUah.value = ''
   adjustmentUsd.value = ''
   adjustmentUah.value = ''
@@ -569,15 +605,6 @@ onMounted(() => {
                     readonly
                     class="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700"
                 /></label>
-                <label class="text-sm font-medium text-slate-600"
-                  >Бронь<input
-                    v-model="reserveUah"
-                    :disabled="isGuest"
-                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
-                    inputmode="decimal"
-                    placeholder="0,00"
-                    @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
-                /></label>
               </div>
 
               <div class="grid content-start gap-3">
@@ -590,21 +617,36 @@ onMounted(() => {
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >Доллары 1С<input
+                    id="reconciliation-accounting-usd"
                     v-model="accountingUsd"
                     :disabled="isGuest"
                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
                     inputmode="decimal"
                     placeholder="0,00"
                     @keydown.enter.prevent="accountingUsd = committedNumericValue(accountingUsd)"
+                    @keydown.tab="moveReconciliationFocus"
+                /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >Бронь USD<input
+                    id="reconciliation-reserve-usd"
+                    v-model="reserveUsd"
+                    :disabled="isGuest"
+                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                    inputmode="decimal"
+                    placeholder="0,00"
+                    @keydown.enter.prevent="reserveUsd = committedNumericValue(reserveUsd)"
+                    @keydown.tab="moveReconciliationFocus"
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >Сторно USD<input
+                    id="reconciliation-adjustment-usd"
                     v-model="adjustmentUsd"
                     :disabled="isGuest"
                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
                     inputmode="decimal"
                     placeholder="+/- 0,00"
                     @keydown.enter.prevent="adjustmentUsd = committedNumericValue(adjustmentUsd)"
+                    @keydown.tab="moveReconciliationFocus"
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >USD после сторно<input
@@ -624,21 +666,36 @@ onMounted(() => {
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >Гривна 1С<input
+                    id="reconciliation-accounting-uah"
                     v-model="accountingUah"
                     :disabled="isGuest"
                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
                     inputmode="decimal"
                     placeholder="0,00"
                     @keydown.enter.prevent="accountingUah = committedNumericValue(accountingUah)"
+                    @keydown.tab="moveReconciliationFocus"
+                /></label>
+                <label class="text-sm font-medium text-slate-600"
+                  >Бронь грн<input
+                    id="reconciliation-reserve-uah"
+                    v-model="reserveUah"
+                    :disabled="isGuest"
+                    class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                    inputmode="decimal"
+                    placeholder="0,00"
+                    @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
+                    @keydown.tab="moveReconciliationFocus"
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >Сторно грн<input
+                    id="reconciliation-adjustment-uah"
                     v-model="adjustmentUah"
                     :disabled="isGuest"
                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
                     inputmode="decimal"
                     placeholder="+/- 0,00"
                     @keydown.enter.prevent="adjustmentUah = committedNumericValue(adjustmentUah)"
+                    @keydown.tab="moveReconciliationFocus"
                 /></label>
                 <label class="text-sm font-medium text-slate-600"
                   >Гривна после сторно<input

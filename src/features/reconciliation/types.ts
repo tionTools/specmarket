@@ -6,6 +6,7 @@ export type Reconciliation = {
   accounting_usd: number
   accounting_uah: number
   accounting_total: number
+  reserve_usd: number
   reserve_uah: number
   crm_balance_usd_before_adjustment: number
   crm_balance_uah_before_adjustment: number
