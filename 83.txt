@@ -1,0 +1,174 @@
+Patch 83 — двухвалютная бронь в «Сверке расчётов»
+
+Base main:
+b9defdcc73d9081047b1df89c20e44a6229fbb63
+
+Patch SHA-256:
+b6a3e555138ec96be6ebbb088d942424a3d3b5461610b17de1fb5451a9d462d5
+
+Задача
+Сделать бронь в сверке с поставщиком двухвалютной: независимые `Бронь USD` и `Бронь грн`.
+Это НЕ прибыль. Не менять заказы, прибыль, Android, marketplace sync, расчёт текущего долга,
+платежи поставщику, сторно, snapshot себестоимости и существующую курсовую логику.
+
+Причина
+Текущая сверка уже хранит и считает отдельно USD/грн для долга, 1С, сторно и платежей,
+но бронь существует только как `reserve_uah`. Из-за этого USD-часть 1С не может быть
+уменьшена на долларовую бронь, а `discrepancyUsd` не учитывает бронь.
+
+Scope — ровно 5 файлов
+1. `src/features/reconciliation/calculations.ts` — новый pure helper формул.
+2. `src/features/reconciliation/types.ts` — `reserve_usd`.
+3. `src/features/reconciliation/ReconciliationHistoryTable.vue` — компактная двухвалютная бронь.
+4. `src/pages/ReconciliationView.vue` — state/UI/save/load/formулы.
+5. `supabase/migrations/20260915170000_reconciliation_usd_reserve.sql` — additive DB migration.
+
+Логика
+- `reserveUsd` и `reserveUah` независимы. Никакого watch/автопересчёта между ними.
+- `USD для сверки = accountingUsd - reserveUsd`.
+- `грн для сверки = accountingUah - reserveUah`.
+- `discrepancyUsd = accountingUsd - reserveUsd - myDebtUsdAfterAdjustment`.
+- `discrepancyUah = accountingUah - reserveUah - myDebtUahAfterAdjustment`.
+- `discrepancyTotalUah = discrepancyUsd * usdRate + discrepancyUah`.
+- `1С для сверки = (accountingUsd - reserveUsd) * usdRate + (accountingUah - reserveUah)`.
+- Использовать текущий `usdRate` сверки; новую курсовую логику не вводить.
+- `accounting_total` остаётся сырым эквивалентом «Всего 1С», его семантику не менять.
+
+DB/backward compatibility
+Миграция:
+`reserve_usd numeric not null default 0`.
+Существующий `reserve_uah` не менять.
+Для старых строк БД `reserve_usd=0`; frontend дополнительно нормализует отсутствующее/undefined
+значение в 0 через `reconciliationReserveUsd`, поэтому старая история не ломается.
+
+UI
+- Удалить старое общее поле `Бронь` из колонки «Параметры».
+- В колонке «Доллары» рядом с `Доллары 1С` показать `Бронь USD`.
+- В колонке «Гривна» рядом с `Гривна 1С` показать `Бронь грн`.
+- Строка `Не сходится: USD ... · грн ... · итого ... грн` сохраняется, но использует новую формулу.
+- История: одна компактная колонка `Бронь`, формат `$100,00 + 2 000,00 грн`.
+- Значения при сохранении пишутся отдельно как `reserve_usd` и `reserve_uah`; после загрузки не конвертируются.
+
+Обязательная процедура Codex
+
+1. Не трогать основной dirty worktree, `AGENTS.md` и пользовательские untracked-файлы.
+2. Обновить refs и убедиться, что GitHub `main` всё ещё:
+   `b9defdcc73d9081047b1df89c20e44a6229fbb63`.
+   Если main изменился — ОСТАНОВИТЬСЯ и сообщить новый SHA; Patch 83 не применять вслепую.
+3. Создать отдельный чистый worktree от этого main.
+4. Получить `83.patch` byte-for-byte из ветки `chatgpt-patches` и проверить SHA-256:
+   `b6a3e555138ec96be6ebbb088d942424a3d3b5461610b17de1fb5451a9d462d5`
+5. Выполнить `git apply --check 83.patch`.
+6. Только после успешного check применить `git apply 83.patch`.
+7. Проверить, что diff ограничен ровно пятью файлами из Scope.
+
+Проверка формул
+Из корня worktree запустить actual helper через установленный Node:
+
+PowerShell:
+
+```powershell
+@'
+import assert from 'node:assert/strict'
+import { pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
+
+const url = pathToFileURL(resolve('src/features/reconciliation/calculations.ts')).href
+const { calculateReconciliationComparison, reconciliationReserveUsd } = await import(url)
+
+const base = {
+  accountingUsd: 100,
+  accountingUah: 5000,
+  myDebtUsdAfterAdjustment: 90,
+  myDebtUahAfterAdjustment: 1000,
+  usdRate: 40,
+}
+
+const cases = [
+  // без брони
+  [{ ...base, reserveUsd: 0, reserveUah: 0 }, [100, 5000, 9000, 10, 4000, 4400]],
+  // только бронь грн
+  [{ ...base, reserveUsd: 0, reserveUah: 2000 }, [100, 3000, 7000, 10, 2000, 2400]],
+  // только бронь USD
+  [{ ...base, reserveUsd: 5, reserveUah: 0 }, [95, 5000, 8800, 5, 4000, 4200]],
+  // одновременно USD + грн
+  [{ ...base, reserveUsd: 5, reserveUah: 2000 }, [95, 3000, 6800, 5, 2000, 2200]],
+]
+
+for (const [input, expected] of cases) {
+  const result = calculateReconciliationComparison(input)
+  assert.deepEqual(
+    [
+      result.accountingUsdForComparison,
+      result.accountingUahForComparison,
+      result.accountingForComparison,
+      result.discrepancyUsd,
+      result.discrepancyUah,
+      result.discrepancyTotalUah,
+    ],
+    expected,
+  )
+  assert.equal(
+    result.discrepancyTotalUah,
+    result.discrepancyUsd * input.usdRate + result.discrepancyUah,
+  )
+}
+
+assert.equal(reconciliationReserveUsd(undefined), 0)
+assert.equal(reconciliationReserveUsd(12.5), 12.5)
+
+console.log('Patch 83 reconciliation cases PASS')
+'@ | node --experimental-strip-types --input-type=module
+```
+
+Это покрывает:
+- отсутствие брони;
+- только грн;
+- только USD;
+- USD + грн;
+- итоговое расхождение по курсу;
+- legacy отсутствие `reserve_usd`.
+
+Дополнительно по коду проверить:
+- insert сохраняет оба raw значения `reserve_usd`/`reserve_uah`;
+- `load()` не пересчитывает одно из другого;
+- после reload оба значения истории берутся из сохранённой строки;
+- `reserveUsd` не связан watch-ом с `reserveUah`.
+
+Стандартные проверки
+Запустить:
+- `pnpm format`
+- `pnpm type-check`
+- `pnpm lint`
+- `pnpm build`
+- `git diff --check`
+
+После format/lint ещё раз проверить scope. Если автоматические fix-команды затронули что-либо
+вне пяти файлов Patch 83 — не коммитить лишнее; вернуть только formatter/linter-induced extra
+изменения и повторить не-мутирующие проверки.
+
+Supabase
+Patch 83 действительно требует DB migration.
+Миграция additive/backward-compatible, поэтому её безопасно применить ДО публикации нового frontend.
+После локальных проверок выполнить штатный Supabase migration deploy/db push существующим
+подключением проекта. Не менять Edge Functions — они здесь не нужны.
+Если Supabase auth/connection недоступен — не выдумывать новый проект/credentials, остановиться
+и сообщить конкретную причину.
+
+После успешных проверок и migration deploy
+- ещё раз подтвердить exact 5-file diff;
+- `git add` только по точным путям, не `git add .`;
+- commit Patch 83;
+- push в `main` только через существующий GitHub SSH;
+- никаких HTTPS/browser auth/new credentials;
+- frontend deploy оставить GitHub Actions.
+
+Регрессии, которые обязательно не должны измениться
+- текущий долг USD/грн;
+- платежи поставщику;
+- сторно USD/грн и его существующий auto-equivalent behavior;
+- cost snapshot;
+- currency rates;
+- orders/profit;
+- Android;
+- marketplace sync.
