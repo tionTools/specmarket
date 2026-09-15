@@ -1,0 +1,108 @@
+diff --git a/src/pages/ReconciliationView.vue b/src/pages/ReconciliationView.vue
+--- a/src/pages/ReconciliationView.vue
++++ b/src/pages/ReconciliationView.vue
+@@ -3,6 +3,30 @@ function committedNumericValue(value: string) {
+   return parsed === null ? value : String(parsed).replace('.', ',')
+ }
+ 
++const reconciliationTabOrder = [
++  'reconciliation-accounting-usd',
++  'reconciliation-accounting-uah',
++  'reconciliation-reserve-usd',
++  'reconciliation-reserve-uah',
++  'reconciliation-adjustment-usd',
++  'reconciliation-adjustment-uah',
++] as const
++
++function moveReconciliationFocus(event: KeyboardEvent) {
++  const current = event.currentTarget as HTMLElement | null
++  if (!current?.id) return
++  const currentIndex = reconciliationTabOrder.indexOf(
++    current.id as (typeof reconciliationTabOrder)[number],
++  )
++  if (currentIndex < 0) return
++  const nextId = reconciliationTabOrder[currentIndex + (event.shiftKey ? -1 : 1)]
++  if (!nextId) return
++  const next = document.getElementById(nextId)
++  if (!(next instanceof HTMLInputElement)) return
++  event.preventDefault()
++  next.focus()
++}
++
+ function suggestedPaymentDebtUah() {
+   const amount = parsedNumber(paymentTransferredUah.value)
+   const supplierRate = parsedNumber(paymentSupplierRate.value)
+@@ -23,30 +47,36 @@ function suggestedPaymentDebtUah() {
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Доллары 1С<input
++                    id="reconciliation-accounting-usd"
+                     v-model="accountingUsd"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="0,00"
+                     @keydown.enter.prevent="accountingUsd = committedNumericValue(accountingUsd)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Бронь USD<input
++                    id="reconciliation-reserve-usd"
+                     v-model="reserveUsd"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="0,00"
+                     @keydown.enter.prevent="reserveUsd = committedNumericValue(reserveUsd)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Сторно USD<input
++                    id="reconciliation-adjustment-usd"
+                     v-model="adjustmentUsd"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="+/- 0,00"
+                     @keydown.enter.prevent="adjustmentUsd = committedNumericValue(adjustmentUsd)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >USD после сторно<input
+@@ -67,30 +97,36 @@ function suggestedPaymentDebtUah() {
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Гривна 1С<input
++                    id="reconciliation-accounting-uah"
+                     v-model="accountingUah"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="0,00"
+                     @keydown.enter.prevent="accountingUah = committedNumericValue(accountingUah)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Бронь грн<input
++                    id="reconciliation-reserve-uah"
+                     v-model="reserveUah"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="0,00"
+                     @keydown.enter.prevent="reserveUah = committedNumericValue(reserveUah)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Сторно грн<input
++                    id="reconciliation-adjustment-uah"
+                     v-model="adjustmentUah"
+                     :disabled="isGuest"
+                     class="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                     inputmode="decimal"
+                     placeholder="+/- 0,00"
+                     @keydown.enter.prevent="adjustmentUah = committedNumericValue(adjustmentUah)"
++                    @keydown.tab="moveReconciliationFocus"
+                 /></label>
+                 <label class="text-sm font-medium text-slate-600"
+                   >Гривна после сторно<input
