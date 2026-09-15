@@ -1,0 +1,43 @@
+Android infrastructure hotfix — remove Get-FileHash dependency from permanent harness worker
+
+Base main:
+61b550c16b8950b453738f089ccb978358c3aaa0
+
+Patch file:
+android-harness-sha256-hotfix.patch
+
+Patch SHA-256:
+3ac11e2570597180c8346814223379aab5e489e5abc499fd1d85ef0ec7a86f21
+
+Причина:
+Patch 84 harness run 20260915184528877-23384 FAILED at stage `snapshot-sha256` because worker PowerShell could not resolve `Get-FileHash`. Patch 84 itself was not committed/pushed and Android business logic was not reached.
+
+Scope hotfix:
+- ONLY scripts/android-check-worker.ps1
+- replace both Get-FileHash usages with a local .NET SHA-256 helper
+- no Android product code, Gradle config, signing, CI workflow or Patch 84 asset changes
+
+Procedure:
+1. Preserve current Patch 84 worktree; do not modify or discard it.
+2. Fetch refs. Require origin/main still equals the Base main above. If not, STOP and report new SHA.
+3. Create a separate clean infrastructure worktree from Base main.
+4. Retrieve `android-harness-sha256-hotfix.patch` byte-for-byte and verify its SHA-256 above.
+5. Run `git apply --check android-harness-sha256-hotfix.patch`; only on PASS apply it.
+6. Verify exact scope is only `scripts/android-check-worker.ps1` and `git diff --check` passes.
+7. Run permanent harness from this infrastructure worktree:
+   - `.\scripts\android-check.ps1 -Mode Validate -ProjectRoot (Get-Location).Path`
+   - `.\scripts\android-check.ps1 -Mode Start -ProjectRoot (Get-Location).Path`
+   - poll only with `.\scripts\android-check.ps1 -Mode Status -RunId <RunId>` until terminal state.
+   PASS is SUCCESS or SUCCESS_LOCAL_CI_SIGNING_REQUIRED. FAILED => STOP and report exact stage/summary; do not redesign infrastructure.
+8. On PASS, exact-path add only `scripts/android-check-worker.ps1`, commit `Fix Android harness SHA256 hashing`, push main via existing SSH only. No HTTPS/browser auth/new credentials.
+9. Fetch origin/main and record the hotfix commit SHA.
+10. Do NOT try to reuse the old failed harness run.
+11. Resume Patch 84 from a NEW clean worktree based on the just-pushed hotfix main. For this continuation only, the old Base-main guard inside 84.txt is superseded by the exact hotfix commit you just pushed; verify that the only change from 61b550c... to that commit is `scripts/android-check-worker.ps1`.
+12. In that new Patch 84 worktree, retrieve/apply `84.patch` and reconstruct the icon asset exactly as documented in 84.txt. `git apply --check` must PASS and icon SHA must match 84.txt.
+13. Run the permanent Android harness again for Patch 84. On PASS, verify exact Patch 84 product scope remains exactly 3 files:
+   - android/app/build.gradle.kts
+   - android/app/src/main/AndroidManifest.xml
+   - android/app/src/main/res/drawable-nodpi/ic_orders_crm.png
+14. Commit Patch 84 separately as `Update Android CRM launcher icon`, push main via existing SSH only, then confirm GitHub Actions `Android APK` and signed APK/apksigner PASS.
+
+Never combine the infrastructure hotfix and Patch 84 into one commit. Do not change AGENTS.md, Android business logic, Supabase, frontend, marketplace sync, signing setup or CI workflow.
