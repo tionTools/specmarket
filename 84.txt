@@ -6,11 +6,23 @@ Base main:
 Patch SHA-256:
 a5323dc153b0ff7e2922960ce0d25fea3a569ec63a851847ed94f5c5c1e5086b
 
-Icon asset parts on `chatgpt-patches`:
-- 84-icon.b64.part1
-- 84-icon.b64.part2
-- 84-icon.b64.part3
-- 84-icon.b64.part4
+Icon asset chunks on `chatgpt-patches`:
+- 84-icon.b64.01
+- 84-icon.b64.02
+- 84-icon.b64.03
+- 84-icon.b64.04
+- 84-icon.b64.05
+- 84-icon.b64.06
+- 84-icon.b64.07
+- 84-icon.b64.08
+- 84-icon.b64.09
+- 84-icon.b64.10
+- 84-icon.b64.11
+- 84-icon.b64.12
+- 84-icon.b64.13
+- 84-icon.b64.14
+- 84-icon.b64.15
+- 84-icon.b64.16
 
 Decoded icon:
 - target path: android/app/src/main/res/drawable-nodpi/ic_orders_crm.png
@@ -51,11 +63,12 @@ Scope — ровно 3 product files:
    `a5323dc153b0ff7e2922960ce0d25fea3a569ec63a851847ed94f5c5c1e5086b`
 5. Выполнить `git apply --check 84.patch`.
 6. Только при PASS выполнить `git apply 84.patch`.
-7. Собрать PNG из четырёх asset parts, не добавляя сами `.b64.part*` в worktree/main. Пример PowerShell из корня worktree:
+7. Собрать PNG из 16 asset chunks, не добавляя сами `84-icon.b64.*` в worktree/main. PowerShell из корня worktree:
 
 ```powershell
-$parts = 1..4 | ForEach-Object {
-  (git show "origin/chatgpt-patches:84-icon.b64.part$_" | Out-String).Trim()
+$parts = 1..16 | ForEach-Object {
+  $name = '84-icon.b64.{0:d2}' -f $_
+  (git show "origin/chatgpt-patches:$name" | Out-String).Trim()
 }
 $bytes = [Convert]::FromBase64String(($parts -join ''))
 $iconPath = 'android/app/src/main/res/drawable-nodpi/ic_orders_crm.png'
