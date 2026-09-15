@@ -1,0 +1,108 @@
+Patch 84 — заменить Android launcher icon на CRM-иконку пользователя
+
+Base main:
+61b550c16b8950b453738f089ccb978358c3aaa0
+
+Patch SHA-256:
+a5323dc153b0ff7e2922960ce0d25fea3a569ec63a851847ed94f5c5c1e5086b
+
+Icon asset parts on `chatgpt-patches`:
+- 84-icon.b64.part1
+- 84-icon.b64.part2
+- 84-icon.b64.part3
+- 84-icon.b64.part4
+
+Decoded icon:
+- target path: android/app/src/main/res/drawable-nodpi/ic_orders_crm.png
+- PNG 192x192
+- byte size: 18870
+- SHA-256: 046ceaf0988e03fd5745ee8baa9f2ab883d5435daa79e72aeb2524cc370240b0
+
+Scope — ровно 3 product files:
+1. android/app/build.gradle.kts
+2. android/app/src/main/AndroidManifest.xml
+3. android/app/src/main/res/drawable-nodpi/ic_orders_crm.png
+
+Что меняется:
+- launcher icon и roundIcon переводятся с `@drawable/ic_orders` на `@drawable/ic_orders_crm`;
+- добавляется новая CRM-иконка из присланного пользователем изображения;
+- versionCode 10 -> 11;
+- versionName 0.10 -> 0.11;
+- applicationId остаётся `ua.orders.crm`.
+
+Не менять:
+- Android business logic;
+- realtime/notifications;
+- frontend;
+- Supabase;
+- marketplace sync;
+- scripts/android-check*.ps1;
+- AGENTS.md;
+- любые другие файлы.
+
+Обязательная процедура Codex
+
+1. Не трогать dirty main, AGENTS.md и пользовательские untracked-файлы.
+2. Fetch refs и подтвердить, что `origin/main` всё ещё ровно:
+   `61b550c16b8950b453738f089ccb978358c3aaa0`
+   Если main изменился — STOP и сообщить новый SHA; Patch 84 не применять вслепую.
+3. Создать отдельный чистый worktree от указанного base.
+4. Получить `84.patch` byte-for-byte из `origin/chatgpt-patches` и проверить SHA-256:
+   `a5323dc153b0ff7e2922960ce0d25fea3a569ec63a851847ed94f5c5c1e5086b`
+5. Выполнить `git apply --check 84.patch`.
+6. Только при PASS выполнить `git apply 84.patch`.
+7. Собрать PNG из четырёх asset parts, не добавляя сами `.b64.part*` в worktree/main. Пример PowerShell из корня worktree:
+
+```powershell
+$parts = 1..4 | ForEach-Object {
+  (git show "origin/chatgpt-patches:84-icon.b64.part$_" | Out-String).Trim()
+}
+$bytes = [Convert]::FromBase64String(($parts -join ''))
+$iconPath = 'android/app/src/main/res/drawable-nodpi/ic_orders_crm.png'
+[IO.Directory]::CreateDirectory((Split-Path $iconPath -Parent)) | Out-Null
+[IO.File]::WriteAllBytes($iconPath, $bytes)
+(Get-FileHash -Algorithm SHA256 $iconPath).Hash.ToLowerInvariant()
+```
+
+Ожидаемый SHA-256 PNG:
+`046ceaf0988e03fd5745ee8baa9f2ab883d5435daa79e72aeb2524cc370240b0`
+
+Если SHA не совпал — STOP, ничего не коммитить.
+
+8. Проверить static scope:
+- Manifest ссылается на `@drawable/ic_orders_crm` и для icon, и для roundIcon;
+- versionCode = 11;
+- versionName = "0.11";
+- applicationId = `ua.orders.crm`;
+- итоговый diff содержит ровно 3 product files из Scope.
+
+9. Запустить постоянный Android harness, не создавать новые runner/junction/build environments:
+
+```powershell
+.\scripts\android-check.ps1 -Mode Validate -ProjectRoot (Get-Location).Path
+.\scripts\android-check.ps1 -Mode Start -ProjectRoot (Get-Location).Path
+```
+
+Сохранить RunId из Start и проверять только через:
+
+```powershell
+.\scripts\android-check.ps1 -Mode Status -RunId <RunId>
+```
+
+Ждать terminal state. Допустимый локальный PASS:
+- `SUCCESS`, или
+- `SUCCESS_LOCAL_CI_SIGNING_REQUIRED` (если локально нет signing credentials).
+
+`FAILED` — STOP и сообщить stage/summary; инфраструктуру не переделывать.
+
+10. После PASS:
+- `git diff --check`;
+- ещё раз exact 3-file scope;
+- `git add` только по трём точным путям, не `git add .`;
+- commit: `Update Android CRM launcher icon`;
+- push в `main` только через существующий GitHub SSH;
+- никаких HTTPS/browser auth/new credentials.
+
+11. После push дождаться GitHub Actions `Android APK` и подтвердить signed APK / `apksigner` PASS. Если workflow падает — сообщить конкретный job/step, не перестраивать Android infrastructure без нового конкретного дефекта.
+
+Supabase deploy НЕ нужен.
