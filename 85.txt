@@ -1,0 +1,67 @@
+Patch 85 — Prom: оплаченный новый заказ status=paid можно принять из Android
+
+База main: 10615241e89f4b7d7e2fe792f00d92f26061e3cd
+Patch file: 85.patch
+Patch SHA-256: cdb273359c1dd92523e1f3e2f29308a7f631da0697d82aa35c9368df11d03a2d
+
+Причина подтверждена на заказе Prom №427904460:
+- crm_orders.external_id = prom:427904460 — корректный;
+- crm_orders.platform = Пром — корректный;
+- crm_orders.status = paid;
+- delivery.paymentStatus = paid;
+- заказ оплачен, но ещё не принят продавцом;
+- Android сейчас показывает кнопку «Принять заказ» только для isNewStatus: новий/новый/new/pending;
+- серверный sync-prom-orders использует classifyPromOrderStatus с тем же ограничением, поэтому даже принудительный вызов для paid вернул бы 409.
+
+Техническое решение:
+- НЕ добавлять paid в общий isNewStatus, чтобы случайно не разрешить paid для Эпицентра/Kasta и не менять общую семантику новых статусов;
+- в Android acceptRoute разрешить paid только когда platform == Пром;
+- в серверной Prom-классификации считать paid состоянием new/доступным к принятию;
+- существующий вызов Prom set_status(received) и сохранение CRM status=Принято не менять;
+- добавить Android и Prom unit-тесты на paid;
+- versionCode 11 -> 12, versionName 0.11 -> 0.12.
+
+Scope — ровно 5 файлов:
+- android/app/build.gradle.kts
+- android/app/src/main/java/ua/orders/crm/OrderModels.kt
+- android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+- supabase/functions/_shared/prom-order-action.ts
+- supabase/functions/_shared/prom-order-action_test.ts
+
+Не менять:
+- sync-prom-orders/index.ts: он уже использует общий prom-order-action.ts, отдельное изменение index.ts не требуется;
+- sync Prom mapping paid -> Новий: raw paid можно хранить в CRM, это отдельное состояние оплаты/заказа; после принятия функция сама сохраняет Принято;
+- Эпицентр/Kasta acceptance semantics;
+- frontend;
+- БД/migrations;
+- AGENTS.md;
+- applicationId ua.orders.crm;
+- signing key / signing infrastructure;
+- Android Realtime/lifecycle.
+
+Проверки бизнес-логики:
+1. Prom + status=paid + external_id prom:<positive id> + авторизованный не guest -> canAccept=true, кнопка «Принять заказ» видна.
+2. Нажатие вызывает sync-prom-orders с acceptExternalIds; сервер считает paid новым, вызывает Prom API на перевод в received и затем сохраняет CRM status=Принято.
+3. Prom paid с неправильным external_id остаётся недоступным.
+4. Epicentr paid НЕ становится доступным к принятию.
+5. Kasta paid НЕ становится доступным к принятию.
+6. Принятые/final/cancelled/returned статусы остаются недоступными.
+7. Существующие новий/новый/new/pending продолжают работать без изменений.
+8. Текущий заказ №427904460 после обновления Android и deploy sync-prom-orders должен стать принимаемым без ручной правки строки CRM.
+
+Codex:
+1. НЕ трогай основной грязный worktree. Работай в отдельном чистом worktree от origin/main.
+2. Выполни fetch и проверь, что origin/main всё ещё ровно 10615241e89f4b7d7e2fe792f00d92f26061e3cd. Если main изменился — остановись; Patch 85 вручную не адаптировать.
+3. Прочитай AGENTS.md и android/README.md. AGENTS.md не изменять.
+4. Получи 85.patch из origin/chatgpt-patches и проверь SHA-256: cdb273359c1dd92523e1f3e2f29308a7f631da0697d82aa35c9368df11d03a2d.
+5. Выполни git apply --check 85.patch. При любой ошибке остановись без ручного исправления, --reject или редизайна Patch.
+6. Примени Patch. Сразу проверь git diff --name-only: должны быть ровно 5 scope-файлов из списка выше.
+7. Проверь бизнес-сценарии выше по коду. Особо: paid разрешён только для platform=Пром, а серверный classifyPromOrderStatus('paid') == new.
+8. Не запускай Deno и не меняй Deno/Supabase tooling. Backend-тест в Patch оставить как regression coverage.
+9. Используй существующий постоянный Android harness scripts/android-check.ps1. Не создавай новый build env/JDK/Gradle cache/junction/keystore. Harness должен выполнить штатные Android проверки, включая unit tests, lint, release build и доступную проверку подписи.
+10. Финально до commit: git diff --check чистый; git diff --name-only ровно 5 scope-файлов; git status --short без посторонних изменений; полностью просмотри diff.
+11. Перед commit снова fetch origin/main и убедись, что база не изменилась.
+12. Commit только 5 scope-файлов. Push в main только через существующий GitHub SSH. При проблеме SSH — остановиться; HTTPS/browser auth/new credentials запрещены.
+13. После успешного push отдельно deploy Supabase Edge Function sync-prom-orders, потому что Patch меняет импортируемый shared prom-order-action.ts. Использовать существующую Supabase конфигурацию/авторизацию; не делать db push и не создавать migrations.
+14. После push дождись GitHub Actions «Android APK»: testDebugUnitTest + lintDebug + assembleRelease, проверка release signature и обновление stable android-latest APK. Обычный frontend deploy не требует отдельного вмешательства.
+15. В отчёте: commit SHA, результаты android-check, итоговые 5 файлов, результат deploy sync-prom-orders, Android APK workflow/status, версия 0.12/versionCode 12, подтверждение release signature и что основной dirty worktree/AGENTS/untracked не затронуты.
