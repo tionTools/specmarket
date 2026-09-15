@@ -1,0 +1,33 @@
+Patch 83 supplement — row-wise Tab navigation in reconciliation
+
+Apply only AFTER successful application of 83.patch.
+
+File:
+83-tab-order.patch
+
+SHA-256:
+6e1d56f35f9c683e6dcff06f73b7e29da85c461e987c5609a9854d116ce86d63
+
+Scope:
+- only src/pages/ReconciliationView.vue
+- does not change reconciliation formulas, DB migration, debt, payments, storno, snapshots, currency logic, orders/profit, Android or marketplace sync
+
+Behavior:
+Forward Tab order for editable reconciliation currency fields:
+1. Доллары 1С
+2. Гривна 1С
+3. Бронь USD
+4. Бронь грн
+5. Сторно USD
+6. Сторно грн
+
+Shift+Tab follows the same order backwards.
+At the beginning/end of this six-field sequence, normal browser Tab behavior is preserved.
+
+Procedure:
+1. After 83.patch is applied successfully, verify SHA-256 of 83-tab-order.patch.
+2. Run: git apply --check 83-tab-order.patch
+3. Only if PASS, run: git apply 83-tab-order.patch
+4. Final worktree scope must still be exactly the same five Patch 83 product files; this supplement only adds changes inside ReconciliationView.vue.
+5. Run the full Patch 83 formula checks plus format, type-check, lint, build and git diff --check.
+6. Commit/push Patch 83 as one functional commit after all checks and required Supabase migration deploy.
