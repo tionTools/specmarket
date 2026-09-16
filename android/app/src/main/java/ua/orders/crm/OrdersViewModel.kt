@@ -17,6 +17,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     private val requests = Mutex()
     private val pendingNotificationIds = linkedSetOf<String>()
     private var realtimeJob: Job? = null
+    private var pushRegistrationJob: Job? = null
     private var visible = false
     private var ordersBeforeDetail: List<Order> = emptyList()
     var email by mutableStateOf<String?>(null); private set
@@ -61,12 +62,17 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         initializing = false
                     }
+                    getApplication<Application>().savePushSessionActive(true)
+                    syncPushRegistration()
                 } else if (session is SessionStatus.NotAuthenticated) {
                     initializing = false
                     email = null
                     realtimeJob?.cancel()
                     realtimeJob = null
+                    pushRegistrationJob?.cancel()
+                    pushRegistrationJob = null
                     realtimeConnected = false
+                    getApplication<Application>().savePushSessionActive(false)
                     clearOrders()
                 }
             }
@@ -78,6 +84,29 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (active && email != null) {
             startRealtime(forceRestart = true)
             refresh()
+            syncPushRegistration()
+        }
+    }
+
+    private fun syncPushRegistration(enabledOverride: Boolean? = null) {
+        if (email == null) return
+        pushRegistrationJob?.cancel()
+        pushRegistrationJob = viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val settingEnabled = enabledOverride ?: app.newOrderNotifications().first()
+                app.savePushNotificationsEnabled(settingEnabled)
+                val enabled = settingEnabled && app.canPostOrderNotifications()
+                repository.setPushDevice(
+                    deviceId = app.pushDeviceId(),
+                    token = if (enabled) firebasePushToken() else null,
+                    enabled = enabled,
+                )
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                // Registration is retried after auth restoration and on foreground resume.
+            }
         }
     }
 
@@ -165,15 +194,18 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 flushPendingNotificationsLocked()
                 persistCache()
             }
+            syncPushRegistration()
         }
     }
 
     fun notificationsSettingChanged(enabled: Boolean) {
+        getApplication<Application>().savePushNotificationsEnabled(enabled)
         viewModelScope.launch {
             requests.withLock {
                 if (!enabled) pendingNotificationIds.clear() else flushPendingNotificationsLocked()
                 persistCache()
             }
+            syncPushRegistration(enabled)
         }
     }
 
@@ -286,7 +318,15 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (authBusy || acceptingId != null) return
         authBusy = true
         viewModelScope.launch {
-            try { repository.signOut() }
+            try {
+                pushRegistrationJob?.cancelAndJoin()
+                val app = getApplication<Application>()
+                try { repository.setPushDevice(app.pushDeviceId(), null, false) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { /* Local logout still disables displaying incoming push. */ }
+                repository.signOut()
+                app.savePushSessionActive(false)
+            }
             catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { message = "Не удалось выйти. Проверьте соединение и повторите." }
             finally { authBusy = false }
