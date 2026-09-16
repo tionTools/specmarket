@@ -1,0 +1,82 @@
+Patch 93 — manual bank data backend for Monobank FOP + NovaPay
+
+Base main:
+40951d9a4ef40bb3da73369408cdd23781da3b94
+
+Patch file:
+93.patch
+Patch blob:
+2d20d569d7c36efc57caed0ef58dede1fa5d5ac0
+
+Expected resulting blobs:
+- supabase/functions/monobank-data/index.ts
+  27fa7a8a06f909597512a51dec7a83cb2b039886
+- supabase/functions/novapay-data/index.ts
+  e46b0b1304ce2a9c0f5aaecae8987a10e0b5645f
+- supabase/migrations/20260916213000_bank_account_cache.sql
+  e56867a00742ac6d8dd96c4df685c16ee41c3c79
+
+Scope: exactly 3 new files above.
+No frontend/UI changes in Patch 93.
+
+Purpose:
+- No automatic bank refresh.
+- Both Edge Functions return cached data when POST body does not contain {"refresh":true}.
+- A manual refresh calls the bank, stores balance + last 7 days of incoming receipts + updated time in public.bank_account_cache, then returns that data.
+- Monobank selects exactly one UAH account with type=fop and uses MONOBANK_API_TOKEN server-side.
+- Monobank manual refresh has a 90-second server cooldown to respect API rate limits.
+- NovaPay uses the existing JWT rotation flow, existing Vault RPCs, and the Patch 92 rotation lock. It reads GetAccountRest + GetAccountExtract for the last 7 days.
+- NovaPay refresh token/public certificate/login are never returned or logged.
+- bank_account_cache is readable only by authenticated non-guest users; writes are service-role only.
+- The migration seeds rows for monobank and novapay.
+
+Important NovaPay diagnostic behavior:
+If GetAccountExtract returns documents but no incoming receipts are recognized, novapay-data returns only diagnostics.documentCount and diagnostics.sampleKeys (field names only, no transaction values). This is temporary-safe schema detection for the first live smoke test; do not redesign it before seeing the real response.
+
+Execution:
+1. git fetch origin.
+2. Verify origin/main is exactly:
+   40951d9a4ef40bb3da73369408cdd23781da3b94
+   If not, STOP and report the new SHA.
+
+3. Clean up the temporary local Monobank diagnostic from the previous task BEFORE Patch 93:
+   - If supabase/functions/monobank-test/index.ts is present as the only uncommitted change, verify its blob is:
+     5ca46649a4ede2ed71758a7a89c1c43cf5733c3a
+   - Verify origin/chatgpt-patches:mono-test.patch blob is:
+     5f426827887c7f3a51a73310f22e1bd3e5ba87c2
+   - Run git apply -R --check on that exact patch, then git apply -R.
+   - Do not delete/deploy-delete the remote monobank-test function yet.
+   - After reversal the worktree must be clean. If there are any other changes, STOP.
+
+4. Read 93.patch byte-for-byte from origin/chatgpt-patches and verify blob:
+   2d20d569d7c36efc57caed0ef58dede1fa5d5ac0
+
+5. Run git apply --check on that exact patch. If it fails, STOP.
+6. Apply exactly 93.patch. Do not redesign or edit it.
+7. Verify:
+   - git diff --check PASS
+   - git diff --name-only contains exactly the 3 declared files
+   - resulting file blobs exactly match the 3 expected hashes above
+
+8. Apply only migration:
+   supabase/migrations/20260916213000_bank_account_cache.sql
+   to the existing linked Supabase project and record it in migration history.
+   Do not reapply Patch 92 migration.
+
+9. Deploy only:
+   - monobank-data
+   - novapay-data
+   Do not change secrets.
+   Do not deploy-delete monobank-test yet.
+
+10. STOP after successful migration + both deploys.
+    Do not run bank smoke tests automatically.
+    Do not commit.
+    Do not push.
+
+11. Report readiness for two authorized browser smoke tests.
+
+Smoke-test safety:
+- Run Monobank refresh only once initially; its API is rate limited.
+- Run NovaPay refresh only once initially because each successful UserAuthenticationJWT rotates and saves a new refresh token/certificate pair.
+- If NovaPay returns diagnostics.sampleKeys, report those keys; do not run another refresh until the parser is adjusted.
