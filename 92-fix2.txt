@@ -1,0 +1,33 @@
+Patch 92 diagnostic fix 2 — verify the NOVAPAY_LOGIN format seen by the Edge Function
+
+Base main: 260eda9eff2616e38e988570cf48a2634549e9ad
+Current function blob: 4eb89f447859dd2cd4bd11da2305a21114fec4f9
+Migration blob: d28ee7a77b35c7a951cf8aeb7680ac9035647e43
+Fix patch blob: 06cefaf4c5ff81ecf17e4a872874895461ad4cee
+Fix patch file: 92-fix2.patch
+
+Purpose:
+The current UserAuthenticationJWT call reaches NovaPay but reports that the refresh token does not apply to the supplied login. This temporary diagnostic returns only three non-secret characteristics of the login read by the deployed function: string length, whether it starts with +380, and the last 2 characters.
+
+Codex execution task:
+1. Continue the CURRENT uncommitted Patch 92 worktree. Do not reset, stash, reverse, or reapply Patch 92 or 92-fix.
+2. Run `git fetch origin main chatgpt-patches`.
+3. Require `HEAD = origin/main = 260eda9eff2616e38e988570cf48a2634549e9ad`. If main moved, STOP.
+4. Require the worktree to contain only the existing Patch 92 files and no unrelated changes.
+5. Verify before fix2:
+   - `git hash-object supabase/functions/novapay-balance/index.ts` = `4eb89f447859dd2cd4bd11da2305a21114fec4f9`
+   - `git hash-object supabase/migrations/20260916190000_novapay_rotation_lock.sql` = `d28ee7a77b35c7a951cf8aeb7680ac9035647e43`
+   If either differs, STOP; do not adapt manually.
+6. Require `git rev-parse origin/chatgpt-patches:92-fix2.patch` = `06cefaf4c5ff81ecf17e4a872874895461ad4cee`.
+7. Run `git show origin/chatgpt-patches:92-fix2.patch | git apply --check -`. If it fails, STOP.
+8. Apply with `git show origin/chatgpt-patches:92-fix2.patch | git apply -`.
+9. Run `git diff --check`, `git diff --name-only`, and `git status --short`. Total Patch 92 scope must remain exactly:
+   - supabase/functions/novapay-balance/index.ts
+   - supabase/migrations/20260916190000_novapay_rotation_lock.sql
+10. Inspect the real diff. The only fix2 delta must be the diagnostic fields `length`, `startsWithPlus380`, and `suffix2`. Do not expose or log the full login or any NovaPay credential values.
+11. Do NOT reapply the migration.
+12. Redeploy only `novapay-balance` using the already linked Supabase project. If new authentication is required, STOP.
+13. After successful deploy, STOP before commit/push. Report that the user can repeat the authenticated browser smoke-test and inspect `RESULT.details.login`, `status`, and `title`.
+14. Do not commit or push.
+
+Do not modify UI, Android, AGENTS.md, migration SQL, existing NovaPay RPC functions, Vault values, or unrelated files.
