@@ -1,0 +1,94 @@
+Patch 91 — resume after safe stop before database migration
+
+Do NOT run broad `supabase db push` and do NOT authorize applying unrelated pending migrations.
+
+Current known state from Codex:
+- Patch 91 is already applied locally; scope is exactly 14 files.
+- Android harness passed with SUCCESS_LOCAL_CI_SIGNING_REQUIRED; testDebugUnitTest=0, lintDebug=0, assembleRelease=0.
+- Local Deno is unavailable because system deno.exe returns Access denied. Do not install/replace Deno or create a new environment for this task. Independent GitHub Actions validation run 35106388698 already passed the exact Patch 91 Deno test/check and Android checks.
+- Required Firebase secret names are present.
+- `manage-push-device` and `send-order-push` are already deployed successfully with `--no-verify-jwt`.
+- Migration `supabase/migrations/20260916160000_order_push_notifications.sql` is NOT yet applied.
+- Nothing has been committed or pushed to main.
+
+Reason for stop:
+The linked project's migration history is behind the repository, so ordinary `supabase db push` may apply older unrelated migrations. That wider DB change is NOT authorized.
+
+Resume instructions:
+
+1. Keep the current Patch 91 worktree exactly as-is. Do not reapply or redesign the patch. Do not modify unrelated files.
+
+2. Reconfirm the migration file is exactly the Patch 91 file and that the working-tree scope is still exactly the 14 Patch 91 files.
+
+3. Inspect, but do not mutate, migration state:
+   - `supabase migration list --linked`
+   - `supabase db push --dry-run`
+Record which older migrations are pending. Do NOT run a real `db push`, `migration up --linked`, `--include-all`, repair older migrations, or apply any migration other than 20260916160000.
+
+4. Check availability/syntax of the scoped SQL command first:
+   - `supabase --version`
+   - `supabase db query --help`
+If `supabase db query --linked` is unavailable, STOP and report. Do not upgrade the CLI and do not fall back to broad db push.
+
+5. Apply ONLY the exact SQL from:
+   `supabase/migrations/20260916160000_order_push_notifications.sql`
+against the linked project using `supabase db query --linked`.
+Run the exact migration SQL inside an explicit transaction so a SQL failure rolls back the migration changes. Do not concatenate or execute any other migration SQL.
+
+On PowerShell, if the installed CLI accepts the SQL as a positional argument, a suitable pattern is:
+
+   `$migrationPath = 'supabase/migrations/20260916160000_order_push_notifications.sql'`
+   `$sql = Get-Content -Raw $migrationPath`
+   `supabase db query --linked "BEGIN;`n$sql`nCOMMIT;"`
+
+If `supabase db query --help` exposes a supported file/stdin form, prefer that exact-file form and wrap the migration in a temporary transaction wrapper WITHOUT modifying the tracked migration file. Delete any temporary wrapper after execution.
+
+If the scoped SQL execution fails, STOP. Do not run migration repair and do not retry by broad db push.
+
+6. Only after the exact SQL succeeds, register ONLY this migration version in Supabase migration history:
+   `supabase migration repair 20260916160000 --status applied --linked`
+
+This repair step is only for version 20260916160000. Do not mark any older missing migration as applied/reverted.
+
+If repair fails after the SQL succeeded, STOP and report that schema changed but history registration failed. Do not rerun the migration SQL; retry/resolve only the history registration.
+
+7. Verify the scoped migration:
+   - `supabase migration list --linked` must show local+remote version 20260916160000 aligned.
+   - Run a read-only verification with `supabase db query --linked` confirming:
+     * `public.crm_push_devices` exists;
+     * function `public.enqueue_crm_new_order_push()` exists;
+     * trigger `crm_orders_new_order_push` exists on `public.crm_orders`.
+   - Run `supabase db push --dry-run` again. It may still report older unrelated pending migrations; that is acceptable. It must NOT still propose 20260916160000.
+Do not apply any older pending migrations.
+
+8. Re-run local repository checks that do not require fixing Deno:
+   - `git diff --check`
+   - exact 14-file scope
+   - `git status --short`
+Deno local result remains `unavailable: Access denied`; cite independent validation run 35106388698 as PASS for the exact patch. Do not install or alter Deno.
+
+9. Immediately before commit/push:
+   - `git fetch origin main`
+   - require `origin/main` = `bfeb68e0cd586d38bf6594e939537e9f6e79cea8`
+If it moved, STOP. No rebase, force, or manual adaptation.
+
+10. Commit only the 14 Patch 91 files with:
+   `Add Android FCM order push notifications`
+
+11. Push ONLY through the existing GitHub SSH configuration to `main`.
+No HTTPS, browser auth, new credentials, or force-push. If SSH push fails, STOP and report.
+
+12. Wait for the normal GitHub Actions `Android APK` workflow for the pushed commit. Require SUCCESS and signed APK verification.
+
+13. Final report must include:
+- exact result of the scoped migration execution;
+- migration repair result for 20260916160000;
+- post-apply object verification;
+- confirmation that no older pending migration was applied;
+- commit SHA;
+- Android harness result;
+- local Deno Access denied plus independent validation run 35106388698 PASS;
+- both Edge Function deploy results;
+- Android APK workflow run/status;
+- signed APK verification;
+- Android versionName 0.15 / versionCode 15.
