@@ -1,0 +1,117 @@
+diff --git a/supabase/functions/monobank-test/index.ts b/supabase/functions/monobank-test/index.ts
+new file mode 100644
+index 0000000..5ca4664
+--- /dev/null
++++ b/supabase/functions/monobank-test/index.ts
+@@ -0,0 +1,111 @@
++import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
++
++const MONOBANK_CLIENT_INFO_URL = 'https://api.monobank.ua/personal/client-info'
++const REQUEST_TIMEOUT_MS = 15_000
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++}
++
++const text = (value) => typeof value === 'string' ? value.trim() : ''
++const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
++const finiteNumber = (value) => {
++  const number = Number(value)
++  return Number.isFinite(number) ? number : null
++}
++
++function safeSuffix(value, length = 6) {
++  const normalized = text(value)
++  return normalized ? normalized.slice(-length) : ''
++}
++
++Deno.serve(async (request) => {
++  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
++  if (request.method !== 'POST') {
++    return Response.json({ ok: false, message: 'Method not allowed.' }, { status: 405, headers: corsHeaders })
++  }
++
++  const url = Deno.env.get('SUPABASE_URL')
++  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
++  const apiToken = text(Deno.env.get('MONOBANK_API_TOKEN'))
++  const authorization = request.headers.get('Authorization')
++
++  if (!url || !anonKey || !apiToken) {
++    return Response.json({ ok: false, message: 'Monobank configuration is incomplete.' }, {
++      status: 500,
++      headers: corsHeaders,
++    })
++  }
++  if (!authorization) {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
++  const { data: { user }, error: authError } = await authClient.auth.getUser()
++  if (authError || !user || user.email?.toLowerCase() === 'guest@gmail.com') {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  const controller = new AbortController()
++  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
++
++  let response
++  try {
++    response = await fetch(MONOBANK_CLIENT_INFO_URL, {
++      method: 'GET',
++      headers: { 'X-Token': apiToken },
++      signal: controller.signal,
++    })
++  } catch {
++    return Response.json({ ok: false, code: 'MONOBANK_TRANSPORT_ERROR', message: 'Monobank is unreachable.' }, {
++      status: 502,
++      headers: corsHeaders,
++    })
++  } finally {
++    clearTimeout(timeout)
++  }
++
++  const raw = await response.text()
++  let payload = null
++  try {
++    payload = raw ? JSON.parse(raw) : null
++  } catch {
++    payload = null
++  }
++
++  if (!response.ok) {
++    const description = isRecord(payload) ? text(payload.errorDescription) : ''
++    return Response.json({
++      ok: false,
++      code: 'MONOBANK_API_ERROR',
++      message: 'Monobank rejected the client-info request.',
++      details: {
++        status: response.status,
++        ...(description ? { description } : {}),
++      },
++    }, { status: response.status, headers: corsHeaders })
++  }
++
++  if (!isRecord(payload) || !Array.isArray(payload.accounts)) {
++    return Response.json({ ok: false, code: 'MONOBANK_INVALID_RESPONSE', message: 'Monobank returned invalid client info.' }, {
++      status: 502,
++      headers: corsHeaders,
++    })
++  }
++
++  const accounts = payload.accounts.filter(isRecord).map((account) => ({
++    idSuffix: safeSuffix(account.id),
++    ibanSuffix: safeSuffix(account.iban),
++    currencyCode: finiteNumber(account.currencyCode),
++    type: text(account.type),
++    balance: finiteNumber(account.balance) === null ? null : finiteNumber(account.balance) / 100,
++  }))
++
++  return Response.json({
++    ok: true,
++    clientIdSuffix: safeSuffix(payload.clientId),
++    accountsCount: accounts.length,
++    accounts,
++  }, { headers: corsHeaders })
++})
