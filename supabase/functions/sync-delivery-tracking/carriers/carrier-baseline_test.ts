@@ -7,9 +7,9 @@ function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
 }
 
-async function withCarrierResponse(
+async function withCarrierResponses(
   environment: Record<string, string>,
-  body: unknown,
+  bodies: unknown[],
   run: () => Promise<void>,
 ) {
   const originalFetch = globalThis.fetch
@@ -18,7 +18,12 @@ async function withCarrierResponse(
     previous.set(key, Deno.env.get(key))
     Deno.env.set(key, value)
   }
-  globalThis.fetch = async () => new Response(JSON.stringify(body))
+  let responseIndex = 0
+  globalThis.fetch = async () => {
+    const body = bodies[Math.min(responseIndex, bodies.length - 1)]
+    responseIndex += 1
+    return new Response(JSON.stringify(body))
+  }
   try {
     await run()
   } finally {
@@ -28,6 +33,14 @@ async function withCarrierResponse(
       else Deno.env.delete(key)
     }
   }
+}
+
+async function withCarrierResponse(
+  environment: Record<string, string>,
+  body: unknown,
+  run: () => Promise<void>,
+) {
+  await withCarrierResponses(environment, [body], run)
 }
 
 Deno.test('ordinary Ukrposhta tracking still updates status', async () => {
@@ -47,6 +60,25 @@ Deno.test('ordinary Meest tracking still updates status', async () => {
     const result = await meestStatus('M')
     assert(result.provider === 'meest_api', 'Meest endpoint changed')
     assert(trackingChanged({ ttn: 'M' }, result), 'ordinary Meest result no longer updates a legacy order')
+  })
+})
+
+Deno.test('Meest falls back to public tracking when OpenAPI has no events', async () => {
+  const publicStatus = 'Відправлення прийнято до перевезення в населеному пункті Харків'
+  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
+    {
+      status: 'OK',
+      info: { fieldName: '', message: '', messageDetails: '' },
+      result: [],
+    },
+    { condition: publicStatus },
+  ], async () => {
+    const result = await meestStatus('723-3447567')
+    assert(result.status === publicStatus, 'Meest public fallback must expose the actual public tracking status')
+    assert(result.normalizedStatus === 'accepted', 'Meest accepted public status must be normalized as accepted')
+    assert(result.final === false, 'Meest accepted public status must remain non-final')
+    assert(result.provider === 'meest_public_tracking', 'Meest empty OpenAPI result must use public tracking fallback')
+    assert(result.source === 'public_tracking', 'Meest fallback source must be marked as public tracking')
   })
 })
 
