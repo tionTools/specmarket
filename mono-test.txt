@@ -1,0 +1,30 @@
+Monobank API token diagnostic — temporary Edge Function
+
+Base main: 40951d9a4ef40bb3da73369408cdd23781da3b94
+Patch file: mono-test.patch
+Patch blob: 5f426827887c7f3a51a73310f22e1bd3e5ba87c2
+Expected resulting file blob: 5ca46649a4ede2ed71758a7a89c1c43cf5733c3a
+Scope: supabase/functions/monobank-test/index.ts only
+
+Purpose:
+Verify that the Supabase Edge Function secret MONOBANK_API_TOKEN is accepted by Monobank personal Open API. The function calls GET https://api.monobank.ua/personal/client-info with X-Token and never returns, logs, or commits the token. On success it returns only sanitized account data: suffixes of account id / IBAN, currency code, account type, and balance.
+
+Execution:
+1. git fetch origin.
+2. Verify origin/main is exactly 40951d9a4ef40bb3da73369408cdd23781da3b94. If not, STOP and report the new SHA.
+3. Verify the working tree is clean before applying. Do not touch AGENTS.md or unrelated files.
+4. Read mono-test.patch byte-for-byte from origin/chatgpt-patches and verify its blob is 5f426827887c7f3a51a73310f22e1bd3e5ba87c2.
+5. Run git apply --check on that exact patch. If it fails, STOP.
+6. Apply that exact patch. Do not redesign or edit it.
+7. Verify:
+   - git diff --check PASS
+   - git diff --name-only contains exactly supabase/functions/monobank-test/index.ts
+   - git hash-object supabase/functions/monobank-test/index.ts == 5ca46649a4ede2ed71758a7a89c1c43cf5733c3a
+8. Deploy only Edge Function monobank-test to the existing Supabase project. Do not create or change DB migrations. Do not change secrets.
+9. STOP after successful deploy. Do not commit and do not push.
+10. Report that the authorized browser smoke-test may be run.
+
+Important:
+- MONOBANK_API_TOKEN must remain server-side only.
+- Do not print or expose the token.
+- Monobank documents personal/client-info as rate-limited to no more than one call per 60 seconds, so do not run repeated smoke tests automatically.
