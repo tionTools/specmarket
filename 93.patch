@@ -1,0 +1,877 @@
+diff --git a/supabase/functions/monobank-data/index.ts b/supabase/functions/monobank-data/index.ts
+new file mode 100644
+index 0000000..27fa7a8
+--- /dev/null
++++ b/supabase/functions/monobank-data/index.ts
+@@ -0,0 +1,280 @@
++import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
++
++const MONOBANK_CLIENT_INFO_URL = 'https://api.monobank.ua/personal/client-info'
++const MONOBANK_STATEMENT_URL = 'https://api.monobank.ua/personal/statement'
++const REQUEST_TIMEOUT_MS = 20_000
++const REFRESH_COOLDOWN_SECONDS = 90
++const PERIOD_SECONDS = 7 * 24 * 60 * 60
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++}
++
++const text = (value) => typeof value === 'string' ? value.trim() : ''
++const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
++const finiteNumber = (value) => {
++  const number = Number(value)
++  return Number.isFinite(number) ? number : null
++}
++
++function formatKyivDate(value) {
++  const date = new Date(value)
++  if (Number.isNaN(date.getTime())) return ''
++  return new Intl.DateTimeFormat('uk-UA', {
++    timeZone: 'Europe/Kyiv',
++    day: '2-digit',
++    month: '2-digit',
++    year: 'numeric',
++    hour: '2-digit',
++    minute: '2-digit',
++    second: '2-digit',
++    hour12: false,
++  }).format(date)
++}
++
++class HttpError extends Error {
++  constructor(status, code, message, details = undefined) {
++    super(message)
++    this.name = 'HttpError'
++    this.status = status
++    this.code = code
++    this.details = details
++  }
++}
++
++function errorResponse(error) {
++  if (error instanceof HttpError) {
++    return Response.json({
++      ok: false,
++      code: error.code,
++      message: error.message,
++      ...(error.details ? { details: error.details } : {}),
++    }, { status: error.status, headers: corsHeaders })
++  }
++
++  console.error('Monobank data request failed with an unexpected error.')
++  return Response.json({ ok: false, code: 'MONOBANK_INTERNAL_ERROR', message: 'Monobank request failed.' }, {
++    status: 500,
++    headers: corsHeaders,
++  })
++}
++
++async function monobankFetch(url, apiToken) {
++  const controller = new AbortController()
++  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
++  let response
++
++  try {
++    response = await fetch(url, {
++      method: 'GET',
++      headers: { 'X-Token': apiToken },
++      signal: controller.signal,
++    })
++  } catch {
++    throw new HttpError(502, 'MONOBANK_TRANSPORT_ERROR', 'Monobank is temporarily unreachable.')
++  } finally {
++    clearTimeout(timeout)
++  }
++
++  const raw = await response.text()
++  let payload = null
++  try {
++    payload = raw ? JSON.parse(raw) : null
++  } catch {
++    payload = null
++  }
++
++  if (!response.ok) {
++    const description = isRecord(payload) ? text(payload.errorDescription) : ''
++    throw new HttpError(response.status, 'MONOBANK_API_ERROR', 'Monobank rejected the request.', {
++      status: response.status,
++      ...(description ? { description } : {}),
++    })
++  }
++
++  return payload
++}
++
++function normalizeCache(row) {
++  if (!row) {
++    return {
++      bank: 'monobank',
++      balance: null,
++      updatedAt: null,
++      account: {},
++      receipts: [],
++      period: { from: null, to: null },
++    }
++  }
++
++  return {
++    bank: 'monobank',
++    balance: finiteNumber(row.balance),
++    updatedAt: row.updated_at ?? null,
++    account: isRecord(row.account) ? row.account : {},
++    receipts: Array.isArray(row.receipts) ? row.receipts : [],
++    period: {
++      from: row.period_from ?? null,
++      to: row.period_to ?? null,
++    },
++  }
++}
++
++async function readCache(admin) {
++  const { data, error } = await admin
++    .from('bank_account_cache')
++    .select('bank,balance,updated_at,account,receipts,period_from,period_to')
++    .eq('bank', 'monobank')
++    .maybeSingle()
++
++  if (error) throw new HttpError(500, 'BANK_CACHE_READ_FAILED', 'Failed to read cached bank data.')
++  return normalizeCache(data)
++}
++
++Deno.serve(async (request) => {
++  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
++  if (request.method !== 'POST') {
++    return Response.json({ ok: false, message: 'Method not allowed.' }, { status: 405, headers: corsHeaders })
++  }
++
++  const url = Deno.env.get('SUPABASE_URL')
++  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
++  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
++  const apiToken = text(Deno.env.get('MONOBANK_API_TOKEN'))
++  const authorization = request.headers.get('Authorization')
++
++  if (!url || !anonKey || !serviceKey || !apiToken) {
++    return Response.json({ ok: false, message: 'Monobank configuration is incomplete.' }, {
++      status: 500,
++      headers: corsHeaders,
++    })
++  }
++  if (!authorization) {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
++  const { data: { user }, error: authError } = await authClient.auth.getUser()
++  if (authError || !user || user.email?.toLowerCase() === 'guest@gmail.com') {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  let body = {}
++  try {
++    body = await request.json()
++  } catch {
++    body = {}
++  }
++  const refresh = isRecord(body) && body.refresh === true
++  const admin = createClient(url, serviceKey)
++
++  try {
++    const cached = await readCache(admin)
++    if (!refresh) {
++      return Response.json({ ok: true, refreshed: false, ...cached }, { headers: corsHeaders })
++    }
++
++    if (cached.updatedAt) {
++      const ageSeconds = Math.floor((Date.now() - new Date(cached.updatedAt).getTime()) / 1000)
++      if (Number.isFinite(ageSeconds) && ageSeconds >= 0 && ageSeconds < REFRESH_COOLDOWN_SECONDS) {
++        throw new HttpError(429, 'MONOBANK_REFRESH_COOLDOWN', 'Monobank was refreshed recently.', {
++          retryAfter: REFRESH_COOLDOWN_SECONDS - ageSeconds,
++        })
++      }
++    }
++
++    const clientData = await monobankFetch(MONOBANK_CLIENT_INFO_URL, apiToken)
++    if (!isRecord(clientData) || !Array.isArray(clientData.accounts)) {
++      throw new HttpError(502, 'MONOBANK_INVALID_RESPONSE', 'Monobank returned invalid client info.')
++    }
++
++    const fopAccounts = clientData.accounts.filter((account) => {
++      if (!isRecord(account)) return false
++      return text(account.type).toLowerCase() === 'fop' && finiteNumber(account.currencyCode) === 980
++    })
++
++    if (fopAccounts.length === 0) {
++      throw new HttpError(502, 'MONOBANK_FOP_ACCOUNT_NOT_FOUND', 'Monobank returned no UAH FOP account.')
++    }
++    if (fopAccounts.length > 1) {
++      throw new HttpError(409, 'MONOBANK_FOP_ACCOUNT_SELECTION_REQUIRED', 'Monobank returned more than one UAH FOP account.', {
++        accounts: fopAccounts.map((account) => ({
++          idSuffix: text(account.id).slice(-6),
++          ibanSuffix: text(account.iban).slice(-6),
++        })),
++      })
++    }
++
++    const account = fopAccounts[0]
++    const accountId = text(account.id)
++    const balanceMinor = finiteNumber(account.balance)
++    if (!accountId || balanceMinor === null) {
++      throw new HttpError(502, 'MONOBANK_INVALID_RESPONSE', 'Monobank returned incomplete FOP account data.')
++    }
++
++    const toSeconds = Math.floor(Date.now() / 1000)
++    const fromSeconds = toSeconds - PERIOD_SECONDS
++    const statement = await monobankFetch(
++      `${MONOBANK_STATEMENT_URL}/${encodeURIComponent(accountId)}/${fromSeconds}/${toSeconds}`,
++      apiToken,
++    )
++
++    if (!Array.isArray(statement)) {
++      throw new HttpError(502, 'MONOBANK_INVALID_RESPONSE', 'Monobank returned invalid statement data.')
++    }
++
++    const receipts = statement
++      .filter(isRecord)
++      .filter((transaction) => (finiteNumber(transaction.amount) ?? 0) > 0)
++      .map((transaction) => ({
++        id: text(transaction.id),
++        date: formatKyivDate((finiteNumber(transaction.time) ?? 0) * 1000),
++        description: text(transaction.description),
++        amount: (finiteNumber(transaction.amount) ?? 0) / 100,
++        balance: finiteNumber(transaction.balance) === null ? null : finiteNumber(transaction.balance) / 100,
++        comment: text(transaction.comment),
++        sortTime: finiteNumber(transaction.time) ?? 0,
++      }))
++      .sort((a, b) => b.sortTime - a.sortTime)
++      .map(({ sortTime: _sortTime, ...transaction }) => transaction)
++
++    const updatedAt = new Date().toISOString()
++    const periodFrom = new Date(fromSeconds * 1000).toISOString()
++    const periodTo = new Date(toSeconds * 1000).toISOString()
++    const balance = balanceMinor / 100
++    const cachedAccount = {
++      type: 'fop',
++      currencyCode: 980,
++      idSuffix: accountId.slice(-6),
++      ibanSuffix: text(account.iban).slice(-6),
++    }
++
++    const { error: cacheError } = await admin
++      .from('bank_account_cache')
++      .update({
++        balance,
++        updated_at: updatedAt,
++        account: cachedAccount,
++        receipts,
++        period_from: periodFrom,
++        period_to: periodTo,
++      })
++      .eq('bank', 'monobank')
++
++    if (cacheError) throw new HttpError(500, 'BANK_CACHE_WRITE_FAILED', 'Failed to save Monobank data.')
++
++    return Response.json({
++      ok: true,
++      refreshed: true,
++      bank: 'monobank',
++      balance,
++      updatedAt,
++      account: cachedAccount,
++      receipts,
++      period: { from: periodFrom, to: periodTo },
++    }, { headers: corsHeaders })
++  } catch (error) {
++    return errorResponse(error)
++  }
++})
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+new file mode 100644
+index 0000000..e46b0b1
+--- /dev/null
++++ b/supabase/functions/novapay-data/index.ts
+@@ -0,0 +1,553 @@
++import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
++import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
++
++const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
++const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
++const SOAP_NAMESPACE = 'http://schemas.xmlsoap.org/soap/envelope/'
++const TEM_NAMESPACE = 'http://tempuri.org/'
++const SOAP_TIMEOUT_MS = 20_000
++const LOCK_LEASE_SECONDS = 90
++const LOCK_WAIT_ATTEMPTS = 20
++const LOCK_WAIT_MS = 250
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++}
++
++const parser = new XMLParser({
++  ignoreAttributes: false,
++  removeNSPrefix: true,
++  parseTagValue: false,
++  trimValues: true,
++})
++
++class HttpError extends Error {
++  constructor(status, code, message, details = undefined) {
++    super(message)
++    this.name = 'HttpError'
++    this.status = status
++    this.code = code
++    this.details = details
++  }
++}
++
++class NovaPayTransportError extends Error {
++  constructor(message) {
++    super(message)
++    this.name = 'NovaPayTransportError'
++  }
++}
++
++const text = (value) => typeof value === 'string' ? value.trim() : ''
++const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
++const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
++
++function requestRef() {
++  return `REQ-${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`
++}
++
++function escapeXml(value) {
++  return String(value)
++    .replaceAll('&', '&amp;')
++    .replaceAll('<', '&lt;')
++    .replaceAll('>', '&gt;')
++    .replaceAll('"', '&quot;')
++    .replaceAll("'", '&apos;')
++}
++
++function soapEnvelope(method, params) {
++  const fields = Object.entries(params)
++    .filter(([, value]) => value !== null && value !== undefined)
++    .map(([key, value]) => `<tem:${key}>${escapeXml(value)}</tem:${key}>`)
++    .join('')
++
++  return `<soapenv:Envelope xmlns:soapenv="${SOAP_NAMESPACE}" xmlns:tem="${TEM_NAMESPACE}"><soapenv:Header/><soapenv:Body><tem:${method}><tem:request>${fields}</tem:request></tem:${method}></soapenv:Body></soapenv:Envelope>`
++}
++
++function findKey(value, key) {
++  if (!isRecord(value)) return undefined
++  if (Object.prototype.hasOwnProperty.call(value, key)) return value[key]
++  for (const child of Object.values(value)) {
++    if (Array.isArray(child)) {
++      for (const item of child) {
++        const found = findKey(item, key)
++        if (found !== undefined) return found
++      }
++    } else {
++      const found = findKey(child, key)
++      if (found !== undefined) return found
++    }
++  }
++  return undefined
++}
++
++function apiError(result, method) {
++  const error = isRecord(result?.error) ? result.error : null
++  if (!error && text(result?.result).toLowerCase() !== 'error') return null
++  return new HttpError(502, 'NOVAPAY_API_ERROR', `NovaPay ${method} failed.`, {
++    status: error ? text(error.status) : undefined,
++    title: error ? text(error.title) : undefined,
++  })
++}
++
++async function soapCallOnce(method, params) {
++  const controller = new AbortController()
++  const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
++  let response
++  try {
++    response = await fetch(NOVAPAY_URL, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'text/xml; charset=utf-8',
++        SOAPAction: `${SOAP_ACTION_BASE}${method}`,
++      },
++      body: soapEnvelope(method, params),
++      signal: controller.signal,
++    })
++  } catch (error) {
++    throw new NovaPayTransportError(error instanceof Error ? error.name : 'fetch_failed')
++  } finally {
++    clearTimeout(timeout)
++  }
++
++  if (!response.ok) {
++    throw new NovaPayTransportError(`http_${response.status}`)
++  }
++
++  let document
++  try {
++    document = parser.parse(await response.text())
++  } catch {
++    throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
++  }
++
++  const fault = findKey(document, 'Fault')
++  if (fault !== undefined) {
++    throw new HttpError(502, 'NOVAPAY_SOAP_FAULT', `NovaPay ${method} returned a SOAP fault.`)
++  }
++
++  const result = findKey(document, `${method}Result`)
++  if (!isRecord(result)) {
++    throw new HttpError(502, 'NOVAPAY_SOAP_RESULT_MISSING', `NovaPay ${method} response is missing its result.`)
++  }
++
++  const logicalError = apiError(result, method)
++  if (logicalError) throw logicalError
++  return result
++}
++
++async function soapCall(method, params, retryTransport = false) {
++  try {
++    return await soapCallOnce(method, params)
++  } catch (error) {
++    if (!retryTransport || !(error instanceof NovaPayTransportError)) throw error
++    return await soapCallOnce(method, params)
++  }
++}
++
++function normalizeCollection(wrapper, itemKey) {
++  if (!isRecord(wrapper)) return []
++  const items = wrapper[itemKey]
++  if (Array.isArray(items)) return items.filter(isRecord)
++  return isRecord(items) ? [items] : []
++}
++
++function finiteNumber(value, field) {
++  const number = Number(text(value).replace(',', '.'))
++  if (!Number.isFinite(number)) {
++    throw new HttpError(502, 'NOVAPAY_INVALID_RESPONSE', `NovaPay returned invalid ${field}.`)
++  }
++  return number
++}
++
++function optionalNumber(value) {
++  const normalized = text(value).replace(',', '.')
++  if (!normalized) return null
++  const number = Number(normalized)
++  return Number.isFinite(number) ? number : null
++}
++
++function normalizeXmlRecord(record) {
++  if (!isRecord(record)) return {}
++  const normalized = {}
++  for (const [key, value] of Object.entries(record)) {
++    const normalizedKey = key.startsWith('@_') ? key.slice(2) : key
++    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
++      normalized[normalizedKey] = String(value).trim()
++      continue
++    }
++    if (isRecord(value) && typeof value['#text'] === 'string') {
++      normalized[normalizedKey] = text(value['#text'])
++    }
++  }
++  return normalized
++}
++
++function parseNestedXmlCollection(rawXml, rootName, itemName) {
++  const xml = text(rawXml)
++  if (!xml) return []
++
++  let document
++  try {
++    document = parser.parse(xml)
++  } catch {
++    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', `NovaPay ${rootName} XML is invalid.`)
++  }
++
++  const root = findKey(document, rootName)
++  if (!isRecord(root)) return []
++  return normalizeCollection(root, itemName).map(normalizeXmlRecord)
++}
++
++function pick(record, ...keys) {
++  for (const key of keys) {
++    const value = text(record?.[key])
++    if (value) return value
++  }
++  return ''
++}
++
++function normalizeIban(value) {
++  return text(value).replaceAll(' ', '').toUpperCase()
++}
++
++function isIncomingExtractDocument(document, accountIban) {
++  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
++  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
++  if (creditIban) return creditIban === accountIban
++  if (debitIban) return debitIban !== accountIban
++
++  const creditAmount = optionalNumber(pick(document, 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
++  const debitAmount = optionalNumber(pick(document, 'CrncyDebit', 'DebitAmount', 'Debit', 'SumDebit'))
++  if ((creditAmount ?? 0) > 0) return true
++  if ((debitAmount ?? 0) > 0) return false
++
++  const direction = pick(document, 'DbtCdtInd', 'Direction', 'OperationType').toUpperCase()
++  return ['CRDT', 'CREDIT', 'C', 'K', 'КРЕДИТ'].includes(direction)
++}
++
++function extractReceipt(document) {
++  const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
++  if (amount === null || amount <= 0) return null
++
++  const dayDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
++  const dayTime = pick(document, 'Time', 'OrgTime', 'PaymentTime')
++  const date = [dayDate, dayTime].filter(Boolean).join(', ')
++  const balance = optionalNumber(pick(document, 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'))
++
++  return {
++    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
++    date,
++    description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
++    amount,
++    balance,
++    comment: pick(document, 'Purpose', 'Comment', 'Description'),
++  }
++}
++
++function formatNovaDate(date) {
++  const parts = new Intl.DateTimeFormat('uk-UA', {
++    timeZone: 'Europe/Kyiv',
++    day: '2-digit',
++    month: '2-digit',
++    year: 'numeric',
++  }).formatToParts(date)
++  const get = (type) => parts.find((part) => part.type === type)?.value ?? ''
++  return `${get('day')}.${get('month')}.${get('year')}`
++}
++
++async function readVaultSecret(admin, secretName) {
++  const { data, error } = await admin.rpc('get_novapay_secret', { secret_name: secretName })
++  if (error) throw new HttpError(500, 'NOVAPAY_SECRET_READ_FAILED', 'Failed to read NovaPay credentials.')
++  const value = text(data)
++  if (!value) throw new HttpError(500, 'NOVAPAY_SECRET_MISSING', `NovaPay secret ${secretName} is empty.`)
++  return value
++}
++
++async function acquireRotationLock(admin, owner) {
++  for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
++    const { data, error } = await admin.rpc('acquire_novapay_rotation_lock', {
++      lock_owner: owner,
++      lease_seconds: LOCK_LEASE_SECONDS,
++    })
++    if (error) throw new HttpError(500, 'NOVAPAY_LOCK_FAILED', 'Failed to acquire NovaPay authorization lock.')
++    if (data === true) return true
++    if (attempt + 1 < LOCK_WAIT_ATTEMPTS) await sleep(LOCK_WAIT_MS)
++  }
++  return false
++}
++
++async function releaseRotationLock(admin, owner) {
++  const { error } = await admin.rpc('release_novapay_rotation_lock', { lock_owner: owner })
++  if (error) console.error('NovaPay rotation lock release failed.')
++}
++
++async function rotateCredentials(admin, refreshToken, publicCertificate) {
++  let lastError = null
++  for (let attempt = 0; attempt < 2; attempt += 1) {
++    const { error } = await admin.rpc('rotate_novapay_credentials', {
++      new_refresh_token: refreshToken,
++      new_public_certificate: publicCertificate,
++    })
++    if (!error) return
++    lastError = error
++  }
++  if (lastError) {
++    console.error('NovaPay credential rotation failed after successful remote authentication.')
++    throw new HttpError(500, 'NOVAPAY_CREDENTIAL_ROTATION_FAILED', 'NovaPay credentials were rotated remotely but could not be saved.')
++  }
++}
++
++function normalizeCache(row) {
++  if (!row) {
++    return {
++      bank: 'novapay',
++      balance: null,
++      updatedAt: null,
++      account: {},
++      receipts: [],
++      period: { from: null, to: null },
++    }
++  }
++
++  return {
++    bank: 'novapay',
++    balance: optionalNumber(row.balance),
++    updatedAt: row.updated_at ?? null,
++    account: isRecord(row.account) ? row.account : {},
++    receipts: Array.isArray(row.receipts) ? row.receipts : [],
++    period: {
++      from: row.period_from ?? null,
++      to: row.period_to ?? null,
++    },
++  }
++}
++
++async function readCache(admin) {
++  const { data, error } = await admin
++    .from('bank_account_cache')
++    .select('bank,balance,updated_at,account,receipts,period_from,period_to')
++    .eq('bank', 'novapay')
++    .maybeSingle()
++
++  if (error) throw new HttpError(500, 'BANK_CACHE_READ_FAILED', 'Failed to read cached bank data.')
++  return normalizeCache(data)
++}
++
++function errorResponse(error) {
++  if (error instanceof HttpError) {
++    return Response.json({
++      ok: false,
++      code: error.code,
++      message: error.message,
++      ...(error.details ? { details: error.details } : {}),
++    }, { status: error.status, headers: corsHeaders })
++  }
++  console.error('NovaPay data request failed with an unexpected error.')
++  return Response.json({ ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay request failed.' }, {
++    status: 500,
++    headers: corsHeaders,
++  })
++}
++
++Deno.serve(async (request) => {
++  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
++  if (request.method !== 'POST') {
++    return Response.json({ ok: false, message: 'Method not allowed.' }, { status: 405, headers: corsHeaders })
++  }
++
++  const url = Deno.env.get('SUPABASE_URL')
++  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
++  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
++  const login = text(Deno.env.get('NOVAPAY_LOGIN'))
++  const authorization = request.headers.get('Authorization')
++
++  if (!url || !anonKey || !serviceKey || !login) {
++    return Response.json({ ok: false, message: 'NovaPay configuration is incomplete.' }, { status: 500, headers: corsHeaders })
++  }
++  if (!authorization) {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
++  const { data: { user }, error: authError } = await authClient.auth.getUser()
++  if (authError || !user || user.email?.toLowerCase() === 'guest@gmail.com') {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  let body = {}
++  try {
++    body = await request.json()
++  } catch {
++    body = {}
++  }
++  const refresh = isRecord(body) && body.refresh === true
++  const admin = createClient(url, serviceKey)
++
++  if (!refresh) {
++    try {
++      const cached = await readCache(admin)
++      return Response.json({ ok: true, refreshed: false, ...cached }, { headers: corsHeaders })
++    } catch (error) {
++      return errorResponse(error)
++    }
++  }
++
++  const owner = crypto.randomUUID()
++  let lockHeld = false
++
++  try {
++    lockHeld = await acquireRotationLock(admin, owner)
++    if (!lockHeld) {
++      throw new HttpError(409, 'NOVAPAY_AUTH_BUSY', 'NovaPay authorization is busy. Retry shortly.')
++    }
++
++    const [refreshToken, publicCertificate] = await Promise.all([
++      readVaultSecret(admin, 'novapay_refresh_token'),
++      readVaultSecret(admin, 'novapay_public_certificate'),
++    ])
++
++    const authResult = await soapCall('UserAuthenticationJWT', {
++      request_ref: requestRef(),
++      refresh_token: refreshToken,
++      login,
++      public_certificate: publicCertificate,
++    }, true)
++
++    const jwt = text(authResult.jwt)
++    const newRefreshToken = text(authResult.refresh_token)
++    const newPublicCertificate = text(authResult.public_certificate)
++    if (!jwt || !newRefreshToken || !newPublicCertificate) {
++      throw new HttpError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete.')
++    }
++
++    await rotateCredentials(admin, newRefreshToken, newPublicCertificate)
++    await releaseRotationLock(admin, owner)
++    lockHeld = false
++
++    const clientsResult = await soapCall('GetClientsList', {
++      request_ref: requestRef(),
++      jwt,
++    }, true)
++    const clients = normalizeCollection(clientsResult.clients, 'Clients')
++    if (clients.length === 0) {
++      throw new HttpError(502, 'NOVAPAY_CLIENT_NOT_FOUND', 'NovaPay returned no available enterprise.')
++    }
++    if (clients.length > 1) {
++      throw new HttpError(409, 'NOVAPAY_CLIENT_SELECTION_REQUIRED', 'NovaPay returned more than one enterprise.', {
++        clients: clients.map((client) => ({
++          id: finiteNumber(client.id, 'client id'),
++          name: text(client.name),
++          statecode: text(client.statecode),
++        })),
++      })
++    }
++
++    const clientId = finiteNumber(clients[0].id, 'client id')
++    const accountsResult = await soapCall('GetAccountsList', {
++      request_ref: requestRef(),
++      jwt,
++      client_id: clientId,
++    }, true)
++    const accounts = normalizeCollection(accountsResult.accounts, 'Accounts')
++    const activeUahAccounts = accounts.filter((account) => {
++      const currency = text(account.currency).toUpperCase()
++      const statusCode = text(account.statuscode).toLowerCase()
++      const status = text(account.status)
++      return currency === 'UAH' && (statusCode === 'active' || status === '1')
++    })
++
++    if (activeUahAccounts.length === 0) {
++      throw new HttpError(502, 'NOVAPAY_ACCOUNT_NOT_FOUND', 'NovaPay returned no active UAH account.')
++    }
++    if (activeUahAccounts.length > 1) {
++      throw new HttpError(409, 'NOVAPAY_ACCOUNT_SELECTION_REQUIRED', 'NovaPay returned more than one active UAH account.', {
++        accounts: activeUahAccounts.map((account) => ({
++          id: finiteNumber(account.id, 'account id'),
++          iban: text(account.IBAN || account.iban),
++          currency: text(account.currency),
++          status: text(account.statuscode || account.status),
++        })),
++      })
++    }
++
++    const account = activeUahAccounts[0]
++    const accountId = finiteNumber(account.id, 'account id')
++    const accountIban = normalizeIban(account.IBAN || account.iban)
++    const balanceResult = await soapCall('GetAccountRest', {
++      request_ref: requestRef(),
++      jwt,
++      account_id: accountId,
++    }, true)
++
++    const now = new Date()
++    const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
++    const dateFrom = formatNovaDate(fromDate)
++    const dateTo = formatNovaDate(now)
++    const extractResult = await soapCall('GetAccountExtract', {
++      request_ref: requestRef(),
++      jwt,
++      account_id: accountId,
++      date_from: dateFrom,
++      date_to: dateTo,
++    }, true)
++
++    const extractDocuments = parseNestedXmlCollection(extractResult.extract, 'Extract', 'Docs')
++    const receipts = extractDocuments
++      .filter((document) => isIncomingExtractDocument(document, accountIban))
++      .map(extractReceipt)
++      .filter((receipt) => receipt !== null)
++
++    const available = finiteNumber(balanceResult.available_balance, 'available balance')
++    const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
++    const projected = finiteNumber(balanceResult.projected_balance, 'projected balance')
++    const updatedAt = new Date().toISOString()
++    const periodFrom = fromDate.toISOString()
++    const periodTo = now.toISOString()
++    const cachedAccount = {
++      id: accountId,
++      iban: accountIban,
++      currency: text(account.currency),
++      confirmed,
++      projected,
++    }
++
++    const { error: cacheError } = await admin
++      .from('bank_account_cache')
++      .update({
++        balance: available,
++        updated_at: updatedAt,
++        account: cachedAccount,
++        receipts,
++        period_from: periodFrom,
++        period_to: periodTo,
++      })
++      .eq('bank', 'novapay')
++
++    if (cacheError) throw new HttpError(500, 'BANK_CACHE_WRITE_FAILED', 'Failed to save NovaPay data.')
++
++    const diagnostics = extractDocuments.length > 0 && receipts.length === 0
++      ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
++      : undefined
++
++    return Response.json({
++      ok: true,
++      refreshed: true,
++      bank: 'novapay',
++      balance: available,
++      updatedAt,
++      account: cachedAccount,
++      receipts,
++      period: { from: periodFrom, to: periodTo },
++      ...(diagnostics ? { diagnostics } : {}),
++    }, { headers: corsHeaders })
++  } catch (error) {
++    if (error instanceof NovaPayTransportError) {
++      return errorResponse(new HttpError(502, 'NOVAPAY_TRANSPORT_ERROR', 'NovaPay is temporarily unreachable.'))
++    }
++    return errorResponse(error)
++  } finally {
++    if (lockHeld) await releaseRotationLock(admin, owner)
++  }
++})
+diff --git a/supabase/migrations/20260916213000_bank_account_cache.sql b/supabase/migrations/20260916213000_bank_account_cache.sql
+new file mode 100644
+index 0000000..e56867a
+--- /dev/null
++++ b/supabase/migrations/20260916213000_bank_account_cache.sql
+@@ -0,0 +1,26 @@
++create table if not exists public.bank_account_cache (
++  bank text primary key check (bank in ('monobank', 'novapay')),
++  balance numeric(14, 2),
++  updated_at timestamptz,
++  account jsonb not null default '{}'::jsonb,
++  receipts jsonb not null default '[]'::jsonb,
++  period_from timestamptz,
++  period_to timestamptz
++);
++
++insert into public.bank_account_cache (bank)
++values ('monobank'), ('novapay')
++on conflict (bank) do nothing;
++
++alter table public.bank_account_cache enable row level security;
++
++revoke all on table public.bank_account_cache from public, anon, authenticated;
++grant select on table public.bank_account_cache to authenticated;
++grant all on table public.bank_account_cache to service_role;
++
++drop policy if exists bank_account_cache_read_authenticated on public.bank_account_cache;
++create policy bank_account_cache_read_authenticated
++on public.bank_account_cache
++for select
++to authenticated
++using (lower(coalesce(auth.jwt() ->> 'email', '')) <> 'guest@gmail.com');
