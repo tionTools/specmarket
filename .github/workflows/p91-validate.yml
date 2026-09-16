@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           git apply "$RUNNER_TEMP/91.patch"
           git diff --check
-          git diff --name-only | sort > "$RUNNER_TEMP/actual-scope.txt"
+          { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$RUNNER_TEMP/actual-scope.txt"
           cat > "$RUNNER_TEMP/expected-scope.txt" <<'EOF'
           android/app/build.gradle.kts
           android/app/google-services.json
@@ -93,5 +93,5 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          git diff --name-only | sort > "$RUNNER_TEMP/final-scope.txt"
+          { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$RUNNER_TEMP/final-scope.txt"
           diff -u "$RUNNER_TEMP/expected-scope.txt" "$RUNNER_TEMP/final-scope.txt"
