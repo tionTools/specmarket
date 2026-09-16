@@ -12,6 +12,10 @@ import android.os.Build
 import java.math.RoundingMode
 
 private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
+private const val NEW_ORDER_DEDUP_PREFS = "new_order_notification_dedupe"
+private const val NEW_ORDER_DEDUP_PREFIX = "order:"
+private const val NEW_ORDER_DEDUP_TTL_MS = 7L * 24L * 60L * 60L * 1000L
+private val newOrderNotificationDedupLock = Any()
 const val EXTRA_OPEN_ORDER_ID = "ua.orders.crm.extra.OPEN_ORDER_ID"
 
 data class PushOrderNotification(
@@ -39,6 +43,24 @@ fun Context.canPostOrderNotifications(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+private fun Context.claimNewOrderNotification(orderId: String): Boolean = synchronized(newOrderNotificationDedupLock) {
+    val preferences = getSharedPreferences(NEW_ORDER_DEDUP_PREFS, Context.MODE_PRIVATE)
+    val key = "$NEW_ORDER_DEDUP_PREFIX$orderId"
+    val now = System.currentTimeMillis()
+    val previous = preferences.getLong(key, 0L)
+    if (previous > 0L && now - previous < NEW_ORDER_DEDUP_TTL_MS) return@synchronized false
+
+    val editor = preferences.edit()
+    preferences.all.forEach { (entryKey, value) ->
+        if (entryKey.startsWith(NEW_ORDER_DEDUP_PREFIX)) {
+            val timestamp = value as? Long ?: 0L
+            if (timestamp <= 0L || now - timestamp >= NEW_ORDER_DEDUP_TTL_MS) editor.remove(entryKey)
+        }
+    }
+    editor.putLong(key, now).apply()
+    true
+}
+
 fun Context.showNewOrderNotification(order: Order) {
     val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
     showNewOrderNotification(
@@ -53,7 +75,7 @@ fun Context.showNewOrderNotification(order: Order) {
 }
 
 fun Context.showNewOrderNotification(order: PushOrderNotification) {
-    if (!canPostOrderNotifications()) return
+    if (!canPostOrderNotifications() || !claimNewOrderNotification(order.orderId)) return
     val manager = getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(
         NotificationChannel(
