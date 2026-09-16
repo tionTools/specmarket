@@ -1,0 +1,44 @@
+Patch 89 — открывать конкретный заказ по нажатию на Android-уведомление
+
+База main: 884a99807e63d052f47285d085189e59ff5d86b9
+
+Причина подтверждена по текущему коду:
+- OrderNotification создаёт Intent только на MainActivity.
+- ID заказа в Intent сейчас не передаётся.
+- MainActivity не обрабатывает onNewIntent и не знает, какой заказ был нажат в шторке.
+- Поэтому нажатие на уведомление может только открыть приложение, но не конкретный заказ.
+
+Исправление:
+- уведомление передаёт `order.id` через EXTRA_OPEN_ORDER_ID;
+- MainActivity читает этот ID и при холодном старте, и через onNewIntent, если приложение уже открыто;
+- OrdersApp после восстановления авторизованной сессии вызывает `vm.open(orderId)`;
+- если открыт экран настроек или подтверждение другого заказа, они закрываются перед переходом;
+- после обработки extra очищается, чтобы поворот/пересоздание Activity не открывали заказ повторно;
+- versionCode 13 -> 14, versionName 0.13 -> 0.14.
+
+Scope:
+- android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+- android/app/src/main/java/ua/orders/crm/MainActivity.kt
+- android/app/build.gradle.kts
+
+Не менять:
+- Realtime-логику Patch 88;
+- OrdersViewModel/OrdersRepository;
+- backend/Supabase/frontend;
+- applicationId и signing infrastructure;
+- AGENTS.md.
+
+Проверка:
+- брать свежий 89.patch из origin/chatgpt-patches;
+- база должна быть ровно 884a99807e63d052f47285d085189e59ff5d86b9; если main изменился — остановиться;
+- `git apply --check 89.patch` без ручной адаптации;
+- после применения `git diff --check`, scope ровно три файла выше;
+- прогнать штатный scripts/android-check.ps1: testDebugUnitTest, lintDebug, assembleRelease, подпись локально или в CI;
+- commit/push только через существующий GitHub SSH;
+- дождаться GitHub Actions Android APK.
+
+Ручная проверка после установки APK 0.14:
+1. Получить новый заказ и дождаться Android-уведомления.
+2. Нажать уведомление при свёрнутом приложении — должна открыться карточка именно этого заказа в детальном виде.
+3. Повторить при уже открытом приложении — должен открыться заказ из нажатого уведомления.
+4. Проверить, что кнопка Назад возвращает к списку заказов.
