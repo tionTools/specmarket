@@ -151,11 +151,143 @@ function normalizeCollection(wrapper, itemKey) {
 }
 
 function finiteNumber(value, field) {
-  const number = Number(text(value))
+  const number = Number(text(value).replace(',', '.'))
   if (!Number.isFinite(number)) {
     throw new HttpError(502, 'NOVAPAY_INVALID_RESPONSE', `NovaPay returned invalid ${field}.`)
   }
   return number
+}
+
+function optionalNumber(value) {
+  const normalized = text(value).replace(',', '.')
+  if (!normalized) return null
+  const number = Number(normalized)
+  return Number.isFinite(number) ? number : null
+}
+
+function normalizeXmlRecord(record) {
+  if (!isRecord(record)) return {}
+  const normalized = {}
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = key.startsWith('@_') ? key.slice(2) : key
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      normalized[normalizedKey] = String(value).trim()
+      continue
+    }
+    if (isRecord(value) && typeof value['#text'] === 'string') {
+      normalized[normalizedKey] = text(value['#text'])
+    }
+  }
+  return normalized
+}
+
+function parseNestedXmlCollection(rawXml, rootName, itemName) {
+  const xml = text(rawXml)
+  if (!xml) return []
+
+  let document
+  try {
+    document = parser.parse(xml)
+  } catch {
+    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', `NovaPay ${rootName} XML is invalid.`)
+  }
+
+  const root = findKey(document, rootName)
+  if (!isRecord(root)) return []
+  return normalizeCollection(root, itemName).map(normalizeXmlRecord)
+}
+
+function pick(record, ...keys) {
+  for (const key of keys) {
+    const value = text(record?.[key])
+    if (value) return value
+  }
+  return ''
+}
+
+function normalizeIban(value) {
+  return text(value).replaceAll(' ', '').toUpperCase()
+}
+
+function isIncomingExtractDocument(document, accountIban) {
+  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
+  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
+  if (creditIban) return creditIban === accountIban
+  if (debitIban) return debitIban !== accountIban
+
+  const creditAmount = optionalNumber(pick(document, 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
+  const debitAmount = optionalNumber(pick(document, 'CrncyDebit', 'DebitAmount', 'Debit', 'SumDebit'))
+  if ((creditAmount ?? 0) > 0) return true
+  if ((debitAmount ?? 0) > 0) return false
+
+  const direction = pick(document, 'DbtCdtInd', 'Direction', 'OperationType').toUpperCase()
+  return ['CRDT', 'CREDIT', 'C', 'K', 'КРЕДИТ'].includes(direction)
+}
+
+function extractReceipt(document) {
+  const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
+  if (amount === null || amount <= 0) return null
+
+  const dayDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
+  const dayTime = pick(document, 'Time', 'OrgTime', 'PaymentTime')
+  const date = [dayDate, dayTime].filter(Boolean).join(', ')
+  const balance = optionalNumber(pick(document, 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'))
+
+  return {
+    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
+    date,
+    description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
+    amount,
+    balance,
+    comment: pick(document, 'Purpose', 'Comment', 'Description'),
+  }
+}
+
+function formatNovaDate(date) {
+  const parts = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(date)
+  const get = (type) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${get('day')}.${get('month')}.${get('year')}`
+}
+
+function normalizeCache(row) {
+  if (!row) {
+    return {
+      bank: 'novapay',
+      balance: null,
+      updatedAt: null,
+      account: {},
+      receipts: [],
+      period: { from: null, to: null },
+    }
+  }
+
+  return {
+    bank: 'novapay',
+    balance: optionalNumber(row.balance),
+    updatedAt: row.updated_at ?? null,
+    account: isRecord(row.account) ? row.account : {},
+    receipts: Array.isArray(row.receipts) ? row.receipts : [],
+    period: {
+      from: row.period_from ?? null,
+      to: row.period_to ?? null,
+    },
+  }
+}
+
+async function readCache(admin) {
+  const { data, error } = await admin
+    .from('bank_account_cache')
+    .select('bank,balance,updated_at,account,receipts,period_from,period_to')
+    .eq('bank', 'novapay')
+    .maybeSingle()
+
+  if (error) throw new HttpError(500, 'BANK_CACHE_READ_FAILED', 'Failed to read cached bank data.')
+  return normalizeCache(data)
 }
 
 function errorResponse(error) {
@@ -167,8 +299,8 @@ function errorResponse(error) {
       ...(error.details ? { details: error.details } : {}),
     }, { status: error.status, headers: corsHeaders })
   }
-  console.error('NovaPay balance failed with an unexpected error.')
-  return Response.json({ ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay balance request failed.' }, {
+  console.error('NovaPay data request failed with an unexpected error.')
+  return Response.json({ ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay request failed.' }, {
     status: 500,
     headers: corsHeaders,
   })
@@ -183,10 +315,9 @@ Deno.serve(async (request) => {
   const url = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  const login = text(Deno.env.get('NOVAPAY_LOGIN'))
   const authorization = request.headers.get('Authorization')
 
-  if (!url || !anonKey || !serviceKey || !login) {
+  if (!url || !anonKey || !serviceKey) {
     return Response.json({ ok: false, message: 'NovaPay configuration is incomplete.' }, { status: 500, headers: corsHeaders })
   }
   if (!authorization) {
@@ -199,7 +330,29 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
   }
 
+  let body = {}
+  try {
+    body = await request.json()
+  } catch {
+    body = {}
+  }
+  const refresh = isRecord(body) && body.refresh === true
   const admin = createClient(url, serviceKey)
+
+  if (!refresh) {
+    try {
+      const cached = await readCache(admin)
+      return Response.json({ ok: true, refreshed: false, ...cached }, { headers: corsHeaders })
+    } catch (error) {
+      return errorResponse(error)
+    }
+  }
+
+  const login = text(Deno.env.get('NOVAPAY_LOGIN'))
+  if (!login) {
+    return Response.json({ ok: false, message: 'NovaPay configuration is incomplete.' }, { status: 500, headers: corsHeaders })
+  }
+
   try {
     const jwt = await getValidNovaPayJwt({
       admin,
@@ -259,24 +412,73 @@ Deno.serve(async (request) => {
 
     const account = activeUahAccounts[0]
     const accountId = finiteNumber(account.id, 'account id')
+    const accountIban = normalizeIban(account.IBAN || account.iban)
     const balanceResult = await soapCall('GetAccountRest', {
       request_ref: requestRef(),
       jwt,
       account_id: accountId,
     }, true)
 
+    const now = new Date()
+    const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const dateFrom = formatNovaDate(fromDate)
+    const dateTo = formatNovaDate(now)
+    const extractResult = await soapCall('GetAccountExtract', {
+      request_ref: requestRef(),
+      jwt,
+      account_id: accountId,
+      date_from: dateFrom,
+      date_to: dateTo,
+    }, true)
+
+    const extractDocuments = parseNestedXmlCollection(extractResult.extract, 'Extract', 'Docs')
+    const receipts = extractDocuments
+      .filter((document) => isIncomingExtractDocument(document, accountIban))
+      .map(extractReceipt)
+      .filter((receipt) => receipt !== null)
+
+    const available = finiteNumber(balanceResult.available_balance, 'available balance')
+    const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
+    const projected = finiteNumber(balanceResult.projected_balance, 'projected balance')
+    const updatedAt = new Date().toISOString()
+    const periodFrom = fromDate.toISOString()
+    const periodTo = now.toISOString()
+    const cachedAccount = {
+      id: accountId,
+      iban: accountIban,
+      currency: text(account.currency),
+      confirmed,
+      projected,
+    }
+
+    const { error: cacheError } = await admin
+      .from('bank_account_cache')
+      .update({
+        balance: available,
+        updated_at: updatedAt,
+        account: cachedAccount,
+        receipts,
+        period_from: periodFrom,
+        period_to: periodTo,
+      })
+      .eq('bank', 'novapay')
+
+    if (cacheError) throw new HttpError(500, 'BANK_CACHE_WRITE_FAILED', 'Failed to save NovaPay data.')
+
+    const diagnostics = extractDocuments.length > 0 && receipts.length === 0
+      ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
+      : undefined
+
     return Response.json({
       ok: true,
-      account: {
-        id: accountId,
-        iban: text(account.IBAN || account.iban),
-        currency: text(account.currency),
-      },
-      balance: {
-        confirmed: finiteNumber(balanceResult.confirmed_balance, 'confirmed balance'),
-        available: finiteNumber(balanceResult.available_balance, 'available balance'),
-        projected: finiteNumber(balanceResult.projected_balance, 'projected balance'),
-      },
+      refreshed: true,
+      bank: 'novapay',
+      balance: available,
+      updatedAt,
+      account: cachedAccount,
+      receipts,
+      period: { from: periodFrom, to: periodTo },
+      ...(diagnostics ? { diagnostics } : {}),
     }, { headers: corsHeaders })
   } catch (error) {
     if (error instanceof NovaPayAuthError) {
