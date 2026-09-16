@@ -1,0 +1,96 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -18,8 +18,8 @@ android {
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 13
+-        versionName = "0.13"
++        versionCode = 14
++        versionName = "0.14"
+     }
+     signingConfigs {
+         create("release") {
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+@@ -11,6 +11,7 @@ import android.os.Build
+ import java.math.RoundingMode
+ 
+ private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
++const val EXTRA_OPEN_ORDER_ID = "ua.orders.crm.extra.OPEN_ORDER_ID"
+ 
+ fun Context.canPostOrderNotifications(): Boolean =
+     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+@@ -31,6 +32,7 @@ fun Context.showNewOrderNotification(order: Order) {
+         },
+     )
+     val intent = Intent(this, MainActivity::class.java).apply {
++        putExtra(EXTRA_OPEN_ORDER_ID, order.id)
+         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+     }
+     val pendingIntent = PendingIntent.getActivity(
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -43,10 +43,31 @@ import java.math.RoundingMode
+ import kotlinx.coroutines.launch
+ 
+ class MainActivity : ComponentActivity() {
++    private var requestedOrderId by mutableStateOf<String?>(null)
++
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+-        setContent { AppearanceHost { OrdersApp() } }
++        requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
++        setContent {
++            AppearanceHost {
++                OrdersApp(
++                    openOrderId = requestedOrderId,
++                    onOrderOpened = ::clearRequestedOrder,
++                )
++            }
++        }
++    }
++
++    override fun onNewIntent(intent: Intent) {
++        super.onNewIntent(intent)
++        setIntent(intent)
++        requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
++    }
++
++    private fun clearRequestedOrder() {
++        requestedOrderId = null
++        intent.removeExtra(EXTRA_OPEN_ORDER_ID)
+     }
+ }
+ 
+@@ -132,7 +153,11 @@ private fun openTelegram(context: Context, phone: String) {
+ }
+ 
+ @Composable
+-fun OrdersApp(vm: OrdersViewModel = viewModel()) {
++fun OrdersApp(
++    vm: OrdersViewModel = viewModel(),
++    openOrderId: String? = null,
++    onOrderOpened: () -> Unit = {},
++) {
+     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
+     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
+     NotificationPermissionGate(vm)
+@@ -143,6 +168,14 @@ fun OrdersApp(vm: OrdersViewModel = viewModel()) {
+         vm.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
+     }
+     LaunchedEffect(vm.email) { if (vm.email == null) { settings = false; confirmationId = null } }
++    LaunchedEffect(openOrderId, vm.email, vm.initializing) {
++        if (openOrderId != null && vm.email != null && !vm.initializing) {
++            settings = false
++            confirmationId = null
++            vm.open(openOrderId)
++            onOrderOpened()
++        }
++    }
+     BackHandler(settings || vm.selectedId != null) {
+         if (settings) settings = false else vm.closeDetail()
+     }
