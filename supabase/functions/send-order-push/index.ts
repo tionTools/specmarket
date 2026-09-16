@@ -60,7 +60,9 @@ Deno.serve(async (request) => {
     if (items.length || attempt === 4) break
     await delay(250)
   }
-  const total = items.reduce((sum, item) => sum + Number(item.price ?? 0) * Number(item.quantity ?? 0), 0)
+  const total = items.length
+    ? items.reduce((sum, item) => sum + Number(item.price ?? 0) * Number(item.quantity ?? 0), 0)
+    : Number.NaN
 
   const { data: deviceRows, error: devicesError } = await admin
     .from('crm_push_devices')
