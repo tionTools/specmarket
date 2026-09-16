@@ -1,0 +1,79 @@
+Patch 86 — Prom: источник заказа и комиссия «Оплатити частинами»
+
+База main:
+26474b790ec56dc33a8c84d8fcd9913e99b291c1
+
+Patch file:
+86.patch
+
+Patch SHA-256:
+af55ec3bf0aa5c8d474f29b094a82151fcf5302127f3058ad8c186616951b023
+
+Подтверждённая диагностика заказа Prom №427999580:
+- Prom показывает «Замовлення з додатку»;
+- API: source = mobile_catalog_app;
+- API: utm.source = prom;
+- API: payment_data.rpay_parts.commission = 3.70 — это процент, НЕ сумма денег;
+- API: payment_data.rpay_parts.commission_amount = 20.54 — это сумма комиссии в грн;
+- комиссия за заказ в Prom = 98.46 грн;
+- правильный итог роялти = 98.46 + 20.54 = 119.00 грн;
+- CRM сейчас показывает 122.70 грн, потому что 3.70 ошибочно прибавляется как гривны;
+- текущие 17.74% комиссии позиции корректны и не должны включать фиксированную комиссию «Оплатити частинами»;
+- заказ должен отображаться как «Пром», не «Сайт».
+
+Что исправляет Patch 86:
+1. Источник заказа отделяется от суммы комиссий.
+   - source=mobile_catalog_app всегда означает НЕ «Сайт»;
+   - для остальных источников сохраняется существующий точный fallback на prosale_commission type=2 / title «с сайта» для совместимости со старыми заказами;
+   - не придумывать и не расширять enum source без подтверждённых данных API.
+2. Для payment_data.rpay_parts учитывать как деньги только commission_amount/commissionAmount.
+   - commission=3.70 не прибавлять к royalty_amount;
+   - commission_amount=20.54 прибавлять как фиксированную комиссию уровня заказа.
+3. Фиксированные комиссии уровня заказа добавляются к royalty_amount пропорционально позициям, но не входят в royalty_percent позиции.
+4. Обычная CPA/item commission логика остаётся прежней.
+5. Реальная prosale-комиссия заказа с сайта по-прежнему входит в royalty_amount.
+
+Scope — ровно 3 файла:
+- supabase/functions/_shared/prom-order-financials.ts (новый)
+- supabase/functions/_shared/prom-order-financials_test.ts (новый)
+- supabase/functions/sync-prom-orders/index.ts
+
+Не менять:
+- frontend, включая src/features/orders/display.ts;
+- Android, versionCode/versionName, Android harness и signing;
+- БД/migrations;
+- другие marketplace sync;
+- delivery/shipping/payment-status logic;
+- AGENTS.md;
+- PROM_API_TOKEN или другие credentials;
+- диагностические route/endpoint.
+
+Обязательные проверки бизнес-логики:
+1. Fixture заказа №427999580:
+   - source=mobile_catalog_app;
+   - rpay_parts.commission=3.70;
+   - rpay_parts.commission_amount=20.54;
+   => isPromWebsiteOrder=false;
+   => order-level commission=20.54, не 24.24;
+   => при базовой комиссии 98.46 общий royalty_amount=119.00;
+   => royalty_percent остаётся рассчитан только по базовой/item комиссии, для 98.46 из 555 это ~17.74%.
+2. prosale_commission type=2 / title «Комісія за замовлення з сайту» без подтверждённого mobile_catalog_app остаётся website marker и его денежная сумма сохраняется.
+3. source=mobile_catalog_app имеет приоритет над legacy website-marker эвристикой для классификации источника.
+4. commissionAmount/item commission, CPA allocation и manual royalty preservation не должны регрессировать.
+
+Codex:
+1. НЕ трогай основной dirty worktree. Работай в отдельном чистом worktree от origin/main.
+2. Fetch refs и проверь, что origin/main всё ещё ровно 26474b790ec56dc33a8c84d8fcd9913e99b291c1. Если main изменился — STOP; Patch 86 вручную не адаптировать.
+3. Прочитай AGENTS.md. AGENTS.md не изменять.
+4. Получи 86.patch byte-for-byte из origin/chatgpt-patches и проверь SHA-256: af55ec3bf0aa5c8d474f29b094a82151fcf5302127f3058ad8c186616951b023. Несовпадение => STOP.
+5. Выполни git apply --check 86.patch. При любой ошибке STOP без --reject, ручного исправления или редизайна Patch.
+6. Примени Patch и сразу проверь git diff --name-only: должны быть ровно 3 scope-файла выше.
+7. Если Deno уже доступен в текущем окружении, запусти `deno test supabase/functions/_shared/prom-order-financials_test.ts`. Если Deno отсутствует — НЕ устанавливай и не перестраивай tooling; зафиксируй это в отчёте.
+8. Запусти только обычные применимые НЕ-Android проверки проекта, уже существующие в package scripts/environment (format/type-check/lint/build). Не создавай новые среды и не запускай Android harness.
+9. Выполни git diff --check и полностью просмотри diff. Проверь четыре бизнес-сценария выше по коду/тесту.
+10. Перед commit снова fetch origin/main и убедись, что база не изменилась.
+11. `git add` только три scope-пути; `git add .` запрещён. Commit: `Fix Prom order source and installment commission`.
+12. Push в main только через существующий GitHub SSH. Если SSH push не работает — STOP; не переходить на HTTPS/browser auth/new credentials.
+13. После успешного push deploy только Supabase Edge Function `sync-prom-orders` через существующую Supabase конфигурацию/авторизацию. DB push, migrations и другие functions не выполнять.
+14. Не создавать временный diagnostic route. Если после deploy нельзя безопасно выполнить обычный авторизованный read/sync заказа №427999580 без изменения tooling — просто сообщи, что deploy завершён; пользователь сам нажмёт обновление заказа в CRM.
+15. Финальный отчёт краткий: commit SHA, точные 3 файла, результаты проверок, результат deploy sync-prom-orders. Отдельно подтвердить ожидаемое исправление заказа №427999580: «Пром», royalty 119.00, percent ~17.74. Android workflow не нужен, потому что Patch 86 backend-only.
