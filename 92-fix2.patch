@@ -1,0 +1,21 @@
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+index 4eb89f4..0000000 100644
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -347,6 +347,16 @@ Deno.serve(async (request) => {
+       },
+     }, { headers: corsHeaders })
+   } catch (error) {
++    if (error instanceof HttpError && error.code === 'NOVAPAY_API_ERROR') {
++      error.details = {
++        ...(isRecord(error.details) ? error.details : {}),
++        login: {
++          length: login.length,
++          startsWithPlus380: login.startsWith('+380'),
++          suffix2: login.slice(-2),
++        },
++      }
++    }
+     if (error instanceof NovaPayTransportError) {
+       return errorResponse(new HttpError(502, 'NOVAPAY_TRANSPORT_ERROR', 'NovaPay is temporarily unreachable.'))
+     }
