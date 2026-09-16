@@ -78,11 +78,17 @@ index 16f0552..57225a3 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
-index 8000873..6d42a82 100644
+index 8000873..26bd4cf 100644
 --- a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
 +++ b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
-@@ -14,11 +14,45 @@ import java.math.RoundingMode
+@@ -12,14 +12,70 @@ import android.os.Build
+ import java.math.RoundingMode
+ 
  private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
++private const val NEW_ORDER_DEDUP_PREFS = "new_order_notification_dedupe"
++private const val NEW_ORDER_DEDUP_PREFIX = "order:"
++private const val NEW_ORDER_DEDUP_TTL_MS = 7L * 24L * 60L * 60L * 1000L
++private val newOrderNotificationDedupLock = Any()
  const val EXTRA_OPEN_ORDER_ID = "ua.orders.crm.extra.OPEN_ORDER_ID"
  
 +data class PushOrderNotification(
@@ -110,7 +116,26 @@ index 8000873..6d42a82 100644
      Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
          checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
  
++private fun Context.claimNewOrderNotification(orderId: String): Boolean = synchronized(newOrderNotificationDedupLock) {
++    val preferences = getSharedPreferences(NEW_ORDER_DEDUP_PREFS, Context.MODE_PRIVATE)
++    val key = "$NEW_ORDER_DEDUP_PREFIX$orderId"
++    val now = System.currentTimeMillis()
++    val previous = preferences.getLong(key, 0L)
++    if (previous > 0L && now - previous < NEW_ORDER_DEDUP_TTL_MS) return@synchronized false
++
++    val editor = preferences.edit()
++    preferences.all.forEach { (entryKey, value) ->
++        if (entryKey.startsWith(NEW_ORDER_DEDUP_PREFIX)) {
++            val timestamp = value as? Long ?: 0L
++            if (timestamp <= 0L || now - timestamp >= NEW_ORDER_DEDUP_TTL_MS) editor.remove(entryKey)
++        }
++    }
++    editor.putLong(key, now).apply()
++    true
++}
++
  fun Context.showNewOrderNotification(order: Order) {
+-    if (!canPostOrderNotifications()) return
 +    val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
 +    showNewOrderNotification(
 +        PushOrderNotification(
@@ -124,10 +149,11 @@ index 8000873..6d42a82 100644
 +}
 +
 +fun Context.showNewOrderNotification(order: PushOrderNotification) {
-     if (!canPostOrderNotifications()) return
++    if (!canPostOrderNotifications() || !claimNewOrderNotification(order.orderId)) return
      val manager = getSystemService(NotificationManager::class.java)
      manager.createNotificationChannel(
-@@ -31,23 +65,23 @@ fun Context.showNewOrderNotification(order: Order) {
+         NotificationChannel(
+@@ -31,23 +87,23 @@ fun Context.showNewOrderNotification(order: Order) {
          },
      )
      val intent = Intent(this, MainActivity::class.java).apply {
