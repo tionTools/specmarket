@@ -1,0 +1,181 @@
+diff --git a/supabase/functions/_shared/prom-order-financials.ts b/supabase/functions/_shared/prom-order-financials.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-order-financials.ts
+@@ -0,0 +1,65 @@
++type RecordValue = Record<string, unknown>
++
++const asRecord = (value: unknown): RecordValue =>
++  value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
++const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
++const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
++const pick = (record: RecordValue, ...keys: string[]) =>
++  keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
++const readable = (value: unknown) => {
++  if (typeof value === 'string' || typeof value === 'number') return String(value)
++  const record = asRecord(value)
++  return text(pick(record, 'title', 'name', 'label', 'value', 'description'))
++}
++
++function hasWebsiteCommissionMarker(value: unknown, depth = 0): boolean {
++  if (depth > 4 || Array.isArray(value)) return false
++  const record = asRecord(value)
++  for (const [key, candidate] of Object.entries(record)) {
++    if (/prosale/i.test(key)) {
++      const commission = asRecord(candidate)
++      const title = readable(commission.title).toLowerCase()
++      if (number(commission.type) === 2 || /(?:с сайта|з сайту|site|website)/i.test(title)) return true
++      continue
++    }
++    if (/(?:product|item|position)/i.test(key)) continue
++    if (candidate && typeof candidate === 'object' && hasWebsiteCommissionMarker(candidate, depth + 1)) return true
++  }
++  return false
++}
++
++export function isPromWebsiteOrder(value: unknown): boolean {
++  const order = asRecord(value)
++  const source = text(order.source).trim().toLowerCase()
++  if (source === 'mobile_catalog_app') return false
++  return hasWebsiteCommissionMarker(order)
++}
++
++// Order-level fixed commissions are added on top of item/catalog commission.
++// In rpay_parts, `commission` is a percentage (3.70), while `commission_amount`
++// is the money amount (20.54). Only the money amount belongs in royalty.
++export function promOrderLevelCommission(value: unknown, depth = 0): number {
++  if (depth > 4 || Array.isArray(value)) return 0
++  const record = asRecord(value)
++  return Object.entries(record).reduce((total, [key, candidate]) => {
++    if (/rpay[_-]?parts/i.test(key)) {
++      const parts = asRecord(candidate)
++      return total + number(pick(parts, 'commission_amount', 'commissionAmount'))
++    }
++    if (/prosale/i.test(key)) {
++      const commission = asRecord(candidate)
++      const title = readable(commission.title).toLowerCase()
++      if (number(commission.type) === 2 || /(?:с сайта|з сайту|site|website)/i.test(title)) {
++        return total + number(pick(commission, 'value', 'amount', 'price'))
++      }
++      return total
++    }
++    if (/(?:cpa|catalog)/i.test(key)) return total
++    if (/(?:commission|royalty)/i.test(key)) {
++      const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
++      return total + amount
++    }
++    if (/(?:product|item|position)/i.test(key)) return total
++    return total + promOrderLevelCommission(candidate, depth + 1)
++  }, 0)
++}
+diff --git a/supabase/functions/_shared/prom-order-financials_test.ts b/supabase/functions/_shared/prom-order-financials_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-order-financials_test.ts
+@@ -0,0 +1,42 @@
++import { isPromWebsiteOrder, promOrderLevelCommission } from './prom-order-financials.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('Prom mobile app installment commission uses amount, not percentage', () => {
++  const order = {
++    source: 'mobile_catalog_app',
++    cpa_commission: { amount: 98.46 },
++    payment_data: {
++      rpay_parts: {
++        commission: 3.70,
++        commission_amount: 20.54,
++      },
++    },
++  }
++
++  assert(!isPromWebsiteOrder(order))
++  assert(promOrderLevelCommission(order) === 20.54)
++  assert(Math.abs(98.46 + promOrderLevelCommission(order) - 119.00) < 1e-9)
++})
++
++Deno.test('Prom website marker remains separate from order-level commission amount', () => {
++  const websiteOrder = {
++    prosale_commission: {
++      type: 2,
++      title: 'Комісія за замовлення з сайту',
++      amount: 15,
++    },
++  }
++
++  assert(isPromWebsiteOrder(websiteOrder))
++  assert(promOrderLevelCommission(websiteOrder) === 15)
++
++  const mobileOrderWithMarker = {
++    source: 'mobile_catalog_app',
++    prosale_commission: websiteOrder.prosale_commission,
++  }
++  assert(!isPromWebsiteOrder(mobileOrderWithMarker))
++  assert(promOrderLevelCommission(mobileOrderWithMarker) === 15)
++})
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -17,2 +17,3 @@
+ import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
++import { isPromWebsiteOrder, promOrderLevelCommission } from '../_shared/prom-order-financials.ts'
+ 
+@@ -253,29 +254,2 @@
+ 
+-// Комиссии уровня заказа (включая «комісія за замовлення з сайту»).
+-// Товары и позиции сюда не заходят, чтобы не посчитать одну комиссию дважды.
+-function orderLevelCommission(value: unknown, depth = 0): number {
+-  if (depth > 4 || Array.isArray(value)) return 0
+-  const record = asRecord(value)
+-  return Object.entries(record).reduce((total, [key, candidate]) => {
+-    // type=2 в prosale_commission — точная метка Prom «Комиссия за заказ с сайта».
+-    // Это фиксированная комиссия всего заказа, а не комиссия каталога по позиции.
+-    if (/prosale/i.test(key)) {
+-      const commission = asRecord(candidate)
+-      const title = readable(commission.title).toLowerCase()
+-      if (number(commission.type) === 2 || /(?:с сайта|з сайту|site|website)/i.test(title)) {
+-        return total + number(pick(commission, 'value', 'amount', 'price'))
+-      }
+-      return total
+-    }
+-    // CPA/каталог относятся к позиции и не должны дублироваться на уровне заказа.
+-    if (/(?:cpa|catalog)/i.test(key)) return total
+-    if (/(?:commission|royalty)/i.test(key)) {
+-      const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
+-      return total + amount
+-    }
+-    if (/(?:product|item|position)/i.test(key)) return total
+-    return total + orderLevelCommission(candidate, depth + 1)
+-  }, 0)
+-}
+-
+ function dateParts(value: unknown) {
+@@ -961,3 +935,4 @@
+     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+-    const websiteOrderCommission = orderLevelCommission(order)
++    const orderLevelCommissionAmount = promOrderLevelCommission(order)
++    const isWebsiteOrder = isPromWebsiteOrder(order)
+     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
+@@ -998,3 +973,3 @@
+           : undefined,
+-        hasWebsiteCommission: websiteOrderCommission > 0,
++        hasWebsiteCommission: isWebsiteOrder,
+         shippingSource: resolvedShipping.shippingSource,
+@@ -1132,10 +1107,10 @@
+       const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
+-      const websiteCommission = websiteOrderCommission && itemsAmount
+-        ? websiteOrderCommission * (price * quantity / itemsAmount)
++      const orderLevelCommissionShare = orderLevelCommissionAmount && itemsAmount
++        ? orderLevelCommissionAmount * (price * quantity / itemsAmount)
+         : 0
+-      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || websiteOrderCommission !== 0
++      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || orderLevelCommissionAmount !== 0
+       const royaltyAmount = hasApiCommission
+-        ? number(cpaCommission) + websiteCommission
++        ? number(cpaCommission) + orderLevelCommissionShare
+         : previous?.royalty_amount ?? null
+-      // Комиссия сайта — фиксированная сумма, не процент от позиции.
++      // Фиксированные комиссии уровня заказа не входят в процент комиссии позиции.
+       const royaltyPercent = hasApiCommission
