@@ -1,0 +1,68 @@
+Patch 87 — Prom «Оплатити частинами»: плашка в шапке и блоке доставки
+
+База main:
+53864146744f9e4bdc0db729a165320a58732c89
+
+Patch file:
+87.patch
+
+Patch SHA-256:
+0aab02ec9ace6da4be7ff9c97e6240e7592fb84bc77306ff6aa69e6083cef8d9
+
+Источник признака:
+- только реальный Prom API marker `payment_data.rpay_parts`;
+- без распознавания текста payment method;
+- после первого подтверждённого marker `true` сохраняется при последующих sync, если сокращённый Prom payload не прислал `rpay_parts`.
+
+Что делает Patch 87:
+- сохраняет `delivery.isInstallmentPayment` для Prom-заказов с `payment_data.rpay_parts`;
+- в строке/шапке заказа вместо обычной Prom-плашки «Оплачено» показывает «Оплачено частями» с маленькой фиолетово-жёлтой пиктограммой;
+- такую же плашку показывает в заголовке блока «Доставка»;
+- обычные Prom-заказы продолжают показывать обычное «Оплачено»;
+- ошибка оплаты и остальные существующие статусы не меняются;
+- расчёт роялти, источник заказа и Patch 86 не меняются.
+
+Scope — ровно 5 файлов:
+- src/features/orders/types.ts
+- src/pages/HomeView.vue
+- supabase/functions/_shared/prom-order-financials.ts
+- supabase/functions/_shared/prom-order-financials_test.ts
+- supabase/functions/sync-prom-orders/index.ts
+
+Не менять:
+- Android;
+- БД/migrations;
+- расчёт роялти/commission;
+- определение source/Сайт/Пром;
+- другие marketplace sync;
+- AGENTS.md;
+- credentials/diagnostic routes.
+
+Проверено перед публикацией:
+- база сверена с актуальным origin/main;
+- Patch сформирован реальным git diff по точным текущим фрагментам затрагиваемых файлов;
+- local git apply --check / apply / git diff --check на проверочной базе — PASS;
+- scope ровно 5 файлов;
+- опубликованный `87.patch` byte-for-byte совпадает с проверенным файлом (Git blob SHA `60dd8c94eba4024f29a4592634984bc7d972f9bd`).
+
+Codex:
+1. НЕ трогай основной dirty worktree. Работай в отдельном чистом worktree от origin/main.
+2. Fetch refs и проверь, что origin/main всё ещё ровно `53864146744f9e4bdc0db729a165320a58732c89`. Если main изменился — STOP; Patch 87 вручную не адаптировать.
+3. Прочитай AGENTS.md. Не изменять AGENTS.md.
+4. Получи актуальный `87.patch` byte-for-byte из origin/chatgpt-patches и проверь SHA-256 `0aab02ec9ace6da4be7ff9c97e6240e7592fb84bc77306ff6aa69e6083cef8d9`. Несовпадение => STOP.
+5. Выполни `git apply --check 87.patch`. Ошибка => STOP без ручного исправления/--reject/редизайна.
+6. Примени Patch. `git diff --name-only` должен показать ровно 5 scope-файлов выше.
+7. Если Deno доступен без изменения tooling — запусти `deno test supabase/functions/_shared/prom-order-financials_test.ts`. Если тот же Windows Access denied — не чинить Deno, просто зафиксировать.
+8. Запусти штатные frontend проверки: format, type-check, lint, build. Android harness не запускать.
+9. Финально: `git diff --check`, полный просмотр diff, scope ровно 5 файлов. Проверить по коду:
+   - rpay_parts => isInstallmentPayment=true;
+   - без rpay_parts и без ранее подтверждённого marker => false;
+   - installment => «Оплачено частями» в шапке и «Доставка»;
+   - обычный оплаченный Prom => прежнее «Оплачено»;
+   - royalty/source logic не изменены.
+10. Перед commit снова fetch origin/main; если база изменилась — STOP.
+11. `git add` только 5 scope-файлов. `git add .` запрещён. Commit: `Show Prom installment payment badges`.
+12. Push в main только через существующий GitHub SSH. При проблеме SSH — STOP, без HTTPS/browser auth/new credentials.
+13. После push отдельно deploy только Supabase Edge Function `sync-prom-orders`. DB push/migrations не выполнять. Frontend deploy — обычный GitHub Actions.
+14. Для уже существующего заказа №427999580 новый marker появится после обычной синхронизации этого заказа из Prom; не создавать diagnostic route.
+15. Итоговый отчёт краткий: commit SHA, 5 файлов, checks, deploy `sync-prom-orders`, frontend workflow/status. Android workflow не нужен.
