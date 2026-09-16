@@ -1,59 +1,8 @@
-Patch 90 — Meest: убрать «OK» из статуса доставки
-
-База main:
-8d3098be11aa7d9f88cec745721d8edd239c4459
-
-Patch file:
-90.patch
-
-Patch SHA-256:
-1ad4494f399b3e0b3c5a4b985d861624444514bfffca2ae0d239c503721e04ed
-
-Что исправляет:
-- Meest `result` принимается и как массив событий, и как одиночный объект события;
-- верхнеуровневые `status=OK/SUCCESS` считаются статусом ответа API, а не статусом отправления;
-- если реальное событие есть, CRM сохраняет его текст и время;
-- если API ещё не дал событий, вместо `OK` показывается `Отправление создано, но не передано на доставку`;
-- code `2` остаётся `created`/не финальным;
-- существующие Meest `Доручено/1622 -> Получено` и остальные перевозчики не меняются.
-
-Scope — ровно 2 файла:
-- supabase/functions/sync-delivery-tracking/carriers/meest.ts
-- supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
-
-Не менять:
-- frontend;
-- Android;
-- marketplace sync;
-- DB/migrations;
-- worker/storage/normalize других перевозчиков;
-- AGENTS.md;
-- secrets/credentials.
-
-Предпубликационная проверка:
-- актуальный origin/main подтверждён: `8d3098be11aa7d9f88cec745721d8edd239c4459`;
-- исходные blobs затрагиваемых файлов точно совпали с current main: `meest.ts` = `5d2fe948ca0d46532b5904c791a82f4c01ad7b94`, `carrier-baseline_test.ts` = `65704640bff747649953091db4934e80c02d82e8`;
-- Patch сформирован реальным `git diff` по этим exact current-main blobs;
-- `git apply --check` — PASS;
-- фактический `git apply` — PASS;
-- `git diff --check` — PASS;
-- `git diff --name-only` — ровно 2 scope-файла;
-- опубликованный `90.patch` byte-for-byte совпадает с проверенным: Git blob SHA `1a72cde3a0209e46a462ff1b50fa1a24305ea5ee`;
-- SHA-256 опубликованного patch: `1ad4494f399b3e0b3c5a4b985d861624444514bfffca2ae0d239c503721e04ed`.
-
-Codex:
-1. Fetch refs. Работай в отдельном чистом worktree; основной worktree не трогать.
-2. Проверь, что origin/main всё ещё ровно `8d3098be11aa7d9f88cec745721d8edd239c4459`. Если изменился — STOP, Patch 90 вручную не адаптировать.
-3. Прочитай `supabase/functions/sync-delivery-tracking/AGENTS.md`; не изменять его.
-4. Получи текущий `90.patch` byte-for-byte из origin/chatgpt-patches и проверь SHA-256 `1ad4494f399b3e0b3c5a4b985d861624444514bfffca2ae0d239c503721e04ed`. Несовпадение => STOP.
-5. Выполни `git apply --check 90.patch`. Ошибка => STOP без ручного исправления/--reject/редизайна.
-6. Примени patch. Scope должен быть ровно 2 файла выше.
-7. Если Deno доступен без изменения tooling — запусти `deno test supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts`. Если локальный `deno.exe` снова даёт Windows `Access denied` — не чинить/не переустанавливать, просто зафиксировать.
-8. Запусти существующие применимые проверки проекта; Android harness не запускать. Затем `git diff --check` и полный просмотр diff.
-9. Проверить по коду сценарии: single-object Meest event + `status=OK` показывает реальный `eventDescr.descrUA` и время; пустой result + `status=OK` не показывает `OK`, а даёт created/non-final; обычный массив событий работает как раньше; `1622/Доручено -> Получено` не сломан.
-10. Перед commit снова fetch origin/main. Если база изменилась — STOP.
-11. `git add` только 2 scope-файла, не `git add .`. Commit: `Fix Meest created tracking status`.
-12. Push в main только через существующий GitHub SSH; при проблеме SSH — STOP, без HTTPS/browser/new credentials.
-13. После push deploy только Supabase Edge Function `sync-delivery-tracking`. DB/migrations не выполнять. Frontend/Android deploy отдельно не нужен.
-14. После deploy обновить tracking заказа/ТТН `723-3447567`: `OK` должен исчезнуть; для текущего состояния ожидается `Відправлення створено, але не передано на доставку` (или российский fallback `Отправление создано, но не передано на доставку`, если Meest не отдаст eventDescr).
-15. Финальный отчёт краткий: commit SHA, 2 файла, checks, Deno result/Access denied, deploy `sync-delivery-tracking`.
+Patch 90
+Base: 8d3098be11aa7d9f88cec745721d8edd239c4459
+SHA256: f86029ac9edd450379a8e75ed094c8a945c48357d0dd84e8c50b928f5ad38d5f
+Blob: b26f62e07cd44c7f88aa0df5c7e5a6bbf5c758de
+Scope: supabase/functions/sync-delivery-tracking/carriers/meest.ts; supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+Verified: git apply --check PASS; actual apply PASS; git diff --check PASS; scope PASS.
+Observed response for 723-3447567: HTTP 200, status OK, empty result array.
+Expected CRM status: Отправление создано, но не передано на доставку; normalizedStatus created; final false.
