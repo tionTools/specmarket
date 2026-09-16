@@ -1,0 +1,12 @@
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+index 86ceda5..4eb89f4 100644
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -87,6 +87,7 @@ function apiError(result, method) {
+   if (!error && text(result?.result).toLowerCase() !== 'error') return null
+   return new HttpError(502, 'NOVAPAY_API_ERROR', `NovaPay ${method} failed.`, {
+     status: error ? text(error.status) : undefined,
++    title: error ? text(error.title) : undefined,
+   })
+ }
+ 
