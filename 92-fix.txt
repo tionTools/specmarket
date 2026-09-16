@@ -1,0 +1,38 @@
+Patch 92 diagnostic fix — expose NovaPay logical error title safely
+
+Expected base main: 260eda9eff2616e38e988570cf48a2634549e9ad
+Expected already-applied old Patch 92 blob: fe656d1f6fea1ef1d1d18d190ed156ffb5d0471e
+Fix patch blob: 70cefdc10aa41eea6e0aa758fd4d38b5399e63e3
+Fix patch file: 92-fix.patch
+Canonical corrected Patch 92 blob after this fix: 8fd5168b7610a7624bf05fbf617e43cdb01d9177
+
+Purpose:
+The first authenticated browser smoke-test reached NovaPay but UserAuthenticationJWT returned a NovaPay logical error. The deployed function exposed only error.status=`logic_error`, while NovaPay's non-secret human-readable error.title was discarded. This fix adds exactly one returned field: details.title. It does not return stacktrace, JWT, refresh token, public certificate, login, or any other credential.
+
+Scope — exactly 1 changed file relative to the already-applied old Patch 92:
+- supabase/functions/novapay-balance/index.ts
+
+Codex execution task for the CURRENT in-progress Patch 92 worktree:
+1. Do not reset, stash, reverse, or reapply the full Patch 92.
+2. `git fetch origin main chatgpt-patches`.
+3. Require `HEAD = origin/main = 260eda9eff2616e38e988570cf48a2634549e9ad`. If main moved, STOP.
+4. The worktree is expected to contain only the already-applied Patch 92 files:
+   - supabase/functions/novapay-balance/index.ts
+   - supabase/migrations/20260916190000_novapay_rotation_lock.sql
+   No unrelated changes are allowed. If unrelated changes exist, STOP; do not reset/stash them.
+5. Verify the current pre-fix file blobs exactly:
+   - `git hash-object supabase/functions/novapay-balance/index.ts` = `86ceda50d617f98130bfc160e12280bcf0b3a804`
+   - `git hash-object supabase/migrations/20260916190000_novapay_rotation_lock.sql` = `d28ee7a77b35c7a951cf8aeb7680ac9035647e43`
+   If either differs, STOP; do not adapt manually.
+6. Require `git rev-parse origin/chatgpt-patches:92-fix.patch` = `70cefdc10aa41eea6e0aa758fd4d38b5399e63e3`.
+7. Run `git show origin/chatgpt-patches:92-fix.patch | git apply --check -`. If it fails, STOP.
+8. Apply with `git show origin/chatgpt-patches:92-fix.patch | git apply -`.
+9. Verify `git hash-object supabase/functions/novapay-balance/index.ts` = `4eb89f4d5470b5f2059e530f67ae6df73692b3cf`.
+10. Run `git diff --check` and verify the total Patch 92 worktree scope remains exactly the same 2 files. The only delta introduced by 92-fix.patch must be one added line returning safe `details.title` for NovaPay logical errors.
+11. Verify no JWT, refresh token, public certificate, NOVAPAY_LOGIN value, Vault secret value, or stacktrace is logged, returned, or added to git.
+12. Do NOT reapply the migration. It has already been applied and registered in migration history.
+13. Redeploy only `novapay-balance` using the already linked/authenticated Supabase project. If a new Supabase login/token/credential is requested, STOP.
+14. Do not attempt to invent or obtain a CRM user JWT. After successful deploy, STOP before commit/push and report that the browser smoke-test can be repeated by the user.
+15. Do not commit or push until the user supplies the next authenticated smoke-test result.
+
+Do not modify UI, Android, AGENTS.md, migration SQL, existing NovaPay RPC functions, Vault secrets, or any unrelated file.
