@@ -1,0 +1,792 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index f211882..a47f923 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -1,5 +1,6 @@
+ plugins {
+     id("com.android.application")
++    id("com.google.gms.google-services")
+     id("org.jetbrains.kotlin.plugin.compose")
+     id("org.jetbrains.kotlin.plugin.serialization")
+ }
+@@ -18,8 +19,8 @@ android {
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 14
+-        versionName = "0.14"
++        versionCode = 15
++        versionName = "0.15"
+     }
+     signingConfigs {
+         create("release") {
+@@ -59,5 +60,7 @@ dependencies {
+     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+     implementation("androidx.datastore:datastore-preferences:1.2.0")
++    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
++    implementation("com.google.firebase:firebase-messaging")
+     testImplementation("junit:junit:4.13.2")
+ }
+diff --git a/android/app/google-services.json b/android/app/google-services.json
+new file mode 100644
+index 0000000..93563aa
+--- /dev/null
++++ b/android/app/google-services.json
+@@ -0,0 +1,29 @@
++{
++  "project_info": {
++    "project_number": "415632359517",
++    "project_id": "specmarket-orders",
++    "storage_bucket": "specmarket-orders.firebasestorage.app"
++  },
++  "client": [
++    {
++      "client_info": {
++        "mobilesdk_app_id": "1:415632359517:android:a094ecb1f0e0d9ac038db4",
++        "android_client_info": {
++          "package_name": "ua.orders.crm"
++        }
++      },
++      "oauth_client": [],
++      "api_key": [
++        {
++          "current_key": "AIzaSyA9cNxveDuRSg_zNTIuS-ZUnXxHvDUdrYA"
++        }
++      ],
++      "services": {
++        "appinvite_service": {
++          "other_platform_oauth_client": []
++        }
++      }
++    }
++  ],
++  "configuration_version": "1"
++}
+\ No newline at end of file
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 16f0552..57225a3 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -3,5 +3,8 @@
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <application android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_orders_crm" android:roundIcon="@drawable/ic_orders_crm" android:label="Заказы" android:theme="@style/Theme.Orders" android:usesCleartextTraffic="false">
+         <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
++        <service android:name=".OrdersFirebaseMessagingService" android:exported="false">
++            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
++        </service>
+     </application>
+ </manifest>
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+index 8000873..6d42a82 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderNotification.kt
+@@ -14,11 +14,45 @@ import java.math.RoundingMode
+ private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
+ const val EXTRA_OPEN_ORDER_ID = "ua.orders.crm.extra.OPEN_ORDER_ID"
+ 
++data class PushOrderNotification(
++    val orderId: String,
++    val platform: String,
++    val total: String,
++    val customer: String,
++    val number: String,
++)
++
++fun pushOrderNotification(data: Map<String, String>): PushOrderNotification? {
++    if (data["type"] != "new_order") return null
++    val orderId = data["order_id"].orEmpty().trim()
++    if (orderId.isEmpty()) return null
++    return PushOrderNotification(
++        orderId = orderId,
++        platform = data["platform"].orEmpty().trim().ifBlank { "—" },
++        total = data["total"].orEmpty().trim().ifBlank { "—" },
++        customer = data["customer"].orEmpty().trim().ifBlank { "—" },
++        number = data["order_number"].orEmpty().trim().ifBlank { "—" },
++    )
++}
++
+ fun Context.canPostOrderNotifications(): Boolean =
+     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+ 
+ fun Context.showNewOrderNotification(order: Order) {
++    val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
++    showNewOrderNotification(
++        PushOrderNotification(
++            orderId = order.id,
++            platform = order.platform.display(),
++            total = total,
++            customer = order.customer.display(),
++            number = order.number(),
++        ),
++    )
++}
++
++fun Context.showNewOrderNotification(order: PushOrderNotification) {
+     if (!canPostOrderNotifications()) return
+     val manager = getSystemService(NotificationManager::class.java)
+     manager.createNotificationChannel(
+@@ -31,23 +65,23 @@ fun Context.showNewOrderNotification(order: Order) {
+         },
+     )
+     val intent = Intent(this, MainActivity::class.java).apply {
+-        putExtra(EXTRA_OPEN_ORDER_ID, order.id)
++        putExtra(EXTRA_OPEN_ORDER_ID, order.orderId)
+         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+     }
+     val pendingIntent = PendingIntent.getActivity(
+         this,
+-        order.id.hashCode(),
++        order.orderId.hashCode(),
+         intent,
+         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+     )
+-    val total = order.total().setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
+     val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)
+         .setSmallIcon(R.drawable.ic_orders)
+-        .setContentTitle("Новый заказ · ${order.platform.display()} · $total")
+-        .setContentText("${order.customer.display()} · №${order.number()}")
++        .setContentTitle("Новый заказ · ${order.platform} · ${order.total}")
++        .setContentText("${order.customer} · №${order.number}")
+         .setAutoCancel(true)
++        .setOnlyAlertOnce(true)
+         .setContentIntent(pendingIntent)
+         .setCategory(Notification.CATEGORY_MESSAGE)
+         .build()
+-    manager.notify(order.id.hashCode(), notification)
++    manager.notify(order.orderId.hashCode(), notification)
+ }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+index ecdd444..afede0c 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+@@ -3,6 +3,7 @@ package ua.orders.crm
+ import io.github.jan.supabase.auth.Auth
+ import io.github.jan.supabase.auth.auth
+ import io.github.jan.supabase.auth.providers.builtin.Email
++import io.github.jan.supabase.auth.status.SessionStatus
+ import io.github.jan.supabase.createSupabaseClient
+ import io.github.jan.supabase.functions.Functions
+ import io.github.jan.supabase.functions.functions
+@@ -28,6 +29,8 @@ data class AcceptResponse(
+     val message: String? = null,
+ )
+ @Serializable
++data class PushDeviceResponse(val ok: Boolean = false, val message: String? = null)
++@Serializable
+ data class OrderChange(val order_id: String, val operation: String = "")
+ 
+ class OrdersRepository {
+@@ -51,6 +54,16 @@ class OrdersRepository {
+     suspend fun signOut() = client.auth.signOut()
+     private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url)")
+ 
++    suspend fun setPushDevice(deviceId: String, token: String?, enabled: Boolean) {
++        check(client.auth.sessionStatus.first { it !is SessionStatus.Initializing } is SessionStatus.Authenticated)
++        val response = json.decodeFromString<PushDeviceResponse>(client.functions.invoke("manage-push-device", buildJsonObject {
++            put("deviceId", deviceId)
++            put("enabled", enabled)
++            token?.takeIf { it.isNotBlank() }?.let { put("token", it) }
++        }).bodyAsText())
++        check(response.ok) { response.message ?: "Не удалось зарегистрировать push-устройство." }
++    }
++
+     suspend fun orders(): List<Order> {
+         val result = mutableListOf<Order>()
+         var offset = 0L
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+index 6dfcc1d..d88d859 100644
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -17,6 +17,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+     private val requests = Mutex()
+     private val pendingNotificationIds = linkedSetOf<String>()
+     private var realtimeJob: Job? = null
++    private var pushRegistrationJob: Job? = null
+     private var visible = false
+     private var ordersBeforeDetail: List<Order> = emptyList()
+     var email by mutableStateOf<String?>(null); private set
+@@ -61,12 +62,17 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+                     } else {
+                         initializing = false
+                     }
++                    getApplication<Application>().savePushSessionActive(true)
++                    syncPushRegistration()
+                 } else if (session is SessionStatus.NotAuthenticated) {
+                     initializing = false
+                     email = null
+                     realtimeJob?.cancel()
+                     realtimeJob = null
++                    pushRegistrationJob?.cancel()
++                    pushRegistrationJob = null
+                     realtimeConnected = false
++                    getApplication<Application>().savePushSessionActive(false)
+                     clearOrders()
+                 }
+             }
+@@ -78,6 +84,29 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+         if (active && email != null) {
+             startRealtime(forceRestart = true)
+             refresh()
++            syncPushRegistration()
++        }
++    }
++
++    private fun syncPushRegistration(enabledOverride: Boolean? = null) {
++        if (email == null) return
++        pushRegistrationJob?.cancel()
++        pushRegistrationJob = viewModelScope.launch {
++            try {
++                val app = getApplication<Application>()
++                val settingEnabled = enabledOverride ?: app.newOrderNotifications().first()
++                app.savePushNotificationsEnabled(settingEnabled)
++                val enabled = settingEnabled && app.canPostOrderNotifications()
++                repository.setPushDevice(
++                    deviceId = app.pushDeviceId(),
++                    token = if (enabled) firebasePushToken() else null,
++                    enabled = enabled,
++                )
++            } catch (cancel: CancellationException) {
++                throw cancel
++            } catch (_: Exception) {
++                // Registration is retried after auth restoration and on foreground resume.
++            }
+         }
+     }
+ 
+@@ -165,15 +194,18 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+                 flushPendingNotificationsLocked()
+                 persistCache()
+             }
++            syncPushRegistration()
+         }
+     }
+ 
+     fun notificationsSettingChanged(enabled: Boolean) {
++        getApplication<Application>().savePushNotificationsEnabled(enabled)
+         viewModelScope.launch {
+             requests.withLock {
+                 if (!enabled) pendingNotificationIds.clear() else flushPendingNotificationsLocked()
+                 persistCache()
+             }
++            syncPushRegistration(enabled)
+         }
+     }
+ 
+@@ -286,7 +318,15 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application)
+         if (authBusy || acceptingId != null) return
+         authBusy = true
+         viewModelScope.launch {
+-            try { repository.signOut() }
++            try {
++                pushRegistrationJob?.cancelAndJoin()
++                val app = getApplication<Application>()
++                try { repository.setPushDevice(app.pushDeviceId(), null, false) }
++                catch (cancel: CancellationException) { throw cancel }
++                catch (_: Exception) { /* Local logout still disables displaying incoming push. */ }
++                repository.signOut()
++                app.savePushSessionActive(false)
++            }
+             catch (cancel: CancellationException) { throw cancel }
+             catch (_: Exception) { message = "Не удалось выйти. Проверьте соединение и повторите." }
+             finally { authBusy = false }
+diff --git a/android/app/src/main/java/ua/orders/crm/PushMessaging.kt b/android/app/src/main/java/ua/orders/crm/PushMessaging.kt
+new file mode 100644
+index 0000000..2122e3d
+--- /dev/null
++++ b/android/app/src/main/java/ua/orders/crm/PushMessaging.kt
+@@ -0,0 +1,87 @@
++package ua.orders.crm
++
++import android.content.Context
++import com.google.firebase.messaging.FirebaseMessaging
++import com.google.firebase.messaging.FirebaseMessagingService
++import com.google.firebase.messaging.RemoteMessage
++import java.util.UUID
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.launch
++import kotlin.coroutines.resume
++import kotlin.coroutines.resumeWithException
++import kotlinx.coroutines.suspendCancellableCoroutine
++
++private const val PUSH_PREFS = "orders_push"
++private const val PUSH_DEVICE_ID = "device_id"
++private const val PUSH_SESSION_ACTIVE = "session_active"
++private const val PUSH_NOTIFICATIONS_ENABLED = "notifications_enabled"
++
++fun Context.pushDeviceId(): String {
++    val preferences = getSharedPreferences(PUSH_PREFS, Context.MODE_PRIVATE)
++    val existing = preferences.getString(PUSH_DEVICE_ID, null)
++    if (!existing.isNullOrBlank()) return existing
++    val created = UUID.randomUUID().toString()
++    preferences.edit().putString(PUSH_DEVICE_ID, created).apply()
++    return created
++}
++
++fun Context.savePushSessionActive(active: Boolean) {
++    getSharedPreferences(PUSH_PREFS, Context.MODE_PRIVATE)
++        .edit()
++        .putBoolean(PUSH_SESSION_ACTIVE, active)
++        .apply()
++}
++
++fun Context.pushSessionActive(): Boolean =
++    getSharedPreferences(PUSH_PREFS, Context.MODE_PRIVATE).getBoolean(PUSH_SESSION_ACTIVE, false)
++
++fun Context.savePushNotificationsEnabled(enabled: Boolean) {
++    getSharedPreferences(PUSH_PREFS, Context.MODE_PRIVATE)
++        .edit()
++        .putBoolean(PUSH_NOTIFICATIONS_ENABLED, enabled)
++        .apply()
++}
++
++fun Context.pushNotificationsEnabled(): Boolean =
++    getSharedPreferences(PUSH_PREFS, Context.MODE_PRIVATE).getBoolean(PUSH_NOTIFICATIONS_ENABLED, true)
++
++suspend fun firebasePushToken(): String = suspendCancellableCoroutine { continuation ->
++    FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
++        if (!continuation.isActive) return@addOnCompleteListener
++        if (task.isSuccessful && !task.result.isNullOrBlank()) {
++            continuation.resume(task.result)
++        } else {
++            continuation.resumeWithException(task.exception ?: IllegalStateException("FCM token недоступен"))
++        }
++    }
++}
++
++class OrdersFirebaseMessagingService : FirebaseMessagingService() {
++    override fun onNewToken(token: String) {
++        val app = applicationContext
++        if (!app.pushSessionActive()) return
++        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
++            try {
++                OrdersRepository().setPushDevice(
++                    deviceId = app.pushDeviceId(),
++                    token = token,
++                    enabled = app.pushNotificationsEnabled() && app.canPostOrderNotifications(),
++                )
++            } catch (cancel: CancellationException) {
++                throw cancel
++            } catch (_: Exception) {
++                // Token rotation can race session restoration; foreground registration retries it.
++            }
++        }
++    }
++
++    override fun onMessageReceived(message: RemoteMessage) {
++        val app = applicationContext
++        if (!app.pushSessionActive() || !app.pushNotificationsEnabled() || !app.canPostOrderNotifications()) return
++        val notification = pushOrderNotification(message.data) ?: return
++        app.showNewOrderNotification(notification)
++    }
++}
+diff --git a/android/app/src/test/java/ua/orders/crm/PushMessagingTest.kt b/android/app/src/test/java/ua/orders/crm/PushMessagingTest.kt
+new file mode 100644
+index 0000000..c35e31a
+--- /dev/null
++++ b/android/app/src/test/java/ua/orders/crm/PushMessagingTest.kt
+@@ -0,0 +1,33 @@
++package ua.orders.crm
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++class PushMessagingTest {
++    @Test
++    fun parsesNewOrderDataForNotification() {
++        val notification = pushOrderNotification(
++            mapOf(
++                "type" to "new_order",
++                "order_id" to "11111111-2222-3333-4444-555555555555",
++                "platform" to "Пром",
++                "total" to "123.40 грн",
++                "customer" to "Іван",
++                "order_number" to "A-42",
++            ),
++        )
++
++        assertEquals("11111111-2222-3333-4444-555555555555", notification?.orderId)
++        assertEquals("Пром", notification?.platform)
++        assertEquals("123.40 грн", notification?.total)
++        assertEquals("Іван", notification?.customer)
++        assertEquals("A-42", notification?.number)
++    }
++
++    @Test
++    fun ignoresUnknownOrIncompletePushes() {
++        assertNull(pushOrderNotification(mapOf("type" to "other", "order_id" to "1")))
++        assertNull(pushOrderNotification(mapOf("type" to "new_order")))
++    }
++}
+diff --git a/android/build.gradle.kts b/android/build.gradle.kts
+index d512af7..0647f39 100644
+--- a/android/build.gradle.kts
++++ b/android/build.gradle.kts
+@@ -1,5 +1,6 @@
+ plugins {
+     id("com.android.application") version "9.4.0" apply false
++    id("com.google.gms.google-services") version "4.5.0" apply false
+     id("org.jetbrains.kotlin.plugin.compose") version "2.3.21" apply false
+     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.21" apply false
+ }
+diff --git a/supabase/functions/_shared/firebase-messaging.ts b/supabase/functions/_shared/firebase-messaging.ts
+new file mode 100644
+index 0000000..252afa6
+--- /dev/null
++++ b/supabase/functions/_shared/firebase-messaging.ts
+@@ -0,0 +1,104 @@
++export type FirebaseSecrets = {
++  projectId: string
++  clientEmail: string
++  privateKey: string
++}
++
++export type PushData = Record<string, string>
++
++const encoder = new TextEncoder()
++const base64Url = (value: Uint8Array | string) => {
++  const bytes = typeof value === 'string' ? encoder.encode(value) : value
++  let binary = ''
++  for (const byte of bytes) binary += String.fromCharCode(byte)
++  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
++}
++
++function pemBytes(value: string) {
++  const compact = value
++    .replace(/\\n/g, '\n')
++    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
++    .replace(/-----END PRIVATE KEY-----/g, '')
++    .replace(/\s/g, '')
++  const binary = atob(compact)
++  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
++}
++
++export async function firebaseAccessToken(secrets: FirebaseSecrets) {
++  const now = Math.floor(Date.now() / 1000)
++  const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
++  const payload = base64Url(JSON.stringify({
++    iss: secrets.clientEmail,
++    scope: 'https://www.googleapis.com/auth/firebase.messaging',
++    aud: 'https://oauth2.googleapis.com/token',
++    iat: now,
++    exp: now + 3600,
++  }))
++  const unsigned = `${header}.${payload}`
++  const key = await crypto.subtle.importKey(
++    'pkcs8',
++    pemBytes(secrets.privateKey),
++    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
++    false,
++    ['sign'],
++  )
++  const signature = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(unsigned)))
++  const assertion = `${unsigned}.${base64Url(signature)}`
++  const response = await fetch('https://oauth2.googleapis.com/token', {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
++    body: new URLSearchParams({
++      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
++      assertion,
++    }),
++  })
++  const body = await response.json().catch(() => ({})) as { access_token?: string; error_description?: string }
++  if (!response.ok || !body.access_token) throw new Error(body.error_description || `Firebase OAuth failed: ${response.status}`)
++  return body.access_token
++}
++
++export function newOrderPushPayload(order: {
++  id: string
++  platform?: string | null
++  order_label?: string | null
++  order_number?: number | null
++  customer?: string | null
++}, total: number): PushData {
++  return {
++    type: 'new_order',
++    order_id: order.id,
++    platform: order.platform?.trim() || '—',
++    total: Number.isFinite(total) ? `${total.toFixed(2)} грн` : '—',
++    customer: order.customer?.trim() || '—',
++    order_number: order.order_label?.trim() || order.order_number?.toString() || '—',
++  }
++}
++
++export async function sendFirebaseDataMessage(args: {
++  accessToken: string
++  projectId: string
++  token: string
++  data: PushData
++}) {
++  return fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(args.projectId)}/messages:send`, {
++    method: 'POST',
++    headers: {
++      Authorization: `Bearer ${args.accessToken}`,
++      'Content-Type': 'application/json',
++    },
++    body: JSON.stringify({
++      message: {
++        token: args.token,
++        data: args.data,
++        android: { priority: 'high', ttl: '86400s' },
++      },
++    }),
++  })
++}
++
++export async function fcmTokenIsUnregistered(response: Response) {
++  if (response.status === 404) return true
++  if (response.ok) return false
++  const text = await response.clone().text().catch(() => '')
++  return /UNREGISTERED|registration-token-not-registered/i.test(text)
++}
+diff --git a/supabase/functions/_shared/firebase-messaging_test.ts b/supabase/functions/_shared/firebase-messaging_test.ts
+new file mode 100644
+index 0000000..e84e16e
+--- /dev/null
++++ b/supabase/functions/_shared/firebase-messaging_test.ts
+@@ -0,0 +1,22 @@
++import { assertEquals } from 'jsr:@std/assert@1'
++import { newOrderPushPayload } from './firebase-messaging.ts'
++
++Deno.test('newOrderPushPayload keeps the order id used by Android deep-linking', () => {
++  assertEquals(
++    newOrderPushPayload({
++      id: '11111111-2222-3333-4444-555555555555',
++      platform: 'Пром',
++      order_label: 'A-42',
++      order_number: 42,
++      customer: 'Іван',
++    }, 123.4),
++    {
++      type: 'new_order',
++      order_id: '11111111-2222-3333-4444-555555555555',
++      platform: 'Пром',
++      total: '123.40 грн',
++      customer: 'Іван',
++      order_number: 'A-42',
++    },
++  )
++})
+diff --git a/supabase/functions/manage-push-device/index.ts b/supabase/functions/manage-push-device/index.ts
+new file mode 100644
+index 0000000..cabc20d
+--- /dev/null
++++ b/supabase/functions/manage-push-device/index.ts
+@@ -0,0 +1,54 @@
++import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
++
++const corsHeaders = {
++  'Access-Control-Allow-Origin': '*',
++  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
++}
++const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
++
++Deno.serve(async (request) => {
++  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
++  if (request.method !== 'POST') return Response.json({ ok: false, message: 'Method not allowed.' }, { status: 405, headers: corsHeaders })
++
++  const url = Deno.env.get('SUPABASE_URL')
++  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
++  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
++  const authorization = request.headers.get('Authorization')
++  if (!url || !anonKey || !serviceKey || !authorization) {
++    return Response.json({ ok: false, message: 'Push configuration is incomplete.' }, { status: 500, headers: corsHeaders })
++  }
++
++  const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
++  const { data: { user } } = await auth.auth.getUser()
++  if (!user || user.email?.toLowerCase() === 'guest@gmail.com') {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
++  }
++
++  const body = await request.json().catch(() => ({})) as { deviceId?: unknown; token?: unknown; enabled?: unknown }
++  const deviceId = text(body.deviceId)
++  const token = text(body.token)
++  const enabled = body.enabled === true
++  if (!deviceId || deviceId.length > 200) {
++    return Response.json({ ok: false, message: 'Invalid deviceId.' }, { status: 400, headers: corsHeaders })
++  }
++
++  const admin = createClient(url, serviceKey)
++  if (!enabled) {
++    const { error } = await admin.from('crm_push_devices').delete().eq('user_id', user.id).eq('device_id', deviceId)
++    if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
++    return Response.json({ ok: true }, { headers: corsHeaders })
++  }
++  if (!token || token.length > 4096) {
++    return Response.json({ ok: false, message: 'Invalid FCM token.' }, { status: 400, headers: corsHeaders })
++  }
++
++  const { error } = await admin.from('crm_push_devices').upsert({
++    user_id: user.id,
++    device_id: deviceId,
++    fcm_token: token,
++    enabled: true,
++    updated_at: new Date().toISOString(),
++  }, { onConflict: 'user_id,device_id' })
++  if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
++  return Response.json({ ok: true }, { headers: corsHeaders })
++})
+diff --git a/supabase/functions/send-order-push/index.ts b/supabase/functions/send-order-push/index.ts
+new file mode 100644
+index 0000000..b9361c0
+--- /dev/null
++++ b/supabase/functions/send-order-push/index.ts
+@@ -0,0 +1,92 @@
++import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
++import {
++  fcmTokenIsUnregistered,
++  firebaseAccessToken,
++  newOrderPushPayload,
++  sendFirebaseDataMessage,
++} from '../_shared/firebase-messaging.ts'
++
++const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
++const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
++const normalized = (value: unknown) => text(value).trim().toLowerCase()
++const cancelledOrReturned = (value: unknown) => /скас|отмен|cancel|повер|возврат|return|refund/.test(normalized(value))
++
++function notificationCandidate(order: { platform?: string | null; status?: string | null; delivery?: unknown }) {
++  const platform = normalized(order.platform)
++  if (!['пром', 'эпицентр', 'епіцентр', 'каста', 'kasta'].includes(platform)) return false
++  if (cancelledOrReturned(order.status)) return false
++  const delivery = order.delivery && typeof order.delivery === 'object' && !Array.isArray(order.delivery)
++    ? order.delivery as Record<string, unknown>
++    : {}
++  return text(delivery.ttn).trim() === ''
++}
++
++Deno.serve(async (request) => {
++  if (request.method !== 'POST') return Response.json({ ok: false, message: 'Method not allowed.' }, { status: 405 })
++
++  const url = Deno.env.get('SUPABASE_URL')
++  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
++  const projectId = Deno.env.get('FIREBASE_PROJECT_ID')
++  const clientEmail = Deno.env.get('FIREBASE_CLIENT_EMAIL')
++  const privateKey = Deno.env.get('FIREBASE_PRIVATE_KEY')
++  const authorization = request.headers.get('Authorization')
++  if (!url || !serviceKey || !projectId || !clientEmail || !privateKey || !authorization) {
++    return Response.json({ ok: false, message: 'Push configuration is incomplete.' }, { status: 500 })
++  }
++
++  const admin = createClient(url, serviceKey)
++  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
++  if (typeof cronSecret !== 'string' || authorization !== `Bearer ${cronSecret}`) {
++    return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401 })
++  }
++
++  const body = await request.json().catch(() => ({})) as { orderId?: string }
++  const orderId = text(body.orderId).trim()
++  if (!orderId) return Response.json({ ok: false, message: 'orderId is required.' }, { status: 400 })
++
++  const { data: order, error: orderError } = await admin
++    .from('crm_orders')
++    .select('id,platform,status,order_label,order_number,customer,delivery')
++    .eq('id', orderId)
++    .maybeSingle()
++  if (orderError) return Response.json({ ok: false, message: orderError.message }, { status: 500 })
++  if (!order || !notificationCandidate(order)) return Response.json({ ok: true, skipped: true })
++
++  let items: Array<{ price: number | null; quantity: number | null }> = []
++  for (let attempt = 0; attempt < 5; attempt += 1) {
++    const { data, error } = await admin.from('crm_order_items').select('price,quantity').eq('order_id', orderId)
++    if (error) return Response.json({ ok: false, message: error.message }, { status: 500 })
++    items = data ?? []
++    if (items.length || attempt === 4) break
++    await delay(250)
++  }
++  const total = items.length
++    ? items.reduce((sum, item) => sum + Number(item.price ?? 0) * Number(item.quantity ?? 0), 0)
++    : Number.NaN
++
++  const { data: deviceRows, error: devicesError } = await admin
++    .from('crm_push_devices')
++    .select('fcm_token')
++    .eq('enabled', true)
++  if (devicesError) return Response.json({ ok: false, message: devicesError.message }, { status: 500 })
++  const tokens = [...new Set((deviceRows ?? []).map((row) => text(row.fcm_token).trim()).filter(Boolean))]
++  if (!tokens.length) return Response.json({ ok: true, sent: 0 })
++
++  const accessToken = await firebaseAccessToken({ projectId, clientEmail, privateKey })
++  const data = newOrderPushPayload(order, total)
++  let sent = 0
++  let failed = 0
++  for (const token of tokens) {
++    const response = await sendFirebaseDataMessage({ accessToken, projectId, token, data })
++    if (response.ok) {
++      sent += 1
++      continue
++    }
++    failed += 1
++    if (await fcmTokenIsUnregistered(response)) {
++      await admin.from('crm_push_devices').delete().eq('fcm_token', token)
++    }
++  }
++
++  return Response.json({ ok: failed === 0, sent, failed })
++})
+diff --git a/supabase/migrations/20260916160000_order_push_notifications.sql b/supabase/migrations/20260916160000_order_push_notifications.sql
+new file mode 100644
+index 0000000..86a0433
+--- /dev/null
++++ b/supabase/migrations/20260916160000_order_push_notifications.sql
+@@ -0,0 +1,54 @@
++create table if not exists public.crm_push_devices (
++  user_id uuid not null references auth.users(id) on delete cascade,
++  device_id text not null,
++  fcm_token text not null,
++  enabled boolean not null default true,
++  updated_at timestamptz not null default now(),
++  primary key (user_id, device_id)
++);
++
++alter table public.crm_push_devices enable row level security;
++revoke all on table public.crm_push_devices from public, anon, authenticated;
++
++create index if not exists crm_push_devices_enabled_idx
++  on public.crm_push_devices(enabled) where enabled;
++create index if not exists crm_push_devices_token_idx
++  on public.crm_push_devices(fcm_token);
++
++create or replace function public.enqueue_crm_new_order_push()
++returns trigger
++language plpgsql
++security definer
++set search_path = net, vault, public
++as $$
++declare
++  cron_secret text;
++begin
++  select decrypted_secret into cron_secret
++  from vault.decrypted_secrets
++  where name = 'crm_sync_cron_secret'
++  limit 1;
++
++  if cron_secret is null or cron_secret = '' then
++    return new;
++  end if;
++
++  perform net.http_post(
++    url := 'https://rtkhgldaswsclkorlyxx.supabase.co/functions/v1/send-order-push',
++    headers := jsonb_build_object(
++      'Content-Type', 'application/json',
++      'Authorization', 'Bearer ' || cron_secret
++    ),
++    body := jsonb_build_object('orderId', new.id),
++    timeout_milliseconds := 10000
++  );
++  return new;
++end;
++$$;
++
++revoke all on function public.enqueue_crm_new_order_push() from public, anon, authenticated;
++
++drop trigger if exists crm_orders_new_order_push on public.crm_orders;
++create trigger crm_orders_new_order_push
++after insert on public.crm_orders
++for each row execute function public.enqueue_crm_new_order_push();
