@@ -1,0 +1,110 @@
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+index 6570464..b1e18e8 100644
+--- a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+@@ -50,6 +50,41 @@ Deno.test('ordinary Meest tracking still updates status', async () => {
+   })
+ })
+ 
++Deno.test('Meest parses a single tracking event object instead of showing response OK', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, {
++    status: 'OK',
++    result: {
++      eventDateTime: '2026-09-16 14:04:00',
++      eventCode: '2',
++      eventDescr: { descrUA: 'Відправлення створено, але не передано на доставку' },
++      eventCityDescr: { descrUA: 'Харків' },
++    },
++  }, async () => {
++    const result = await meestStatus('723-3447567')
++    assert(
++      result.status === 'Відправлення створено, але не передано на доставку',
++      'Meest single-event status must be shown instead of response OK',
++    )
++    assert(result.normalizedStatus === 'created', 'Meest event code 2 must remain created')
++    assert(
++      result.details?.trackingEventAt === '2026-09-16 14:04:00',
++      'Meest single-event timestamp must be preserved',
++    )
++  })
++})
++
++Deno.test('Meest does not expose generic OK when tracking events are still absent', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { status: 'OK', result: [] }, async () => {
++    const result = await meestStatus('M-CREATED')
++    assert(
++      result.status === 'Отправление создано, но не передано на доставку',
++      'Meest response OK must not be used as a shipment status',
++    )
++    assert(result.normalizedStatus === 'created', 'Meest OK fallback must remain created')
++    assert(result.final === false, 'Meest created shipment must remain non-final')
++  })
++})
++
+ Deno.test('Rozetka Delivery keeps using public tracking', async () => {
+   await withCarrierResponse({}, { data: {
+     last_status: { id: '1', name: 'Створено', date: '2026-08-30 10:00:00' }, status_groups: [],
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/meest.ts b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+index 5d2fe94..dd47eb2 100644
+--- a/supabase/functions/sync-delivery-tracking/carriers/meest.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+@@ -1,13 +1,27 @@
+ import { compactEvents, latestEvent, readableStatus, record, text } from '../normalize.ts'
+ import type { TrackingResult } from '../types.ts'
+ 
++function meestCreatedStatus() {
++  return {
++    status: 'Отправление создано, но не передано на доставку',
++    final: false,
++    normalizedStatus: 'created',
++  }
++}
++
+ function meestReadableStatus(source: string, code: string) {
+-  if (code === '2') return { status: 'Создана накладная', final: false, normalizedStatus: 'created' }
++  if (code === '2') return meestCreatedStatus()
+   if (code === '1622' || /^доручено$/i.test(source.trim()))
+     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
+   return readableStatus(source, code)
+ }
+ 
++function meestEvents(value: unknown) {
++  if (Array.isArray(value)) return value.map(record)
++  const event = record(value)
++  return Object.keys(event).length ? [event] : []
++}
++
+ export async function meestStatus(ttn: string): Promise<TrackingResult> {
+   const apiToken = text(Deno.env.get('MEEST_API_TOKEN'))
+   if (!apiToken) throw new Error('Не задан MEEST_API_TOKEN')
+@@ -17,12 +31,17 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
+   })
+   if (!response.ok) throw new Error(`Meest HTTP ${response.status}`)
+   const raw = record(await response.json())
+-  const events = (Array.isArray(raw.result) ? raw.result : []).map(record)
++  const events = meestEvents(raw.result)
+   const latest = latestEvent(events, 'eventDateTime')
+-  const source = text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || text(raw.status)
+-  if (!source) throw new Error('Meest API не вернул статус')
++  const eventSource = text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr)
++  const responseStatus = text(raw.status)
++  const responseIsSuccess = /^(ok|success)$/i.test(responseStatus)
++  const source = eventSource || (responseIsSuccess ? '' : responseStatus)
+   const eventCode = text(latest?.eventCode)
+-  const base = meestReadableStatus(source, eventCode)
++  if (!source && !eventCode && !responseIsSuccess) throw new Error('Meest API не вернул статус')
++  const base = source || eventCode
++    ? meestReadableStatus(source, eventCode)
++    : meestCreatedStatus()
+   const final = /^(1622|1825|3|5700)$/.test(eventCode) || base.final
+   const trackingEvents = compactEvents(events.map((event) => ({
+     at: text(event.eventDateTime),
+@@ -33,7 +52,7 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
+   })))
+   return {
+     ...base,
+-    status: base.normalizedStatus === 'delivered' ? base.status : source,
++    status: base.normalizedStatus === 'delivered' ? base.status : source || base.status,
+     final,
+     provider: 'meest_api',
+     source: 'carrier_api',
