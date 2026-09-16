@@ -56,7 +56,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             initialLoadComplete = true
                         }
                         initializing = false
-                        if (visible) { startRealtime(); refresh() }
+                        startRealtime()
+                        if (visible) refresh()
                     } else {
                         initializing = false
                     }
@@ -74,29 +75,28 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun foreground(active: Boolean) {
         visible = active
-        if (!active) {
-            realtimeConnected = false
-            realtimeJob?.cancel()
-            return
-        }
-        if (email != null) {
-            startRealtime()
+        if (active && email != null) {
+            startRealtime(forceRestart = true)
             refresh()
         }
     }
 
-    private fun startRealtime() {
-        if (!visible || email == null) return
+    private fun startRealtime(forceRestart: Boolean = false) {
+        if (email == null) return
         val previousJob = realtimeJob
-        if (previousJob?.isActive == true) return
+        if (!forceRestart && previousJob?.isActive == true) return
+        if (forceRestart) {
+            realtimeConnected = false
+            previousJob?.cancel()
+        }
         realtimeJob = viewModelScope.launch {
             previousJob?.join()
-            while (isActive && visible && email != null) {
+            while (isActive && email != null) {
                 try {
                     repository.watch(onConnection = { connected ->
                         val reconnect = connected && !realtimeConnected
                         realtimeConnected = connected
-                        if (reconnect && visible) refresh()
+                        if (reconnect) refresh()
                     }) { change ->
                         requests.withLock {
                             val account = email ?: return@withLock
