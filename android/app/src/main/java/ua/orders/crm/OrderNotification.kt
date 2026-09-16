@@ -12,6 +12,7 @@ import android.os.Build
 import java.math.RoundingMode
 
 private const val NEW_ORDERS_CHANNEL_ID = "new_orders"
+const val EXTRA_OPEN_ORDER_ID = "ua.orders.crm.extra.OPEN_ORDER_ID"
 
 fun Context.canPostOrderNotifications(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -30,6 +31,7 @@ fun Context.showNewOrderNotification(order: Order) {
         },
     )
     val intent = Intent(this, MainActivity::class.java).apply {
+        putExtra(EXTRA_OPEN_ORDER_ID, order.id)
         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
     val pendingIntent = PendingIntent.getActivity(

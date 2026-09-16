@@ -47,9 +47,30 @@ import java.math.RoundingMode
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var requestedOrderId by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AppearanceHost { OrdersApp() } }
+        requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+        setContent {
+            AppearanceHost {
+                OrdersApp(
+                    openOrderId = requestedOrderId,
+                    onOrderOpened = ::clearRequestedOrder,
+                )
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+    }
+
+    private fun clearRequestedOrder() {
+        requestedOrderId = null
+        intent.removeExtra(EXTRA_OPEN_ORDER_ID)
     }
 }
 
@@ -130,7 +151,11 @@ private fun openTelegram(context: Context, phone: String) {
 }
 
 @Composable
-fun OrdersApp(vm: OrdersViewModel = viewModel()) {
+fun OrdersApp(
+    vm: OrdersViewModel = viewModel(),
+    openOrderId: String? = null,
+    onOrderOpened: () -> Unit = {},
+) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
     NotificationPermissionGate(vm)
@@ -141,6 +166,14 @@ fun OrdersApp(vm: OrdersViewModel = viewModel()) {
         vm.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
     }
     LaunchedEffect(vm.email) { if (vm.email == null) { settings = false; confirmationId = null } }
+    LaunchedEffect(openOrderId, vm.email, vm.initializing) {
+        if (openOrderId != null && vm.email != null && !vm.initializing) {
+            settings = false
+            confirmationId = null
+            vm.open(openOrderId)
+            onOrderOpened()
+        }
+    }
     BackHandler(settings || vm.selectedId != null) {
         if (settings) settings = false else vm.closeDetail()
     }
