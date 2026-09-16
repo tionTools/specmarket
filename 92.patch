@@ -1,9 +1,9 @@
 diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..86ceda50d617f98130bfc160e12280bcf0b3a804
+index 0000000..4eb89f4
 --- /dev/null
 +++ b/supabase/functions/novapay-balance/index.ts
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,356 @@
 +import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 +import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
 +
@@ -93,6 +93,7 @@ index 0000000000000000000000000000000000000000..86ceda50d617f98130bfc160e12280bc
 +  if (!error && text(result?.result).toLowerCase() !== 'error') return null
 +  return new HttpError(502, 'NOVAPAY_API_ERROR', `NovaPay ${method} failed.`, {
 +    status: error ? text(error.status) : undefined,
++    title: error ? text(error.title) : undefined,
 +  })
 +}
 +
@@ -361,7 +362,7 @@ index 0000000000000000000000000000000000000000..86ceda50d617f98130bfc160e12280bc
 +})
 diff --git a/supabase/migrations/20260916190000_novapay_rotation_lock.sql b/supabase/migrations/20260916190000_novapay_rotation_lock.sql
 new file mode 100644
-index 0000000000000000000000000000000000000000..d28ee7a77b35c7a951cf8aeb7680ac9035647e43
+index 0000000..d28ee7a
 --- /dev/null
 +++ b/supabase/migrations/20260916190000_novapay_rotation_lock.sql
 @@ -0,0 +1,76 @@
