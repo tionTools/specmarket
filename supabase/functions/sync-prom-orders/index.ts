@@ -15,6 +15,7 @@ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, 
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
+import { isPromWebsiteOrder, promOrderLevelCommission } from '../_shared/prom-order-financials.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -249,33 +250,6 @@ function commissionAmount(value: unknown): number | undefined {
     }
   }
   return undefined
-}
-
-// Комиссии уровня заказа (включая «комісія за замовлення з сайту»).
-// Товары и позиции сюда не заходят, чтобы не посчитать одну комиссию дважды.
-function orderLevelCommission(value: unknown, depth = 0): number {
-  if (depth > 4 || Array.isArray(value)) return 0
-  const record = asRecord(value)
-  return Object.entries(record).reduce((total, [key, candidate]) => {
-    // type=2 в prosale_commission — точная метка Prom «Комиссия за заказ с сайта».
-    // Это фиксированная комиссия всего заказа, а не комиссия каталога по позиции.
-    if (/prosale/i.test(key)) {
-      const commission = asRecord(candidate)
-      const title = readable(commission.title).toLowerCase()
-      if (number(commission.type) === 2 || /(?:с сайта|з сайту|site|website)/i.test(title)) {
-        return total + number(pick(commission, 'value', 'amount', 'price'))
-      }
-      return total
-    }
-    // CPA/каталог относятся к позиции и не должны дублироваться на уровне заказа.
-    if (/(?:cpa|catalog)/i.test(key)) return total
-    if (/(?:commission|royalty)/i.test(key)) {
-      const amount = number(candidate) || number(pick(asRecord(candidate), 'amount', 'price', 'value'))
-      return total + amount
-    }
-    if (/(?:product|item|position)/i.test(key)) return total
-    return total + orderLevelCommission(candidate, depth + 1)
-  }, 0)
 }
 
 function dateParts(value: unknown) {
@@ -959,7 +933,8 @@ Deno.serve(async (request) => {
     // Для прибыли используем только отдельную сумму, которую платит продавец.
     const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
-    const websiteOrderCommission = orderLevelCommission(order)
+    const orderLevelCommissionAmount = promOrderLevelCommission(order)
+    const isWebsiteOrder = isPromWebsiteOrder(order)
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
     const resolvedShipping = resolvePromShipping({
@@ -996,7 +971,7 @@ Deno.serve(async (request) => {
         rozetkaPayOperationIds: Array.isArray(previousDelivery.rozetkaPayOperationIds)
           ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
           : undefined,
-        hasWebsiteCommission: websiteOrderCommission > 0,
+        hasWebsiteCommission: isWebsiteOrder,
         shippingSource: resolvedShipping.shippingSource,
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
@@ -1130,14 +1105,14 @@ Deno.serve(async (request) => {
         (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
       const itemCommission = commissionAmount(item)
       const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
-      const websiteCommission = websiteOrderCommission && itemsAmount
-        ? websiteOrderCommission * (price * quantity / itemsAmount)
+      const orderLevelCommissionShare = orderLevelCommissionAmount && itemsAmount
+        ? orderLevelCommissionAmount * (price * quantity / itemsAmount)
         : 0
-      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || websiteOrderCommission !== 0
+      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || orderLevelCommissionAmount !== 0
       const royaltyAmount = hasApiCommission
-        ? number(cpaCommission) + websiteCommission
+        ? number(cpaCommission) + orderLevelCommissionShare
         : previous?.royalty_amount ?? null
-      // Комиссия сайта — фиксированная сумма, не процент от позиции.
+      // Фиксированные комиссии уровня заказа не входят в процент комиссии позиции.
       const royaltyPercent = hasApiCommission
         ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
         : previous?.royalty_percent ?? null
