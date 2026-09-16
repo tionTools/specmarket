@@ -1,0 +1,32 @@
+Patch 88 — Android Realtime в фоне
+
+База main: c499c57ea7d504609278bcebff8d20bb0e011426
+
+Проблема:
+Patch 82 стал отменять realtimeJob на ON_PAUSE. Из-за этого при сворачивании приложения Android переставал слушать Supabase Realtime `crm:orders` / `order_changed`, хотя процесс приложения оставался жив.
+
+Исправление:
+- ON_PAUSE больше не отменяет realtimeJob.
+- Realtime retry-loop больше не зависит от `visible` и работает, пока есть авторизованный аккаунт и жив процесс приложения.
+- ON_RESUME принудительно перезапускает Realtime через cancel + join предыдущего job, чтобы не вернуть старую проблему с зависшим каналом «Онлайн».
+- После успешного reconnect выполняется refresh независимо от foreground/background, чтобы добрать пропущенные изменения.
+- Logout/смена аккаунта по-прежнему отменяют realtimeJob.
+- `OrdersRepository.watch()`, backend, Supabase functions/migrations, frontend и логика уведомлений не меняются.
+- Android versionCode 12 → 13, versionName 0.12 → 0.13.
+
+Scope:
+- android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+- android/app/build.gradle.kts
+
+Ожидаемое поведение:
+Пока процесс Android жив, новые заказы и изменения должны приходить тем же Realtime-каналом `crm:orders` / `order_changed`, что используется CRM на ПК. При возврате в приложение канал пересоздаётся, чтобы не оставаться в зависшем состоянии.
+
+Граница:
+Если Android полностью убил процесс приложения, websocket уже не может принять событие. FCM/server push в Patch 88 не добавляется.
+
+Проверка перед применением:
+- использовать актуальный origin/main;
+- `git apply --check 88.patch` должен пройти без ручной адаптации;
+- после применения diff должен содержать только два scope-файла;
+- прогнать штатный `scripts/android-check.ps1`;
+- после успешных проверок commit/push выполнять по обычному SSH-процессу проекта.
