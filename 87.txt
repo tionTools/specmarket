@@ -7,7 +7,7 @@ Patch file:
 87.patch
 
 Patch SHA-256:
-0aab02ec9ace6da4be7ff9c97e6240e7592fb84bc77306ff6aa69e6083cef8d9
+39d5b675e9a986e87a41abff5e08273f2c590061e834bd792cb5bacab8670fb6
 
 Источник признака:
 - только реальный Prom API marker `payment_data.rpay_parts`;
@@ -38,18 +38,22 @@ Scope — ровно 5 файлов:
 - AGENTS.md;
 - credentials/diagnostic routes.
 
-Проверено перед публикацией:
-- база сверена с актуальным origin/main;
-- Patch сформирован реальным git diff по точным текущим фрагментам затрагиваемых файлов;
-- local git apply --check / apply / git diff --check на проверочной базе — PASS;
-- scope ровно 5 файлов;
-- опубликованный `87.patch` byte-for-byte совпадает с проверенным файлом (Git blob SHA `60dd8c94eba4024f29a4592634984bc7d972f9bd`).
+Предпубликационная проверка:
+- актуальный origin/main подтверждён: `53864146744f9e4bdc0db729a165320a58732c89`;
+- Patch 87 пересобран реальным `git diff`, а не вручную;
+- `git apply --check` — PASS;
+- фактический `git apply` — PASS;
+- `git diff --check` — PASS;
+- `git diff --name-only` — ровно 5 заявленных scope-файлов;
+- итоговый diff полностью просмотрен;
+- опубликованный `87.patch` byte-for-byte совпадает с проверенным: Git blob SHA `53d8dabbc68871494dc60638383cdae8adb0e9a8`;
+- SHA-256 опубликованного файла: `39d5b675e9a986e87a41abff5e08273f2c590061e834bd792cb5bacab8670fb6`.
 
 Codex:
 1. НЕ трогай основной dirty worktree. Работай в отдельном чистом worktree от origin/main.
 2. Fetch refs и проверь, что origin/main всё ещё ровно `53864146744f9e4bdc0db729a165320a58732c89`. Если main изменился — STOP; Patch 87 вручную не адаптировать.
 3. Прочитай AGENTS.md. Не изменять AGENTS.md.
-4. Получи актуальный `87.patch` byte-for-byte из origin/chatgpt-patches и проверь SHA-256 `0aab02ec9ace6da4be7ff9c97e6240e7592fb84bc77306ff6aa69e6083cef8d9`. Несовпадение => STOP.
+4. Получи актуальный `87.patch` byte-for-byte из origin/chatgpt-patches и проверь SHA-256 `39d5b675e9a986e87a41abff5e08273f2c590061e834bd792cb5bacab8670fb6`. Несовпадение => STOP.
 5. Выполни `git apply --check 87.patch`. Ошибка => STOP без ручного исправления/--reject/редизайна.
 6. Примени Patch. `git diff --name-only` должен показать ровно 5 scope-файлов выше.
 7. Если Deno доступен без изменения tooling — запусти `deno test supabase/functions/_shared/prom-order-financials_test.ts`. Если тот же Windows Access denied — не чинить Deno, просто зафиксировать.
