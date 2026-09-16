@@ -1,0 +1,64 @@
+name: Patch 94 validation
+
+on:
+  push:
+    branches: [chatgpt-p94-validate]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Patch 94 base
+        uses: actions/checkout@v5
+        with:
+          ref: fb1e5adda93a6ef9b71de1b9ec979d2cfd4d2218
+          fetch-depth: 0
+
+      - name: Fetch patch transport branch
+        run: git fetch origin chatgpt-patches:refs/remotes/origin/chatgpt-patches
+
+      - name: Verify base and patch blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "fb1e5adda93a6ef9b71de1b9ec979d2cfd4d2218"
+          test "$(git rev-parse origin/chatgpt-patches:94.patch)" = "2850f1efca3d98ed64154f8bc2b07e46367165dd"
+          git show origin/chatgpt-patches:94.patch > "$RUNNER_TEMP/94.patch"
+          git apply --check "$RUNNER_TEMP/94.patch"
+
+      - name: Apply patch and verify scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply "$RUNNER_TEMP/94.patch"
+          git diff --check
+          { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$RUNNER_TEMP/actual-scope.txt"
+          cat > "$RUNNER_TEMP/expected-scope.txt" <<'EOF'
+          supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+          supabase/functions/sync-delivery-tracking/carriers/meest.ts
+          EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/expected-scope.txt"
+          sort -o "$RUNNER_TEMP/expected-scope.txt" "$RUNNER_TEMP/expected-scope.txt"
+          diff -u "$RUNNER_TEMP/expected-scope.txt" "$RUNNER_TEMP/actual-scope.txt"
+          git status --short
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Validate delivery tracking
+        run: |
+          deno test --no-lock supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+          deno check --no-lock supabase/functions/sync-delivery-tracking/carriers/meest.ts supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+
+      - name: Final diff verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$RUNNER_TEMP/final-scope.txt"
+          diff -u "$RUNNER_TEMP/expected-scope.txt" "$RUNNER_TEMP/final-scope.txt"
