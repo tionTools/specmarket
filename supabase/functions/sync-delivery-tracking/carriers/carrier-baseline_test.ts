@@ -73,7 +73,7 @@ Deno.test('Meest falls back to public tracking when OpenAPI has no events', asyn
     },
     { condition: publicStatus },
   ], async () => {
-    const result = await meestStatus('723-3447567')
+    const result = await meestStatus('723-0000000')
     assert(result.status === publicStatus, 'Meest public fallback must expose the actual public tracking status')
     assert(result.normalizedStatus === 'accepted', 'Meest accepted public status must be normalized as accepted')
     assert(result.final === false, 'Meest accepted public status must remain non-final')
@@ -88,7 +88,7 @@ Deno.test('Meest treats observed OK with empty result as created but not handed 
     info: { fieldName: '', message: '', messageDetails: '' },
     result: [],
   }, async () => {
-    const result = await meestStatus('723-3447567')
+    const result = await meestStatus('723-0000000')
     assert(
       result.status === 'Отправление создано, но не передано на доставку',
       'Meest response OK must not be shown as shipment status',
