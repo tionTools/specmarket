@@ -50,6 +50,22 @@ Deno.test('ordinary Meest tracking still updates status', async () => {
   })
 })
 
+Deno.test('Meest treats observed OK with empty result as created but not handed over', async () => {
+  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, {
+    status: 'OK',
+    info: { fieldName: '', message: '', messageDetails: '' },
+    result: [],
+  }, async () => {
+    const result = await meestStatus('723-3447567')
+    assert(
+      result.status === 'Отправление создано, но не передано на доставку',
+      'Meest response OK must not be shown as shipment status',
+    )
+    assert(result.normalizedStatus === 'created', 'Meest empty result must remain created')
+    assert(result.final === false, 'Meest empty result must remain non-final')
+  })
+})
+
 Deno.test('Rozetka Delivery keeps using public tracking', async () => {
   await withCarrierResponse({}, { data: {
     last_status: { id: '1', name: 'Створено', date: '2026-08-30 10:00:00' }, status_groups: [],

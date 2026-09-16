@@ -19,10 +19,16 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
   const raw = record(await response.json())
   const events = (Array.isArray(raw.result) ? raw.result : []).map(record)
   const latest = latestEvent(events, 'eventDateTime')
-  const source = text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || text(raw.status)
+  const responseStatus = text(raw.status)
+  const createdWithoutEvents = events.length === 0 && /^ok$/i.test(responseStatus)
+  const source = createdWithoutEvents
+    ? 'Отправление создано, но не передано на доставку'
+    : text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || responseStatus
   if (!source) throw new Error('Meest API не вернул статус')
   const eventCode = text(latest?.eventCode)
-  const base = meestReadableStatus(source, eventCode)
+  const base = createdWithoutEvents
+    ? { status: source, final: false, normalizedStatus: 'created' }
+    : meestReadableStatus(source, eventCode)
   const final = /^(1622|1825|3|5700)$/.test(eventCode) || base.final
   const trackingEvents = compactEvents(events.map((event) => ({
     at: text(event.eventDateTime),
