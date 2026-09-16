@@ -35,6 +35,11 @@ export function isPromWebsiteOrder(value: unknown): boolean {
   return hasWebsiteCommissionMarker(order)
 }
 
+export function hasPromInstallmentPayment(value: unknown): boolean {
+  const paymentData = asRecord(asRecord(value).payment_data)
+  return Object.keys(asRecord(paymentData.rpay_parts)).length > 0
+}
+
 // Order-level fixed commissions are added on top of item/catalog commission.
 // In rpay_parts, `commission` is a percentage (3.70), while `commission_amount`
 // is the money amount (20.54). Only the money amount belongs in royalty.

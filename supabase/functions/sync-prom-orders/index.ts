@@ -15,7 +15,11 @@ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, 
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
-import { isPromWebsiteOrder, promOrderLevelCommission } from '../_shared/prom-order-financials.ts'
+import {
+  hasPromInstallmentPayment,
+  isPromWebsiteOrder,
+  promOrderLevelCommission,
+} from '../_shared/prom-order-financials.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -935,6 +939,8 @@ Deno.serve(async (request) => {
     const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const orderLevelCommissionAmount = promOrderLevelCommission(order)
     const isWebsiteOrder = isPromWebsiteOrder(order)
+    const isInstallmentPayment =
+      hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
     const resolvedShipping = resolvePromShipping({
@@ -972,6 +978,7 @@ Deno.serve(async (request) => {
           ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
           : undefined,
         hasWebsiteCommission: isWebsiteOrder,
+        isInstallmentPayment,
         shippingSource: resolvedShipping.shippingSource,
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,

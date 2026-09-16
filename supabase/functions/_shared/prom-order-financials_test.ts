@@ -1,4 +1,4 @@
-import { isPromWebsiteOrder, promOrderLevelCommission } from './prom-order-financials.ts'
+import { hasPromInstallmentPayment, isPromWebsiteOrder, promOrderLevelCommission } from './prom-order-financials.ts'
 
 function assert(value: unknown, message = 'Assertion failed'): asserts value {
   if (!value) throw new Error(message)
@@ -17,6 +17,8 @@ Deno.test('Prom mobile app installment commission uses amount, not percentage', 
   }
 
   assert(!isPromWebsiteOrder(order))
+  assert(hasPromInstallmentPayment(order))
+  assert(!hasPromInstallmentPayment({ payment_data: {} }))
   assert(promOrderLevelCommission(order) === 20.54)
   assert(Math.abs(98.46 + promOrderLevelCommission(order) - 119.00) < 1e-9)
 })

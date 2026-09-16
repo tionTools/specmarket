@@ -5144,7 +5144,16 @@ function orderDateTime(order: Order) {
                   class="ml-2 mt-1 inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
                   >{{ orderHeaderPaymentLabel(order) }}</span
                 ><span
-                  v-if="promPaymentState(order) === 'paid'"
+                  v-if="order.delivery.isInstallmentPayment"
+                  class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
+                  ><span
+                    class="grid size-4 shrink-0 grid-cols-2 gap-[1px] overflow-hidden rounded-[2px] bg-white p-[1px]"
+                    aria-hidden="true"
+                    ><span class="bg-violet-700"></span><span class="bg-lime-300"></span
+                    ><span class="bg-violet-700"></span><span class="bg-violet-700"></span></span
+                  >Оплачено частями</span
+                ><span
+                  v-if="!order.delivery.isInstallmentPayment && promPaymentState(order) === 'paid'"
                   class="ml-2 mt-1 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
                   ><span
                     class="grid size-4 place-items-center rounded-full bg-emerald-500 text-[10px] font-bold text-white"
@@ -5886,17 +5895,29 @@ function orderDateTime(order: Order) {
             >
               <div class="flex items-start justify-between gap-3">
                 <h3 class="text-lg font-semibold">Доставка</h3>
-                <span
-                  class="rounded-full px-2.5 py-1 text-xs font-semibold"
-                  :class="statusBadgeClass(order)"
-                  >{{
-                    deliveryReturnStatus(
-                      order.delivery.trackingStatus,
-                      order.delivery.trackingNormalizedStatus,
-                      order.delivery.trackingReturnInProgress,
-                    ) || deliveryStatusForOrder(order)
-                  }}</span
-                >
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                  <span
+                    v-if="order.delivery.isInstallmentPayment"
+                    class="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-700"
+                    ><span
+                      class="grid size-4 shrink-0 grid-cols-2 gap-[1px] overflow-hidden rounded-[2px] bg-white p-[1px]"
+                      aria-hidden="true"
+                      ><span class="bg-violet-700"></span><span class="bg-lime-300"></span
+                      ><span class="bg-violet-700"></span><span class="bg-violet-700"></span></span
+                    >Оплачено частями</span
+                  >
+                  <span
+                    class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                    :class="statusBadgeClass(order)"
+                    >{{
+                      deliveryReturnStatus(
+                        order.delivery.trackingStatus,
+                        order.delivery.trackingNormalizedStatus,
+                        order.delivery.trackingReturnInProgress,
+                      ) || deliveryStatusForOrder(order)
+                    }}</span
+                  >
+                </div>
               </div>
               <div
                 v-if="

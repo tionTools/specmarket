@@ -63,6 +63,7 @@ export interface Delivery {
   /** Уже учтённые операции RozetkaPay, чтобы повторный импорт реестра не применял их повторно. */
   rozetkaPayOperationIds?: string[]
   hasWebsiteCommission?: boolean
+  isInstallmentPayment?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
   /** Последний статус, полученный из tracking перевозчика. */
   trackingStatus?: string
