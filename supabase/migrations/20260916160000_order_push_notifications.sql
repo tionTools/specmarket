@@ -8,34 +8,12 @@ create table if not exists public.crm_push_devices (
 );
 
 alter table public.crm_push_devices enable row level security;
-revoke all on table public.crm_push_devices from public, anon;
-grant select, insert, update, delete on table public.crm_push_devices to authenticated;
+revoke all on table public.crm_push_devices from public, anon, authenticated;
 
 create index if not exists crm_push_devices_enabled_idx
   on public.crm_push_devices(enabled) where enabled;
 create index if not exists crm_push_devices_token_idx
   on public.crm_push_devices(fcm_token);
-
-drop policy if exists "own push devices select" on public.crm_push_devices;
-create policy "own push devices select"
-on public.crm_push_devices for select to authenticated
-using ((select auth.uid()) = user_id);
-
-drop policy if exists "own push devices insert" on public.crm_push_devices;
-create policy "own push devices insert"
-on public.crm_push_devices for insert to authenticated
-with check ((select auth.uid()) = user_id);
-
-drop policy if exists "own push devices update" on public.crm_push_devices;
-create policy "own push devices update"
-on public.crm_push_devices for update to authenticated
-using ((select auth.uid()) = user_id)
-with check ((select auth.uid()) = user_id);
-
-drop policy if exists "own push devices delete" on public.crm_push_devices;
-create policy "own push devices delete"
-on public.crm_push_devices for delete to authenticated
-using ((select auth.uid()) = user_id);
 
 create or replace function public.enqueue_crm_new_order_push()
 returns trigger
