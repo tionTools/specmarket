@@ -1,7 +1,7 @@
 Patch 92 — NovaPay balance backend
 
 Base main: 260eda9eff2616e38e988570cf48a2634549e9ad
-Patch blob: fe656d1f6fea1ef1d1d18d190ed156ffb5d0471e
+Patch blob: 8fd5168b7610a7624bf05fbf617e43cdb01d9177
 Patch file: 92.patch
 
 Goal:
@@ -28,6 +28,7 @@ What changes:
 - Uses the resulting JWT for GetClientsList, GetAccountsList and GetAccountRest.
 - Automatically uses the account only when exactly one active UAH account exists; otherwise returns a controlled selection-required error instead of guessing.
 - Returns account id/IBAN/currency plus confirmed, available and projected balances.
+- For NovaPay logical errors, returns only safe error status/title metadata; stacktrace and credentials are never returned.
 - Does not add UI, Android code, payments, statements or write-payment functionality.
 
 Security:
@@ -36,25 +37,28 @@ Security:
 - No secret value is intentionally logged.
 - Function follows the existing project auth pattern and rejects unauthenticated/guest users.
 
-Codex execution task:
+Codex execution task for a clean worktree:
 1. Work only in the main project/worktree. Do not modify AGENTS.md or unrelated files.
 2. `git fetch origin main chatgpt-patches`.
 3. Require a clean working tree. If unrelated user changes exist, STOP and report; do not reset/stash them automatically.
 4. Require `HEAD = origin/main = 260eda9eff2616e38e988570cf48a2634549e9ad`. If origin/main differs, STOP; do not manually adapt Patch 92.
-5. Require `git rev-parse origin/chatgpt-patches:92.patch` = `fe656d1f6fea1ef1d1d18d190ed156ffb5d0471e`.
+5. Require `git rev-parse origin/chatgpt-patches:92.patch` = `8fd5168b7610a7624bf05fbf617e43cdb01d9177`.
 6. Run `git show origin/chatgpt-patches:92.patch | git apply --check -`. If it fails, STOP; do not edit the patch manually.
 7. Apply with `git show origin/chatgpt-patches:92.patch | git apply -`.
 8. Run `git diff --check`, `git diff --name-only`, and `git status --short`. Scope must be exactly the 2 files listed above, including untracked files.
-9. Run available Deno checks for `supabase/functions/novapay-balance/index.ts`. Do not create or commit deno.lock or unrelated artifacts. If the installed Deno cannot resolve the remote/npm imports, report that exact limitation; do not redesign the patch.
+9. Run available Deno checks for `supabase/functions/novapay-balance/index.ts`. Do not create or commit deno.lock or unrelated artifacts. If the installed Deno cannot run, report the exact limitation; do not redesign the patch.
 10. Verify the diff contains no real NovaPay refresh token, JWT, public certificate, login or other secret value, and that secrets are not logged or returned.
 11. Apply only the migration `supabase/migrations/20260916190000_novapay_rotation_lock.sql` using the already linked/authenticated Supabase project. If Supabase requires new login/auth/credentials, STOP and report.
-12. Deploy only `novapay-balance`. Use the existing project auth pattern. Do not create new secrets or credentials. If deploy requires new auth, STOP.
-13. Perform a safe smoke-test of novapay-balance without printing any secret values. Confirm, in order: UserAuthenticationJWT succeeds; credential rotation RPC succeeds; GetClientsList succeeds; GetAccountsList succeeds; GetAccountRest succeeds and returns balance fields. If the function returns a controlled multiple-client or multiple-account selection error, report the returned non-secret ids/IBAN metadata and STOP without inventing a selection.
+12. Deploy only `novapay-balance`. Do not create new secrets or credentials. If deploy requires new auth, STOP.
+13. Perform a safe smoke-test of novapay-balance without printing any secret values. Confirm, in order: UserAuthenticationJWT; credential rotation RPC; GetClientsList; GetAccountsList; GetAccountRest. If an authenticated CRM JWT is not available to Codex, STOP before commit/push and ask the user to run the browser smoke-test.
 14. If any backend step or smoke-test fails, STOP. Do not repair, redesign or expand Patch 92 on your own.
 15. Re-run `git diff --check`, exact 2-file scope check and `git status --short` after all checks.
 16. Re-fetch `origin/main` immediately before commit/push. If main moved from the required base, STOP; do not force-push or rebase/adapt automatically.
-17. Commit only the 2 Patch 92 files. Commit message: `Add NovaPay balance backend`.
+17. Commit only the 2 Patch 92 files after a successful smoke-test. Commit message: `Add NovaPay balance backend`.
 18. Push only through the existing GitHub SSH configuration directly to `main`. No HTTPS, browser auth, new credentials or force-push. If SSH push fails, STOP and report the reason.
 19. Final report must include: original HEAD; pushed commit SHA; exact changed-file list; git apply/check results; Deno check result; migration result; Edge Function deploy result; smoke-test result; confirmation that no secret values were printed or committed.
+
+Current in-progress worktree note:
+If the previous Patch 92 blob `fe656d1f6fea1ef1d1d18d190ed156ffb5d0471e` is already applied locally and the migration/function were already deployed, do NOT reverse/reapply the full patch. Use `92-fix.patch` and `92-fix.txt` instead.
 
 Do not modify UI, Android, AGENTS.md, marketplace sync logic, existing NovaPay Vault secrets, or existing NovaPay credential RPC functions.
