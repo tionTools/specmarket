@@ -7,7 +7,14 @@ Patch file:
 86.patch
 
 Patch SHA-256:
-af55ec3bf0aa5c8d474f29b094a82151fcf5302127f3058ad8c186616951b023
+f6a6855d0bc3d03d766aa6a9a92e90add8e597e73c662f1aa6040aaedcbf12a4
+
+Перепроверка перед запуском Codex:
+- первая публикация 86.patch была отбракована при независимой проверке: в двух hunk были неверно оформлены context/count строки, а SHA в 86.txt не соответствовал фактическому файлу;
+- main не менялся, Patch 86 не применялся;
+- 86.patch пересобран реальным `git diff --unified=1` на точных фрагментах базы;
+- локально проверены `git apply --check`, `git apply` и `git diff --check` — PASS;
+- Git blob SHA опубликованного 86.patch совпадает с локально рассчитанным blob SHA, поэтому SHA-256 выше относится именно к текущему файлу в `origin/chatgpt-patches`.
 
 Подтверждённая диагностика заказа Prom №427999580:
 - Prom показывает «Замовлення з додатку»;
@@ -65,7 +72,7 @@ Codex:
 1. НЕ трогай основной dirty worktree. Работай в отдельном чистом worktree от origin/main.
 2. Fetch refs и проверь, что origin/main всё ещё ровно 26474b790ec56dc33a8c84d8fcd9913e99b291c1. Если main изменился — STOP; Patch 86 вручную не адаптировать.
 3. Прочитай AGENTS.md. AGENTS.md не изменять.
-4. Получи 86.patch byte-for-byte из origin/chatgpt-patches и проверь SHA-256: af55ec3bf0aa5c8d474f29b094a82151fcf5302127f3058ad8c186616951b023. Несовпадение => STOP.
+4. Получи 86.patch byte-for-byte из origin/chatgpt-patches и проверь SHA-256: f6a6855d0bc3d03d766aa6a9a92e90add8e597e73c662f1aa6040aaedcbf12a4. Несовпадение => STOP.
 5. Выполни git apply --check 86.patch. При любой ошибке STOP без --reject, ручного исправления или редизайна Patch.
 6. Примени Patch и сразу проверь git diff --name-only: должны быть ровно 3 scope-файла выше.
 7. Если Deno уже доступен в текущем окружении, запусти `deno test supabase/functions/_shared/prom-order-financials_test.ts`. Если Deno отсутствует — НЕ устанавливай и не перестраивай tooling; зафиксируй это в отчёте.
