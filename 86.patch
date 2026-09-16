@@ -118,11 +118,11 @@ new file mode 100644
 diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
 --- a/supabase/functions/sync-prom-orders/index.ts
 +++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -17,2 +17,3 @@
+@@ -17,2 +17,3 @@ import { resolvePromShipping } from '../_shared/prom-delivery.ts'
  import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
 +import { isPromWebsiteOrder, promOrderLevelCommission } from '../_shared/prom-order-financials.ts'
  
-@@ -253,29 +254,2 @@
+@@ -253,29 +254,2 @@ const corsHeaders = {
  
 -// Комиссии уровня заказа (включая «комісія за замовлення з сайту»).
 -// Товары и позиции сюда не заходят, чтобы не посчитать одну комиссию дважды.
@@ -152,18 +152,18 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 -}
 -
  function dateParts(value: unknown) {
-@@ -961,3 +935,4 @@
+@@ -961,3 +935,4 @@ function dateParts(value: unknown) {
      const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
 -    const websiteOrderCommission = orderLevelCommission(order)
 +    const orderLevelCommissionAmount = promOrderLevelCommission(order)
 +    const isWebsiteOrder = isPromWebsiteOrder(order)
      const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
-@@ -998,3 +973,3 @@
+@@ -998,3 +973,3 @@ function dateParts(value: unknown) {
            : undefined,
 -        hasWebsiteCommission: websiteOrderCommission > 0,
 +        hasWebsiteCommission: isWebsiteOrder,
          shippingSource: resolvedShipping.shippingSource,
-@@ -1132,10 +1107,10 @@
+@@ -1132,10 +1107,10 @@ function dateParts(value: unknown) {
        const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
 -      const websiteCommission = websiteOrderCommission && itemsAmount
 -        ? websiteOrderCommission * (price * quantity / itemsAmount)
