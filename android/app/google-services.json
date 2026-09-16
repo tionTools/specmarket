@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "415632359517",
+    "project_id": "specmarket-orders",
+    "storage_bucket": "specmarket-orders.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:415632359517:android:a094ecb1f0e0d9ac038db4",
+        "android_client_info": {
+          "package_name": "ua.orders.crm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9cNxveDuRSg_zNTIuS-ZUnXxHvDUdrYA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

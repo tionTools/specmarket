@@ -3,6 +3,7 @@ package ua.orders.crm
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.functions.functions
@@ -28,6 +29,8 @@ data class AcceptResponse(
     val message: String? = null,
 )
 @Serializable
+data class PushDeviceResponse(val ok: Boolean = false, val message: String? = null)
+@Serializable
 data class OrderChange(val order_id: String, val operation: String = "")
 
 class OrdersRepository {
@@ -50,6 +53,16 @@ class OrdersRepository {
     }
     suspend fun signOut() = client.auth.signOut()
     private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url)")
+
+    suspend fun setPushDevice(deviceId: String, token: String?, enabled: Boolean) {
+        check(client.auth.sessionStatus.first { it !is SessionStatus.Initializing } is SessionStatus.Authenticated)
+        val response = json.decodeFromString<PushDeviceResponse>(client.functions.invoke("manage-push-device", buildJsonObject {
+            put("deviceId", deviceId)
+            put("enabled", enabled)
+            token?.takeIf { it.isNotBlank() }?.let { put("token", it) }
+        }).bodyAsText())
+        check(response.ok) { response.message ?: "Не удалось зарегистрировать push-устройство." }
+    }
 
     suspend fun orders(): List<Order> {
         val result = mutableListOf<Order>()
