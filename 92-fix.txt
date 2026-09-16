@@ -27,7 +27,7 @@ Codex execution task for the CURRENT in-progress Patch 92 worktree:
 6. Require `git rev-parse origin/chatgpt-patches:92-fix.patch` = `70cefdc10aa41eea6e0aa758fd4d38b5399e63e3`.
 7. Run `git show origin/chatgpt-patches:92-fix.patch | git apply --check -`. If it fails, STOP.
 8. Apply with `git show origin/chatgpt-patches:92-fix.patch | git apply -`.
-9. Verify `git hash-object supabase/functions/novapay-balance/index.ts` = `4eb89f4d5470b5f2059e530f67ae6df73692b3cf`.
+9. Verify `git hash-object supabase/functions/novapay-balance/index.ts` = `4eb89f447859dd2cd4bd11da2305a21114fec4f9`.
 10. Run `git diff --check` and verify the total Patch 92 worktree scope remains exactly the same 2 files. The only delta introduced by 92-fix.patch must be one added line returning safe `details.title` for NovaPay logical errors.
 11. Verify no JWT, refresh token, public certificate, NOVAPAY_LOGIN value, Vault secret value, or stacktrace is logged, returned, or added to git.
 12. Do NOT reapply the migration. It has already been applied and registered in migration history.
