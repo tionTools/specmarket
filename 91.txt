@@ -6,6 +6,18 @@ Android: versionName 0.15, versionCode 15
 Firebase project: specmarket-orders
 Android package: ua.orders.crm
 
+FINAL VALIDATION
+GitHub Actions validation run 35106388698: SUCCESS.
+Verified on the exact base and exact patch blob:
+- git apply --check: PASS
+- exact 14-file scope: PASS
+- git diff --check: PASS
+- Deno test/check for push Edge Function code: PASS
+- Android testDebugUnitTest: PASS
+- Android lintDebug: PASS
+- Android assembleRelease: PASS
+- final scope verification after checks: PASS
+
 Goal:
 A new marketplace order must produce an Android notification even when the normal app process is not running. Existing Supabase Realtime remains the live synchronization channel while the process is alive. Tapping the push notification must open that exact order through the Patch 89 deep-link path.
 
@@ -39,36 +51,33 @@ What changes:
 - Adds AFTER INSERT trigger on crm_orders. The trigger queues send-order-push through pg_net. It only acts on inserts; status updates do not create a new-order push.
 - send-order-push only notifies for Prom/Epicentr/Kasta new-order candidates without TTN/cancel/return signals and removes unregistered FCM tokens.
 
-Secrets already configured in Supabase by the user; never put their values in Git or logs:
+Required Supabase secrets:
 - FIREBASE_PROJECT_ID
 - FIREBASE_CLIENT_EMAIL
 - FIREBASE_PRIVATE_KEY
+Codex must verify that these secret NAMES are configured before backend deployment. Never print, echo, copy, log, or commit secret VALUES. If any required secret is absent, stop before deployment and report only the missing secret names.
 
-Deployment order after all local checks pass:
-1. Deploy `manage-push-device` with `--no-verify-jwt` because the function validates the bearer token itself with Supabase Auth.
-2. Deploy `send-order-push` with `--no-verify-jwt` because it validates the internal crm_sync_cron_secret itself.
-3. Only after both functions are deployed, apply the migration/database push so the new INSERT trigger never points to a missing function.
-4. Commit/push main through the existing GitHub SSH flow. Do not use HTTPS/browser auth/new credentials.
-5. Wait for GitHub Actions `Android APK`, require SUCCESS and signed APK verification.
-
-Required pre-apply checks:
-- fetch origin/main and origin/chatgpt-patches;
-- origin/main must still equal bfeb68e0cd586d38bf6594e939537e9f6e79cea8; if not, stop and report, do not manually adapt Patch 91;
-- `git rev-parse origin/chatgpt-patches:91.patch` must equal d94183df77eabe6fa4d12d1e35f4f77c482bca06;
-- working tree must be clean; do not reset/stash unrelated user work automatically;
-- run `git show origin/chatgpt-patches:91.patch | git apply --check -`; failure => stop, no manual adaptation;
-- apply the same stream only after the check passes;
-- run `git diff --check`, `git diff --name-only`, and `git status --short`; scope must be exactly the 14 files above.
-
-Required checks after apply:
-- run `deno test supabase/functions/_shared/firebase-messaging_test.ts`;
-- run Deno type/check validation for firebase-messaging.ts, manage-push-device/index.ts and send-order-push/index.ts if the project Deno tooling is available;
-- run the standard `scripts/android-check.ps1` harness only; do not create a new JDK/Gradle cache/junction/build environment;
-- Android harness must run testDebugUnitTest, lintDebug and assembleRelease; SUCCESS_LOCAL_CI_SIGNING_REQUIRED is acceptable locally when signing credentials are intentionally absent;
-- re-run `git diff --check` and exact scope verification after checks.
-
-Commit message:
-Add Android FCM order push notifications
+Codex execution task:
+1. Work only in the main project/worktree. Do not modify AGENTS.md or unrelated files.
+2. `git fetch origin main chatgpt-patches`.
+3. Require a clean working tree. If unrelated user changes exist, stop and report; do not reset/stash them automatically.
+4. Require `origin/main` = `bfeb68e0cd586d38bf6594e939537e9f6e79cea8`. If it differs, stop; do not manually adapt Patch 91.
+5. Require `git rev-parse origin/chatgpt-patches:91.patch` = `d94183df77eabe6fa4d12d1e35f4f77c482bca06`.
+6. Run `git show origin/chatgpt-patches:91.patch | git apply --check -`. If it fails, stop; do not edit the patch manually.
+7. Apply with `git show origin/chatgpt-patches:91.patch | git apply -`.
+8. Run `git diff --check`, `git diff --name-only`, and `git status --short`. Scope must be exactly the 14 files listed above, including untracked files.
+9. Run `deno test --no-lock supabase/functions/_shared/firebase-messaging_test.ts` and `deno check --no-lock supabase/functions/_shared/firebase-messaging.ts supabase/functions/manage-push-device/index.ts supabase/functions/send-order-push/index.ts` if supported by the installed Deno. Do not leave generated deno.lock or other artifacts in the worktree.
+10. Run only the permanent Android harness `scripts/android-check.ps1`. Do not create a new JDK, Gradle cache, junction, ASCII copy, runner, or build environment. The harness must cover testDebugUnitTest, lintDebug and assembleRelease. `SUCCESS_LOCAL_CI_SIGNING_REQUIRED` is acceptable if local signing credentials are intentionally unavailable.
+11. Re-run `git diff --check`, exact 14-file scope check, and `git status --short` after all checks.
+12. Verify the required Supabase secret NAMES are configured: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY. Never expose their values. If any name is missing, stop before backend deployment.
+13. Deploy `manage-push-device` with `--no-verify-jwt` because the function validates the bearer token itself through Supabase Auth.
+14. Deploy `send-order-push` with `--no-verify-jwt` because the function validates the internal crm_sync_cron_secret itself.
+15. Only after both Edge Functions deploy successfully, apply the Supabase migration/database push containing `20260916160000_order_push_notifications.sql`. If any backend step fails, stop and do not push main.
+16. Re-fetch `origin/main` immediately before commit/push. If main moved from the required base, stop; do not force-push or rebase/adapt automatically.
+17. Commit only the 14 Patch 91 files. Commit message: `Add Android FCM order push notifications`.
+18. Push only through the existing GitHub SSH configuration to `main`. No HTTPS, browser auth, new credentials, or force-push. If SSH push fails, stop and report the reason.
+19. Wait for the normal GitHub Actions `Android APK` workflow for the pushed commit. Require SUCCESS and verify the resulting APK is signed. Do not claim success without checking the workflow.
+20. Final report must include: pushed commit SHA; local android-check result; Deno test/check result; exact changed-file list; backend deploy results for both Edge Functions and migration; Android APK workflow run/status; signed APK verification; Android version 0.15 / versionCode 15.
 
 Real-device acceptance test after production deploy and APK install:
 - launch/login once so the phone registers its FCM token;
