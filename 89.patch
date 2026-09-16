@@ -34,7 +34,7 @@ diff --git a/android/app/src/main/java/ua/orders/crm/OrderNotification.kt b/andr
 diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
 --- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
 +++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
-@@ -43,10 +43,31 @@ import java.math.RoundingMode
+@@ -48,9 +48,30 @@ import java.math.RoundingMode
  import kotlinx.coroutines.launch
  
  class MainActivity : ComponentActivity() {
