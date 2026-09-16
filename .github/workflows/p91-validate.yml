@@ -66,6 +66,7 @@ jobs:
         run: |
           deno test supabase/functions/_shared/firebase-messaging_test.ts
           deno check supabase/functions/_shared/firebase-messaging.ts supabase/functions/manage-push-device/index.ts supabase/functions/send-order-push/index.ts
+          rm -f deno.lock
 
       - name: Setup Java
         uses: actions/setup-java@v5
