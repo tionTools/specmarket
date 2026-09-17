@@ -59,7 +59,7 @@ Deno.serve(async (request) => {
     amount,
     balance: balance !== null && Number.isFinite(balance) ? balance : null,
     payer: text(event.payer),
-    purpose: text(event.description) || text(event.comment),
+    purpose: text(event.comment) || text(event.description),
   })
 
   return Response.json({ ok: true, sent })
