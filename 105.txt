@@ -1,6 +1,6 @@
 Patch 105 — Meest tracking fallback when OpenAPI returns no events
 
-STATUS: REVIEW ONLY. Do not apply/deploy/commit to main until Vadim approves the logic.
+STATUS: LOGIC APPROVED BY VADIM. Not applied/deployed/committed to main yet.
 
 Base main at preparation time:
 8822fdf46cc422ad532924ce4f229b663eb48dc2
@@ -13,22 +13,26 @@ Exact scope — 2 files only:
 - supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
 
 Root cause being fixed:
-Patch 90 treated Meest OpenAPI `status: OK` + empty `result: []` as factual proof that the shipment was created but not handed to the carrier. That assumption is false: for TTN 723-3447567 the OpenAPI path could have no events while the public Meest tracker already contained later shipment events. Therefore an empty event array must mean "no factual OpenAPI tracking event available", not a shipment status.
+Patch 90 treats Meest OpenAPI `status: OK` + empty `result: []` as factual proof that the shipment was created but not handed to the carrier. That interpretation is unsafe: an empty event array contains no factual shipment event and therefore must not itself be converted into a shipment status.
 
-Live verification completed before this patch:
-GitHub Actions probe run 35232115647 reproduced the current official public Meest tracker protocol for TTN 723-3447567.
-Observed protocol:
+Evidence and limitation:
+The CRM/public-status mismatch is established for TTN 723-3447567: the public Meest tracker contains later real shipment events than the stale `created` state shown by CRM.
+GitHub Actions probe run 35232115647 live-tested ONLY the current public Meest tracker mechanism. It did NOT call the authenticated Meest OpenAPI and therefore does not independently prove that OpenAPI currently returns `result: []` for this TTN.
+To prove the current OpenAPI response for this exact TTN independently, a raw authenticated OpenAPI response or corresponding Supabase log is required.
+
+What run 35232115647 did prove live:
 1. GET https://t.meest-group.com/n/<TTN>.
 2. Read the current `salt` embedded by the official tracking page.
 3. Compute MD5(salt + TTN + salt).
 4. POST https://t.meest-group.com/get.php?what=tracking&test&number=<TTN>&lang=uk&ext_track=&chk=<MD5>.
 5. Parse the returned XML `<items>` rows.
 
-The live response contained these real events:
+The live public response contained these real events:
 - 2026-09-16 14:04:00, code 2: `Відправлення створено, але не передано на доставку`, Харків.
 - 2026-09-16 19:04:19, code 606: `Відправлення прийнято до перевезення`, detail `в населеному пункті Харків`.
 - 2026-09-17 16:41:59, code 8081: `Відправлення в дорозі`, detail `в населений пункт Київ`.
-This proves the public tracker can contain newer factual events while the OpenAPI event list is empty.
+
+Therefore the public fallback mechanism is live-verified, and the current treatment of an empty OpenAPI event list as factual `created` is logically invalid. What remains unverified from the available evidence is whether authenticated OpenAPI for this exact TTN is currently returning `result: []`.
 
 Patch 105 runtime logic:
 1. Meest OpenAPI remains the primary source exactly as before.
@@ -56,6 +60,9 @@ Patch 105 runtime logic:
    - existing code 1622 / `Доручено` -> delivered
    - everything else continues through the existing readableStatus logic.
 8. If OpenAPI has no events AND the public tracker cannot produce valid events, meestStatus throws an error instead of inventing a status. The existing worker catches that carrier error and leaves the saved crm_orders.delivery tracking state unchanged while recording the tracking error. This prevents a temporary Meest failure from rolling an already-moving parcel backwards to `created`.
+
+Known technological weakness:
+The fallback uses the internal web endpoint/protocol currently used by the public Meest site, not a documented supported API contract. Meest may change that page, salt/signature logic, endpoint, or XML shape without notice. If that happens, the fallback can fail. The failure mode is intentionally safe: the existing saved tracking state remains unchanged and an error is recorded instead of replacing the status with a fabricated `created` state.
 
 No changes to:
 - worker.ts
@@ -103,4 +110,4 @@ Deployment after approval:
 - no migration/database push;
 - then commit/push through the normal existing SSH workflow.
 
-Do not deploy Patch 105 before explicit approval of this logic.
+Logic approval is recorded. Deployment still requires the normal apply/validate/deploy sequence against the then-current main.
