@@ -4,6 +4,7 @@ type BankName = 'monobank' | 'novapay'
 
 type BankNotification = {
   bank: BankName
+  occurredAt: string
   amount: number
   balance: number | null
   payer: string
@@ -17,14 +18,24 @@ function validEmail(value: string) {
 }
 
 function money(value: number) {
-  return new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value).replaceAll('\u00a0', ' ')
+  return value.toFixed(2)
 }
 
-function bankLabel(bank: BankName) {
-  return bank === 'monobank' ? 'Monobank ФОП' : 'NovaPay ФОП'
+function dateTime(value: string) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value || '—'
+  const parts = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
+  return `${part('day')}.${part('month')}.${part('year')}, ${part('hour')}:${part('minute')}:${part('second')}`
 }
 
 export async function sendBankPaymentEmail(
@@ -52,22 +63,18 @@ export async function sendBankPaymentEmail(
     return false
   }
 
-  const label = bankLabel(notification.bank)
-  const amount = `+${money(notification.amount)} ₴`
-  const balance = notification.balance === null ? '—' : `${money(notification.balance)} ₴`
-  const payer = text(notification.payer) || '—'
+  const amount = money(notification.amount)
+  const balance = notification.balance === null ? '—' : money(notification.balance)
+  const payer = text(notification.payer)
   const purpose = text(notification.purpose) || '—'
-  const subject = `💰 ${label}: ${amount}`
+  const description = payer ? `Від: ${payer}` : '—'
+  const subject = `💰 Нове надходження: ${amount} грн`
   const body = [
-    `Новый приход на ${label}`,
-    '',
-    `Зачислено: ${amount}`,
-    `Текущий остаток: ${balance}`,
-    '',
-    `Плательщик: ${payer}`,
-    `Назначение: ${purpose}`,
-    '',
-    'Ваш финансовый помощник',
+    `Дата: ${dateTime(notification.occurredAt)}`,
+    `Сумма: ${amount} грн`,
+    `Описание: ${description}`,
+    `Баланс: ${balance}${balance === '—' ? '' : ' грн'}`,
+    `Коммент: ${purpose}`,
   ].join('\n')
 
   try {
