@@ -1,0 +1,320 @@
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+index f16db33..2528833 100644
+--- a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+@@ -7,10 +7,13 @@ function assert(value: unknown, message: string): asserts value {
+   if (!value) throw new Error(message)
+ }
+ 
+-async function withCarrierResponse(
++type MockResponse = { body: unknown; status?: number }
++type FetchCall = { url: string; method: string }
++
++async function withCarrierResponses(
+   environment: Record<string, string>,
+-  body: unknown,
+-  run: () => Promise<void>,
++  responses: MockResponse[],
++  run: (calls: FetchCall[]) => Promise<void>,
+ ) {
+   const originalFetch = globalThis.fetch
+   const previous = new Map<string, string | undefined>()
+@@ -18,9 +21,23 @@ async function withCarrierResponse(
+     previous.set(key, Deno.env.get(key))
+     Deno.env.set(key, value)
+   }
+-  globalThis.fetch = async () => new Response(JSON.stringify(body))
++  const calls: FetchCall[] = []
++  let responseIndex = 0
++  globalThis.fetch = async (input, init) => {
++    const url = typeof input === 'string'
++      ? input
++      : input instanceof URL
++      ? input.toString()
++      : input.url
++    const method = init?.method || (input instanceof Request ? input.method : 'GET')
++    calls.push({ url, method })
++    const current = responses[responseIndex++]
++    if (!current) throw new Error(`Unexpected fetch ${method} ${url}`)
++    const body = typeof current.body === 'string' ? current.body : JSON.stringify(current.body)
++    return new Response(body, { status: current.status ?? 200 })
++  }
+   try {
+-    await run()
++    await run(calls)
+   } finally {
+     globalThis.fetch = originalFetch
+     for (const [key, value] of previous) {
+@@ -30,6 +47,14 @@ async function withCarrierResponse(
+   }
+ }
+ 
++async function withCarrierResponse(
++  environment: Record<string, string>,
++  body: unknown,
++  run: (calls: FetchCall[]) => Promise<void>,
++) {
++  await withCarrierResponses(environment, [{ body }], run)
++}
++
+ Deno.test('ordinary Ukrposhta tracking still updates status', async () => {
+   await withCarrierResponse({ UKRPOSHTA_STATUS_BEARER: 'test' }, [{
+     date: '2026-08-30 10:00:00', event: '10100', eventName: 'Прийнято', name: 'Відділення', index: '01001',
+@@ -40,29 +65,85 @@ Deno.test('ordinary Ukrposhta tracking still updates status', async () => {
+   })
+ })
+ 
+-Deno.test('ordinary Meest tracking still updates status', async () => {
++Deno.test('ordinary Meest OpenAPI tracking stays primary and does not call public fallback', async () => {
+   await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
+     eventDateTime: '2026-08-30 10:00:00', eventCode: '101', eventDescr: { descrUA: 'В дорозі' },
+-  }] }, async () => {
++  }] }, async (calls) => {
+     const result = await meestStatus('M')
+-    assert(result.provider === 'meest_api', 'Meest endpoint changed')
++    assert(result.provider === 'meest_api', 'Meest OpenAPI must remain the primary provider')
++    assert(result.source === 'carrier_api', 'ordinary Meest result must remain carrier_api')
++    assert(calls.length === 1, 'public tracking must not run when OpenAPI returned events')
+     assert(trackingChanged({ ttn: 'M' }, result), 'ordinary Meest result no longer updates a legacy order')
+   })
+ })
+ 
+-Deno.test('Meest treats observed OK with empty result as created but not handed over', async () => {
+-  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, {
+-    status: 'OK',
+-    info: { fieldName: '', message: '', messageDetails: '' },
+-    result: [],
+-  }, async () => {
++Deno.test('Meest empty OpenAPI result falls back to the signed public tracking used by the official site', async () => {
++  const salt = '0123456789abcdef0123456789abcdef'
++  const html = `<script>var salt = '${salt}';</script>`
++  const xml = `<?xml version="1.0" encoding="UTF-8"?>
++<return><result_table>
++<items>
++<DateTimeAction>2026-09-16 14:04:00</DateTimeAction><Country>УКРАЇНА</Country><City>Харків</City>
++<StatusCode>2</StatusCode><ActionMessages>Відправлення створено, але не передано на доставку</ActionMessages><DetailMessages></DetailMessages>
++</items>
++<items>
++<DateTimeAction>2026-09-16 19:04:19</DateTimeAction><Country>УКРАЇНА</Country><City>Харків</City>
++<StatusCode>606</StatusCode><ActionMessages>Відправлення прийнято до перевезення</ActionMessages><DetailMessages>в населеному пункті Харків</DetailMessages>
++</items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } },
++    { body: html },
++    { body: xml },
++  ], async (calls) => {
++    const result = await meestStatus('723-3447567')
++    assert(result.status === 'Відправлення прийнято до перевезення в населеному пункті Харків', 'public fallback must expose the latest actual event')
++    assert(result.normalizedStatus === 'accepted', 'Meest code 606 must normalize as accepted')
++    assert(result.final === false, 'accepted shipment must remain non-final')
++    assert(result.provider === 'meest_public_tracking', 'empty OpenAPI must use public tracking provider')
++    assert(result.source === 'public_tracking', 'fallback source must be public_tracking')
++    assert(result.details?.trackingStatusCode === '606', 'latest public status code must be preserved')
++    assert(result.details?.trackingEventAt === '2026-09-16 19:04:19', 'latest public event time must be preserved')
++    assert(calls.length === 3, 'fallback must use OpenAPI, public page, then signed tracking request')
++    assert(calls[1]?.url === 'https://t.meest-group.com/n/723-3447567', 'fallback must get the current public tracking salt')
++    assert(calls[2]?.method === 'POST', 'public tracking endpoint must use the same POST method as the official site')
++    assert(calls[2]?.url.includes('chk=4240e08ea27115c1064147ef96dd0f1e'), 'public request signature must be MD5(salt + TTN + salt)')
++  })
++})
++
++Deno.test('Meest public fallback selects the newest public event instead of the obsolete created event', async () => {
++  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
++  const xml = `<return><result_table>
++<items><DateTimeAction>2026-09-16 14:04:00</DateTimeAction><Country>УКРАЇНА</Country><City>Харків</City><StatusCode>2</StatusCode><ActionMessages>Відправлення створено, але не передано на доставку</ActionMessages><DetailMessages></DetailMessages></items>
++<items><DateTimeAction>2026-09-16 19:04:19</DateTimeAction><Country>УКРАЇНА</Country><City>Харків</City><StatusCode>606</StatusCode><ActionMessages>Відправлення прийнято до перевезення</ActionMessages><DetailMessages>в населеному пункті Харків</DetailMessages></items>
++<items><DateTimeAction>2026-09-17 16:41:59</DateTimeAction><Country>УКРАЇНА</Country><City>Харків</City><StatusCode>8081</StatusCode><ActionMessages>Відправлення в дорозі</ActionMessages><DetailMessages>в населений пункт Київ</DetailMessages></items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } },
++    { body: html },
++    { body: xml },
++  ], async () => {
+     const result = await meestStatus('723-3447567')
+-    assert(
+-      result.status === 'Отправление создано, но не передано на доставку',
+-      'Meest response OK must not be shown as shipment status',
+-    )
+-    assert(result.normalizedStatus === 'created', 'Meest empty result must remain created')
+-    assert(result.final === false, 'Meest empty result must remain non-final')
++    assert(result.status === 'Відправлення в дорозі в населений пункт Київ', 'fallback must use the newest public event')
++    assert(result.normalizedStatus === 'in_transit', 'Meest code 8081 must normalize as in_transit')
++    assert(result.details?.trackingStatusCode === '8081', 'latest status code must be 8081')
++    assert(result.details?.trackingEventAt === '2026-09-17 16:41:59', 'latest event time must be selected')
++    assert(result.events?.length === 3, 'public event history must be preserved')
++  })
++})
++
++Deno.test('Meest empty OpenAPI and unusable public fallback fails instead of inventing a created status', async () => {
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } },
++    { body: '<html><body>No tracking salt</body></html>' },
++  ], async () => {
++    let rejected = false
++    try {
++      await meestStatus('723-3447567')
++    } catch (error) {
++      rejected = error instanceof Error && /OpenAPI не вернул события; public tracking/.test(error.message)
++    }
++    assert(rejected, 'missing public tracking evidence must reject instead of returning a synthetic status')
+   })
+ })
+ 
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/meest.ts b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+index 417d2d3..eb06aea 100644
+--- a/supabase/functions/sync-delivery-tracking/carriers/meest.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+@@ -1,13 +1,122 @@
+-import { compactEvents, latestEvent, readableStatus, record, text } from '../normalize.ts'
++import { createHash } from 'node:crypto'
++import { compactEvents, latestEvent, parseTrackingDate, readableStatus, record, text } from '../normalize.ts'
+ import type { TrackingResult } from '../types.ts'
+ 
++type PublicTrackingEvent = {
++  at: string
++  status: string
++  detail: string
++  code: string
++  location: string
++  country: string
++}
++
+ function meestReadableStatus(source: string, code: string) {
+   if (code === '2') return { status: 'Создана накладная', final: false, normalizedStatus: 'created' }
++  if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(source))
++    return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
++  if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
+   if (code === '1622' || /^доручено$/i.test(source.trim()))
+     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
+   return readableStatus(source, code)
+ }
+ 
++function decodeXml(value: string) {
++  return value.replace(/&(amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi, (match, entity: string) => {
++    switch (entity.toLowerCase()) {
++      case 'amp': return '&'
++      case 'lt': return '<'
++      case 'gt': return '>'
++      case 'quot': return '"'
++      case 'apos': return "'"
++      default: {
++        const hex = entity[1]?.toLowerCase() === 'x'
++        const source = hex ? entity.slice(2) : entity.slice(1)
++        const codePoint = Number.parseInt(source, hex ? 16 : 10)
++        return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
++          ? String.fromCodePoint(codePoint)
++          : match
++      }
++    }
++  })
++}
++
++function xmlValue(block: string, tag: string) {
++  const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'))
++  return match ? decodeXml(match[1]).replace(/\s+/g, ' ').trim() : ''
++}
++
++function publicTrackingEvents(xml: string): PublicTrackingEvent[] {
++  return Array.from(xml.matchAll(/<items>([\s\S]*?)<\/items>/gi), (match) => {
++    const block = match[1]
++    const action = xmlValue(block, 'ActionMessages')
++    const detail = xmlValue(block, 'DetailMessages')
++    return {
++      at: xmlValue(block, 'DateTimeAction'),
++      status: [action, detail].filter(Boolean).join(' ').trim(),
++      detail,
++      code: xmlValue(block, 'StatusCode'),
++      location: xmlValue(block, 'City'),
++      country: xmlValue(block, 'Country'),
++    }
++  }).filter((event) => event.at && event.status)
++}
++
++function latestPublicTrackingEvent(events: PublicTrackingEvent[]) {
++  return events.reduce((current, event) =>
++    parseTrackingDate(event.at) >= parseTrackingDate(current.at) ? event : current,
++  events[0])
++}
++
++async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
++  const normalizedTtn = ttn.replace(/\s/g, '')
++  const pageResponse = await fetch(`https://t.meest-group.com/n/${encodeURIComponent(normalizedTtn)}`, {
++    headers: { Accept: 'text/html' },
++  })
++  if (!pageResponse.ok) throw new Error(`Meest public page HTTP ${pageResponse.status}`)
++  const page = await pageResponse.text()
++  const salt = page.match(/\bvar\s+salt\s*=\s*['"]([0-9a-f]{16,128})['"]/i)?.[1]
++  if (!salt) throw new Error('Meest public tracking не вернул salt')
++
++  const check = createHash('md5').update(`${salt}${normalizedTtn}${salt}`).digest('hex')
++  const trackingUrl = `https://t.meest-group.com/get.php?what=tracking&test&number=${encodeURIComponent(normalizedTtn)}&lang=uk&ext_track=&chk=${check}`
++  const trackingResponse = await fetch(trackingUrl, {
++    method: 'POST',
++    headers: { Accept: 'application/xml, text/xml, */*' },
++  })
++  if (!trackingResponse.ok) throw new Error(`Meest public tracking HTTP ${trackingResponse.status}`)
++
++  const events = publicTrackingEvents(await trackingResponse.text())
++  if (!events.length) throw new Error('Meest public tracking не вернул события')
++  const latest = latestPublicTrackingEvent(events)
++  const base = meestReadableStatus(latest.status, latest.code)
++  const final = /^(1622|1825|3|5700)$/.test(latest.code) || base.final
++  return {
++    ...base,
++    status: base.normalizedStatus === 'delivered' ? base.status : latest.status,
++    final,
++    provider: 'meest_public_tracking',
++    source: 'public_tracking',
++    activeTtn: normalizedTtn,
++    relatedShipments: [],
++    events: compactEvents(events.map((event) => ({
++      at: event.at,
++      status: event.status,
++      code: event.code,
++      location: event.location,
++      country: event.country,
++    }))),
++    details: {
++      trackingEventAt: latest.at,
++      trackingLocation: latest.location,
++      trackingLocationCountry: latest.country,
++      trackingLocationDetails: latest.detail,
++      trackingStatusCode: latest.code,
++      trackingDeliveredAt: latest.code === '1622' ? latest.at : '',
++    },
++  }
++}
++
+ export async function meestStatus(ttn: string): Promise<TrackingResult> {
+   const apiToken = text(Deno.env.get('MEEST_API_TOKEN'))
+   if (!apiToken) throw new Error('Не задан MEEST_API_TOKEN')
+@@ -18,17 +127,21 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
+   if (!response.ok) throw new Error(`Meest HTTP ${response.status}`)
+   const raw = record(await response.json())
+   const events = (Array.isArray(raw.result) ? raw.result : []).map(record)
++  if (!events.length) {
++    try {
++      return await meestPublicTrackingStatus(ttn)
++    } catch (error) {
++      const reason = error instanceof Error ? error.message : 'неизвестная ошибка'
++      throw new Error(`Meest OpenAPI не вернул события; public tracking: ${reason}`)
++    }
++  }
++
+   const latest = latestEvent(events, 'eventDateTime')
+   const responseStatus = text(raw.status)
+-  const createdWithoutEvents = events.length === 0 && /^ok$/i.test(responseStatus)
+-  const source = createdWithoutEvents
+-    ? 'Отправление создано, но не передано на доставку'
+-    : text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || responseStatus
++  const source = text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || responseStatus
+   if (!source) throw new Error('Meest API не вернул статус')
+   const eventCode = text(latest?.eventCode)
+-  const base = createdWithoutEvents
+-    ? { status: source, final: false, normalizedStatus: 'created' }
+-    : meestReadableStatus(source, eventCode)
++  const base = meestReadableStatus(source, eventCode)
+   const final = /^(1622|1825|3|5700)$/.test(eventCode) || base.final
+   const trackingEvents = compactEvents(events.map((event) => ({
+     at: text(event.eventDateTime),
