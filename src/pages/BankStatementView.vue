@@ -46,6 +46,7 @@ function normalizeReceipt(value: unknown): BankReceipt | null {
   return {
     id: stringValue(row.id),
     date: stringValue(row.date),
+    occurredAt: stringValue(row.occurredAt),
     description: stringValue(row.description),
     amount,
     balance: numberOrNull(row.balance),
@@ -102,6 +103,31 @@ function periodDate(value: string | null) {
     dateStyle: 'short',
     timeZone: 'Europe/Kyiv',
   }).format(date)
+}
+
+function receiptTimestamp(receipt: BankReceipt) {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})(?:,\s*|\s+)(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(receipt.date)
+  if (match) {
+    const value = new Date(
+      Number(match[3]),
+      Number(match[2]) - 1,
+      Number(match[1]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] ?? 0),
+    ).getTime()
+    if (Number.isFinite(value)) return value
+  }
+
+  const occurredAt = Date.parse(receipt.occurredAt)
+  return Number.isFinite(occurredAt) ? occurredAt : Number.NaN
+}
+
+function isRecentReceipt(receipt: BankReceipt) {
+  const timestamp = receiptTimestamp(receipt)
+  if (!Number.isFinite(timestamp)) return false
+  const age = Date.now() - timestamp
+  return age >= 0 && age <= 24 * 60 * 60 * 1000
 }
 
 const periodLabel = computed(() => {
@@ -249,7 +275,11 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              <tr v-for="(receipt, index) in snapshot.receipts" :key="receipt.id || `${receipt.date}-${index}`">
+              <tr
+                v-for="(receipt, index) in snapshot.receipts"
+                :key="receipt.id || `${receipt.date}-${index}`"
+                :class="isRecentReceipt(receipt) ? '[&>td]:font-bold' : ''"
+              >
                 <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ receipt.date || '—' }}</td>
                 <td class="max-w-[280px] px-4 py-3 text-slate-800">{{ receipt.description || '—' }}</td>
                 <td class="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-emerald-700">
