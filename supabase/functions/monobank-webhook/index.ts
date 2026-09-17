@@ -7,6 +7,21 @@ const number = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function formatKyivDate(value: string | number | Date) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 function matchesSecret(secret: string, key: string) {
   const left = new TextEncoder().encode(secret)
   const right = new TextEncoder().encode(key)
@@ -50,7 +65,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
   const { data: cache, error: cacheError } = await admin
     .from('bank_account_cache')
-    .select('account,updated_at')
+    .select('account,updated_at,receipts')
     .eq('bank', 'monobank')
     .maybeSingle()
   if (cacheError) return new Response(null, { status: 500 })
@@ -69,10 +84,30 @@ Deno.serve(async (request) => {
   if (eventError) return new Response(null, { status: 500 })
   const insertedNew = Boolean(inserted?.length)
 
-  const { error: cacheUpdateError } = await admin.from('bank_account_cache').update({
+  const cacheUpdate: Record<string, unknown> = {
     balance: balanceMinor / 100,
     updated_at: occurredAt,
-  }).eq('bank', 'monobank').or(`updated_at.is.null,updated_at.lte.${occurredAt}`)
+  }
+  if (amountMinor > 0) {
+    const existingReceipts = Array.isArray(cache?.receipts) ? cache.receipts : []
+    const receipt = {
+      id: externalId,
+      date: formatKyivDate(occurredAt),
+      description: text(statement?.description),
+      amount: amountMinor / 100,
+      balance: balanceMinor / 100,
+      comment: text(statement?.comment),
+      occurredAt,
+    }
+    cacheUpdate.receipts = [
+      receipt,
+      ...existingReceipts.filter((item: any) => text(item?.id) !== externalId),
+    ]
+  }
+
+  const { error: cacheUpdateError } = await admin.from('bank_account_cache').update(cacheUpdate)
+    .eq('bank', 'monobank')
+    .or(`updated_at.is.null,updated_at.lte.${occurredAt}`)
   if (cacheUpdateError) return new Response(null, { status: 500 })
   const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
   if (cleanupError) return new Response(null, { status: 500 })
