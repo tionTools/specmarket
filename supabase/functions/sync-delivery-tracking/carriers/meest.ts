@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { compactEvents, latestEvent, parseTrackingDate, readableStatus, record, text } from '../normalize.ts'
 import type { TrackingResult } from '../types.ts'
 
@@ -9,6 +8,81 @@ type PublicTrackingEvent = {
   code: string
   location: string
   country: string
+}
+
+const md5Shift = [
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+]
+const md5Constants = Array.from(
+  { length: 64 },
+  (_, index) => Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000) >>> 0,
+)
+
+function rotateLeft(value: number, amount: number) {
+  return ((value << amount) | (value >>> (32 - amount))) >>> 0
+}
+
+function md5Hex(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64
+  const padded = new Uint8Array(paddedLength)
+  padded.set(bytes)
+  padded[bytes.length] = 0x80
+  const bitLength = BigInt(bytes.length) * 8n
+  for (let index = 0; index < 8; index += 1)
+    padded[paddedLength - 8 + index] = Number((bitLength >> BigInt(index * 8)) & 0xffn)
+
+  const view = new DataView(padded.buffer, padded.byteOffset, padded.byteLength)
+  let a0 = 0x67452301
+  let b0 = 0xefcdab89
+  let c0 = 0x98badcfe
+  let d0 = 0x10325476
+
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    const words = Array.from({ length: 16 }, (_, index) => view.getUint32(offset + index * 4, true))
+    let a = a0
+    let b = b0
+    let c = c0
+    let d = d0
+
+    for (let index = 0; index < 64; index += 1) {
+      let f: number
+      let wordIndex: number
+      if (index < 16) {
+        f = (b & c) | (~b & d)
+        wordIndex = index
+      } else if (index < 32) {
+        f = (d & b) | (~d & c)
+        wordIndex = (5 * index + 1) % 16
+      } else if (index < 48) {
+        f = b ^ c ^ d
+        wordIndex = (3 * index + 5) % 16
+      } else {
+        f = c ^ (b | ~d)
+        wordIndex = (7 * index) % 16
+      }
+      const previousD = d
+      d = c
+      c = b
+      const sum = (a + f + md5Constants[index]! + words[wordIndex]!) >>> 0
+      b = (b + rotateLeft(sum, md5Shift[index]!)) >>> 0
+      a = previousD
+    }
+
+    a0 = (a0 + a) >>> 0
+    b0 = (b0 + b) >>> 0
+    c0 = (c0 + c) >>> 0
+    d0 = (d0 + d) >>> 0
+  }
+
+  return [a0, b0, c0, d0].map((word) =>
+    [0, 8, 16, 24]
+      .map((shift) => ((word >>> shift) & 0xff).toString(16).padStart(2, '0'))
+      .join('')
+  ).join('')
 }
 
 function meestReadableStatus(source: string, code: string) {
@@ -43,12 +117,12 @@ function decodeXml(value: string) {
 
 function xmlValue(block: string, tag: string) {
   const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'))
-  return match ? decodeXml(match[1]).replace(/\s+/g, ' ').trim() : ''
+  return match ? decodeXml(match[1] ?? '').replace(/\s+/g, ' ').trim() : ''
 }
 
 function publicTrackingEvents(xml: string): PublicTrackingEvent[] {
   return Array.from(xml.matchAll(/<items>([\s\S]*?)<\/items>/gi), (match) => {
-    const block = match[1]
+    const block = match[1] ?? ''
     const action = xmlValue(block, 'ActionMessages')
     const detail = xmlValue(block, 'DetailMessages')
     return {
@@ -65,7 +139,7 @@ function publicTrackingEvents(xml: string): PublicTrackingEvent[] {
 function latestPublicTrackingEvent(events: PublicTrackingEvent[]) {
   return events.reduce((current, event) =>
     parseTrackingDate(event.at) >= parseTrackingDate(current.at) ? event : current,
-  events[0])
+  events[0]!)
 }
 
 async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
@@ -78,7 +152,7 @@ async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
   const salt = page.match(/\bvar\s+salt\s*=\s*['"]([0-9a-f]{16,128})['"]/i)?.[1]
   if (!salt) throw new Error('Meest public tracking не вернул salt')
 
-  const check = createHash('md5').update(`${salt}${normalizedTtn}${salt}`).digest('hex')
+  const check = md5Hex(`${salt}${normalizedTtn}${salt}`)
   const trackingUrl = `https://t.meest-group.com/get.php?what=tracking&test&number=${encodeURIComponent(normalizedTtn)}&lang=uk&ext_track=&chk=${check}`
   const trackingResponse = await fetch(trackingUrl, {
     method: 'POST',
