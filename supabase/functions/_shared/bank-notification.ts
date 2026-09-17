@@ -4,10 +4,12 @@ type BankName = 'monobank' | 'novapay'
 
 type BankNotification = {
   bank: BankName
+  occurredAt: string
   amount: number
   balance: number | null
   payer: string
-  purpose: string
+  description: string
+  comment: string
 }
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
@@ -17,14 +19,29 @@ function validEmail(value: string) {
 }
 
 function money(value: number) {
-  return new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value).replaceAll('\u00a0', ' ')
+  return value.toFixed(2)
 }
 
 function bankLabel(bank: BankName) {
-  return bank === 'monobank' ? 'Monobank ФОП' : 'NovaPay ФОП'
+  return bank === 'monobank' ? 'МОНОБАНК' : 'NOVAPAY'
+}
+
+function kyivDateTime(value: string) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value || '—'
+  const parts = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? ''
+  return `${part('day')}.${part('month')}.${part('year')}, ${part('hour')}:${part('minute')}:${part('second')}`
 }
 
 export async function sendBankPaymentEmail(
@@ -53,21 +70,17 @@ export async function sendBankPaymentEmail(
   }
 
   const label = bankLabel(notification.bank)
-  const amount = `+${money(notification.amount)} ₴`
-  const balance = notification.balance === null ? '—' : `${money(notification.balance)} ₴`
-  const payer = text(notification.payer) || '—'
-  const purpose = text(notification.purpose) || '—'
-  const subject = `💰 ${label}: ${amount}`
+  const amount = `${money(notification.amount)} грн`
+  const balance = notification.balance === null ? '—' : `${money(notification.balance)} грн`
+  const description = text(notification.description) || text(notification.payer) || '—'
+  const comment = text(notification.comment) || '—'
+  const subject = `💰 ${label} Нове надходження: ${amount}`
   const body = [
-    `Новый приход на ${label}`,
-    '',
-    `Зачислено: ${amount}`,
-    `Текущий остаток: ${balance}`,
-    '',
-    `Плательщик: ${payer}`,
-    `Назначение: ${purpose}`,
-    '',
-    'Ваш финансовый помощник',
+    `Дата: ${kyivDateTime(notification.occurredAt)}`,
+    `Сумма: ${amount}`,
+    `Описание: ${description}`,
+    `Баланс: ${balance}`,
+    `Коммент: ${comment}`,
   ].join('\n')
 
   try {
