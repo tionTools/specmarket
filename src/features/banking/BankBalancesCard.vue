@@ -27,7 +27,7 @@ function updatedAt(value: string | null) {
 </script>
 
 <template>
-  <div class="mt-3 flex flex-wrap gap-3 sm:-mt-[42px] sm:ml-44">
+  <div class="mt-3 flex flex-wrap items-stretch gap-3 sm:-mt-[42px] sm:ml-44">
     <section
       v-for="bank in banks"
       :key="bank"
@@ -48,6 +48,13 @@ function updatedAt(value: string | null) {
       >
         Выписка
       </RouterLink>
+    </section>
+
+    <section class="min-w-[170px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
+      <p class="font-semibold text-slate-700">Всего</p>
+      <p class="mt-2 whitespace-nowrap text-lg font-bold tabular-nums text-slate-950">
+        {{ totalBalance === null ? '—' : formatMoney(totalBalance) }}
+      </p>
     </section>
   </div>
 </template>
