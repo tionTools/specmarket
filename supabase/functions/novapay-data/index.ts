@@ -159,6 +159,7 @@ function finiteNumber(value, field) {
 }
 
 function optionalNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
   const normalized = text(value).replace(',', '.')
   if (!normalized) return null
   const number = Number(normalized)
@@ -216,6 +217,37 @@ function parseNestedXmlCollection(rawXml, rootName, itemName) {
   return collectNestedRecords(root, itemName).map(normalizeXmlRecord)
 }
 
+function parseExtractDocuments(rawXml) {
+  const xml = text(rawXml)
+  if (!xml) return []
+
+  let document
+  try {
+    document = parser.parse(xml)
+  } catch {
+    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', 'NovaPay Extract XML is invalid.')
+  }
+
+  const root = findKey(document, 'Extract')
+  if (!isRecord(root)) return []
+
+  const documents = []
+  for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
+    const statement = normalizeXmlRecord(day)
+    const docs = day.Docs
+    const items = Array.isArray(docs) ? docs.filter(isRecord) : isRecord(docs) ? [docs] : []
+    for (const item of items) {
+      documents.push({
+        ...normalizeXmlRecord(item),
+        StatementDate: pick(statement, 'Date'),
+        StatementInCome: pick(statement, 'InCome'),
+        StatementOutCome: pick(statement, 'OutCome'),
+      })
+    }
+  }
+  return documents
+}
+
 function pick(record, ...keys) {
   for (const key of keys) {
     const value = text(record?.[key])
@@ -247,10 +279,15 @@ function extractReceipt(document) {
   const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
   if (amount === null || amount <= 0) return null
 
-  const dayDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
-  const dayTime = pick(document, 'Time', 'OrgTime', 'PaymentTime')
-  const date = [dayDate, dayTime].filter(Boolean).join(', ')
-  const balance = optionalNumber(pick(document, 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'))
+  const createdAt = pick(document, 'Created', 'Changed')
+  const createdMatch = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(createdAt)
+  const dayDate = createdMatch?.[1] ??
+    pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'StatementDate', 'Date', 'date')
+  const dayTime = createdMatch?.[2] ?? pick(document, 'Time', 'OrgTime', 'PaymentTime')
+  const date = createdAt || [dayDate, dayTime].filter(Boolean).join(', ')
+  const balance = optionalNumber(
+    pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
+  )
 
   return {
     id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
@@ -491,7 +528,7 @@ Deno.serve(async (request) => {
       date_to: dateTo,
     }, true)
 
-    const extractDocuments = parseNestedXmlCollection(extractResult.extract, 'Extract', 'Docs')
+    const extractDocuments = parseExtractDocuments(extractResult.extract)
     const receipts = sortReceiptsNewestFirst(extractDocuments
       .filter((document) => isIncomingExtractDocument(document, accountIban))
       .map(extractReceipt)
