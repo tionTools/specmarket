@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 
 import { currencyRateForDate, localDateKey, type CurrencyRateRow } from '@/features/prices/currencyRates'
 import { supabase } from '@/lib/supabase'
+import { consumeBankingReturn } from './navigation'
 import type { BankName, BankState } from './types'
 
 const props = defineProps<{ caches: BankState; totalBalance: number | null }>()
-const route = useRoute()
 
 const banks = ['monobank', 'novapay'] as const
 const supplierDebt = ref<number | null>(null)
@@ -116,7 +115,7 @@ async function loadSupplierDebt() {
 }
 
 function scrollToBankingBlock() {
-  if (route.hash !== '#banking') return
+  if (!consumeBankingReturn()) return
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => {
       document.getElementById('banking')?.scrollIntoView({ behavior: 'auto', block: 'center' })
@@ -124,7 +123,17 @@ function scrollToBankingBlock() {
   })
 }
 
+function clearLegacyBankingHash() {
+  if (window.location.hash !== '#banking') return
+  window.history.replaceState(
+    window.history.state,
+    '',
+    `${window.location.pathname}${window.location.search}`,
+  )
+}
+
 onMounted(() => {
+  clearLegacyBankingHash()
   scrollToBankingBlock()
   void loadSupplierDebt()
 })

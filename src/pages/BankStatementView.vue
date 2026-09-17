@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, RefreshCw } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { requestBankingReturn } from '@/features/banking/navigation'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
 import { supabase } from '@/lib/supabase'
 
@@ -164,7 +165,8 @@ async function initialize() {
 }
 
 function goBackToBanking() {
-  void router.push({ path: '/', hash: '#banking' })
+  requestBankingReturn()
+  void router.push('/')
 }
 
 onMounted(() => {
