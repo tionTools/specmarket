@@ -27,7 +27,7 @@ function updatedAt(value: string | null) {
 </script>
 
 <template>
-  <div class="mt-3 flex flex-wrap items-stretch gap-3 sm:-mt-[42px] sm:ml-44">
+  <div id="banking" class="mt-3 flex flex-wrap items-stretch gap-3 sm:-mt-[42px] sm:ml-44">
     <section
       v-for="bank in banks"
       :key="bank"
