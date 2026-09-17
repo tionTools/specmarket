@@ -1,0 +1,12 @@
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -641,7 +641,7 @@ Deno.serve(async (request) => {
+     }, true)
+     const paymentsResult = await soapCall('GetPaymentsList', {
+       request_ref: requestRef(),
+-      principal: jwt,
++      jwt,
+       account_id: accountId,
+       date_from: dateFrom,
+       date_to: dateTo,
