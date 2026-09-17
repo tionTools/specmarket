@@ -1,0 +1,172 @@
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -242,6 +242,7 @@ function parseExtractDocuments(rawXml) {
+         StatementDate: pick(statement, 'Date'),
+         StatementInCome: pick(statement, 'InCome'),
+         StatementOutCome: pick(statement, 'OutCome'),
++        StatementSequence: String(documents.length),
+       })
+     }
+   }
+@@ -260,6 +261,103 @@ function normalizeIban(value) {
+   return text(value).replaceAll(' ', '').toUpperCase()
+ }
+ 
++function documentMatchKey(document) {
++  const amount = optionalNumber(pick(document, 'Amount'))
++  return [
++    pick(document, 'Code'),
++    amount === null ? '' : String(amount),
++    pick(document, 'OrgDate'),
++    normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN')),
++    normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN')),
++    pick(document, 'Purpose'),
++  ].join('\u0000')
++}
++
++function mergePaymentMetadata(extractDocuments, paymentDocuments) {
++  const paymentsByKey = new Map()
++  for (const payment of paymentDocuments) {
++    const key = documentMatchKey(payment)
++    const bucket = paymentsByKey.get(key) ?? []
++    bucket.push(payment)
++    paymentsByKey.set(key, bucket)
++  }
++
++  return extractDocuments.map((document) => {
++    const bucket = paymentsByKey.get(documentMatchKey(document))
++    const payment = bucket?.shift()
++    if (!payment) return document
++    return {
++      ...document,
++      DayDate: pick(document, 'DayDate') || pick(payment, 'DayDate'),
++      Created: pick(document, 'Created') || pick(payment, 'Created'),
++      Changed: pick(document, 'Changed') || pick(payment, 'Changed'),
++      PaymentType: pick(document, 'PaymentType') || pick(payment, 'PaymentType'),
++    }
++  })
++}
++
++function documentTimestamp(document) {
++  const value = pick(document, 'Created', 'Changed')
++  const match = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value)
++  if (!match) return Number.NaN
++  return Date.UTC(
++    Number(match[3]),
++    Number(match[2]) - 1,
++    Number(match[1]),
++    Number(match[4]),
++    Number(match[5]),
++    Number(match[6] ?? 0),
++  )
++}
++
++function documentDelta(document, accountIban) {
++  const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
++  if (amount === null) return null
++
++  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
++  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
++  if (creditIban === accountIban) return amount
++  if (debitIban === accountIban) return -amount
++
++  const paymentType = pick(document, 'PaymentType').toUpperCase()
++  if (paymentType === 'CREDIT') return amount
++  if (paymentType === 'DEBIT') return -amount
++  return null
++}
++
++function calculateRunningBalances(documents, accountIban) {
++  const groups = new Map()
++  for (const document of documents) {
++    const day = pick(document, 'StatementDate', 'DayDate', 'OrgDate')
++    const bucket = groups.get(day) ?? []
++    bucket.push(document)
++    groups.set(day, bucket)
++  }
++
++  const calculated = []
++  for (const group of groups.values()) {
++    const ordered = [...group].sort((left, right) => {
++      const leftTime = documentTimestamp(left)
++      const rightTime = documentTimestamp(right)
++      if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
++        return leftTime - rightTime
++      }
++      return Number(pick(left, 'StatementSequence') || 0) - Number(pick(right, 'StatementSequence') || 0)
++    })
++
++    let balance = optionalNumber(pick(ordered[0], 'StatementInCome'))
++    for (const document of ordered) {
++      const delta = documentDelta(document, accountIban)
++      if (balance !== null && delta !== null) balance += delta
++      calculated.push({
++        ...document,
++        CalculatedBalance: balance,
++      })
++    }
++  }
++  return calculated
++}
++
+ function isIncomingExtractDocument(document, accountIban) {
+   const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
+   const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
+@@ -286,7 +384,8 @@ function extractReceipt(document) {
+   const dayTime = createdMatch?.[2] ?? pick(document, 'Time', 'OrgTime', 'PaymentTime')
+   const date = createdAt || [dayDate, dayTime].filter(Boolean).join(', ')
+   const balance = optionalNumber(
+-    pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
++    document.CalculatedBalance ??
++      pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
+   )
+ 
+   return {
+@@ -326,12 +425,23 @@ async function receiptExternalId(receipt) {
+   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+ }
+ 
++function receiptIdentity(receipt) {
++  return [
++    text(receipt.id),
++    text(receipt.date).slice(0, 10),
++    String(receipt.amount),
++    text(receipt.description),
++    text(receipt.comment),
++  ].join('\u0000')
++}
++
+ async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline) {
+   if (!hasBaseline) return
+   const known = new Set(await Promise.all(previousReceipts.map(receiptExternalId)))
++  const knownIdentities = new Set(previousReceipts.map(receiptIdentity))
+   for (const receipt of receipts) {
+     const externalId = await receiptExternalId(receipt)
+-    if (known.has(externalId) || !receipt.occurredAt) continue
++    if (known.has(externalId) || knownIdentities.has(receiptIdentity(receipt)) || !receipt.occurredAt) continue
+     const { error } = await admin.from('bank_payment_events').upsert({
+       bank: 'novapay', external_id: externalId, occurred_at: receipt.occurredAt,
+       amount: receipt.amount, balance: receipt.balance,
+@@ -527,8 +637,20 @@ Deno.serve(async (request) => {
+       date_from: dateFrom,
+       date_to: dateTo,
+     }, true)
++    const paymentsResult = await soapCall('GetPaymentsList', {
++      request_ref: requestRef(),
++      jwt,
++      account_id: accountId,
++      date_from: dateFrom,
++      date_to: dateTo,
++      date_type: 0,
++    }, true)
+ 
+-    const extractDocuments = parseExtractDocuments(extractResult.extract)
++    const paymentDocuments = parseNestedXmlCollection(paymentsResult.payments, 'Payments', 'Docs')
++    const extractDocuments = calculateRunningBalances(
++      mergePaymentMetadata(parseExtractDocuments(extractResult.extract), paymentDocuments),
++      accountIban,
++    )
+     const receipts = sortReceiptsNewestFirst(extractDocuments
+       .filter((document) => isIncomingExtractDocument(document, accountIban))
+       .map(extractReceipt)
