@@ -132,6 +132,47 @@ async function readCache(admin) {
   return normalizeCache(data)
 }
 
+function receiptFromEvent(event) {
+  const amount = finiteNumber(event?.amount)
+  if (amount === null || amount <= 0) return null
+  const occurredAt = text(event?.occurred_at)
+  return {
+    id: text(event?.external_id),
+    date: formatKyivDate(occurredAt),
+    description: text(event?.description) || text(event?.payer),
+    amount,
+    balance: finiteNumber(event?.balance),
+    comment: text(event?.comment),
+    occurredAt,
+  }
+}
+
+async function mergeRecentEvents(admin, cached) {
+  const fallbackFrom = new Date(Date.now() - PERIOD_SECONDS * 1000).toISOString()
+  const from = cached.period.from ?? fallbackFrom
+  const { data, error } = await admin
+    .from('bank_payment_events')
+    .select('external_id,occurred_at,amount,balance,payer,description,comment')
+    .eq('bank', 'monobank')
+    .gte('occurred_at', from)
+    .order('occurred_at', { ascending: false })
+
+  if (error) throw new HttpError(500, 'BANK_PAYMENT_EVENT_READ_FAILED', 'Failed to read Monobank payment events.')
+
+  const eventReceipts = (data ?? []).flatMap((event) => {
+    const receipt = receiptFromEvent(event)
+    return receipt ? [receipt] : []
+  })
+  if (eventReceipts.length === 0) return cached
+
+  const eventIds = new Set(eventReceipts.map((receipt) => receipt.id).filter(Boolean))
+  const cachedReceipts = cached.receipts.filter((receipt) => !eventIds.has(text(receipt?.id)))
+  return {
+    ...cached,
+    receipts: [...eventReceipts, ...cachedReceipts],
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') {
@@ -170,7 +211,7 @@ Deno.serve(async (request) => {
   const admin = createClient(url, serviceKey)
 
   try {
-    const cached = await readCache(admin)
+    const cached = await mergeRecentEvents(admin, await readCache(admin))
     if (!refresh) {
       return Response.json({ ok: true, refreshed: false, ...cached }, { headers: corsHeaders })
     }
@@ -227,15 +268,19 @@ Deno.serve(async (request) => {
     const receipts = statement
       .filter(isRecord)
       .filter((transaction) => (finiteNumber(transaction.amount) ?? 0) > 0)
-      .map((transaction) => ({
-        id: text(transaction.id),
-        date: formatKyivDate((finiteNumber(transaction.time) ?? 0) * 1000),
-        description: text(transaction.description),
-        amount: (finiteNumber(transaction.amount) ?? 0) / 100,
-        balance: finiteNumber(transaction.balance) === null ? null : finiteNumber(transaction.balance) / 100,
-        comment: text(transaction.comment),
-        sortTime: finiteNumber(transaction.time) ?? 0,
-      }))
+      .map((transaction) => {
+        const occurredSeconds = finiteNumber(transaction.time) ?? 0
+        return {
+          id: text(transaction.id),
+          date: formatKyivDate(occurredSeconds * 1000),
+          description: text(transaction.description),
+          amount: (finiteNumber(transaction.amount) ?? 0) / 100,
+          balance: finiteNumber(transaction.balance) === null ? null : finiteNumber(transaction.balance) / 100,
+          comment: text(transaction.comment),
+          occurredAt: new Date(occurredSeconds * 1000).toISOString(),
+          sortTime: occurredSeconds,
+        }
+      })
       .sort((a, b) => b.sortTime - a.sortTime)
       .map(({ sortTime: _sortTime, ...transaction }) => transaction)
 
