@@ -34,7 +34,7 @@ Deno.serve(async (request) => {
 
   const { data: event, error: eventError } = await admin
     .from('bank_payment_events')
-    .select('id,bank,amount,balance,payer,description,comment')
+    .select('id,bank,occurred_at,amount,balance,payer,description,comment')
     .eq('id', eventId)
     .maybeSingle()
 
@@ -56,6 +56,7 @@ Deno.serve(async (request) => {
 
   const sent = await sendBankPaymentEmail(admin, {
     bank: event.bank,
+    occurredAt: text(event.occurred_at),
     amount,
     balance: balance !== null && Number.isFinite(balance) ? balance : null,
     payer: text(event.payer),
