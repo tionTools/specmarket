@@ -1,5 +1,4 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sendBankPaymentEmail } from '../_shared/bank-notification.ts'
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
 const number = (value: unknown) => {
@@ -59,39 +58,23 @@ Deno.serve(async (request) => {
   if (!idSuffix || !account.endsWith(idSuffix)) return ignored()
 
   const occurredAt = new Date(occurredSeconds * 1000).toISOString()
-  const amount = amountMinor / 100
-  const balance = balanceMinor / 100
-  const payer = text(statement?.counterName)
-  const description = text(statement?.description)
-  const comment = text(statement?.comment)
   const { data: inserted, error: eventError } = await admin
     .from('bank_payment_events')
     .upsert({
       bank: 'monobank', external_id: externalId, occurred_at: occurredAt,
-      amount, balance,
-      payer, description, comment,
-    }, { onConflict: 'bank,external_id', ignoreDuplicates: true })
+      amount: amountMinor / 100, balance: balanceMinor / 100,
+      payer: text(statement?.counterName), description: text(statement?.description), comment: text(statement?.comment),
+  }, { onConflict: 'bank,external_id', ignoreDuplicates: true })
     .select('id')
   if (eventError) return new Response(null, { status: 500 })
   const insertedNew = Boolean(inserted?.length)
 
   const { error: cacheUpdateError } = await admin.from('bank_account_cache').update({
-    balance,
+    balance: balanceMinor / 100,
     updated_at: occurredAt,
   }).eq('bank', 'monobank').or(`updated_at.is.null,updated_at.lte.${occurredAt}`)
   if (cacheUpdateError) return new Response(null, { status: 500 })
   const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
   if (cleanupError) return new Response(null, { status: 500 })
-
-  if (insertedNew && amount > 0) {
-    await sendBankPaymentEmail(admin, {
-      bank: 'monobank',
-      amount,
-      balance,
-      payer,
-      purpose: description || comment,
-    })
-  }
-
   return insertedNew ? Response.json({ ok: true }) : ignored()
 })
