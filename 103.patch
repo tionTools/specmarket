@@ -1,1 +1,68 @@
-PLACEHOLDER
+diff --git a/src/features/banking/types.ts b/src/features/banking/types.ts
+--- a/src/features/banking/types.ts
++++ b/src/features/banking/types.ts
+@@ -10,6 +10,7 @@ export type BankState = Record<BankName, BankCache>
+ export type BankReceipt = {
+   id: string
+   date: string
++  occurredAt: string
+   description: string
+   amount: number
+   balance: number | null
+
+diff --git a/src/pages/BankStatementView.vue b/src/pages/BankStatementView.vue
+--- a/src/pages/BankStatementView.vue
++++ b/src/pages/BankStatementView.vue
+@@ -46,6 +46,7 @@ function normalizeReceipt(value: unknown): BankReceipt | null {
+   return {
+     id: stringValue(row.id),
+     date: stringValue(row.date),
++    occurredAt: stringValue(row.occurredAt),
+     description: stringValue(row.description),
+     amount,
+     balance: numberOrNull(row.balance),
+@@ -104,6 +105,31 @@ function periodDate(value: string | null) {
+   }).format(date)
+ }
+ 
++function receiptTimestamp(receipt: BankReceipt) {
++  const match = /^(\d{2})\.(\d{2})\.(\d{4})(?:,\s*|\s+)(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(receipt.date)
++  if (match) {
++    const value = new Date(
++      Number(match[3]),
++      Number(match[2]) - 1,
++      Number(match[1]),
++      Number(match[4]),
++      Number(match[5]),
++      Number(match[6] ?? 0),
++    ).getTime()
++    if (Number.isFinite(value)) return value
++  }
++
++  const occurredAt = Date.parse(receipt.occurredAt)
++  return Number.isFinite(occurredAt) ? occurredAt : Number.NaN
++}
++
++function isRecentReceipt(receipt: BankReceipt) {
++  const timestamp = receiptTimestamp(receipt)
++  if (!Number.isFinite(timestamp)) return false
++  const age = Date.now() - timestamp
++  return age >= 0 && age <= 24 * 60 * 60 * 1000
++}
++
+ const periodLabel = computed(() => {
+   const from = periodDate(snapshot.value?.period.from ?? null)
+   const to = periodDate(snapshot.value?.period.to ?? null)
+@@ -249,7 +275,11 @@ onMounted(() => {
+               </tr>
+             </thead>
+             <tbody class="divide-y divide-slate-100">
+-              <tr v-for="(receipt, index) in snapshot.receipts" :key="receipt.id || `${receipt.date}-${index}`">
++              <tr
++                v-for="(receipt, index) in snapshot.receipts"
++                :key="receipt.id || `${receipt.date}-${index}`"
++                :class="isRecentReceipt(receipt) ? '[&>td]:font-bold' : ''"
++              >
+                 <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ receipt.date || '—' }}</td>
+                 <td class="max-w-[280px] px-4 py-3 text-slate-800">{{ receipt.description || '—' }}</td>
+                 <td class="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-emerald-700">
