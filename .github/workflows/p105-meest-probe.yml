@@ -31,11 +31,16 @@ jobs:
             code=$(curl -L --max-time 20 -sS -D "/tmp/${name}.headers" -o "/tmp/${name}.body" -w '%{http_code}' "$url" || true)
             echo "HTTP ${code}"
             sed -n '1,20p' "/tmp/${name}.headers" || true
-            echo '--- body (first 12000 bytes) ---'
-            head -c 12000 "/tmp/${name}.body" || true
+            echo '--- body (first 20000 bytes) ---'
+            head -c 20000 "/tmp/${name}.body" || true
             echo
           }
 
           probe tracking_info_n "https://t.meest-group.com/get.php?what=tracking_info_n&out=json&lang=uk&number=${ttn}"
-          probe tracking "https://t.meest-group.com/get.php?what=tracking&out=json&lang=uk&number=${ttn}"
-          probe n_page "https://t.meest-group.com/n?parcel_number=${ttn}"
+          probe n_path "https://t.meest-group.com/n/${ttn}"
+          probe script_lc "https://t.meest-group.com/js/script_lc.js?ver=1.51"
+
+          echo '=== tracking implementation hints from script_lc ==='
+          grep -n -E 'get\.php|tracking_info|function tracking|what:|what=' /tmp/script_lc.body | head -n 120 || true
+          echo '=== shipment status hints from /n/<ttn> ==='
+          grep -n -i -E 'прийня|перевез|харків|status|condition|track_num|723-3447567' /tmp/n_path.body | head -n 120 || true
