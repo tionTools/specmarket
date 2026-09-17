@@ -88,6 +88,9 @@ import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import { reapplyRegistryPreview } from '@/features/orders/registry-preview'
 import { currencyRateForDate, type CurrencyRateRow } from '@/features/prices/currencyRates'
 import PrintRegistry from '@/features/orders/PrintRegistry.vue'
+import BankBalancesCard from '@/features/banking/BankBalancesCard.vue'
+import { useBankingMonitor } from '@/features/banking/useBankingMonitor'
+import type { BankPaymentEvent } from '@/features/banking/types'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
@@ -327,6 +330,27 @@ let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+
+function playToastSound() {
+  if (!audioContext || audioContext.state !== 'running') return
+  try {
+    const oscillator = audioContext.createOscillator()
+    oscillator.connect(audioContext.destination)
+    oscillator.start()
+    oscillator.stop(audioContext.currentTime + 0.2)
+  } catch {}
+}
+
+const bankingMonitor = useBankingMonitor({
+  supabase,
+  user,
+  isGuest,
+  isOnline,
+  documentVisibility,
+  onPayment: notifyBankPayment,
+})
+const bankCaches = bankingMonitor.caches
+const bankTotalBalance = bankingMonitor.totalBalance
 
 function usdRateForOrderDate(orderDate: string) {
   return currencyRateForDate(currencyRates.value, orderDate, 0)
@@ -2609,12 +2633,14 @@ async function restartAutomaticOrdersRefresh() {
 function handleOrdersVisibilityChange() {
   if (documentVisibility.value !== 'visible') return
   void reconcileRemoteOrders(true)
+  bankingMonitor.handleVisibilityChange()
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
 }
 
 function handleBrowserOnline() {
   if (!isOnline.value) return
   void reconcileRemoteOrders(true)
+  bankingMonitor.handleOnline()
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
 }
 
@@ -2803,13 +2829,19 @@ function notifyNewOrder(order: Order) {
     text: `Новый заказ · ${orderBusinessPlatform(order)} · №${order.displayNumber ?? order.id}`,
   }
   newOrderToasts.value.push(toast)
-  if (!audioContext || audioContext.state !== 'running') return
-  try {
-    const oscillator = audioContext.createOscillator()
-    oscillator.connect(audioContext.destination)
-    oscillator.start()
-    oscillator.stop(audioContext.currentTime + 0.2)
-  } catch {}
+  playToastSound()
+}
+
+function notifyBankPayment(event: BankPaymentEvent) {
+  newOrderToasts.value.push({
+    id: ++nextNewOrderToastId,
+    text: [
+      `${event.bank === 'monobank' ? 'Monobank' : 'NovaPay'} · +${formatMoney(event.amount)}`,
+      event.payer,
+      event.comment || event.description,
+    ].filter((value, index, lines) => Boolean(value) && (index === 0 || value !== lines[index - 1])).join('\n'),
+  })
+  playToastSound()
 }
 
 function unlockNewOrderSound() {
@@ -2895,6 +2927,7 @@ onMounted(async () => {
   document.addEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   await loadRemoteOrders()
   startAutomaticOrdersRefresh()
+  await bankingMonitor.start()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   const hasManualDraftCheckpoint = Boolean(
@@ -2932,6 +2965,7 @@ onScopeDispose(() => {
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
   document.removeEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
+  bankingMonitor.stop()
   if (audioContext) void audioContext.close()
 })
 
@@ -4428,7 +4462,7 @@ function orderDateTime(order: Order) {
       <p
         v-for="toast in newOrderToasts"
         :key="toast.id"
-        class="rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg"
+        class="whitespace-pre-line rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg"
       >
         {{ toast.text }}
       </p>
@@ -6287,6 +6321,7 @@ function orderDateTime(order: Order) {
             Сверка расчётов
           </RouterLink>
         </div>
+        <BankBalancesCard :caches="bankCaches" :total-balance="bankTotalBalance" />
         <div
           v-if="isPromRegistryView"
           class="sticky bottom-4 z-10 ml-auto mt-5 flex w-fit max-w-full flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"

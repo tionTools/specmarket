@@ -236,10 +236,44 @@ function extractReceipt(document) {
   return {
     id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
     date,
+    occurredAt: receiptOccurredAt(dayDate, dayTime),
     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
     amount,
     balance,
     comment: pick(document, 'Purpose', 'Comment', 'Description'),
+  }
+}
+
+function receiptOccurredAt(dayDate, dayTime) {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dayDate)
+  if (!match) return ''
+  const [hours = '0', minutes = '0', seconds = '0'] = dayTime.split(':')
+  const value = new Date(Date.UTC(
+    Number(match[3]), Number(match[2]) - 1, Number(match[1]), Number(hours), Number(minutes), Number(seconds),
+  ))
+  return Number.isFinite(value.getTime()) ? value.toISOString() : ''
+}
+
+async function receiptExternalId(receipt) {
+  if (text(receipt.id)) return text(receipt.id)
+  const source = `novapay\u0000${receipt.date}\u0000${receipt.amount}\u0000${receipt.description}\u0000${receipt.comment}`
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
+  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline) {
+  if (!hasBaseline) return
+  const known = new Set(await Promise.all(previousReceipts.map(receiptExternalId)))
+  for (const receipt of receipts) {
+    const externalId = await receiptExternalId(receipt)
+    if (known.has(externalId) || !receipt.occurredAt) continue
+    const { error } = await admin.from('bank_payment_events').upsert({
+      bank: 'novapay', external_id: externalId, occurred_at: receipt.occurredAt,
+      amount: receipt.amount, balance: receipt.balance,
+      payer: text(receipt.description) || text(receipt.comment),
+      description: text(receipt.description), comment: text(receipt.comment),
+    }, { onConflict: 'bank,external_id', ignoreDuplicates: true })
+    if (error) throw new HttpError(500, 'BANK_PAYMENT_EVENT_WRITE_FAILED', 'Failed to save NovaPay payment event.')
   }
 }
 
@@ -337,16 +371,16 @@ Deno.serve(async (request) => {
     body = {}
   }
   const refresh = isRecord(body) && body.refresh === true
+  const compact = isRecord(body) && body.compact === true
   const admin = createClient(url, serviceKey)
 
-  if (!refresh) {
-    try {
-      const cached = await readCache(admin)
-      return Response.json({ ok: true, refreshed: false, ...cached }, { headers: corsHeaders })
-    } catch (error) {
-      return errorResponse(error)
-    }
+  let previousCache
+  try {
+    previousCache = await readCache(admin)
+  } catch (error) {
+    return errorResponse(error)
   }
+  if (!refresh) return Response.json({ ok: true, refreshed: false, ...previousCache }, { headers: corsHeaders })
 
   const login = text(Deno.env.get('NOVAPAY_LOGIN'))
   if (!login) {
@@ -451,6 +485,8 @@ Deno.serve(async (request) => {
       projected,
     }
 
+    await saveNewReceipts(admin, previousCache.receipts, receipts, Boolean(previousCache.updatedAt))
+
     const { error: cacheError } = await admin
       .from('bank_account_cache')
       .update({
@@ -464,11 +500,14 @@ Deno.serve(async (request) => {
       .eq('bank', 'novapay')
 
     if (cacheError) throw new HttpError(500, 'BANK_CACHE_WRITE_FAILED', 'Failed to save NovaPay data.')
+    const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
+    if (cleanupError) throw new HttpError(500, 'BANK_PAYMENT_EVENT_CLEANUP_FAILED', 'Failed to clean up NovaPay payment events.')
 
     const diagnostics = extractDocuments.length > 0 && receipts.length === 0
       ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
       : undefined
 
+    if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
     return Response.json({
       ok: true,
       refreshed: true,

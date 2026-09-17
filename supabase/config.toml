@@ -383,6 +383,9 @@ verify_jwt = false
 [functions.sync-delivery-tracking]
 verify_jwt = false
 
+[functions.monobank-webhook]
+verify_jwt = false
+
 [functions.send-order-label-email]
 verify_jwt = false
 
