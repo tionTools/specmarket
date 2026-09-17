@@ -1,0 +1,41 @@
+name: Patch 105 Meest live probe
+
+on:
+  push:
+    branches: [chatgpt-p105-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe current Meest public tracking
+        shell: bash
+        run: |
+          set -u
+          ttn='723-3447567'
+
+          echo '=== Official Meest page iframe/link hints ==='
+          curl -L --max-time 20 -sS -D /tmp/page_headers \
+            "https://ua.meest.com/parcel-track?parcel_number=${ttn}" -o /tmp/page.html || true
+          head -n 20 /tmp/page_headers || true
+          grep -Eo 'https?://[^"'"'"'<> ]*meest-group[^"'"'"'<> ]*' /tmp/page.html | head -n 20 || true
+          grep -i -n -E 'iframe|meest-group|tracking' /tmp/page.html | head -n 30 || true
+
+          probe() {
+            name="$1"
+            url="$2"
+            echo "=== ${name} ==="
+            code=$(curl -L --max-time 20 -sS -D "/tmp/${name}.headers" -o "/tmp/${name}.body" -w '%{http_code}' "$url" || true)
+            echo "HTTP ${code}"
+            sed -n '1,20p' "/tmp/${name}.headers" || true
+            echo '--- body (first 12000 bytes) ---'
+            head -c 12000 "/tmp/${name}.body" || true
+            echo
+          }
+
+          probe tracking_info_n "https://t.meest-group.com/get.php?what=tracking_info_n&out=json&lang=uk&number=${ttn}"
+          probe tracking "https://t.meest-group.com/get.php?what=tracking&out=json&lang=uk&number=${ttn}"
+          probe n_page "https://t.meest-group.com/n?parcel_number=${ttn}"
