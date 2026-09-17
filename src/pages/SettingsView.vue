@@ -17,8 +17,11 @@ const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
 const router = useRouter()
 const user = ref<User | null>(null)
 const labelRecipientEmail = ref(defaultLabelRecipientEmail)
+const bankRecipientEmail = ref('')
 const isSavingEmail = ref(false)
+const isSavingBankEmail = ref(false)
 const emailMessage = ref('')
+const bankEmailMessage = ref('')
 const soundEnabled = ref(window.localStorage.getItem(newOrderNotificationsStorageKey) !== 'false')
 const appearance = ref<Appearance>(
   parseAppearance(window.localStorage.getItem(appearanceStorageKey)),
@@ -28,6 +31,10 @@ const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail
 
 function handleSystemTheme() {
   if (appearance.value === 'system') applyAppearance(appearance.value)
+}
+
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
 watch(soundEnabled, (value) => {
@@ -46,7 +53,7 @@ watch(
 async function saveLabelRecipientEmail() {
   if (!supabase || !user.value || isGuest.value || isSavingEmail.value) return
   const value = labelRecipientEmail.value.trim().toLowerCase()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+  if (!validEmail(value)) {
     emailMessage.value = 'Введите корректный email.'
     return
   }
@@ -65,6 +72,32 @@ async function saveLabelRecipientEmail() {
   emailMessage.value = 'Email сохранён для CRM.'
 }
 
+async function saveBankRecipientEmail() {
+  if (!supabase || !user.value || isGuest.value || isSavingBankEmail.value) return
+  const value = bankRecipientEmail.value.trim().toLowerCase()
+  if (!validEmail(value)) {
+    bankEmailMessage.value = 'Введите корректный email.'
+    return
+  }
+
+  isSavingBankEmail.value = true
+  bankEmailMessage.value = ''
+  const { error } = await supabase.from('bank_notification_settings').upsert({
+    id: 1,
+    recipient_email: value,
+    updated_at: new Date().toISOString(),
+  })
+  isSavingBankEmail.value = false
+
+  if (error) {
+    bankEmailMessage.value = `Не удалось сохранить email: ${error.message}`
+    return
+  }
+
+  bankRecipientEmail.value = value
+  bankEmailMessage.value = 'Email для банковских приходов сохранён.'
+}
+
 onMounted(async () => {
   systemTheme.addEventListener('change', handleSystemTheme)
   if (!supabase) return
@@ -79,6 +112,18 @@ onMounted(async () => {
   labelRecipientEmail.value =
     String(session.user.user_metadata?.labelRecipientEmail ?? '').trim() ||
     defaultLabelRecipientEmail
+
+  if (!isGuest.value) {
+    const { data: bankSetting, error: bankSettingError } = await supabase
+      .from('bank_notification_settings')
+      .select('recipient_email')
+      .eq('id', 1)
+      .maybeSingle()
+    if (!bankSettingError) {
+      bankRecipientEmail.value =
+        String(bankSetting?.recipient_email ?? '').trim() || labelRecipientEmail.value
+    }
+  }
 })
 
 onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme))
@@ -124,6 +169,34 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
           </div>
         </label>
         <p v-if="emailMessage" class="mt-2 text-sm text-slate-600">{{ emailMessage }}</p>
+
+        <label class="mt-5 block text-sm font-medium text-slate-600">
+          Email для банковских приходов
+          <div class="mt-1 flex flex-col gap-2 sm:flex-row">
+            <input
+              v-model="bankRecipientEmail"
+              class="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-slate-900"
+              type="email"
+              placeholder="name@example.com"
+              :disabled="isGuest || isSavingBankEmail"
+            />
+            <button
+              v-if="!isGuest"
+              class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+              type="button"
+              :disabled="isSavingBankEmail"
+              @click="saveBankRecipientEmail"
+            >
+              <Save class="size-4" aria-hidden="true" />
+              {{ isSavingBankEmail ? 'Сохраняем…' : 'Сохранить' }}
+            </button>
+          </div>
+        </label>
+        <p v-if="bankEmailMessage" class="mt-2 text-sm text-slate-600">{{ bankEmailMessage }}</p>
+        <p class="mt-2 text-xs text-slate-500">
+          На этот адрес приходят уведомления о новых зачислениях на Monobank и NovaPay.
+        </p>
+
         <p v-if="isGuest" class="mt-2 text-sm text-sky-700">
           Гостевой режим: общие настройки доступны только для просмотра.
         </p>
