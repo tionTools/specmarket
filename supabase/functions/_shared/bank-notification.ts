@@ -57,7 +57,7 @@ export async function sendBankPaymentEmail(
   const balance = notification.balance === null ? '—' : `${money(notification.balance)} ₴`
   const payer = text(notification.payer) || '—'
   const purpose = text(notification.purpose) || '—'
-  const subject = `${label}: ${amount}`
+  const subject = `💰 ${label}: ${amount}`
   const body = [
     `Новый приход на ${label}`,
     '',
