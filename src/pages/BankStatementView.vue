@@ -176,7 +176,7 @@ onMounted(() => {
 <template>
   <main class="min-h-screen bg-slate-50 p-4 text-slate-900 sm:p-8">
     <div class="mx-auto max-w-7xl">
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center justify-start gap-3">
         <button
           class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
           type="button"
