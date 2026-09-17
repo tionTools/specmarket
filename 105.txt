@@ -1,0 +1,106 @@
+Patch 105 — Meest tracking fallback when OpenAPI returns no events
+
+STATUS: REVIEW ONLY. Do not apply/deploy/commit to main until Vadim approves the logic.
+
+Base main at preparation time:
+8822fdf46cc422ad532924ce4f229b663eb48dc2
+
+Patch blob:
+1e6b25daa38a5be012d10d4a68474ce3a7b1d842
+
+Exact scope — 2 files only:
+- supabase/functions/sync-delivery-tracking/carriers/meest.ts
+- supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+
+Root cause being fixed:
+Patch 90 treated Meest OpenAPI `status: OK` + empty `result: []` as factual proof that the shipment was created but not handed to the carrier. That assumption is false: for TTN 723-3447567 the OpenAPI path could have no events while the public Meest tracker already contained later shipment events. Therefore an empty event array must mean "no factual OpenAPI tracking event available", not a shipment status.
+
+Live verification completed before this patch:
+GitHub Actions probe run 35232115647 reproduced the current official public Meest tracker protocol for TTN 723-3447567.
+Observed protocol:
+1. GET https://t.meest-group.com/n/<TTN>.
+2. Read the current `salt` embedded by the official tracking page.
+3. Compute MD5(salt + TTN + salt).
+4. POST https://t.meest-group.com/get.php?what=tracking&test&number=<TTN>&lang=uk&ext_track=&chk=<MD5>.
+5. Parse the returned XML `<items>` rows.
+
+The live response contained these real events:
+- 2026-09-16 14:04:00, code 2: `Відправлення створено, але не передано на доставку`, Харків.
+- 2026-09-16 19:04:19, code 606: `Відправлення прийнято до перевезення`, detail `в населеному пункті Харків`.
+- 2026-09-17 16:41:59, code 8081: `Відправлення в дорозі`, detail `в населений пункт Київ`.
+This proves the public tracker can contain newer factual events while the OpenAPI event list is empty.
+
+Patch 105 runtime logic:
+1. Meest OpenAPI remains the primary source exactly as before.
+2. If OpenAPI returns one or more events, use those events and do NOT call public tracking.
+3. If OpenAPI returns zero events, do not synthesize `created` and do not interpret `OK` as a shipment state.
+4. Only in that zero-event case, use the current public tracker protocol reproduced from the official Meest site:
+   - fetch /n/<TTN> for the current salt;
+   - compute the signed MD5 check locally;
+   - POST the signed public tracking request;
+   - parse its XML event rows;
+   - select the newest row by DateTimeAction.
+5. A valid public fallback result is returned as:
+   - provider: `meest_public_tracking`
+   - source: `public_tracking`
+   - activeTtn unchanged
+   - no destination inference
+   - no redirect/replacement inference
+   - actual public event history preserved in TrackingResult.events.
+6. Display status uses the actual public ActionMessages plus DetailMessages, for example:
+   `Відправлення в дорозі в населений пункт Київ`.
+7. Meest-specific normalization is local to meest.ts only:
+   - code 2 -> created
+   - code 606 / accepted-for-transport phrase -> accepted
+   - code 8081 -> in_transit
+   - existing code 1622 / `Доручено` -> delivered
+   - everything else continues through the existing readableStatus logic.
+8. If OpenAPI has no events AND the public tracker cannot produce valid events, meestStatus throws an error instead of inventing a status. The existing worker catches that carrier error and leaves the saved crm_orders.delivery tracking state unchanged while recording the tracking error. This prevents a temporary Meest failure from rolling an already-moving parcel backwards to `created`.
+
+No changes to:
+- worker.ts
+- storage.ts
+- normalize.ts
+- types.ts
+- marketplace sync
+- TTN creation
+- crm_orders.status
+- frontend
+- Android
+- database/migrations
+- cron/security
+- other carriers
+
+Implementation detail:
+The official site signs the public request with MD5. The first candidate used node:crypto, but exact validation exposed an unwanted local @types/node dependency. The final patch therefore uses a small local MD5 implementation with no new runtime/package dependency. Its output is regression-tested against a fixed salt/TTN signature matching the official algorithm.
+
+Exact-patch validation:
+GitHub Actions run 35233283682: SUCCESS.
+Verified against exact base 8822fdf46cc422ad532924ce4f229b663eb48dc2 and exact patch blob 1e6b25daa38a5be012d10d4a68474ce3a7b1d842:
+- git apply --check: PASS
+- git diff --check: PASS
+- exact 2-file scope: PASS
+- Deno 2.9.7 test: 7 passed, 0 failed
+- Deno check: PASS
+- final scope verification: PASS
+
+Regression coverage includes:
+- normal OpenAPI events stay primary and do not call public fallback;
+- empty OpenAPI falls back through the same signed request sequence used by the official public site;
+- code 606 becomes accepted;
+- newest public event wins over the obsolete code-2 created event;
+- code 8081 becomes in_transit;
+- signature check matches MD5(salt + TTN + salt);
+- unusable public fallback rejects instead of fabricating `created`;
+- existing Ukrposhta and Rozetka baseline tests still pass.
+
+Deployment after approval:
+- before applying, fetch current origin/main;
+- because patches 101-104 are being worked separately, if main has moved, re-run git apply --check and all validation against the then-current main; regenerate Patch 105 only if required;
+- apply only these two files;
+- run the same Deno test/check and exact scope checks;
+- deploy ONLY the existing `sync-delivery-tracking` Supabase Edge Function;
+- no migration/database push;
+- then commit/push through the normal existing SSH workflow.
+
+Do not deploy Patch 105 before explicit approval of this logic.
