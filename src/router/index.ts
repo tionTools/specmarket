@@ -15,6 +15,7 @@ const router = createRouter({
         { path: 'epicentr-royalty', component: () => import('@/pages/EpicentrRoyaltyView.vue') },
         { path: 'currency-rates', component: () => import('@/pages/CurrencyRatesView.vue') },
         { path: 'reconciliation', component: () => import('@/pages/ReconciliationView.vue') },
+        { path: 'banking/:bank', component: () => import('@/pages/BankStatementView.vue') },
       ],
     },
   ],
