@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "8822fdf46cc422ad532924ce4f229b663eb48dc2"
-          test "$(git rev-parse origin/chatgpt-patches:105.patch)" = "0d6d137cbe4da0bb40b9df880e3b4d8eddef47f9"
+          test "$(git rev-parse origin/chatgpt-patches:105.patch)" = "1e6b25daa38a5be012d10d4a68474ce3a7b1d842"
           git show origin/chatgpt-patches:105.patch > "$RUNNER_TEMP/105.patch"
           git apply --check "$RUNNER_TEMP/105.patch"
 
