@@ -53,12 +53,14 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
 
     const jwt = text(data.jwt)
     const tokenExpiry = jwtExpiryMs(jwt)
-    const storedExpirySeconds = Number(text(data.jwt_expires_at))
-    const storedExpiry = storedExpirySeconds * 1000
-    if (jwt && (!tokenExpiry || !Number.isFinite(storedExpirySeconds) || storedExpirySeconds <= 0)) {
-      throw new NovaPayAuthError(409, 'NOVAPAY_JWT_EXPIRY_UNKNOWN', 'NovaPay JWT expiry is unknown; re-authentication is blocked to protect credentials.')
-    }
-    if (jwt && Math.min(tokenExpiry!, storedExpiry) - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
+    const storedExpiryText = text(data.jwt_expires_at)
+    const storedExpirySeconds = storedExpiryText ? Number(storedExpiryText) : NaN
+    const storedExpiry = Number.isFinite(storedExpirySeconds) && storedExpirySeconds > 0
+      ? storedExpirySeconds * 1000
+      : null
+    const expiresAt = tokenExpiry && storedExpiry ? Math.min(tokenExpiry, storedExpiry) : tokenExpiry
+
+    if (jwt && expiresAt && expiresAt - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
 
     const result: any = await authenticate({
       refreshToken: text(data.refresh_token),
@@ -67,16 +69,16 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
     const nextJwt = text(result?.jwt)
     const refreshToken = text(result?.refresh_token)
     const publicCertificate = text(result?.public_certificate)
-    if (!nextJwt || !refreshToken || !publicCertificate) {
-      throw new NovaPayAuthError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete.')
-    }
     const jwtExpiresAt = jwtExpiryMs(nextJwt)
+    if (!nextJwt || !refreshToken || !publicCertificate || !jwtExpiresAt || jwtExpiresAt <= Date.now()) {
+      throw new NovaPayAuthError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete or has no valid expiry.')
+    }
 
     const { error: saveError } = await admin.rpc('save_novapay_auth_state', {
       new_refresh_token: refreshToken,
       new_public_certificate: publicCertificate,
       new_jwt: nextJwt,
-      new_jwt_expires_at: jwtExpiresAt && jwtExpiresAt > Date.now() ? String(Math.floor(jwtExpiresAt / 1000)) : '',
+      new_jwt_expires_at: String(Math.floor(jwtExpiresAt / 1000)),
     })
     if (saveError) throw new NovaPayAuthError(500, 'NOVAPAY_CREDENTIAL_ROTATION_FAILED', 'NovaPay credentials could not be saved.')
     return nextJwt
