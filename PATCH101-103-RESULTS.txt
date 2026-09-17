@@ -1,0 +1,13 @@
+Patch 101 SHA: 87758abc7d5fb2f0ecb71b8ca31cb4b807545b8d
+Patch 102 SHA: 011f74c0883e402821accc82935b709f2bcde6e1
+Patch 103 SHA: 52fb2c44aa19a05b21f6c2a550b4b7073eea0b88
+novapay-data/index.ts: af85a4e813c14f5293b0086d6a383cea83c04f54
+monobank-data/index.ts: 37a98b58ec592f6ac0d631c761045174b799249d
+monobank-webhook/index.ts: 6172f89b6a3646dad4186395e9f880d9077ab542
+types.ts: 10b17e06cb72894a8bb1b6553daa86c302dcca91
+BankStatementView.vue: 46b6e4d1df743582a570b4e6e637e1ffeb92cdfd
+git diff --check: PASS
+frontend build: PASS
+novapay-data: ACTIVE v11
+monobank-data: ACTIVE v6
+monobank-webhook: ACTIVE v5
