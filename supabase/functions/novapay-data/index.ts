@@ -273,6 +273,15 @@ function receiptOccurredAt(dayDate, dayTime) {
   return Number.isFinite(value.getTime()) ? value.toISOString() : ''
 }
 
+function sortReceiptsNewestFirst(receipts) {
+  return [...receipts].sort((left, right) => {
+    const leftTime = Date.parse(text(left?.occurredAt))
+    const rightTime = Date.parse(text(right?.occurredAt))
+    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return 0
+    return rightTime - leftTime
+  })
+}
+
 async function receiptExternalId(receipt) {
   if (text(receipt.id)) return text(receipt.id)
   const source = `novapay\u0000${receipt.date}\u0000${receipt.amount}\u0000${receipt.description}\u0000${receipt.comment}`
@@ -322,7 +331,7 @@ function normalizeCache(row) {
     balance: optionalNumber(row.balance),
     updatedAt: row.updated_at ?? null,
     account: isRecord(row.account) ? row.account : {},
-    receipts: Array.isArray(row.receipts) ? row.receipts : [],
+    receipts: Array.isArray(row.receipts) ? sortReceiptsNewestFirst(row.receipts) : [],
     period: {
       from: row.period_from ?? null,
       to: row.period_to ?? null,
@@ -483,10 +492,10 @@ Deno.serve(async (request) => {
     }, true)
 
     const extractDocuments = parseNestedXmlCollection(extractResult.extract, 'Extract', 'Docs')
-    const receipts = extractDocuments
+    const receipts = sortReceiptsNewestFirst(extractDocuments
       .filter((document) => isIncomingExtractDocument(document, accountIban))
       .map(extractReceipt)
-      .filter((receipt) => receipt !== null)
+      .filter((receipt) => receipt !== null))
 
     const available = finiteNumber(balanceResult.available_balance, 'available balance')
     const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
