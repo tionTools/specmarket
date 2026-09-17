@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase'
 
 type BankFunctionResponse = Partial<BankSnapshot> & {
   ok?: boolean
+  code?: string
   message?: string
 }
 
@@ -108,6 +109,21 @@ const periodLabel = computed(() => {
   return from && to ? `${from} — ${to}` : 'Последние 7 дней'
 })
 
+async function edgeFunctionErrorMessage(value: unknown) {
+  if (value && typeof value === 'object' && 'context' in value) {
+    const context = (value as { context?: unknown }).context
+    if (context instanceof Response) {
+      try {
+        const body = await context.clone().json() as BankFunctionResponse
+        if (body?.message) return body.code ? `${body.code}: ${body.message}` : body.message
+      } catch {
+        // Fall through to the SDK error below.
+      }
+    }
+  }
+  return value instanceof Error ? value.message : 'Не удалось получить выписку.'
+}
+
 async function load(refresh: boolean) {
   if (!supabase || !bank.value) return
   if (refresh) isRefreshing.value = true
@@ -120,10 +136,13 @@ async function load(refresh: boolean) {
       { body: { refresh } },
     )
     if (invokeError) throw invokeError
-    if (!data || data.ok === false) throw new Error(data?.message || 'Не удалось получить выписку.')
+    if (!data || data.ok === false) {
+      const message = data?.message || 'Не удалось получить выписку.'
+      throw new Error(data?.code ? `${data.code}: ${message}` : message)
+    }
     snapshot.value = normalizeSnapshot(data)
   } catch (loadError) {
-    error.value = loadError instanceof Error ? loadError.message : 'Не удалось получить выписку.'
+    error.value = await edgeFunctionErrorMessage(loadError)
   } finally {
     isLoading.value = false
     isRefreshing.value = false
@@ -144,7 +163,14 @@ async function initialize() {
   await load(false)
 }
 
-onMounted(initialize)
+function goBackToBanking() {
+  void router.push({ path: '/', hash: '#banking' })
+}
+
+onMounted(() => {
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  void initialize()
+})
 </script>
 
 <template>
@@ -154,7 +180,7 @@ onMounted(initialize)
         <button
           class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
           type="button"
-          @click="router.push('/')"
+          @click="goBackToBanking"
         >
           <ArrowLeft class="size-4" aria-hidden="true" />
           Назад
