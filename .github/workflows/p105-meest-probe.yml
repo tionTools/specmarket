@@ -17,30 +17,19 @@ jobs:
           set -u
           ttn='723-3447567'
 
-          echo '=== Official Meest page iframe/link hints ==='
-          curl -L --max-time 20 -sS -D /tmp/page_headers \
-            "https://ua.meest.com/parcel-track?parcel_number=${ttn}" -o /tmp/page.html || true
-          head -n 20 /tmp/page_headers || true
-          grep -Eo 'https?://[^"'"'"'<> ]*meest-group[^"'"'"'<> ]*' /tmp/page.html | head -n 20 || true
-          grep -i -n -E 'iframe|meest-group|tracking' /tmp/page.html | head -n 30 || true
+          curl -L --max-time 20 -sS "https://t.meest-group.com/n/${ttn}" -o /tmp/n.html
+          salt=$(grep -oE "var salt = '[0-9a-f]+'" /tmp/n.html | head -n1 | sed -E "s/.*'([0-9a-f]+)'.*/\1/")
+          echo "salt_length=${#salt}"
+          chk=$(printf '%s' "${salt}${ttn}${salt}" | md5sum | awk '{print $1}')
 
-          probe() {
-            name="$1"
-            url="$2"
-            echo "=== ${name} ==="
-            code=$(curl -L --max-time 20 -sS -D "/tmp/${name}.headers" -o "/tmp/${name}.body" -w '%{http_code}' "$url" || true)
-            echo "HTTP ${code}"
-            sed -n '1,20p' "/tmp/${name}.headers" || true
-            echo '--- body (first 20000 bytes) ---'
-            head -c 20000 "/tmp/${name}.body" || true
-            echo
-          }
-
-          probe tracking_info_n "https://t.meest-group.com/get.php?what=tracking_info_n&out=json&lang=uk&number=${ttn}"
-          probe n_path "https://t.meest-group.com/n/${ttn}"
-          probe script_lc "https://t.meest-group.com/js/script_lc.js?ver=1.51"
-
-          echo '=== tracking implementation hints from script_lc ==='
-          grep -n -E 'get\.php|tracking_info|function tracking|what:|what=' /tmp/script_lc.body | head -n 120 || true
-          echo '=== shipment status hints from /n/<ttn> ==='
-          grep -n -i -E 'прийня|перевез|харків|status|condition|track_num|723-3447567' /tmp/n_path.body | head -n 120 || true
+          echo '=== signed public tracking XML ==='
+          code=$(curl -L --max-time 20 -sS -X POST \
+            -D /tmp/tracking.headers -o /tmp/tracking.xml -w '%{http_code}' \
+            "https://t.meest-group.com/get.php?what=tracking&test&number=${ttn}&lang=uk&ext_track=&chk=${chk}" || true)
+          echo "HTTP ${code}"
+          sed -n '1,20p' /tmp/tracking.headers || true
+          echo '--- XML ---'
+          cat /tmp/tracking.xml || true
+          echo
+          echo '=== extracted fields ==='
+          grep -oE '<(DateTimeAction|ActionMessages|DetailMessages|Country|City|StatusCode)>[^<]*</(DateTimeAction|ActionMessages|DetailMessages|Country|City|StatusCode)>' /tmp/tracking.xml || true
