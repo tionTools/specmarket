@@ -181,6 +181,25 @@ function normalizeXmlRecord(record) {
   return normalized
 }
 
+function collectNestedRecords(value, itemName, records = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectNestedRecords(item, itemName, records)
+    return records
+  }
+  if (!isRecord(value)) return records
+
+  if (Object.prototype.hasOwnProperty.call(value, itemName)) {
+    const items = value[itemName]
+    if (Array.isArray(items)) records.push(...items.filter(isRecord))
+    else if (isRecord(items)) records.push(items)
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== itemName) collectNestedRecords(child, itemName, records)
+  }
+  return records
+}
+
 function parseNestedXmlCollection(rawXml, rootName, itemName) {
   const xml = text(rawXml)
   if (!xml) return []
@@ -194,7 +213,7 @@ function parseNestedXmlCollection(rawXml, rootName, itemName) {
 
   const root = findKey(document, rootName)
   if (!isRecord(root)) return []
-  return normalizeCollection(root, itemName).map(normalizeXmlRecord)
+  return collectNestedRecords(root, itemName).map(normalizeXmlRecord)
 }
 
 function pick(record, ...keys) {
@@ -280,9 +299,7 @@ async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline) {
 function formatNovaDate(date) {
   const parts = new Intl.DateTimeFormat('uk-UA', {
     timeZone: 'Europe/Kyiv',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+    day: '2-digit', month: '2-digit', year: 'numeric',
   }).formatToParts(date)
   const get = (type) => parts.find((part) => part.type === type)?.value ?? ''
   return `${get('day')}.${get('month')}.${get('year')}`
