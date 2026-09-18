@@ -1,0 +1,64 @@
+Patch 108 — diagnostic NovaPay credential fingerprints
+
+Base main:
+e4bcbe44b60c54cbe469592226b46d0b1300fb7a
+
+Detached validation commit:
+e3cb26849f0f4d12c097d575a37f20947b1d3d1e
+
+Scope:
+- supabase/functions/_shared/novapay-auth.ts
+
+Purpose:
+Temporarily add non-secret SHA-256 fingerprints for the NovaPay refresh token and public certificate so we can trace one credential pair across:
+1. credentials read from Vault before UserAuthenticationJWT;
+2. credentials returned by NovaPay;
+3. credentials read back from Vault immediately after save.
+
+Security:
+- never log refresh_token, JWT, certificate, login, or any raw credential;
+- log only the first 16 hexadecimal characters of SHA-256 for refresh token and public certificate;
+- fingerprints are for correlation only;
+- do not persist fingerprints in the database or Vault.
+
+Expected diagnostic log lines during a rotation:
+- NovaPay auth fingerprint input: refresh=<16hex> certificate=<16hex>
+- NovaPay auth fingerprint response: refresh=<16hex> certificate=<16hex>
+- NovaPay auth fingerprint stored: refresh=<16hex> certificate=<16hex>
+- NovaPay auth fingerprint stored matches response: true|false
+
+Behavior:
+- no change to auth retry rules;
+- no change to token rotation rules;
+- no change to Vault save retries;
+- diagnostic readback after successful save is best-effort only; if it fails, log a warning and do not fail the bank refresh;
+- no cron, no migrations, no frontend changes.
+
+Required Codex validation:
+- verify current main is e4bcbe44b60c54cbe469592226b46d0b1300fb7a;
+- verify 108.patch blob SHA;
+- git apply --check;
+- apply Patch 108 only;
+- inspect git diff: exactly one file may change;
+- pnpm format;
+- revert any out-of-scope formatter changes;
+- pnpm type-check;
+- pnpm lint;
+- pnpm build;
+- git diff --check;
+- if existing Deno works, run the NovaPay auth tests; do not install Deno if unavailable;
+- confirm no raw refresh token/JWT/certificate/login values are logged.
+
+If all checks PASS:
+- commit and push to main via existing GitHub SSH only;
+- no HTTPS/browser auth/new credentials;
+- deploy BOTH Supabase Edge Functions because both import the shared auth helper:
+  - novapay-data
+  - novapay-balance
+- no migrations;
+- no cron.
+
+After deploy:
+- do not change Vault automatically;
+- report commit SHA and both Edge Function deploy results;
+- then wait for manual diagnostic steps.
