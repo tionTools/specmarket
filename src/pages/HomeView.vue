@@ -1462,7 +1462,8 @@ const matchingOrders = computed(() => {
       : isShowingCancellations.value
         ? lifecycleState === 'cancelled_before_shipment'
         : isShowingReturns.value
-          ? isReturnLifecycleState(lifecycleState)
+          ? order.delivery.trackingReturnInProgress === true ||
+            isReturnLifecycleState(lifecycleState)
           : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
