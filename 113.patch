@@ -1,5 +1,5 @@
 diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
-index 5312946..3f35a39 100644
+index 5312946..77f5cbd 100644
 --- a/supabase/functions/novapay-data/index.ts
 +++ b/supabase/functions/novapay-data/index.ts
 @@ -201,35 +201,20 @@ function collectNestedRecords(value, itemName, records = []) {
@@ -42,7 +42,7 @@ index 5312946..3f35a39 100644
  }
  
  function pick(record, ...keys) {
-@@ -244,53 +229,142 @@ function normalizeIban(value) {
+@@ -244,85 +229,349 @@ function normalizeIban(value) {
    return text(value).replaceAll(' ', '').toUpperCase()
  }
  
@@ -117,12 +117,21 @@ index 5312946..3f35a39 100644
 +  const paymentDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
 +  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
 +  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
++  const providerId = pick(document, 'ID', 'id')
++  const uetr = pick(document, 'UETR')
++  const paymentCode = pick(document, 'Code')
++  const providerAliases = [
++    providerId ? `id:${providerId}` : '',
++    uetr ? `uetr:${uetr}` : '',
++  ].filter(Boolean)
  
    return {
 -    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
 -    date,
 -    occurredAt: receiptOccurredAt(dayDate, dayTime),
-+    id: pick(document, 'ID', 'id', 'Code', 'UETR', 'DocumentId', 'DocId', 'Reference', 'Ref'),
++    id: providerAliases[0] ?? '',
++    providerAliases,
++    paymentCode,
 +    date: eventDateTime?.raw ?? paymentDate,
 +    occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
      description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
@@ -136,9 +145,9 @@ index 5312946..3f35a39 100644
 +    stableDebitIban: debitIban,
 +    stableCreditIban: creditIban,
 +    eventKnown: false,
-   }
- }
- 
++  }
++}
++
 +function kyivDateTimeParts(utcMs) {
 +  const parts = new Intl.DateTimeFormat('en-CA', {
 +    timeZone: 'Europe/Kyiv',
@@ -158,9 +167,9 @@ index 5312946..3f35a39 100644
 +    hours: Number(part('hour')),
 +    minutes: Number(part('minute')),
 +    seconds: Number(part('second')),
-+  }
-+}
-+
+   }
+ }
+ 
 +function kyivOffsetMs(utcMs) {
 +  const local = kyivDateTimeParts(utcMs)
 +  return Date.UTC(
@@ -214,10 +223,27 @@ index 5312946..3f35a39 100644
    return Number.isFinite(value.getTime()) ? value.toISOString() : ''
  }
  
-@@ -303,26 +377,163 @@ function sortReceiptsNewestFirst(receipts) {
-   })
- }
- 
++function receiptSortTimestamp(receipt) {
++  const occurredAt = Date.parse(text(receipt?.occurredAt))
++  if (Number.isFinite(occurredAt)) return occurredAt
++
++  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(text(receipt?.legacyDate))
++  if (!match) return Number.NEGATIVE_INFINITY
++  return Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]))
++}
++
+ function sortReceiptsNewestFirst(receipts) {
+-  return [...receipts].sort((left, right) => {
+-    const leftTime = Date.parse(text(left?.occurredAt))
+-    const rightTime = Date.parse(text(right?.occurredAt))
+-    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return 0
+-    return rightTime - leftTime
+-  })
++  return [...receipts].sort((left, right) =>
++    receiptSortTimestamp(right) - receiptSortTimestamp(left)
++  )
++}
++
 +function receiptCalendarDate(receipt) {
 +  const match = /^(\d{2}\.\d{2}\.\d{4})/.exec(text(receipt?.date))
 +  if (match) return match[1]
@@ -230,6 +256,11 @@ index 5312946..3f35a39 100644
 +  return text(value).replace(/\s+/g, ' ')
 +}
 +
++function receiptProviderAliases(receipt) {
++  if (!Array.isArray(receipt?.providerAliases)) return []
++  return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
++}
++
 +function receiptStableSignature(receipt) {
 +  const stableDate = text(receipt?.legacyDate)
 +  if (!stableDate) return ''
@@ -237,24 +268,28 @@ index 5312946..3f35a39 100644
 +  const amount = Number(receipt?.amount)
 +  return [
 +    stableDate,
++    normalizedLegacyText(receipt?.paymentCode),
 +    Number.isFinite(amount) ? amount.toFixed(2) : '',
 +    normalizeIban(receipt?.stableDebitIban),
 +    normalizeIban(receipt?.stableCreditIban),
 +    normalizedLegacyText(receipt?.description),
 +    normalizedLegacyText(receipt?.comment),
 +  ].join('\u0000')
-+}
-+
+ }
+ 
  async function receiptExternalId(receipt) {
-   if (text(receipt.id)) return text(receipt.id)
+-  if (text(receipt.id)) return text(receipt.id)
 -  const source = `novapay\u0000${receipt.date}\u0000${receipt.amount}\u0000${receipt.description}\u0000${receipt.comment}`
++  const providerIdentity = receiptProviderAliases(receipt)[0]
++  if (providerIdentity) return providerIdentity
 +
 +  const stableSignature = receiptStableSignature(receipt)
 +  if (!stableSignature) return ''
 +
-+  const source = `novapay\u0000${stableSignature}`
++  const source = `novapay-fallback\u0000${stableSignature}`
    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
-   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+-  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
++  return `hash:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
  }
  
 -async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline) {
@@ -289,20 +324,27 @@ index 5312946..3f35a39 100644
 +    throw new HttpError(500, 'BANK_PAYMENT_EVENT_READ_FAILED', 'Failed to read existing NovaPay payment events.')
 +  }
 +
-+  const known = new Set(
++  const knownExact = new Set(
 +    (existingEvents ?? []).map((event) => text(event.external_id)).filter(Boolean),
 +  )
-+  const knownStableCounts = new Map()
++  const knownStableWithoutProvider = new Map()
++
 +  for (const receipt of previousReceipts) {
 +    if (!text(receipt?.occurredAt) && receipt?.eventKnown !== true) continue
 +
      const externalId = await receiptExternalId(receipt)
 -    if (known.has(externalId) || !receipt.occurredAt) continue
-+    if (externalId) known.add(externalId)
++    if (externalId) knownExact.add(externalId)
++    for (const alias of receiptProviderAliases(receipt)) knownExact.add(alias)
 +
-+    const stableSignature = receiptStableSignature(receipt)
-+    if (stableSignature) {
-+      knownStableCounts.set(stableSignature, (knownStableCounts.get(stableSignature) ?? 0) + 1)
++    if (receiptProviderAliases(receipt).length === 0) {
++      const stableSignature = receiptStableSignature(receipt)
++      if (stableSignature) {
++        knownStableWithoutProvider.set(
++          stableSignature,
++          (knownStableWithoutProvider.get(stableSignature) ?? 0) + 1,
++        )
++      }
 +    }
 +  }
 +
@@ -316,31 +358,39 @@ index 5312946..3f35a39 100644
 +
 +  const candidates = await Promise.all(receipts.map(async (receipt) => ({
 +    receipt,
++    aliases: receiptProviderAliases(receipt),
 +    externalId: await receiptExternalId(receipt),
 +    stableSignature: receiptStableSignature(receipt),
 +  })))
 +  const handled = new Set()
 +
++  // Exact provider identities are authoritative. UETR acts as a safe alias if an ID changes.
 +  for (const candidate of candidates) {
-+    if (!candidate.externalId || !known.has(candidate.externalId)) continue
++    const exactMatch =
++      Boolean(candidate.externalId && knownExact.has(candidate.externalId)) ||
++      candidate.aliases.some((alias) => knownExact.has(alias))
++    if (!exactMatch) continue
 +
-+    const stableKnownCount = candidate.stableSignature
-+      ? (knownStableCounts.get(candidate.stableSignature) ?? 0)
-+      : 0
-+    if (stableKnownCount > 0) {
-+      knownStableCounts.set(candidate.stableSignature, stableKnownCount - 1)
++    if (candidate.aliases.length === 0 && candidate.stableSignature) {
++      const stableKnownCount = knownStableWithoutProvider.get(candidate.stableSignature) ?? 0
++      if (stableKnownCount > 0) {
++        knownStableWithoutProvider.set(candidate.stableSignature, stableKnownCount - 1)
++      }
 +    }
++
 +    candidate.receipt.eventKnown = true
 +    handled.add(candidate.receipt)
 +  }
 +
++  // Cross-identity stable matching is allowed only when the previous known receipt had
++  // no provider identity at all. Never suppress id:111 with id:222 only by similarity.
 +  for (const candidate of [...candidates].reverse()) {
 +    if (handled.has(candidate.receipt) || !candidate.stableSignature) continue
 +
-+    const stableKnownCount = knownStableCounts.get(candidate.stableSignature) ?? 0
++    const stableKnownCount = knownStableWithoutProvider.get(candidate.stableSignature) ?? 0
 +    if (stableKnownCount <= 0) continue
 +
-+    knownStableCounts.set(candidate.stableSignature, stableKnownCount - 1)
++    knownStableWithoutProvider.set(candidate.stableSignature, stableKnownCount - 1)
 +    candidate.receipt.eventKnown = true
 +    handled.add(candidate.receipt)
 +  }
@@ -383,11 +433,12 @@ index 5312946..3f35a39 100644
 +
 +    candidate.receipt.eventKnown = true
 +    handled.add(candidate.receipt)
-+    known.add(candidate.externalId)
++    knownExact.add(candidate.externalId)
++    for (const alias of candidate.aliases) knownExact.add(alias)
    }
  }
  
-@@ -514,17 +725,21 @@ Deno.serve(async (request) => {
+@@ -514,17 +763,21 @@ Deno.serve(async (request) => {
      const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
      const dateFrom = formatNovaDate(fromDate)
      const dateTo = formatNovaDate(now)
@@ -413,7 +464,7 @@ index 5312946..3f35a39 100644
        .map(extractReceipt)
        .filter((receipt) => receipt !== null))
  
-@@ -540,9 +755,17 @@ Deno.serve(async (request) => {
+@@ -540,9 +793,17 @@ Deno.serve(async (request) => {
        currency: text(account.currency),
        confirmed,
        projected,
@@ -432,7 +483,7 @@ index 5312946..3f35a39 100644
  
      const { error: cacheError } = await admin
        .from('bank_account_cache')
-@@ -560,9 +783,21 @@ Deno.serve(async (request) => {
+@@ -560,9 +821,33 @@ Deno.serve(async (request) => {
      const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
      if (cleanupError) throw new HttpError(500, 'BANK_PAYMENT_EVENT_CLEANUP_FAILED', 'Failed to clean up NovaPay payment events.')
  
@@ -440,6 +491,16 @@ index 5312946..3f35a39 100644
 -      ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
 +    const timedCount = receipts.filter((receipt) => Boolean(text(receipt?.occurredAt))).length
 +    const eventKnownCount = receipts.filter((receipt) => receipt?.eventKnown === true).length
++    const providerIdentifiedCount = receipts.filter((receipt) =>
++      receiptProviderAliases(receipt).length > 0
++    ).length
++    const fallbackIdentityCount = receipts.filter((receipt) =>
++      receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt))
++    ).length
++    if (fallbackIdentityCount > 0) {
++      console.warn(`NovaPay conducted payments without ID/UETR: ${fallbackIdentityCount}`)
++    }
++
 +    const diagnostics = paymentDocuments.length > 0
 +      ? {
 +          documentCount: paymentDocuments.length,
@@ -447,11 +508,13 @@ index 5312946..3f35a39 100644
 +          incomingCount: incomingDocuments.length,
 +          timedCount,
 +          eventKnownCount,
++          providerIdentifiedCount,
++          fallbackIdentityCount,
 +          sampleKeys: Object.keys(paymentDocuments[0]).sort(),
 +        }
        : undefined
 +    console.info(
-+      `NovaPay payments diagnostics: documents=${paymentDocuments.length} conducted=${conductedDocuments.length} incoming=${incomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount}`,
++      `NovaPay payments diagnostics: documents=${paymentDocuments.length} conducted=${conductedDocuments.length} incoming=${incomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}`,
 +    )
  
      if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
