@@ -1,5 +1,5 @@
 diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
-index 5312946..6bbcb56 100644
+index 5312946..7db2751 100644
 --- a/supabase/functions/novapay-data/index.ts
 +++ b/supabase/functions/novapay-data/index.ts
 @@ -201,35 +201,20 @@ function collectNestedRecords(value, itemName, records = []) {
@@ -42,7 +42,7 @@ index 5312946..6bbcb56 100644
  }
  
  function pick(record, ...keys) {
-@@ -244,53 +229,74 @@ function normalizeIban(value) {
+@@ -244,53 +229,80 @@ function normalizeIban(value) {
    return text(value).replaceAll(' ', '').toUpperCase()
  }
  
@@ -52,18 +52,23 @@ index 5312946..6bbcb56 100644
 -  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
 -  if (creditIban) return creditIban === accountIban
 -  if (debitIban) return debitIban !== accountIban
--
++  return Boolean(accountIban) && creditIban === accountIban
++}
+ 
 -  const creditAmount = optionalNumber(pick(document, 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
 -  const debitAmount = optionalNumber(pick(document, 'CrncyDebit', 'DebitAmount', 'Debit', 'SumDebit'))
 -  if ((creditAmount ?? 0) > 0) return true
 -  if ((debitAmount ?? 0) > 0) return false
-+  return Boolean(accountIban) && creditIban === accountIban
++function isConductedPaymentDocument(document) {
++  return pick(document, 'StatusDocumentId') === '8'
 +}
  
 -  const direction = pick(document, 'DbtCdtInd', 'Direction', 'OperationType').toUpperCase()
 -  return ['CRDT', 'CREDIT', 'C', 'K', 'КРЕДИТ'].includes(direction)
-+function isConductedPaymentDocument(document) {
-+  return pick(document, 'StatusDocumentId') === '8'
++function parseNovaDateTime(value) {
++  const raw = text(value)
++  const match = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(raw)
++  return match ? { raw, date: match[1], time: match[2] } : null
  }
  
  function extractReceipt(document) {
@@ -79,25 +84,25 @@ index 5312946..6bbcb56 100644
 -  const balance = optionalNumber(
 -    pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
 -  )
-+  const changedAt = pick(document, 'Changed')
-+  const createdAt = pick(document, 'Created')
-+  const eventDateTime = changedAt || createdAt
-+  const eventMatch = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(eventDateTime)
-+  const displayDate = eventDateTime ||
-+    pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
++  const changedAt = parseNovaDateTime(pick(document, 'Changed'))
++  const createdAt = parseNovaDateTime(pick(document, 'Created'))
++  const eventDateTime = changedAt ?? createdAt
++  const paymentDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
  
    return {
 -    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
 -    date,
 -    occurredAt: receiptOccurredAt(dayDate, dayTime),
 +    id: pick(document, 'ID', 'id', 'Code', 'UETR', 'DocumentId', 'DocId', 'Reference', 'Ref'),
-+    date: displayDate,
-+    occurredAt: eventMatch ? receiptOccurredAt(eventMatch[1], eventMatch[2]) : '',
++    date: eventDateTime?.raw ?? paymentDate,
++    occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
      description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
      amount,
 -    balance,
 +    balance: null,
      comment: pick(document, 'Purpose', 'Comment', 'Description'),
++    legacyDate: paymentDate,
++    legacyCreatedDate: createdAt?.date ?? '',
    }
  }
  
@@ -144,7 +149,7 @@ index 5312946..6bbcb56 100644
    return Number.isFinite(value.getTime()) ? value.toISOString() : ''
  }
  
-@@ -310,12 +316,59 @@ async function receiptExternalId(receipt) {
+@@ -310,12 +322,74 @@ async function receiptExternalId(receipt) {
    return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
  }
  
@@ -161,20 +166,32 @@ index 5312946..6bbcb56 100644
 +  return text(value).replace(/\s+/g, ' ')
 +}
 +
-+function receiptLegacySignature(receipt) {
++function receiptLegacySignature(receipt, date = receiptCalendarDate(receipt)) {
 +  const amount = Number(receipt?.amount)
 +  return [
-+    receiptCalendarDate(receipt),
++    text(date),
 +    Number.isFinite(amount) ? amount.toFixed(2) : '',
 +    normalizedLegacyText(receipt?.description),
 +    normalizedLegacyText(receipt?.comment),
 +  ].join('\u0000')
 +}
 +
++function newReceiptLegacyDates(receipt) {
++  return [...new Set([
++    text(receipt?.legacyDate),
++    text(receipt?.legacyCreatedDate),
++  ].filter(Boolean))]
++}
++
 +async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline, useLegacyMatcher) {
    if (!hasBaseline) return
-   const known = new Set(await Promise.all(previousReceipts.map(receiptExternalId)))
+-  const known = new Set(await Promise.all(previousReceipts.map(receiptExternalId)))
 -  for (const receipt of receipts) {
++  const known = new Set(await Promise.all(
++    previousReceipts
++      .filter((receipt) => Boolean(text(receipt?.occurredAt)))
++      .map(receiptExternalId),
++  ))
 +  const legacyCounts = new Map()
 +
 +  if (useLegacyMatcher) {
@@ -191,12 +208,16 @@ index 5312946..6bbcb56 100644
 +    if (known.has(externalId)) continue
 +
 +    if (useLegacyMatcher) {
-+      const signature = receiptLegacySignature(receipt)
-+      const legacyCount = legacyCounts.get(signature) ?? 0
-+      if (legacyCount > 0) {
++      let matchedLegacy = false
++      for (const date of newReceiptLegacyDates(receipt)) {
++        const signature = receiptLegacySignature(receipt, date)
++        const legacyCount = legacyCounts.get(signature) ?? 0
++        if (legacyCount <= 0) continue
 +        legacyCounts.set(signature, legacyCount - 1)
-+        continue
++        matchedLegacy = true
++        break
 +      }
++      if (matchedLegacy) continue
 +    }
 +
 +    if (!receipt.occurredAt) continue
@@ -207,7 +228,7 @@ index 5312946..6bbcb56 100644
      const { error } = await admin.from('bank_payment_events').upsert({
        bank: 'novapay', external_id: externalId, occurred_at: receipt.occurredAt,
        amount: receipt.amount, balance: receipt.balance,
-@@ -514,17 +567,21 @@ Deno.serve(async (request) => {
+@@ -514,17 +588,21 @@ Deno.serve(async (request) => {
      const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
      const dateFrom = formatNovaDate(fromDate)
      const dateTo = formatNovaDate(now)
@@ -233,7 +254,7 @@ index 5312946..6bbcb56 100644
        .map(extractReceipt)
        .filter((receipt) => receipt !== null))
  
-@@ -540,9 +597,17 @@ Deno.serve(async (request) => {
+@@ -540,9 +618,17 @@ Deno.serve(async (request) => {
        currency: text(account.currency),
        confirmed,
        projected,
@@ -252,7 +273,7 @@ index 5312946..6bbcb56 100644
  
      const { error: cacheError } = await admin
        .from('bank_account_cache')
-@@ -560,9 +625,19 @@ Deno.serve(async (request) => {
+@@ -560,9 +646,19 @@ Deno.serve(async (request) => {
      const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
      if (cleanupError) throw new HttpError(500, 'BANK_PAYMENT_EVENT_CLEANUP_FAILED', 'Failed to clean up NovaPay payment events.')
  
