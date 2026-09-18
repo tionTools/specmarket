@@ -18,6 +18,15 @@ function validEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 function money(value: number) {
   return value.toFixed(2)
 }
@@ -75,13 +84,15 @@ export async function sendBankPaymentEmail(
   const description = text(notification.description) || text(notification.payer) || '—'
   const comment = text(notification.comment) || '—'
   const subject = `💰 ${label} Нове надходження: ${amount}`
-  const body = [
+  const lines = [
     `Дата: ${kyivDateTime(notification.occurredAt)}`,
     `Сумма: ${amount}`,
     `Описание: ${description}`,
     `Баланс: ${balance}`,
     `Коммент: ${comment}`,
-  ].join('\n')
+  ]
+  const body = lines.join('\n')
+  const html = `<div style="width:100%;max-width:620px;font-family:Arial,sans-serif;font-size:16px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:break-word;">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>`
 
   try {
     const response = await fetch('https://api.resend.com/emails', {
@@ -95,6 +106,7 @@ export async function sendBankPaymentEmail(
         to: [recipient],
         subject,
         text: body,
+        html,
       }),
     })
 
