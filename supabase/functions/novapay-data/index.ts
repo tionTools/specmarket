@@ -124,6 +124,11 @@ async function soapCallOnce(method, params) {
     throw new HttpError(502, 'NOVAPAY_SOAP_RESULT_MISSING', `NovaPay ${method} response is missing its result.`)
   }
 
+  if (method === 'UserAuthenticationJWT') {
+    const responseRef = text(result.response_ref)
+    console.info(`NovaPay auth response_ref: ${responseRef || 'missing'}`)
+  }
+
   const logicalError = apiError(result, method)
   if (logicalError) throw logicalError
   return result
@@ -438,12 +443,16 @@ Deno.serve(async (request) => {
   try {
     const jwt = await getValidNovaPayJwt({
       admin,
-      authenticate: ({ refreshToken, publicCertificate }) => soapCall('UserAuthenticationJWT', {
-        request_ref: requestRef(),
-        refresh_token: refreshToken,
-        login,
-        public_certificate: publicCertificate,
-      }),
+      authenticate: ({ refreshToken, publicCertificate }) => {
+        const authRequestRef = requestRef()
+        console.info(`NovaPay auth request_ref: ${authRequestRef}`)
+        return soapCall('UserAuthenticationJWT', {
+          request_ref: authRequestRef,
+          refresh_token: refreshToken,
+          login,
+          public_certificate: publicCertificate,
+        })
+      },
     })
 
     const clientsResult = await soapCall('GetClientsList', {
