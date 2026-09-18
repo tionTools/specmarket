@@ -217,6 +217,30 @@ function parsePaymentsDocuments(rawXml) {
   return collectNestedRecords(root, 'Docs').map(normalizeXmlRecord)
 }
 
+function parseExtractDayBalances(rawXml) {
+  const xml = text(rawXml)
+  if (!xml) return new Map()
+
+  let document
+  try {
+    document = parser.parse(xml)
+  } catch {
+    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', 'NovaPay Extract XML is invalid.')
+  }
+
+  const root = findKey(document, 'Extract')
+  if (!isRecord(root)) return new Map()
+
+  const balances = new Map()
+  for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
+    const statement = normalizeXmlRecord(day)
+    const date = pick(statement, 'Date')
+    const balance = optionalNumber(pick(statement, 'OutCome', 'MainOutCome'))
+    if (date && balance !== null) balances.set(date, balance)
+  }
+  return balances
+}
+
 function pick(record, ...keys) {
   for (const key of keys) {
     const value = text(record?.[key])
@@ -271,7 +295,7 @@ function parseNovaDateTime(value) {
   }
 }
 
-function extractReceipt(document) {
+function extractReceipt(document, dailyBalances = new Map()) {
   const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
   if (amount === null || amount <= 0) return null
 
@@ -297,7 +321,7 @@ function extractReceipt(document) {
     occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
     amount,
-    balance: null,
+    balance: dailyBalances.get(paymentDate) ?? null,
     comment: pick(document, 'Purpose', 'Comment', 'Description'),
     legacyDate: paymentDate,
     legacyCreatedDate: createdAt?.date ?? '',
@@ -768,6 +792,14 @@ Deno.serve(async (request) => {
       ? new Date(Math.min(now.getTime(), Math.max(previousUpdatedAt, fromDate.getTime())))
       : fromDate
     const updatedDateFrom = formatNovaDate(updatedFromDate)
+    const extractResult = await soapCall('GetAccountExtract', {
+      request_ref: requestRef(),
+      jwt,
+      account_id: accountId,
+      date_from: dateFrom,
+      date_to: dateTo,
+    }, true)
+    const dailyBalances = parseExtractDayBalances(extractResult.extract)
     const statementPaymentsResult = await soapCall('GetPaymentsList', {
       request_ref: requestRef(),
       jwt,
@@ -791,7 +823,7 @@ Deno.serve(async (request) => {
       isIncomingPaymentDocument(document, accountIban)
     )
     const receipts = sortReceiptsNewestFirst(statementIncomingDocuments
-      .map(extractReceipt)
+      .map((document) => extractReceipt(document, dailyBalances))
       .filter((receipt) => receipt !== null))
 
     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
@@ -800,7 +832,7 @@ Deno.serve(async (request) => {
       isIncomingPaymentDocument(document, accountIban)
     )
     const updatedReceipts = sortReceiptsNewestFirst(updatedIncomingDocuments
-      .map(extractReceipt)
+      .map((document) => extractReceipt(document, dailyBalances))
       .filter((receipt) => receipt !== null))
 
     const available = finiteNumber(balanceResult.available_balance, 'available balance')
