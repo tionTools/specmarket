@@ -57,10 +57,44 @@ diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_sh
  
  const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-@@ -39,6 +41,24 @@ async function acquireRotationLock(admin: any, owner: string) {
+@@ -13,6 +15,13 @@ export class NovaPayAuthError extends Error {
+   }
+ }
+ 
++export class NovaPayTransportError extends Error {
++  constructor(message: string) {
++    super(message)
++    this.name = 'NovaPayTransportError'
++  }
++}
++
+ function jwtExpiryMs(jwt: string): number | null {
+   const payload = jwt.split('.')[1]
+   if (!payload) return null
+@@ -39,6 +48,44 @@ async function acquireRotationLock(admin: any, owner: string) {
    throw new NovaPayAuthError(409, 'NOVAPAY_AUTH_BUSY', 'NovaPay authorization is busy. Retry shortly.')
  }
  
++function retryableAuthenticationError(error: unknown) {
++  if (error instanceof NovaPayTransportError) return true
++  if (!error || typeof error !== 'object') return false
++  const code = text((error as { code?: unknown }).code)
++  return code === 'NOVAPAY_SOAP_PARSE_ERROR' || code === 'NOVAPAY_SOAP_RESULT_MISSING'
++}
++
++async function authenticateWithRetry(
++  authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>,
++  state: { refreshToken: string; publicCertificate: string },
++) {
++  try {
++    return await authenticate(state)
++  } catch (error) {
++    if (!retryableAuthenticationError(error)) throw error
++    console.warn('NovaPay JWT rotation response was unavailable; retrying once.')
++    return await authenticate(state)
++  }
++}
++
 +async function saveRotatedAuthState(admin: any, state: Record<string, string>) {
 +  for (let attempt = 0; attempt < AUTH_STATE_SAVE_ATTEMPTS; attempt += 1) {
 +    let failed = true
@@ -82,20 +116,23 @@ diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_sh
  export async function getValidNovaPayJwt({ admin, authenticate }: {
    admin: any
    authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>
-@@ -62,10 +82,12 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
+@@ -62,10 +109,13 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
  
      if (jwt && expiresAt && expiresAt - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
  
-+    console.info('NovaPay JWT rotation started.')
-     const result: any = await authenticate({
+-    const result: any = await authenticate({
++    const authState = {
        refreshToken: text(data.refresh_token),
        publicCertificate: text(data.public_certificate),
-     })
+-    })
++    }
++    console.info('NovaPay JWT rotation started.')
++    const result: any = await authenticateWithRetry(authenticate, authState)
 +    console.info('NovaPay JWT rotation response received.')
      const nextJwt = text(result?.jwt)
      const refreshToken = text(result?.refresh_token)
      const publicCertificate = text(result?.public_certificate)
-@@ -74,13 +96,13 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
+@@ -74,13 +124,13 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
        throw new NovaPayAuthError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete or has no valid expiry.')
      }
  
@@ -114,7 +151,35 @@ diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_sh
 diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/functions/_shared/novapay-auth_test.ts
 --- a/supabase/functions/_shared/novapay-auth_test.ts
 +++ b/supabase/functions/_shared/novapay-auth_test.ts
-@@ -49,38 +49,78 @@ Deno.test('authenticates once then saves shared state', async () => {
+@@ -1,4 +1,4 @@
+-import { getValidNovaPayJwt } from './novapay-auth.ts'
++import { getValidNovaPayJwt, NovaPayTransportError } from './novapay-auth.ts'
+ 
+ const jwt = (exp: number) => `x.${btoa(JSON.stringify({ exp })).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')}.x`
+ 
+@@ -15,18 +15,16 @@ Deno.test('reuses a valid shared NovaPay JWT without authenticating', async () =
+   if (result !== validJwt || authenticated !== 0) throw new Error('valid session was not reused')
+ })
+ 
+-Deno.test('blocks a JWT with valid exp when stored expiry is empty', async () => {
++Deno.test('uses JWT exp when stored expiry is empty', async () => {
+   let authenticated = 0
+   const validJwt = jwt(Math.floor(Date.now() / 1000) + 300)
+   const admin = { rpc: async (name: string) => {
+     if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
+     if (name === 'get_novapay_auth_state') return { data: { jwt: validJwt, jwt_expires_at: '' } }
+     throw new Error(name)
+   } }
+-  await getValidNovaPayJwt({ admin, authenticate: async () => { authenticated += 1; return {} } })
+-    .then(() => { throw new Error('unknown stored expiry was accepted') })
+-    .catch((error) => { if (error.code !== 'NOVAPAY_JWT_EXPIRY_UNKNOWN') throw error })
+-  if (authenticated !== 0) throw new Error('unknown stored expiry triggered authentication')
++  const result = await getValidNovaPayJwt({ admin, authenticate: async () => { authenticated += 1; return {} } })
++  if (result !== validJwt || authenticated !== 0) throw new Error('JWT exp fallback was not reused')
+ })
+ 
+ Deno.test('authenticates once then saves shared state', async () => {
+@@ -49,38 +47,155 @@ Deno.test('authenticates once then saves shared state', async () => {
    if (authenticated !== 1 || saved !== 1) throw new Error('auth state was not atomically saved once')
  })
  
@@ -181,16 +246,93 @@ diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/function
 +  }
 +})
 +
++Deno.test('retries one transport failure during JWT rotation', async () => {
++  let authenticated = 0
++  let saved = 0
++  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 300)
++  const admin = { rpc: async (name: string) => {
++    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
++    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
++    if (name === 'save_novapay_auth_state') { saved += 1; return { data: null } }
++    throw new Error(name)
++  } }
++  const result = await getValidNovaPayJwt({
++    admin,
++    authenticate: async () => {
++      authenticated += 1
++      if (authenticated === 1) throw new NovaPayTransportError('response lost')
++      return { jwt: nextJwt, refresh_token: 'next', public_certificate: 'next' }
++    },
++  })
++  if (result !== nextJwt || authenticated !== 2 || saved !== 1) throw new Error('transport retry did not recover rotation')
++})
++
++Deno.test('stops after two transport failures during JWT rotation', async () => {
++  let authenticated = 0
++  const admin = { rpc: async (name: string) => {
++    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
++    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
++    throw new Error(name)
++  } }
++  await getValidNovaPayJwt({
++    admin,
++    authenticate: async () => {
++      authenticated += 1
++      throw new NovaPayTransportError('response lost')
++    },
++  })
++    .then(() => { throw new Error('second transport failure was ignored') })
++    .catch((error) => { if (!(error instanceof NovaPayTransportError)) throw error })
++  if (authenticated !== 2) throw new Error('transport retry count was not exactly one')
++})
++
++Deno.test('retries one unreadable JWT rotation response', async () => {
++  let authenticated = 0
++  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 300)
++  const admin = { rpc: async (name: string) => {
++    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
++    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
++    if (name === 'save_novapay_auth_state') return { data: null }
++    throw new Error(name)
++  } }
++  const result = await getValidNovaPayJwt({
++    admin,
++    authenticate: async () => {
++      authenticated += 1
++      if (authenticated === 1) throw Object.assign(new Error('bad xml'), { code: 'NOVAPAY_SOAP_PARSE_ERROR' })
++      return { jwt: nextJwt, refresh_token: 'next', public_certificate: 'next' }
++    },
++  })
++  if (result !== nextJwt || authenticated !== 2) throw new Error('unreadable auth response was not retried once')
++})
++
++Deno.test('does not retry logical NovaPay API errors during JWT rotation', async () => {
++  let authenticated = 0
++  const logicalError = Object.assign(new Error('invalid refresh token'), { code: 'NOVAPAY_API_ERROR' })
++  const admin = { rpc: async (name: string) => {
++    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
++    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
++    throw new Error(name)
++  } }
++  await getValidNovaPayJwt({
++    admin,
++    authenticate: async () => {
++      authenticated += 1
++      throw logicalError
++    },
++  })
++    .then(() => { throw new Error('logical API error was ignored') })
++    .catch((error) => { if (error !== logicalError) throw error })
++  if (authenticated !== 1) throw new Error('logical API error was retried')
++})
++
 +Deno.test('rejects rotated credentials with unknown JWT expiry before saving', async () => {
 +  let authenticated = 0
 +  let saved = 0
 +  const admin = { rpc: async (name: string) => {
 +    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
 +    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
-+    if (name === 'save_novapay_auth_state') {
-+      saved += 1
-+      return { data: null }
-+    }
++    if (name === 'save_novapay_auth_state') { saved += 1; return { data: null } }
 +    throw new Error(name)
 +  } }
 +  await getValidNovaPayJwt({
@@ -207,24 +349,86 @@ diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/function
 diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
 --- a/supabase/functions/novapay-balance/index.ts
 +++ b/supabase/functions/novapay-balance/index.ts
-@@ -208,7 +208,7 @@ Deno.serve(async (request) => {
-         refresh_token: refreshToken,
-         login,
-         public_certificate: publicCertificate,
--      }),
-+      }, true),
-     })
+@@ -1,6 +1,6 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+ import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
+-import { getValidNovaPayJwt, NovaPayAuthError } from '../_shared/novapay-auth.ts'
++import { getValidNovaPayJwt, NovaPayAuthError, NovaPayTransportError } from '../_shared/novapay-auth.ts'
  
-     const clientsResult = await soapCall('GetClientsList', {
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
+@@ -30,13 +30,6 @@ class HttpError extends Error {
+   }
+ }
+ 
+-class NovaPayTransportError extends Error {
+-  constructor(message) {
+-    super(message)
+-    this.name = 'NovaPayTransportError'
+-  }
+-}
+-
+ const text = (value) => typeof value === 'string' ? value.trim() : ''
+ const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+ 
+@@ -112,9 +105,16 @@ async function soapCallOnce(method, params) {
+     throw new NovaPayTransportError(`http_${response.status}`)
+   }
+ 
++  let responseText
++  try {
++    responseText = await response.text()
++  } catch (error) {
++    throw new NovaPayTransportError(error instanceof Error ? `response_${error.name}` : 'response_read_failed')
++  }
++
+   let document
+   try {
+-    document = parser.parse(await response.text())
++    document = parser.parse(responseText)
+   } catch {
+     throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
+   }
 diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
 --- a/supabase/functions/novapay-data/index.ts
 +++ b/supabase/functions/novapay-data/index.ts
-@@ -442,7 +442,7 @@ Deno.serve(async (request) => {
-         refresh_token: refreshToken,
-         login,
-         public_certificate: publicCertificate,
--      }),
-+      }, true),
-     })
+@@ -1,6 +1,6 @@
+ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+ import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
+-import { getValidNovaPayJwt, NovaPayAuthError } from '../_shared/novapay-auth.ts'
++import { getValidNovaPayJwt, NovaPayAuthError, NovaPayTransportError } from '../_shared/novapay-auth.ts'
  
-     const clientsResult = await soapCall('GetClientsList', {
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
+@@ -30,13 +30,6 @@ class HttpError extends Error {
+   }
+ }
+ 
+-class NovaPayTransportError extends Error {
+-  constructor(message) {
+-    super(message)
+-    this.name = 'NovaPayTransportError'
+-  }
+-}
+-
+ const text = (value) => typeof value === 'string' ? value.trim() : ''
+ const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+ 
+@@ -112,9 +105,16 @@ async function soapCallOnce(method, params) {
+     throw new NovaPayTransportError(`http_${response.status}`)
+   }
+ 
++  let responseText
++  try {
++    responseText = await response.text()
++  } catch (error) {
++    throw new NovaPayTransportError(error instanceof Error ? `response_${error.name}` : 'response_read_failed')
++  }
++
+   let document
+   try {
+-    document = parser.parse(await response.text())
++    document = parser.parse(responseText)
+   } catch {
+     throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
+   }
