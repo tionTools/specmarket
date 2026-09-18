@@ -1,0 +1,79 @@
+Patch 109 — prepare automatic NovaPay polling, disabled by default
+
+Base main:
+b058d52343f995287152f131ad9f752bba491bc4
+
+Detached validation commit:
+85854f25e09d1bba4ab26a8753060ec6187a7f57
+
+Scope:
+- supabase/functions/novapay-data/index.ts
+- supabase/migrations/20260918170000_prepare_novapay_sync_schedule.sql
+
+Purpose:
+Prepare automatic NovaPay polling without enabling it yet.
+
+Required Kyiv schedule after explicit enable:
+- 00:00, 00:15, 00:30, 00:45
+- 01:00, 02:00, 03:00, 04:00, 05:00, 06:00
+- every 15 minutes from 07:00 through 23:45
+Total: 78 real NovaPay refreshes per Kyiv day.
+
+DST:
+- pg_cron checks every 15 minutes.
+- crm_novapay_sync_is_due() gates the real request using Europe/Kyiv local time.
+- summer/winter time changes must not shift the business schedule.
+
+Security/auth:
+- reuse existing crm_sync_cron_secret from Vault.
+- scheduled novapay-data request is recognized only by Authorization: Bearer <cron secret>.
+- a browser/user cannot gain scheduled privileges by sending body.scheduled=true.
+- scheduled requests bypass end-user auth only when the Authorization header exactly matches the Vault cron secret.
+- no secret values are returned to the browser or logged.
+
+Scheduled request behavior:
+- force refresh=true
+- force compact=true
+- invoke novapay-data
+- normal manual user behavior remains unchanged.
+
+Activation:
+- migration MUST leave NovaPay cron disabled.
+- migration removes any existing crm-sync-novapay job.
+- no cron.job is created until explicit:
+  select public.enable_crm_novapay_sync();
+- disable with:
+  select public.disable_crm_novapay_sync();
+
+Do NOT enable the schedule as part of Patch 109 deployment.
+
+Required validation:
+- verify current main is b058d52343f995287152f131ad9f752bba491bc4
+- verify 109.patch blob SHA
+- git apply --check
+- inspect real diff; exactly 2 files above
+- pnpm format
+- revert unrelated formatter changes
+- pnpm type-check
+- pnpm lint
+- if lint fails, compare with clean base; do not fix baseline lint in this patch
+- pnpm build
+- git diff --check
+- Deno tests only if existing Deno works; do not install
+- inspect migration for 78/day schedule semantics
+- confirm migration ends with schedule disabled
+- confirm no Vault credential mutation and no NovaPay refresh is triggered by migration itself
+
+Deployment if checks pass:
+- commit + SSH push main only
+- deploy novapay-data
+- apply the new Supabase migration
+- DO NOT call enable_crm_novapay_sync()
+- no novapay-balance deploy required (unchanged)
+- do not change Vault
+- do not trigger NovaPay refresh
+
+After deployment, verify:
+- no cron.job named crm-sync-novapay exists
+- helper functions exist
+- report migration result and disabled state.
