@@ -1,5 +1,5 @@
 diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
-index 77f5cbd..6f0fed9 100644
+index 77f5cbd..97d825f 100644
 --- a/supabase/functions/novapay-data/index.ts
 +++ b/supabase/functions/novapay-data/index.ts
 @@ -763,21 +763,43 @@ Deno.serve(async (request) => {
@@ -130,7 +130,7 @@ index 77f5cbd..6f0fed9 100644
        : undefined
      console.info(
 -      `NovaPay payments diagnostics: documents=${paymentDocuments.length} conducted=${conductedDocuments.length} incoming=${incomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}`,
-+      `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
++      `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} eventKnown=${updatedEventKnownCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
      )
  
      if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
