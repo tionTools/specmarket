@@ -1,5 +1,7 @@
 Patch 109 — prepare automatic NovaPay polling, disabled by default
 
+Patch file corrected after initial git apply --check exposed an invalid new-file diff header. The implementation content and validation commit are unchanged; only the patch container format was fixed.
+
 Base main:
 b058d52343f995287152f131ad9f752bba491bc4
 
