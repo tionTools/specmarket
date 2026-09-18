@@ -1,0 +1,54 @@
+Patch 106 — include active carrier returns in the Returns filter only
+
+Base main:
+3faf2aabeffc8aac34238cd934f39bcaead7b52a
+
+Base src/pages/HomeView.vue blob:
+c4486d232c392b387e51d0db46f548270d47de87
+
+Exact scope:
+- src/pages/HomeView.vue only
+- one condition in matchingOrders / isShowingReturns branch only
+- no shipment-accounting changes
+- no financial/reconciliation changes
+- no Supabase function or migration changes
+- no Android changes
+
+Root cause:
+The order card already treats delivery.trackingReturnInProgress=true as an active return even after the carrier current checkpoint becomes ordinary movement such as in_transit. The Returns filter only checked isReturnLifecycleState(lifecycleState), so such a return could be omitted.
+
+Fix:
+When the Returns filter is active, include the order if either:
+1. order.delivery.trackingReturnInProgress === true; or
+2. the existing lifecycle state is a return lifecycle state.
+
+Required accounting invariants preserved:
+- trackingReturnInProgress does NOT change getOrderLifecycleState.
+- trackingReturnInProgress does NOT change includeInUnpaidShipment.
+- a physically shipped order returning to sender stays in the "В дороге" amount until the return is actually accepted.
+- supplier debt/current cost is reduced only by crm_order_item_returns.returned_quantity, not by tracking state.
+- partial accepted returns reduce only the confirmed quantity.
+- full accepted return removes the remaining quantity/cost.
+
+Targeted regression verification:
+PASS — in_transit + trackingReturnInProgress=true appears in Returns.
+PASS — ordinary in_transit + trackingReturnInProgress=false does not appear in Returns.
+PASS — lifecycle classification remains unchanged.
+PASS — unpaid/in-road inclusion remains true before accepted return.
+PASS — full supplier cost remains before accepted return.
+PASS — partial return reduces only confirmed quantity.
+PASS — full accepted return makes remaining amount/cost zero.
+PASS — git apply --check.
+PASS — git diff --check.
+
+Fresh-main baseline verification:
+GitHub Actions Deploy to Production run 35316059612 for base main completed successfully, including the project build step.
+
+Local patch SHA-256:
+7cdf85b065a9436be83ad842c0d111ba26db6bacbb746d5b7c174a584d89e9f0
+
+Expected Git blob SHA for 106.patch:
+5ddbbd8c5d484a110d7df0edb6320f86fa294b35
+
+Codex:
+Apply Patch 106 only against the then-current main. Before applying, verify the base/file context still matches or that git apply --check passes. After applying run the repository-required frontend checks and inspect the final diff. Commit/push to main through the existing GitHub SSH access only after all checks pass. Do not deploy Supabase for this patch.
