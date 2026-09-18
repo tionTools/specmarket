@@ -1,5 +1,5 @@
 diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
-index 5312946..fa26b46 100644
+index 5312946..7c15266 100644
 --- a/supabase/functions/novapay-data/index.ts
 +++ b/supabase/functions/novapay-data/index.ts
 @@ -201,35 +201,20 @@ function collectNestedRecords(value, itemName, records = []) {
@@ -60,11 +60,11 @@ index 5312946..fa26b46 100644
    return ['CRDT', 'CREDIT', 'C', 'K', 'КРЕДИТ'].includes(direction)
  }
  
-+function isPostedPaymentDocument(document) {
++function isConductedPaymentDocument(document) {
 +  const statusId = pick(document, 'StatusDocumentId')
 +  const status = pick(document, 'StatusDocument').toLowerCase()
-+  if (!statusId && !status) return true
-+  return statusId === '8' || statusId === '9' || status === 'conducted' || status === 'advance'
++  if (statusId || status) return statusId === '8' || status === 'conducted'
++  return Boolean(pick(document, 'ID', 'id')) && Boolean(pick(document, 'DayDate'))
 +}
 +
  function extractReceipt(document) {
@@ -80,12 +80,12 @@ index 5312946..fa26b46 100644
 -  const balance = optionalNumber(
 -    pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
 -  )
-+  const changedAt = pick(document, 'Changed', 'Created')
-+  const changedMatch = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(changedAt)
-+  const dayDate = changedMatch?.[1] ??
++  const postedAt = pick(document, 'Changed', 'Created')
++  const postedMatch = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(postedAt)
++  const dayDate = postedMatch?.[1] ??
 +    pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
-+  const dayTime = changedMatch?.[2] ?? pick(document, 'Time', 'OrgTime', 'PaymentTime')
-+  const date = changedAt || [dayDate, dayTime].filter(Boolean).join(', ')
++  const dayTime = postedMatch?.[2] ?? pick(document, 'Time', 'OrgTime', 'PaymentTime')
++  const date = postedAt || [dayDate, dayTime].filter(Boolean).join(', ')
  
    return {
 -    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
@@ -195,7 +195,7 @@ index 5312946..fa26b46 100644
      const { error } = await admin.from('bank_payment_events').upsert({
        bank: 'novapay', external_id: externalId, occurred_at: receipt.occurredAt,
        amount: receipt.amount, balance: receipt.balance,
-@@ -514,17 +571,19 @@ Deno.serve(async (request) => {
+@@ -514,17 +571,21 @@ Deno.serve(async (request) => {
      const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
      const dateFrom = formatNovaDate(fromDate)
      const dateTo = formatNovaDate(now)
@@ -213,20 +213,29 @@ index 5312946..fa26b46 100644
 -    const receipts = sortReceiptsNewestFirst(extractDocuments
 -      .filter((document) => isIncomingExtractDocument(document, accountIban))
 +    const paymentDocuments = parsePaymentsDocuments(paymentsResult.payments)
-+    const receipts = sortReceiptsNewestFirst(paymentDocuments
-+      .filter(isPostedPaymentDocument)
-+      .filter((document) => isIncomingPaymentDocument(document, accountIban))
++    const conductedDocuments = paymentDocuments.filter(isConductedPaymentDocument)
++    const incomingDocuments = conductedDocuments.filter((document) =>
++      isIncomingPaymentDocument(document, accountIban)
++    )
++    const receipts = sortReceiptsNewestFirst(incomingDocuments
        .map(extractReceipt)
        .filter((receipt) => receipt !== null))
  
-@@ -560,8 +619,8 @@ Deno.serve(async (request) => {
+@@ -560,8 +621,15 @@ Deno.serve(async (request) => {
      const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
      if (cleanupError) throw new HttpError(500, 'BANK_PAYMENT_EVENT_CLEANUP_FAILED', 'Failed to clean up NovaPay payment events.')
  
 -    const diagnostics = extractDocuments.length > 0 && receipts.length === 0
 -      ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
-+    const diagnostics = paymentDocuments.length > 0 && receipts.length === 0
-+      ? { documentCount: paymentDocuments.length, sampleKeys: Object.keys(paymentDocuments[0]).sort() }
++    const timedDocuments = incomingDocuments.filter((document) => pick(document, 'Changed', 'Created'))
++    const diagnostics = paymentDocuments.length > 0
++      ? {
++          documentCount: paymentDocuments.length,
++          conductedCount: conductedDocuments.length,
++          incomingCount: incomingDocuments.length,
++          timedCount: timedDocuments.length,
++          sampleKeys: Object.keys(paymentDocuments[0]).sort(),
++        }
        : undefined
  
      if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
