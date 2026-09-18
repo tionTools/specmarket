@@ -201,22 +201,6 @@ function collectNestedRecords(value, itemName, records = []) {
   return records
 }
 
-function parseNestedXmlCollection(rawXml, rootName, itemName) {
-  const xml = text(rawXml)
-  if (!xml) return []
-
-  let document
-  try {
-    document = parser.parse(xml)
-  } catch {
-    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', `NovaPay ${rootName} XML is invalid.`)
-  }
-
-  const root = findKey(document, rootName)
-  if (!isRecord(root)) return []
-  return collectNestedRecords(root, itemName).map(normalizeXmlRecord)
-}
-
 function parseExtractDocuments(rawXml) {
   const xml = text(rawXml)
   if (!xml) return []
