@@ -763,21 +763,43 @@ Deno.serve(async (request) => {
     const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const dateFrom = formatNovaDate(fromDate)
     const dateTo = formatNovaDate(now)
-    const paymentsResult = await soapCall('GetPaymentsList', {
+    const previousUpdatedAt = Date.parse(text(previousCache.updatedAt))
+    const updatedFromDate = Number.isFinite(previousUpdatedAt)
+      ? new Date(Math.min(now.getTime(), Math.max(previousUpdatedAt, fromDate.getTime())))
+      : fromDate
+    const updatedDateFrom = formatNovaDate(updatedFromDate)
+    const statementPaymentsResult = await soapCall('GetPaymentsList', {
       request_ref: requestRef(),
       jwt,
       account_id: accountId,
       date_from: dateFrom,
       date_to: dateTo,
+      date_type: 0,
+    }, true)
+    const updatedPaymentsResult = await soapCall('GetPaymentsList', {
+      request_ref: requestRef(),
+      jwt,
+      account_id: accountId,
+      date_from: updatedDateFrom,
+      date_to: dateTo,
       date_type: 3,
     }, true)
 
-    const paymentDocuments = parsePaymentsDocuments(paymentsResult.payments)
-    const conductedDocuments = paymentDocuments.filter(isConductedPaymentDocument)
-    const incomingDocuments = conductedDocuments.filter((document) =>
+    const statementDocuments = parsePaymentsDocuments(statementPaymentsResult.payments)
+    const statementConductedDocuments = statementDocuments.filter(isConductedPaymentDocument)
+    const statementIncomingDocuments = statementConductedDocuments.filter((document) =>
       isIncomingPaymentDocument(document, accountIban)
     )
-    const receipts = sortReceiptsNewestFirst(incomingDocuments
+    const receipts = sortReceiptsNewestFirst(statementIncomingDocuments
+      .map(extractReceipt)
+      .filter((receipt) => receipt !== null))
+
+    const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
+    const updatedConductedDocuments = updatedDocuments.filter(isConductedPaymentDocument)
+    const updatedIncomingDocuments = updatedConductedDocuments.filter((document) =>
+      isIncomingPaymentDocument(document, accountIban)
+    )
+    const updatedReceipts = sortReceiptsNewestFirst(updatedIncomingDocuments
       .map(extractReceipt)
       .filter((receipt) => receipt !== null))
 
@@ -797,12 +819,20 @@ Deno.serve(async (request) => {
     }
 
     const useLegacyMatcher = previousCache.account?.receiptSource !== 'payments-list-v1'
+    const hasBaseline = Boolean(previousCache.updatedAt)
     await saveNewReceipts(
       admin,
       previousCache.receipts,
       receipts,
-      Boolean(previousCache.updatedAt),
+      hasBaseline,
       useLegacyMatcher,
+    )
+    await saveNewReceipts(
+      admin,
+      receipts,
+      updatedReceipts,
+      hasBaseline,
+      false,
     )
 
     const { error: cacheError } = await admin
@@ -829,24 +859,47 @@ Deno.serve(async (request) => {
     const fallbackIdentityCount = receipts.filter((receipt) =>
       receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt))
     ).length
-    if (fallbackIdentityCount > 0) {
-      console.warn(`NovaPay conducted payments without ID/UETR: ${fallbackIdentityCount}`)
+    const updatedTimedCount = updatedReceipts.filter((receipt) => Boolean(text(receipt?.occurredAt))).length
+    const updatedEventKnownCount = updatedReceipts.filter((receipt) => receipt?.eventKnown === true).length
+    const updatedProviderIdentifiedCount = updatedReceipts.filter((receipt) =>
+      receiptProviderAliases(receipt).length > 0
+    ).length
+    const updatedFallbackIdentityCount = updatedReceipts.filter((receipt) =>
+      receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt))
+    ).length
+
+    if (fallbackIdentityCount > 0 || updatedFallbackIdentityCount > 0) {
+      console.warn(
+        `NovaPay conducted payments without ID/UETR: statement=${fallbackIdentityCount} updated=${updatedFallbackIdentityCount}`,
+      )
     }
 
-    const diagnostics = paymentDocuments.length > 0
+    const diagnostics = statementDocuments.length > 0 || updatedDocuments.length > 0
       ? {
-          documentCount: paymentDocuments.length,
-          conductedCount: conductedDocuments.length,
-          incomingCount: incomingDocuments.length,
-          timedCount,
-          eventKnownCount,
-          providerIdentifiedCount,
-          fallbackIdentityCount,
-          sampleKeys: Object.keys(paymentDocuments[0]).sort(),
+          statement: {
+            documentCount: statementDocuments.length,
+            conductedCount: statementConductedDocuments.length,
+            incomingCount: statementIncomingDocuments.length,
+            timedCount,
+            eventKnownCount,
+            providerIdentifiedCount,
+            fallbackIdentityCount,
+            sampleKeys: Object.keys(statementDocuments[0] ?? {}).sort(),
+          },
+          updated: {
+            documentCount: updatedDocuments.length,
+            conductedCount: updatedConductedDocuments.length,
+            incomingCount: updatedIncomingDocuments.length,
+            timedCount: updatedTimedCount,
+            eventKnownCount: updatedEventKnownCount,
+            providerIdentifiedCount: updatedProviderIdentifiedCount,
+            fallbackIdentityCount: updatedFallbackIdentityCount,
+            sampleKeys: Object.keys(updatedDocuments[0] ?? {}).sort(),
+          },
         }
       : undefined
     console.info(
-      `NovaPay payments diagnostics: documents=${paymentDocuments.length} conducted=${conductedDocuments.length} incoming=${incomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}`,
+      `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} eventKnown=${updatedEventKnownCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
     )
 
     if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
