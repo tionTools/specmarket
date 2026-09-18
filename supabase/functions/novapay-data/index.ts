@@ -400,9 +400,16 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
   }
 
+  const admin = createClient(url, serviceKey)
+  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
+  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
+
   const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user }, error: authError } = await authClient.auth.getUser()
-  if (authError || !user || user.email?.toLowerCase() === 'guest@gmail.com') {
+  const authResult = isScheduledRequest
+    ? { data: { user: null }, error: null }
+    : await authClient.auth.getUser()
+  const { data: { user }, error: authError } = authResult
+  if (!isScheduledRequest && (authError || !user || user.email?.toLowerCase() === 'guest@gmail.com')) {
     return Response.json({ ok: false, message: 'Unauthorized.' }, { status: 401, headers: corsHeaders })
   }
 
@@ -412,9 +419,8 @@ Deno.serve(async (request) => {
   } catch {
     body = {}
   }
-  const refresh = isRecord(body) && body.refresh === true
-  const compact = isRecord(body) && body.compact === true
-  const admin = createClient(url, serviceKey)
+  const refresh = isScheduledRequest || (isRecord(body) && body.refresh === true)
+  const compact = isScheduledRequest || (isRecord(body) && body.compact === true)
 
   let previousCache
   try {
