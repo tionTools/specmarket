@@ -1,0 +1,46 @@
+Patch 112 — NovaPay auth request/response reference diagnostics
+
+Base main:
+eb18a7c28c1ad940e99f20d34bd5da59fc389408
+
+Validation commit:
+0895ac631481b3a1cde817977547775ebf0343f4
+
+Scope:
+- supabase/functions/novapay-data/index.ts
+
+Purpose:
+Add non-secret diagnostic logging for NovaPay UserAuthenticationJWT request_ref and response_ref so failed/successful auth attempts can be correlated with NovaPay support.
+
+Behavior:
+- generate auth request_ref once per actual UserAuthenticationJWT attempt;
+- log: NovaPay auth request_ref: <value>;
+- after a parsed UserAuthenticationJWT result is received, log: NovaPay auth response_ref: <value>;
+- if response_ref is absent, log "missing";
+- response_ref is logged before logical API error handling, so a NovaPay logic_error can still be correlated;
+- transport/parse failures may naturally have no response_ref;
+- existing fingerprint diagnostics remain unchanged;
+- no refresh token, certificate, JWT, login, or other secret is logged;
+- no auth retry, lock, persistence, SOAP timeout, parser, schedule, frontend, DB or Vault behavior changes.
+
+Required checks:
+- fresh main must equal the base above, otherwise stop and check compatibility;
+- verify 112.patch blob SHA;
+- git apply --check;
+- inspect real diff; exactly the single file above;
+- pnpm format; revert unrelated formatter changes;
+- pnpm type-check;
+- pnpm lint; if only known baseline fails, prove against clean base and do not widen scope;
+- pnpm build;
+- git diff --check;
+- Deno tests only if existing Deno works; do not install;
+- commit + SSH push main only;
+- deploy novapay-data only;
+- no migrations;
+- no Vault changes;
+- do not enable NovaPay cron;
+- do not trigger a NovaPay refresh as part of deployment.
+
+After deployment:
+- report commit SHA and deploy result.
+- The next manual auth test should capture request_ref, response_ref (or missing), and auth fingerprint lines.
