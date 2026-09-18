@@ -4,6 +4,7 @@ const LOCK_WAIT_MS = 250
 const JWT_SAFETY_MARGIN_MS = 60_000
 const AUTH_STATE_SAVE_ATTEMPTS = 2
 const AUTH_STATE_SAVE_RETRY_MS = 250
+const AUTH_FINGERPRINT_HEX_LENGTH = 16
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -20,6 +21,26 @@ export class NovaPayTransportError extends Error {
     super(message)
     this.name = 'NovaPayTransportError'
   }
+}
+
+async function credentialFingerprint(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, AUTH_FINGERPRINT_HEX_LENGTH)
+}
+
+async function logCredentialFingerprints(
+  stage: string,
+  state: { refreshToken: string; publicCertificate: string },
+) {
+  const [refresh, certificate] = await Promise.all([
+    credentialFingerprint(state.refreshToken),
+    credentialFingerprint(state.publicCertificate),
+  ])
+  console.info(`NovaPay auth fingerprint ${stage}: refresh=${refresh} certificate=${certificate}`)
+  return { refresh, certificate }
 }
 
 function jwtExpiryMs(jwt: string): number | null {
@@ -114,6 +135,7 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
       publicCertificate: text(data.public_certificate),
     }
     console.info('NovaPay JWT rotation started.')
+    await logCredentialFingerprints('input', authState)
     const result: any = await authenticateWithRetry(authenticate, authState)
     console.info('NovaPay JWT rotation response received.')
     const nextJwt = text(result?.jwt)
@@ -124,6 +146,8 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
       throw new NovaPayAuthError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete or has no valid expiry.')
     }
 
+    const responseFingerprints = await logCredentialFingerprints('response', { refreshToken, publicCertificate })
+
     await saveRotatedAuthState(admin, {
       new_refresh_token: refreshToken,
       new_public_certificate: publicCertificate,
@@ -131,6 +155,24 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
       new_jwt_expires_at: String(Math.floor(jwtExpiresAt / 1000)),
     })
     console.info('NovaPay JWT rotation state saved.')
+
+    try {
+      const { data: storedState, error: storedStateError } = await admin.rpc('get_novapay_auth_state')
+      if (storedStateError || !storedState) {
+        console.warn('NovaPay auth fingerprint stored read failed.')
+      } else {
+        const storedFingerprints = await logCredentialFingerprints('stored', {
+          refreshToken: text(storedState.refresh_token),
+          publicCertificate: text(storedState.public_certificate),
+        })
+        console.info(
+          `NovaPay auth fingerprint stored matches response: ${storedFingerprints.refresh === responseFingerprints.refresh && storedFingerprints.certificate === responseFingerprints.certificate}`,
+        )
+      }
+    } catch {
+      console.warn('NovaPay auth fingerprint stored read failed.')
+    }
+
     return nextJwt
   } finally {
     if (locked) {
