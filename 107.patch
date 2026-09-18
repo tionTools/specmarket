@@ -179,7 +179,7 @@ diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/function
  })
  
  Deno.test('authenticates once then saves shared state', async () => {
-@@ -49,38 +47,155 @@ Deno.test('authenticates once then saves shared state', async () => {
+@@ -49,38 +47,175 @@ Deno.test('authenticates once then saves shared state', async () => {
    if (authenticated !== 1 || saved !== 1) throw new Error('auth state was not atomically saved once')
  })
  
@@ -306,6 +306,26 @@ diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/function
 +  if (result !== nextJwt || authenticated !== 2) throw new Error('unreadable auth response was not retried once')
 +})
 +
++Deno.test('retries one missing JWT rotation result', async () => {
++  let authenticated = 0
++  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 300)
++  const admin = { rpc: async (name: string) => {
++    if (name === 'acquire_novapay_rotation_lock' || name === 'release_novapay_rotation_lock') return { data: true }
++    if (name === 'get_novapay_auth_state') return { data: { refresh_token: 'old', public_certificate: 'old' } }
++    if (name === 'save_novapay_auth_state') return { data: null }
++    throw new Error(name)
++  } }
++  const result = await getValidNovaPayJwt({
++    admin,
++    authenticate: async () => {
++      authenticated += 1
++      if (authenticated === 1) throw Object.assign(new Error('missing result'), { code: 'NOVAPAY_SOAP_RESULT_MISSING' })
++      return { jwt: nextJwt, refresh_token: 'next', public_certificate: 'next' }
++    },
++  })
++  if (result !== nextJwt || authenticated !== 2) throw new Error('missing auth result was not retried once')
++})
++
 +Deno.test('does not retry logical NovaPay API errors during JWT rotation', async () => {
 +  let authenticated = 0
 +  const logicalError = Object.assign(new Error('invalid refresh token'), { code: 'NOVAPAY_API_ERROR' })
@@ -371,17 +391,24 @@ diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/no
  const text = (value) => typeof value === 'string' ? value.trim() : ''
  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
  
-@@ -112,9 +105,16 @@ async function soapCallOnce(method, params) {
-     throw new NovaPayTransportError(`http_${response.status}`)
-   }
- 
+@@ -92,6 +85,7 @@ async function soapCallOnce(method, params) {
+   const controller = new AbortController()
+   const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
+   let response
 +  let responseText
-+  try {
+   try {
+     response = await fetch(NOVAPAY_URL, {
+       method: 'POST',
+@@ -102,6 +96,7 @@ async function soapCallOnce(method, params) {
+       body: soapEnvelope(method, params),
+       signal: controller.signal,
+     })
 +    responseText = await response.text()
-+  } catch (error) {
-+    throw new NovaPayTransportError(error instanceof Error ? `response_${error.name}` : 'response_read_failed')
-+  }
-+
+   } catch (error) {
+     throw new NovaPayTransportError(error instanceof Error ? error.name : 'fetch_failed')
+   } finally {
+@@ -114,7 +109,7 @@ async function soapCallOnce(method, params) {
+ 
    let document
    try {
 -    document = parser.parse(await response.text())
@@ -414,17 +441,24 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
  const text = (value) => typeof value === 'string' ? value.trim() : ''
  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
  
-@@ -112,9 +105,16 @@ async function soapCallOnce(method, params) {
-     throw new NovaPayTransportError(`http_${response.status}`)
-   }
- 
+@@ -92,6 +85,7 @@ async function soapCallOnce(method, params) {
+   const controller = new AbortController()
+   const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
+   let response
 +  let responseText
-+  try {
+   try {
+     response = await fetch(NOVAPAY_URL, {
+       method: 'POST',
+@@ -102,6 +96,7 @@ async function soapCallOnce(method, params) {
+       body: soapEnvelope(method, params),
+       signal: controller.signal,
+     })
 +    responseText = await response.text()
-+  } catch (error) {
-+    throw new NovaPayTransportError(error instanceof Error ? `response_${error.name}` : 'response_read_failed')
-+  }
-+
+   } catch (error) {
+     throw new NovaPayTransportError(error instanceof Error ? error.name : 'fetch_failed')
+   } finally {
+@@ -114,7 +109,7 @@ async function soapCallOnce(method, params) {
+ 
    let document
    try {
 -    document = parser.parse(await response.text())
