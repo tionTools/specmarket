@@ -201,7 +201,7 @@ function collectNestedRecords(value, itemName, records = []) {
   return records
 }
 
-function parseExtractDocuments(rawXml) {
+function parsePaymentsDocuments(rawXml) {
   const xml = text(rawXml)
   if (!xml) return []
 
@@ -209,27 +209,12 @@ function parseExtractDocuments(rawXml) {
   try {
     document = parser.parse(xml)
   } catch {
-    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', 'NovaPay Extract XML is invalid.')
+    throw new HttpError(502, 'NOVAPAY_NESTED_XML_PARSE_ERROR', 'NovaPay Payments XML is invalid.')
   }
 
-  const root = findKey(document, 'Extract')
+  const root = findKey(document, 'Payments')
   if (!isRecord(root)) return []
-
-  const documents = []
-  for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
-    const statement = normalizeXmlRecord(day)
-    const docs = day.Docs
-    const items = Array.isArray(docs) ? docs.filter(isRecord) : isRecord(docs) ? [docs] : []
-    for (const item of items) {
-      documents.push({
-        ...normalizeXmlRecord(item),
-        StatementDate: pick(statement, 'Date'),
-        StatementInCome: pick(statement, 'InCome'),
-        StatementOutCome: pick(statement, 'OutCome'),
-      })
-    }
-  }
-  return documents
+  return collectNestedRecords(root, 'Docs').map(normalizeXmlRecord)
 }
 
 function pick(record, ...keys) {
@@ -244,85 +229,349 @@ function normalizeIban(value) {
   return text(value).replaceAll(' ', '').toUpperCase()
 }
 
-function isIncomingExtractDocument(document, accountIban) {
+function isIncomingPaymentDocument(document, accountIban) {
   const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
-  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
-  if (creditIban) return creditIban === accountIban
-  if (debitIban) return debitIban !== accountIban
+  return Boolean(accountIban) && creditIban === accountIban
+}
 
-  const creditAmount = optionalNumber(pick(document, 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
-  const debitAmount = optionalNumber(pick(document, 'CrncyDebit', 'DebitAmount', 'Debit', 'SumDebit'))
-  if ((creditAmount ?? 0) > 0) return true
-  if ((debitAmount ?? 0) > 0) return false
+function isConductedPaymentDocument(document) {
+  return pick(document, 'StatusDocumentId') === '8'
+}
 
-  const direction = pick(document, 'DbtCdtInd', 'Direction', 'OperationType').toUpperCase()
-  return ['CRDT', 'CREDIT', 'C', 'K', 'КРЕДИТ'].includes(direction)
+function parseNovaDateTime(value) {
+  const raw = text(value)
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(raw)
+  if (!match) return null
+
+  const day = Number(match[1])
+  const month = Number(match[2])
+  const year = Number(match[3])
+  const hours = Number(match[4])
+  const minutes = Number(match[5])
+  const seconds = Number(match[6] ?? 0)
+
+  if (
+    month < 1 || month > 12 ||
+    hours < 0 || hours > 23 ||
+    minutes < 0 || minutes > 59 ||
+    seconds < 0 || seconds > 59
+  ) return null
+
+  const calendarProbe = new Date(Date.UTC(year, month - 1, day))
+  if (
+    calendarProbe.getUTCFullYear() !== year ||
+    calendarProbe.getUTCMonth() !== month - 1 ||
+    calendarProbe.getUTCDate() !== day
+  ) return null
+
+  return {
+    raw,
+    date: `${match[1]}.${match[2]}.${match[3]}`,
+    time: `${match[4]}:${match[5]}:${String(seconds).padStart(2, '0')}`,
+  }
 }
 
 function extractReceipt(document) {
   const amount = optionalNumber(pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'))
   if (amount === null || amount <= 0) return null
 
-  const createdAt = pick(document, 'Created', 'Changed')
-  const createdMatch = /^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/.exec(createdAt)
-  const dayDate = createdMatch?.[1] ??
-    pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'StatementDate', 'Date', 'date')
-  const dayTime = createdMatch?.[2] ?? pick(document, 'Time', 'OrgTime', 'PaymentTime')
-  const date = createdAt || [dayDate, dayTime].filter(Boolean).join(', ')
-  const balance = optionalNumber(
-    pick(document, 'StatementOutCome', 'Balance', 'Rest', 'CrncyRest', 'EndRest', 'OutRest'),
-  )
+  const changedAt = parseNovaDateTime(pick(document, 'Changed'))
+  const createdAt = parseNovaDateTime(pick(document, 'Created'))
+  const eventDateTime = changedAt ?? createdAt
+  const paymentDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
+  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
+  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
+  const providerId = pick(document, 'ID', 'id')
+  const uetr = pick(document, 'UETR')
+  const paymentCode = pick(document, 'Code')
+  const providerAliases = [
+    providerId ? `id:${providerId}` : '',
+    uetr ? `uetr:${uetr}` : '',
+  ].filter(Boolean)
 
   return {
-    id: pick(document, 'id', 'ID', 'DocumentId', 'DocId', 'Reference', 'Ref'),
-    date,
-    occurredAt: receiptOccurredAt(dayDate, dayTime),
+    id: providerAliases[0] ?? '',
+    providerAliases,
+    paymentCode,
+    date: eventDateTime?.raw ?? paymentDate,
+    occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
     amount,
-    balance,
+    balance: null,
     comment: pick(document, 'Purpose', 'Comment', 'Description'),
+    legacyDate: paymentDate,
+    legacyCreatedDate: createdAt?.date ?? '',
+    legacyChangedDate: changedAt?.date ?? '',
+    stableDebitIban: debitIban,
+    stableCreditIban: creditIban,
+    eventKnown: false,
   }
 }
 
+function kyivDateTimeParts(utcMs) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(utcMs))
+  const part = (type) => parts.find((item) => item.type === type)?.value ?? ''
+  return {
+    year: Number(part('year')),
+    month: Number(part('month')),
+    day: Number(part('day')),
+    hours: Number(part('hour')),
+    minutes: Number(part('minute')),
+    seconds: Number(part('second')),
+  }
+}
+
+function kyivOffsetMs(utcMs) {
+  const local = kyivDateTimeParts(utcMs)
+  return Date.UTC(
+    local.year,
+    local.month - 1,
+    local.day,
+    local.hours,
+    local.minutes,
+    local.seconds,
+  ) - utcMs
+}
+
 function receiptOccurredAt(dayDate, dayTime) {
-  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dayDate)
-  if (!match) return ''
-  const [hours = '0', minutes = '0', seconds = '0'] = dayTime.split(':')
-  const value = new Date(Date.UTC(
-    Number(match[3]), Number(match[2]) - 1, Number(match[1]), Number(hours), Number(minutes), Number(seconds),
-  ))
+  const dateMatch = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dayDate)
+  const timeMatch = /^(\d{2}):(\d{2}):(\d{2})$/.exec(dayTime)
+  if (!dateMatch || !timeMatch) return ''
+
+  const day = Number(dateMatch[1])
+  const month = Number(dateMatch[2])
+  const year = Number(dateMatch[3])
+  const hours = Number(timeMatch[1])
+  const minutes = Number(timeMatch[2])
+  const seconds = Number(timeMatch[3])
+  const localAsUtc = Date.UTC(year, month - 1, day, hours, minutes, seconds)
+
+  let offset = kyivOffsetMs(localAsUtc)
+  let utcMs = localAsUtc - offset
+  const correctedOffset = kyivOffsetMs(utcMs)
+  if (correctedOffset !== offset) {
+    offset = correctedOffset
+    utcMs = localAsUtc - offset
+  }
+
+  const local = kyivDateTimeParts(utcMs)
+  if (
+    local.year !== year ||
+    local.month !== month ||
+    local.day !== day ||
+    local.hours !== hours ||
+    local.minutes !== minutes ||
+    local.seconds !== seconds
+  ) return ''
+
+  const value = new Date(utcMs)
   return Number.isFinite(value.getTime()) ? value.toISOString() : ''
 }
 
+function receiptSortTimestamp(receipt) {
+  const occurredAt = Date.parse(text(receipt?.occurredAt))
+  if (Number.isFinite(occurredAt)) return occurredAt
+
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(text(receipt?.legacyDate))
+  if (!match) return Number.NEGATIVE_INFINITY
+  return Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]))
+}
+
 function sortReceiptsNewestFirst(receipts) {
-  return [...receipts].sort((left, right) => {
-    const leftTime = Date.parse(text(left?.occurredAt))
-    const rightTime = Date.parse(text(right?.occurredAt))
-    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return 0
-    return rightTime - leftTime
-  })
+  return [...receipts].sort((left, right) =>
+    receiptSortTimestamp(right) - receiptSortTimestamp(left)
+  )
+}
+
+function receiptCalendarDate(receipt) {
+  const match = /^(\d{2}\.\d{2}\.\d{4})/.exec(text(receipt?.date))
+  if (match) return match[1]
+
+  const occurredAt = Date.parse(text(receipt?.occurredAt))
+  return Number.isFinite(occurredAt) ? formatNovaDate(new Date(occurredAt)) : ''
+}
+
+function normalizedLegacyText(value) {
+  return text(value).replace(/\s+/g, ' ')
+}
+
+function receiptProviderAliases(receipt) {
+  if (!Array.isArray(receipt?.providerAliases)) return []
+  return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
+}
+
+function receiptStableSignature(receipt) {
+  const stableDate = text(receipt?.legacyDate)
+  if (!stableDate) return ''
+
+  const amount = Number(receipt?.amount)
+  return [
+    stableDate,
+    normalizedLegacyText(receipt?.paymentCode),
+    Number.isFinite(amount) ? amount.toFixed(2) : '',
+    normalizeIban(receipt?.stableDebitIban),
+    normalizeIban(receipt?.stableCreditIban),
+    normalizedLegacyText(receipt?.description),
+    normalizedLegacyText(receipt?.comment),
+  ].join('\u0000')
 }
 
 async function receiptExternalId(receipt) {
-  if (text(receipt.id)) return text(receipt.id)
-  const source = `novapay\u0000${receipt.date}\u0000${receipt.amount}\u0000${receipt.description}\u0000${receipt.comment}`
+  const providerIdentity = receiptProviderAliases(receipt)[0]
+  if (providerIdentity) return providerIdentity
+
+  const stableSignature = receiptStableSignature(receipt)
+  if (!stableSignature) return ''
+
+  const source = `novapay-fallback\u0000${stableSignature}`
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
-  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  return `hash:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
-async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline) {
+function receiptLegacySignature(receipt, date = receiptCalendarDate(receipt)) {
+  const amount = Number(receipt?.amount)
+  return [
+    text(date),
+    Number.isFinite(amount) ? amount.toFixed(2) : '',
+    normalizedLegacyText(receipt?.description),
+    normalizedLegacyText(receipt?.comment),
+  ].join('\u0000')
+}
+
+function newReceiptLegacyDates(receipt) {
+  return [...new Set([
+    text(receipt?.legacyDate),
+    text(receipt?.legacyCreatedDate),
+    text(receipt?.legacyChangedDate),
+  ].filter(Boolean))]
+}
+
+async function saveNewReceipts(admin, previousReceipts, receipts, hasBaseline, useLegacyMatcher) {
   if (!hasBaseline) return
-  const known = new Set(await Promise.all(previousReceipts.map(receiptExternalId)))
-  for (const receipt of receipts) {
+
+  const { data: existingEvents, error: existingEventsError } = await admin
+    .from('bank_payment_events')
+    .select('external_id')
+    .eq('bank', 'novapay')
+  if (existingEventsError) {
+    throw new HttpError(500, 'BANK_PAYMENT_EVENT_READ_FAILED', 'Failed to read existing NovaPay payment events.')
+  }
+
+  const knownExact = new Set(
+    (existingEvents ?? []).map((event) => text(event.external_id)).filter(Boolean),
+  )
+  const knownStableWithoutProvider = new Map()
+
+  for (const receipt of previousReceipts) {
+    if (!text(receipt?.occurredAt) && receipt?.eventKnown !== true) continue
+
     const externalId = await receiptExternalId(receipt)
-    if (known.has(externalId) || !receipt.occurredAt) continue
+    if (externalId) knownExact.add(externalId)
+    for (const alias of receiptProviderAliases(receipt)) knownExact.add(alias)
+
+    if (receiptProviderAliases(receipt).length === 0) {
+      const stableSignature = receiptStableSignature(receipt)
+      if (stableSignature) {
+        knownStableWithoutProvider.set(
+          stableSignature,
+          (knownStableWithoutProvider.get(stableSignature) ?? 0) + 1,
+        )
+      }
+    }
+  }
+
+  const legacyCounts = new Map()
+  if (useLegacyMatcher) {
+    for (const receipt of previousReceipts) {
+      const signature = receiptLegacySignature(receipt)
+      legacyCounts.set(signature, (legacyCounts.get(signature) ?? 0) + 1)
+    }
+  }
+
+  const candidates = await Promise.all(receipts.map(async (receipt) => ({
+    receipt,
+    aliases: receiptProviderAliases(receipt),
+    externalId: await receiptExternalId(receipt),
+    stableSignature: receiptStableSignature(receipt),
+  })))
+  const handled = new Set()
+
+  // Exact provider identities are authoritative. UETR acts as a safe alias if an ID changes.
+  for (const candidate of candidates) {
+    const exactMatch =
+      Boolean(candidate.externalId && knownExact.has(candidate.externalId)) ||
+      candidate.aliases.some((alias) => knownExact.has(alias))
+    if (!exactMatch) continue
+
+    if (candidate.aliases.length === 0 && candidate.stableSignature) {
+      const stableKnownCount = knownStableWithoutProvider.get(candidate.stableSignature) ?? 0
+      if (stableKnownCount > 0) {
+        knownStableWithoutProvider.set(candidate.stableSignature, stableKnownCount - 1)
+      }
+    }
+
+    candidate.receipt.eventKnown = true
+    handled.add(candidate.receipt)
+  }
+
+  // Cross-identity stable matching is allowed only when the previous known receipt had
+  // no provider identity at all. Never suppress id:111 with id:222 only by similarity.
+  for (const candidate of [...candidates].reverse()) {
+    if (handled.has(candidate.receipt) || !candidate.stableSignature) continue
+
+    const stableKnownCount = knownStableWithoutProvider.get(candidate.stableSignature) ?? 0
+    if (stableKnownCount <= 0) continue
+
+    knownStableWithoutProvider.set(candidate.stableSignature, stableKnownCount - 1)
+    candidate.receipt.eventKnown = true
+    handled.add(candidate.receipt)
+  }
+
+  if (useLegacyMatcher) {
+    for (const candidate of [...candidates].reverse()) {
+      if (handled.has(candidate.receipt)) continue
+
+      for (const date of newReceiptLegacyDates(candidate.receipt)) {
+        const signature = receiptLegacySignature(candidate.receipt, date)
+        const legacyCount = legacyCounts.get(signature) ?? 0
+        if (legacyCount <= 0) continue
+
+        legacyCounts.set(signature, legacyCount - 1)
+        candidate.receipt.eventKnown = true
+        handled.add(candidate.receipt)
+        break
+      }
+    }
+  }
+
+  for (const candidate of [...candidates].reverse()) {
+    if (
+      handled.has(candidate.receipt) ||
+      !candidate.externalId ||
+      !candidate.receipt.occurredAt
+    ) continue
+
     const { error } = await admin.from('bank_payment_events').upsert({
-      bank: 'novapay', external_id: externalId, occurred_at: receipt.occurredAt,
-      amount: receipt.amount, balance: receipt.balance,
-      payer: text(receipt.description) || text(receipt.comment),
-      description: text(receipt.description), comment: text(receipt.comment),
+      bank: 'novapay', external_id: candidate.externalId, occurred_at: candidate.receipt.occurredAt,
+      amount: candidate.receipt.amount, balance: candidate.receipt.balance,
+      payer: text(candidate.receipt.description) || text(candidate.receipt.comment),
+      description: text(candidate.receipt.description), comment: text(candidate.receipt.comment),
     }, { onConflict: 'bank,external_id', ignoreDuplicates: true })
     if (error) throw new HttpError(500, 'BANK_PAYMENT_EVENT_WRITE_FAILED', 'Failed to save NovaPay payment event.')
+
+    candidate.receipt.eventKnown = true
+    handled.add(candidate.receipt)
+    knownExact.add(candidate.externalId)
+    for (const alias of candidate.aliases) knownExact.add(alias)
   }
 }
 
@@ -514,17 +763,21 @@ Deno.serve(async (request) => {
     const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const dateFrom = formatNovaDate(fromDate)
     const dateTo = formatNovaDate(now)
-    const extractResult = await soapCall('GetAccountExtract', {
+    const paymentsResult = await soapCall('GetPaymentsList', {
       request_ref: requestRef(),
       jwt,
       account_id: accountId,
       date_from: dateFrom,
       date_to: dateTo,
+      date_type: 3,
     }, true)
 
-    const extractDocuments = parseExtractDocuments(extractResult.extract)
-    const receipts = sortReceiptsNewestFirst(extractDocuments
-      .filter((document) => isIncomingExtractDocument(document, accountIban))
+    const paymentDocuments = parsePaymentsDocuments(paymentsResult.payments)
+    const conductedDocuments = paymentDocuments.filter(isConductedPaymentDocument)
+    const incomingDocuments = conductedDocuments.filter((document) =>
+      isIncomingPaymentDocument(document, accountIban)
+    )
+    const receipts = sortReceiptsNewestFirst(incomingDocuments
       .map(extractReceipt)
       .filter((receipt) => receipt !== null))
 
@@ -540,9 +793,17 @@ Deno.serve(async (request) => {
       currency: text(account.currency),
       confirmed,
       projected,
+      receiptSource: 'payments-list-v1',
     }
 
-    await saveNewReceipts(admin, previousCache.receipts, receipts, Boolean(previousCache.updatedAt))
+    const useLegacyMatcher = previousCache.account?.receiptSource !== 'payments-list-v1'
+    await saveNewReceipts(
+      admin,
+      previousCache.receipts,
+      receipts,
+      Boolean(previousCache.updatedAt),
+      useLegacyMatcher,
+    )
 
     const { error: cacheError } = await admin
       .from('bank_account_cache')
@@ -560,9 +821,33 @@ Deno.serve(async (request) => {
     const { error: cleanupError } = await admin.rpc('cleanup_bank_payment_events')
     if (cleanupError) throw new HttpError(500, 'BANK_PAYMENT_EVENT_CLEANUP_FAILED', 'Failed to clean up NovaPay payment events.')
 
-    const diagnostics = extractDocuments.length > 0 && receipts.length === 0
-      ? { documentCount: extractDocuments.length, sampleKeys: Object.keys(extractDocuments[0]).sort() }
+    const timedCount = receipts.filter((receipt) => Boolean(text(receipt?.occurredAt))).length
+    const eventKnownCount = receipts.filter((receipt) => receipt?.eventKnown === true).length
+    const providerIdentifiedCount = receipts.filter((receipt) =>
+      receiptProviderAliases(receipt).length > 0
+    ).length
+    const fallbackIdentityCount = receipts.filter((receipt) =>
+      receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt))
+    ).length
+    if (fallbackIdentityCount > 0) {
+      console.warn(`NovaPay conducted payments without ID/UETR: ${fallbackIdentityCount}`)
+    }
+
+    const diagnostics = paymentDocuments.length > 0
+      ? {
+          documentCount: paymentDocuments.length,
+          conductedCount: conductedDocuments.length,
+          incomingCount: incomingDocuments.length,
+          timedCount,
+          eventKnownCount,
+          providerIdentifiedCount,
+          fallbackIdentityCount,
+          sampleKeys: Object.keys(paymentDocuments[0]).sort(),
+        }
       : undefined
+    console.info(
+      `NovaPay payments diagnostics: documents=${paymentDocuments.length} conducted=${conductedDocuments.length} incoming=${incomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}`,
+    )
 
     if (compact) return Response.json({ ok: true, refreshed: true, bank: 'novapay', balance: available, updatedAt })
     return Response.json({
