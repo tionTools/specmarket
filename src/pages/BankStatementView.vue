@@ -11,6 +11,7 @@ type BankFunctionResponse = Partial<BankSnapshot> & {
   ok?: boolean
   code?: string
   message?: string
+  details?: { status?: unknown; title?: unknown }
 }
 
 const route = useRoute()
@@ -136,13 +137,22 @@ const periodLabel = computed(() => {
   return from && to ? `${from} — ${to}` : 'Последние 7 дней'
 })
 
+function bankFunctionErrorMessage(body: BankFunctionResponse) {
+  const message = body.message || 'Не удалось получить выписку.'
+  const base = body.code ? `${body.code}: ${message}` : message
+  const status = stringValue(body.details?.status)
+  const title = stringValue(body.details?.title)
+  const details = [status, title].filter(Boolean).join(' — ')
+  return details ? `${base} (${details})` : base
+}
+
 async function edgeFunctionErrorMessage(value: unknown) {
   if (value && typeof value === 'object' && 'context' in value) {
     const context = (value as { context?: unknown }).context
     if (context instanceof Response) {
       try {
         const body = await context.clone().json() as BankFunctionResponse
-        if (body?.message) return body.code ? `${body.code}: ${body.message}` : body.message
+        if (body?.message) return bankFunctionErrorMessage(body)
       } catch {
         // Fall through to the SDK error below.
       }
@@ -163,10 +173,7 @@ async function load(refresh: boolean) {
       { body: { refresh } },
     )
     if (invokeError) throw invokeError
-    if (!data || data.ok === false) {
-      const message = data?.message || 'Не удалось получить выписку.'
-      throw new Error(data?.code ? `${data.code}: ${message}` : message)
-    }
+    if (!data || data.ok === false) throw new Error(bankFunctionErrorMessage(data ?? {}))
     snapshot.value = normalizeSnapshot(data)
   } catch (loadError) {
     error.value = await edgeFunctionErrorMessage(loadError)

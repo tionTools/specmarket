@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
-import { getValidNovaPayJwt, NovaPayAuthError } from '../_shared/novapay-auth.ts'
+import { getValidNovaPayJwt, NovaPayAuthError, NovaPayTransportError } from '../_shared/novapay-auth.ts'
 
 const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
 const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
@@ -27,13 +27,6 @@ class HttpError extends Error {
     this.status = status
     this.code = code
     this.details = details
-  }
-}
-
-class NovaPayTransportError extends Error {
-  constructor(message) {
-    super(message)
-    this.name = 'NovaPayTransportError'
   }
 }
 
@@ -92,6 +85,7 @@ async function soapCallOnce(method, params) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
   let response
+  let responseText
   try {
     response = await fetch(NOVAPAY_URL, {
       method: 'POST',
@@ -102,6 +96,7 @@ async function soapCallOnce(method, params) {
       body: soapEnvelope(method, params),
       signal: controller.signal,
     })
+    responseText = await response.text()
   } catch (error) {
     throw new NovaPayTransportError(error instanceof Error ? error.name : 'fetch_failed')
   } finally {
@@ -114,7 +109,7 @@ async function soapCallOnce(method, params) {
 
   let document
   try {
-    document = parser.parse(await response.text())
+    document = parser.parse(responseText)
   } catch {
     throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
   }
