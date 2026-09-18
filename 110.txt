@@ -1,0 +1,40 @@
+Patch 110 — compact bank payment email layout
+
+Base main:
+e461751313a009d3cd338d2505024c06148b3309
+
+Validation commit:
+d8bb3154b1d125cd97757323816f1fe8eac65cca
+
+Scope:
+- supabase/functions/_shared/bank-notification.ts
+
+Purpose:
+Make Monobank/NovaPay incoming-payment email bodies compact and easier to read in Gmail, similar to the older notification layout.
+
+Behavior:
+- Keep the existing subject and plain-text body.
+- Add an HTML body with max-width: 620px.
+- Preserve normal wrapping for long payment comments.
+- Add safe HTML escaping for all rendered lines.
+- Do not change notification triggering, recipients, bank event logic, Resend configuration, or payment data.
+
+Deployment:
+- deploy send-bank-payment-email only (it imports the changed shared module)
+- no migrations
+- no frontend deploy
+- no Vault changes
+
+Required checks:
+- fresh main must equal the base above, otherwise stop and check compatibility
+- verify 110.patch blob SHA
+- git apply --check
+- inspect real diff: exactly one file above
+- pnpm format; revert unrelated formatter changes
+- pnpm type-check
+- pnpm lint; if baseline lint fails, compare clean base and do not widen scope
+- pnpm build
+- git diff --check
+- Deno tests only if existing Deno works; do not install
+- commit and push via existing GitHub SSH only
+- deploy send-bank-payment-email
