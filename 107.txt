@@ -1,10 +1,10 @@
-Patch 107 (revised) — harden NovaPay single-use refresh-token rotation
+Patch 107 (final candidate) — harden NovaPay single-use refresh-token rotation
 
 Base main:
 4da9c527bed7f34f2665e1c141b23ef1dddb3999
 
 Detached validation commit built from that exact base:
-a3e3224f064b844ffbe207fe010772032a4641ec
+c200f7e7f690df3d576c91aea8b6cbd719e4d4c1
 
 Files:
 - supabase/functions/_shared/novapay-auth.ts
@@ -13,35 +13,44 @@ Files:
 - supabase/functions/novapay-balance/index.ts
 - src/pages/BankStatementView.vue
 
-What changed after review:
-1. UserAuthenticationJWT retry is centralized in getValidNovaPayJwt and is exactly one retry.
-2. Retryable auth failures are:
-   - NovaPayTransportError (fetch failure, HTTP non-2xx, response body read failure)
-   - NOVAPAY_SOAP_PARSE_ERROR
-   - NOVAPAY_SOAP_RESULT_MISSING
-   Logical NOVAPAY_API_ERROR is NOT retried.
-3. response.text() is separated from XML parsing in both Edge Functions. A body-read failure is now a NovaPayTransportError.
-4. A successful rotation response is persisted as one state payload; save_novapay_auth_state is retried once with the identical payload and authentication is not repeated.
-5. Patch 96 behavior is reflected in tests: if stored jwt_expires_at is empty but JWT exp is valid, the shared JWT is reused.
-6. Regression tests cover:
-   - first transport failure -> second auth succeeds;
-   - two transport failures -> second error is propagated, exactly two auth attempts;
-   - unreadable/invalid XML auth response -> one retry;
-   - logical NOVAPAY_API_ERROR -> no retry;
-   - transient Vault save failure -> same payload save retried without re-authentication;
-   - permanent Vault save failure -> stop after two save attempts;
-   - invalid rotated JWT expiry -> never persisted.
-7. Rotation logs contain stage names only; no refresh token, JWT, certificate, login, or credential values.
-8. UI displays NovaPay API status/title already returned in Edge Function error details.
+Auth rotation behavior:
+1. UserAuthenticationJWT is attempted at most twice.
+2. Exactly one retry is allowed only when the first auth attempt has an unavailable/untrustworthy response:
+   - NovaPayTransportError;
+   - NOVAPAY_SOAP_PARSE_ERROR;
+   - NOVAPAY_SOAP_RESULT_MISSING.
+3. Recognized NOVAPAY_API_ERROR is not retried.
+4. SOAP_TIMEOUT_MS now remains active through response.text(), not only until response headers arrive. A stalled/aborted body read therefore becomes a transport failure while the 20-second timeout is still active.
+5. A successful rotation response is validated, then the complete refresh_token + public_certificate + JWT + expiry state is saved.
+6. save_novapay_auth_state is attempted at most twice with the same payload. The save retry never invokes UserAuthenticationJWT again.
+7. Rotation logs contain stage names only; no tokens, certificates, login, or credential values.
+8. UI displays NovaPay API status/title details already returned by Edge Functions.
+
+Regression tests:
+- valid JWT reused;
+- Patch 96 fallback: valid JWT exp is used when stored jwt_expires_at is empty;
+- auth success and shared-state save;
+- permanent save failure stops after two save attempts;
+- transient save failure retries same state without re-authentication;
+- first transport failure -> second auth succeeds;
+- two transport failures -> stop after exactly two auth attempts;
+- NOVAPAY_SOAP_PARSE_ERROR -> one auth retry;
+- NOVAPAY_SOAP_RESULT_MISSING -> one auth retry;
+- NOVAPAY_API_ERROR -> no auth retry;
+- invalid rotated JWT expiry -> never persisted.
+
+Known boundary:
+- HTTP non-2xx is still classified as transport before SOAP-body interpretation, so a NovaPay logical error delivered only via HTTP 4xx/5xx could receive one retry. Recognized NOVAPAY_API_ERROR in a normal parsed result is not retried.
+- No finite retry scheme can make credential loss mathematically impossible if NovaPay rotates successfully and the Vault remains unavailable for both save attempts. This patch reduces the identified transient-loss windows; it does not claim absolute durability across a sustained Supabase outage.
 
 Not included:
-- no cron / automatic NovaPay polling yet;
+- no automatic NovaPay polling/cron yet;
 - no migrations;
 - no Monobank changes;
 - no order/reconciliation changes;
 - no Vault values embedded in code.
 
-Required Codex validation:
+Required Codex validation before commit:
 - verify current main and 107.patch applicability;
 - verify published 107.patch blob SHA;
 - git apply --check;
@@ -51,9 +60,10 @@ Required Codex validation:
 - pnpm lint;
 - pnpm build;
 - git diff --check;
-- run supabase/functions/_shared/novapay-auth_test.ts with the existing Deno environment if available;
-- if Deno is unavailable, do NOT install it just for this patch; report test as unavailable;
+- run supabase/functions/_shared/novapay-auth_test.ts using the existing Deno environment if available;
+- if Deno is unavailable, do not install it only for this patch; report the test as unavailable;
 - inspect final diff: exactly the five files above;
+- verify both Edge Functions keep SOAP_TIMEOUT_MS active until response.text() completes;
 - verify UserAuthenticationJWT authentication itself is attempted at most twice;
 - verify save_novapay_auth_state is attempted at most twice with the same rotated payload;
 - verify NOVAPAY_API_ERROR is not retried.
@@ -65,7 +75,7 @@ Deployment after all checks PASS:
 - no database migration deploy.
 
 Post-deploy:
-- after the user has stored the newly generated novapay_refresh_token and novapay_public_certificate in Vault, perform one manual NovaPay refresh;
-- confirm it succeeds;
-- perform a second manual refresh and confirm it reuses the shared JWT instead of rotating again;
+- after the newly generated novapay_refresh_token and novapay_public_certificate are stored in Vault, perform one manual NovaPay refresh;
+- confirm success;
+- perform a second manual refresh and confirm it reuses the shared JWT rather than rotating again;
 - on failure, report exact NOVAPAY_* code and status/title; do not regenerate credentials again until the failure is understood.
