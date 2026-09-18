@@ -1,0 +1,38 @@
+Patch 111 — visible spreadsheet-style grid for bank statement
+
+Base main:
+e461751313a009d3cd338d2505024c06148b3309
+
+Validation commit:
+3fbb42031212db51e81dfa031feab83dc315277c
+
+Scope:
+- src/pages/BankStatementView.vue
+
+Purpose:
+Make the CRM bank statement table visually closer to the user's Google Sheets/Excel layout by drawing a clear full grid around every header/data cell.
+
+Behavior:
+- Add a visible border around every th/td cell.
+- Keep border-collapse so adjacent cell borders render as one grid.
+- Remove the old horizontal-only tbody dividers because the cell grid replaces them.
+- Do not change bank data, sorting, highlighting, widths, refresh behavior, backend calls, or business logic.
+
+Required checks:
+- fresh main must equal the base above, otherwise stop and check compatibility
+- verify 111.patch blob SHA
+- git apply --check
+- inspect real diff: exactly one file above
+- pnpm format
+- revert unrelated formatter changes
+- pnpm type-check
+- pnpm lint; if only known baseline lint fails, prove against clean base and do not widen scope
+- pnpm build
+- git diff --check
+- commit and push via existing GitHub SSH only
+
+Deployment:
+- frontend only; normal GitHub Actions deploy after push
+- no Supabase deploy
+- no migration
+- no Vault changes
