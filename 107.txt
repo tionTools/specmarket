@@ -1,13 +1,10 @@
-Patch 107 — harden NovaPay refresh-token rotation
+Patch 107 (revised) — harden NovaPay single-use refresh-token rotation
 
 Base main:
 4da9c527bed7f34f2665e1c141b23ef1dddb3999
 
-Published patch blob SHA:
-2fe90ae0c4bac02db59ab63d36d3fe0833641f5c
-
-Detached validation commit built directly from the exact base tree:
-4dc70ce375a231ee4069ba51ba2c35d08a9b746a
+Detached validation commit built from that exact base:
+a3e3224f064b844ffbe207fe010772032a4641ec
 
 Files:
 - supabase/functions/_shared/novapay-auth.ts
@@ -16,45 +13,59 @@ Files:
 - supabase/functions/novapay-balance/index.ts
 - src/pages/BankStatementView.vue
 
-Purpose:
-1. UserAuthenticationJWT now uses the existing immediate transport retry in both NovaPay Edge Functions. This is specifically for the NovaPay 120-second historical refresh-token grace period when a successful rotation response is lost in transit.
-2. Saving the newly rotated refresh token/certificate/JWT to Vault is retried once. Repeating the same save payload is idempotent and protects against a lost/transient Supabase RPC response.
-3. Rotation stage logs contain no token/certificate values.
-4. Bank statement UI displays NovaPay API status/title details already returned by the Edge Function.
-5. Auth tests cover permanent save failure, transient save recovery, and rejection of a rotated JWT without a usable expiry.
+What changed after review:
+1. UserAuthenticationJWT retry is centralized in getValidNovaPayJwt and is exactly one retry.
+2. Retryable auth failures are:
+   - NovaPayTransportError (fetch failure, HTTP non-2xx, response body read failure)
+   - NOVAPAY_SOAP_PARSE_ERROR
+   - NOVAPAY_SOAP_RESULT_MISSING
+   Logical NOVAPAY_API_ERROR is NOT retried.
+3. response.text() is separated from XML parsing in both Edge Functions. A body-read failure is now a NovaPayTransportError.
+4. A successful rotation response is persisted as one state payload; save_novapay_auth_state is retried once with the identical payload and authentication is not repeated.
+5. Patch 96 behavior is reflected in tests: if stored jwt_expires_at is empty but JWT exp is valid, the shared JWT is reused.
+6. Regression tests cover:
+   - first transport failure -> second auth succeeds;
+   - two transport failures -> second error is propagated, exactly two auth attempts;
+   - unreadable/invalid XML auth response -> one retry;
+   - logical NOVAPAY_API_ERROR -> no retry;
+   - transient Vault save failure -> same payload save retried without re-authentication;
+   - permanent Vault save failure -> stop after two save attempts;
+   - invalid rotated JWT expiry -> never persisted.
+7. Rotation logs contain stage names only; no refresh token, JWT, certificate, login, or credential values.
+8. UI displays NovaPay API status/title already returned in Edge Function error details.
 
-Important:
-- This patch does NOT add automatic NovaPay polling/cron yet.
-- No migrations.
-- No Monobank changes.
-- No marketplace/order/reconciliation changes.
-- Do not edit Vault values in code.
-- Do not log refresh tokens, JWTs, certificates, login, or other credentials.
+Not included:
+- no cron / automatic NovaPay polling yet;
+- no migrations;
+- no Monobank changes;
+- no order/reconciliation changes;
+- no Vault values embedded in code.
 
-Required validation before commit:
-- verify current main / patch applicability
-- verify 107.patch blob SHA
-- git apply --check
-- apply Patch 107 only
-- inspect final diff; only the five files above may change
-- pnpm format; revert formatter side effects outside scope
-- pnpm type-check
-- pnpm lint
-- pnpm build
-- git diff --check
-- run the existing NovaPay auth tests if the project environment already supports them; do not install Deno or add dependencies solely for this patch
-- specifically verify there are two UserAuthenticationJWT call sites using transport retry=true
-- specifically verify credential persistence attempts at most twice and authentication itself is not repeated by the save retry
+Required Codex validation:
+- verify current main and 107.patch applicability;
+- verify published 107.patch blob SHA;
+- git apply --check;
+- apply Patch 107 only;
+- pnpm format; revert formatter side effects outside declared scope;
+- pnpm type-check;
+- pnpm lint;
+- pnpm build;
+- git diff --check;
+- run supabase/functions/_shared/novapay-auth_test.ts with the existing Deno environment if available;
+- if Deno is unavailable, do NOT install it just for this patch; report test as unavailable;
+- inspect final diff: exactly the five files above;
+- verify UserAuthenticationJWT authentication itself is attempted at most twice;
+- verify save_novapay_auth_state is attempted at most twice with the same rotated payload;
+- verify NOVAPAY_API_ERROR is not retried.
 
-Deployment:
-- commit/push to main via existing GitHub SSH only after checks pass
-- frontend deploy via normal GitHub Actions
-- Supabase deploy IS required because Edge Function code changed:
-  deploy novapay-data and novapay-balance after successful push
-- no database migration deploy is required
-- do NOT add the NovaPay polling schedule in Patch 107
+Deployment after all checks PASS:
+- commit/push to main through existing GitHub SSH only;
+- normal frontend deploy via GitHub Actions;
+- deploy Supabase Edge Functions novapay-data and novapay-balance;
+- no database migration deploy.
 
-After deploy:
-- with the newly generated novapay_refresh_token and novapay_public_certificate already stored in Vault, perform one manual NovaPay refresh
-- confirm success and that a second manual refresh reuses the shared JWT rather than rotating again
-- if it fails, report the exact NOVAPAY_* code plus the displayed status/title; do not regenerate credentials again until the failure is understood
+Post-deploy:
+- after the user has stored the newly generated novapay_refresh_token and novapay_public_certificate in Vault, perform one manual NovaPay refresh;
+- confirm it succeeds;
+- perform a second manual refresh and confirm it reuses the shared JWT instead of rotating again;
+- on failure, report exact NOVAPAY_* code and status/title; do not regenerate credentials again until the failure is understood.
