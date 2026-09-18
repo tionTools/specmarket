@@ -271,7 +271,9 @@ onMounted(() => {
           За этот период поступлений нет.
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[900px] border-collapse text-sm">
+          <table
+            class="w-full min-w-[900px] border-collapse border border-slate-400 text-sm [&_td]:border [&_td]:border-slate-400 [&_th]:border [&_th]:border-slate-400"
+          >
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th class="px-4 py-3">Дата</th>
@@ -281,7 +283,7 @@ onMounted(() => {
                 <th class="px-4 py-3">Комментарий</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100">
+            <tbody>
               <tr
                 v-for="(receipt, index) in snapshot.receipts"
                 :key="receipt.id || `${receipt.date}-${index}`"
