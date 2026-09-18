@@ -1,10 +1,12 @@
 Patch 110 — compact bank payment email layout
 
+Corrected patch container after git apply --check exposed a missing trailing context line in the final hunk. Implementation content is unchanged.
+
 Base main:
-e461751313a009d3cd338d2505024c06148b3309
+4514eea73d0b1bcbb9632db9096f547fa70556ed
 
 Validation commit:
-d8bb3154b1d125cd97757323816f1fe8eac65cca
+cf973c2023760b31465639a5b544e8f9ec4ed9e4
 
 Scope:
 - supabase/functions/_shared/bank-notification.ts
@@ -38,3 +40,6 @@ Required checks:
 - Deno tests only if existing Deno works; do not install
 - commit and push via existing GitHub SSH only
 - deploy send-bank-payment-email
+
+Current 110.patch blob SHA:
+fb80e9ebba2a9129ed5a1ca0f7f237a96c3340e8
