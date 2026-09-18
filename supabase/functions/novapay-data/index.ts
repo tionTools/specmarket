@@ -782,6 +782,7 @@ Deno.serve(async (request) => {
       jwt,
       account_id: accountId,
     }, true)
+    const available = finiteNumber(balanceResult.available_balance, 'available balance')
 
     const now = new Date()
     const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
@@ -800,6 +801,7 @@ Deno.serve(async (request) => {
       date_to: dateTo,
     }, true)
     const dailyBalances = parseExtractDayBalances(extractResult.extract)
+    dailyBalances.set(dateTo, available)
     const statementPaymentsResult = await soapCall('GetPaymentsList', {
       request_ref: requestRef(),
       jwt,
@@ -835,7 +837,6 @@ Deno.serve(async (request) => {
       .map((document) => extractReceipt(document, dailyBalances))
       .filter((receipt) => receipt !== null))
 
-    const available = finiteNumber(balanceResult.available_balance, 'available balance')
     const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
     const projected = finiteNumber(balanceResult.projected_balance, 'projected balance')
     const updatedAt = new Date().toISOString()
