@@ -1,0 +1,60 @@
+Patch 107 — harden NovaPay refresh-token rotation
+
+Base main:
+4da9c527bed7f34f2665e1c141b23ef1dddb3999
+
+Published patch blob SHA:
+2fe90ae0c4bac02db59ab63d36d3fe0833641f5c
+
+Detached validation commit built directly from the exact base tree:
+4dc70ce375a231ee4069ba51ba2c35d08a9b746a
+
+Files:
+- supabase/functions/_shared/novapay-auth.ts
+- supabase/functions/_shared/novapay-auth_test.ts
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/novapay-balance/index.ts
+- src/pages/BankStatementView.vue
+
+Purpose:
+1. UserAuthenticationJWT now uses the existing immediate transport retry in both NovaPay Edge Functions. This is specifically for the NovaPay 120-second historical refresh-token grace period when a successful rotation response is lost in transit.
+2. Saving the newly rotated refresh token/certificate/JWT to Vault is retried once. Repeating the same save payload is idempotent and protects against a lost/transient Supabase RPC response.
+3. Rotation stage logs contain no token/certificate values.
+4. Bank statement UI displays NovaPay API status/title details already returned by the Edge Function.
+5. Auth tests cover permanent save failure, transient save recovery, and rejection of a rotated JWT without a usable expiry.
+
+Important:
+- This patch does NOT add automatic NovaPay polling/cron yet.
+- No migrations.
+- No Monobank changes.
+- No marketplace/order/reconciliation changes.
+- Do not edit Vault values in code.
+- Do not log refresh tokens, JWTs, certificates, login, or other credentials.
+
+Required validation before commit:
+- verify current main / patch applicability
+- verify 107.patch blob SHA
+- git apply --check
+- apply Patch 107 only
+- inspect final diff; only the five files above may change
+- pnpm format; revert formatter side effects outside scope
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+- run the existing NovaPay auth tests if the project environment already supports them; do not install Deno or add dependencies solely for this patch
+- specifically verify there are two UserAuthenticationJWT call sites using transport retry=true
+- specifically verify credential persistence attempts at most twice and authentication itself is not repeated by the save retry
+
+Deployment:
+- commit/push to main via existing GitHub SSH only after checks pass
+- frontend deploy via normal GitHub Actions
+- Supabase deploy IS required because Edge Function code changed:
+  deploy novapay-data and novapay-balance after successful push
+- no database migration deploy is required
+- do NOT add the NovaPay polling schedule in Patch 107
+
+After deploy:
+- with the newly generated novapay_refresh_token and novapay_public_certificate already stored in Vault, perform one manual NovaPay refresh
+- confirm success and that a second manual refresh reuses the shared JWT rather than rotating again
+- if it fails, report the exact NOVAPAY_* code plus the displayed status/title; do not regenerate credentials again until the failure is understood
