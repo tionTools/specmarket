@@ -10,6 +10,7 @@ export type BankState = Record<BankName, BankCache>
 export type BankReceipt = {
   id: string
   date: string
+  occurredAt: string
   description: string
   amount: number
   balance: number | null
