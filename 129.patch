@@ -1,0 +1,293 @@
+diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/functions/_shared/novapay-running-balance.ts
+--- a/supabase/functions/_shared/novapay-running-balance.ts
++++ b/supabase/functions/_shared/novapay-running-balance.ts
+@@ -14,78 +14,95 @@ function aliases(receipt) {
+   return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
+ }
+ 
+-export function assignRunningBalances(receipts, movements, dailyBalances) {
++function receiptKey(value) {
++  const date = text(value?.legacyDate)
++  const occurredAt = text(value?.occurredAt)
++  const amountCents = moneyCents(value?.amount)
++  if (!date || !occurredAt || amountCents === null) return ''
++  return [date, occurredAt, amountCents].join('\u0000')
++}
++
++function addIndex(map, key, index) {
++  if (!key) return
++  map.set(key, [...(map.get(key) ?? []), index])
++}
++
++function firstUnassigned(indexes, assigned) {
++  if (!Array.isArray(indexes)) return null
++  return indexes.find((index) => !assigned.has(index)) ?? null
++}
++
++export function assignRunningBalances(receipts, movements, currentBalance) {
+   const result = receipts.map((receipt) => ({ ...receipt }))
+-  const movementsByDate = new Map()
++  const currentCents = moneyCents(currentBalance)
++  if (currentCents === null) return result
+ 
++  const validMovements = []
+   for (const movement of movements) {
+-    const date = text(movement?.legacyDate)
+-    if (!date) continue
+-
+     const direction = movement?.direction
+     if (direction !== 'credit' && direction !== 'debit') continue
+ 
+     const amountCents = moneyCents(movement?.amount)
+     const timestamp = Date.parse(text(movement?.occurredAt))
+     if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) continue
+ 
+-    movementsByDate.set(date, [
+-      ...(movementsByDate.get(date) ?? []),
+-      { movement, amountCents, timestamp, direction },
+-    ])
++    validMovements.push({ movement, amountCents, timestamp, direction })
+   }
+ 
+-  const balanceByAlias = new Map()
+-
+-  for (const [date, dayMovements] of movementsByDate) {
+-    const day = dailyBalances.get(date)
+-    const closingCents = moneyCents(day?.closing)
+-    if (closingCents === null) continue
+-
+-    const netMovementCents = dayMovements.reduce(
+-      (sum, entry) =>
+-        sum + (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents),
+-      0,
+-    )
+-    const statedOpeningCents = moneyCents(day?.opening)
+-    const derivedOpeningCents = closingCents - netMovementCents
+-    const statedOpeningReconciles =
+-      statedOpeningCents !== null && statedOpeningCents + netMovementCents === closingCents
+-    let runningCents = statedOpeningReconciles ? statedOpeningCents : derivedOpeningCents
++  const receiptIndexesByAlias = new Map()
++  const receiptIndexesByKey = new Map()
++  for (let index = 0; index < result.length; index += 1) {
++    const receipt = result[index]
++    for (const alias of aliases(receipt)) addIndex(receiptIndexesByAlias, alias, index)
++    addIndex(receiptIndexesByKey, receiptKey(receipt), index)
++  }
+ 
+-    for (const entry of [...dayMovements].sort((left, right) => left.timestamp - right.timestamp)) {
+-      runningCents += entry.direction === 'credit' ? entry.amountCents : -entry.amountCents
++  const assigned = new Set()
++  let runningCents = currentCents
+ 
+-      if (entry.direction === 'credit') {
+-        for (const alias of aliases(entry.movement)) {
+-          balanceByAlias.set(alias, runningCents / 100)
+-        }
++  for (const entry of validMovements.sort((left, right) => right.timestamp - left.timestamp)) {
++    if (entry.direction === 'credit') {
++      let receiptIndex = null
++      for (const alias of aliases(entry.movement)) {
++        receiptIndex = firstUnassigned(receiptIndexesByAlias.get(alias), assigned)
++        if (receiptIndex !== null) break
++      }
++      if (receiptIndex === null) {
++        receiptIndex = firstUnassigned(
++          receiptIndexesByKey.get(receiptKey(entry.movement)),
++          assigned,
++        )
+       }
++      if (receiptIndex !== null) {
++        result[receiptIndex] = { ...result[receiptIndex], balance: runningCents / 100 }
++        assigned.add(receiptIndex)
++      }
++      runningCents -= entry.amountCents
++    } else {
++      runningCents += entry.amountCents
+     }
+   }
+ 
+-  return result.map((receipt) => {
+-    for (const alias of aliases(receipt)) {
+-      if (balanceByAlias.has(alias)) {
+-        return { ...receipt, balance: balanceByAlias.get(alias) }
+-      }
+-    }
+-    return receipt
+-  })
++  return result
+ }
+ 
+ export function copyKnownBalancesByProviderAlias(receipts, statementReceipts) {
+   const balanceByAlias = new Map()
++  const balanceByKey = new Map()
+   for (const receipt of statementReceipts) {
+     const balance = receipt?.balance
+     if (typeof balance !== 'number' || !Number.isFinite(balance)) continue
+     for (const alias of aliases(receipt)) balanceByAlias.set(alias, balance)
++    const key = receiptKey(receipt)
++    if (key) balanceByKey.set(key, balance)
+   }
+ 
+   return receipts.map((receipt) => {
+     for (const alias of aliases(receipt)) {
+       if (balanceByAlias.has(alias)) return { ...receipt, balance: balanceByAlias.get(alias) }
+     }
++    const key = receiptKey(receipt)
++    if (key && balanceByKey.has(key)) return { ...receipt, balance: balanceByKey.get(key) }
+     return receipt
+   })
+ }
+diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
+--- a/supabase/functions/_shared/novapay-running-balance_test.ts
++++ b/supabase/functions/_shared/novapay-running-balance_test.ts
+@@ -7,11 +7,6 @@ function assertEquals(actual, expected, message) {
+   if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
+ }
+ 
+-const balances = new Map([
+-  ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
+-  ['19.09.2026', { opening: 7248.21, closing: 8000.43 }],
+-])
+-
+ const receipts = [
+   {
+     legacyDate: '19.09.2026',
+@@ -37,13 +32,19 @@ const receipts = [
+ ]
+ 
+ const movements = receipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
+-
+-const result = assignRunningBalances(receipts, movements, balances)
++const result = assignRunningBalances(receipts, movements, 8000.43)
+ 
+ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
+ assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
+ assertEquals(result[2].balance, 7248.21, '18.09 receipt')
+ 
++const noAliasReceipts = receipts.map((receipt) => ({ ...receipt, providerAliases: [] }))
++const noAliasMovements = noAliasReceipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
++const noAliasResult = assignRunningBalances(noAliasReceipts, noAliasMovements, 8000.43)
++assertEquals(noAliasResult[0].balance, 8000.43, 'fallback match without provider alias')
++assertEquals(noAliasResult[1].balance, 7373.58, 'fallback earlier match without provider alias')
++assertEquals(noAliasResult[2].balance, 7248.21, 'fallback previous-day match without provider alias')
++
+ const withUnrelatedConductedDocument = assignRunningBalances(
+   receipts,
+   [
+@@ -56,42 +57,17 @@ const withUnrelatedConductedDocument = assignRunningBalances(
+       direction: 'unknown',
+     },
+   ],
+-  balances,
++  8000.43,
+ )
+ assertEquals(
+   withUnrelatedConductedDocument[1].balance,
+   7373.58,
+-  'unrelated conducted document does not invalidate the account day',
++  'unrelated conducted document does not affect running balance',
+ )
+ assertEquals(
+   withUnrelatedConductedDocument[0].balance,
+   8000.43,
+-  'unrelated conducted document does not affect account balance',
+-)
+-
+-const withMalformedAccountMovement = assignRunningBalances(
+-  receipts,
+-  [
+-    ...movements,
+-    {
+-      legacyDate: '19.09.2026',
+-      occurredAt: '',
+-      amount: 50,
+-      providerAliases: ['id:malformed-debit'],
+-      direction: 'debit',
+-    },
+-  ],
+-  balances,
+-)
+-assertEquals(
+-  withMalformedAccountMovement[1].balance,
+-  7373.58,
+-  'malformed movement does not erase valid receipt balances',
+-)
+-assertEquals(
+-  withMalformedAccountMovement[0].balance,
+-  8000.43,
+-  'valid movements still reconcile to authoritative close',
++  'unrelated conducted document does not affect latest balance',
+ )
+ 
+ const debitReceipts = [
+@@ -121,40 +97,29 @@ const debitMovements = [
+   },
+   { ...debitReceipts[0], direction: 'credit' },
+ ]
+-const debitResult = assignRunningBalances(
+-  debitReceipts,
+-  debitMovements,
+-  new Map([['20.09.2026', { opening: 1000, closing: 1250 }]]),
+-)
+-
++const debitResult = assignRunningBalances(debitReceipts, debitMovements, 1250)
+ assertEquals(debitResult[1].balance, 1100, 'credit before debit')
+ assertEquals(debitResult[0].balance, 1250, 'credit after debit')
+ 
+-const mismatchResult = assignRunningBalances(
+-  debitReceipts,
+-  debitMovements,
+-  new Map([['20.09.2026', { opening: 999, closing: 1250 }]]),
+-)
+-assertEquals(
+-  mismatchResult[1].balance,
+-  1100,
+-  'non-reconciling stated opening falls back to closing minus known day movements',
+-)
+-assertEquals(mismatchResult[0].balance, 1250, 'fallback still lands on authoritative close')
+-
+-const missingOpeningResult = assignRunningBalances(
++const withMalformedMovement = assignRunningBalances(
+   receipts,
+-  movements,
+-  new Map([
+-    ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
+-    ['19.09.2026', { opening: null, closing: 8000.43 }],
+-  ]),
++  [
++    ...movements,
++    {
++      legacyDate: '19.09.2026',
++      occurredAt: '',
++      amount: 50,
++      providerAliases: ['id:malformed'],
++      direction: 'debit',
++    },
++  ],
++  8000.43,
+ )
+-assertEquals(missingOpeningResult[1].balance, 7373.58, 'missing 19.09 opening is derived')
+-assertEquals(missingOpeningResult[0].balance, 8000.43, 'derived opening reaches exact close')
++assertEquals(withMalformedMovement[1].balance, 7373.58, 'malformed movement is ignored')
++assertEquals(withMalformedMovement[0].balance, 8000.43, 'valid latest balance remains')
+ 
+ const updated = copyKnownBalancesByProviderAlias(
+-  [{ providerAliases: ['id:earlier'], balance: null }],
+-  result,
++  [{ ...noAliasReceipts[1], balance: null }],
++  noAliasResult,
+ )
+-assertEquals(updated[0].balance, 7373.58, 'updated path reuses statement balance')
++assertEquals(updated[0].balance, 7373.58, 'updated path also falls back without provider alias')
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -1040,7 +1040,7 @@ Deno.serve(async (request) => {
+           .filter((receipt) => receipt !== null),
+       ),
+       statementMovements,
+-      dailyBalances,
++      available,
+     )
+ 
+     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
