@@ -1,0 +1,140 @@
+PATCH 128 — NovaPay: stop nulling valid running balances; derive start from closing and known movements
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 128.patch
+Patch SHA-256: 8c4c6c1b4638b7c686e214f0b0d19d779aeb3d01f038121b1ae3bd3f1f16e990
+Published patch blob SHA: 2e67139c03d4ddb066464fb238525c4a99b9bdea
+
+Expected base main:
+ff9934f7db499fa50b3f4eba5fb33a08ccd49ceb
+
+Expected base blobs:
+- supabase/functions/_shared/novapay-running-balance.ts
+  241f44f8eb82ca2c80e771094b1c0f7e197c0ada
+- supabase/functions/_shared/novapay-running-balance_test.ts
+  3d7f660d208c78c7e053c58f62883c83b8409a0f
+
+Purpose
+Fix the remaining production regression where 19.09 receipts are still null even though:
+- 18.09 running balance is correct;
+- 19.09 final account balance is 8000.43;
+- 19.09 receipts are 125.37 at 13:56:25 and 626.85 at 19:47:04.
+
+Do not add diagnostics. Do not change index.ts. Do not change auth, cron, locks, Vault, dedupe, email or schema.
+
+Simple algorithm
+For each day:
+1. Take authoritative day closing balance.
+2. Sum all valid known account movements of that day:
+   credit = +amount
+   debit = -amount
+3. If stated opening is present AND reconciles exactly with closing, use it.
+4. Otherwise derive opening:
+   opening = closing - net day movements
+5. Sort valid movements by occurredAt ascending.
+6. Walk forward:
+   credit => add
+   debit => subtract
+7. Store current balance after incoming movements.
+
+Important
+- Unknown/non-account conducted documents are ignored.
+- Malformed known movements are skipped; they must not erase valid balances for the whole day.
+- The calculation is anchored to the authoritative closing balance.
+- Existing forward running-balance behavior stays intact.
+- No reverse per-receipt algorithm is introduced.
+
+Expected production math for 19.09:
+closing = 8000.43
+known net movements = 125.37 + 626.85 = 752.22
+derived opening = 8000.43 - 752.22 = 7248.21
+
+Then forward:
+7248.21 + 125.37 = 7373.58
+7373.58 + 626.85 = 8000.43
+
+Exact scope
+Only:
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Preflight
+1. Work only in a clean auxiliary SpecMarket worktree based on current origin/main.
+2. Do not touch the user's dirty main worktree or the old Patch 124 worktree.
+3. git fetch origin
+4. Verify origin/main exactly:
+   ff9934f7db499fa50b3f4eba5fb33a08ccd49ceb
+   If main advanced: STOP.
+5. Verify helper/test blobs exactly as listed above.
+6. Fetch origin/chatgpt-patches:128.patch byte-for-byte.
+7. Verify SHA-256:
+   8c4c6c1b4638b7c686e214f0b0d19d779aeb3d01f038121b1ae3bd3f1f16e990
+8. git apply --check 128.patch
+   If FAIL: STOP.
+9. Apply unchanged.
+10. Verify changed files are exactly the two declared files.
+11. git diff --check
+
+Focused test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+Must PASS:
+- 18.09 +1248.72 -> 7248.21
+- 19.09 +125.37 -> 7373.58
+- 19.09 +626.85 -> 8000.43
+- unrelated unknown document does not affect result
+- malformed movement does not wipe valid balances
+- missing opening derives correctly from closing and known movements
+- non-reconciling stated opening falls back to derived opening
+- debit-between-credits remains correct
+- updated path reuses full-statement balance
+
+Checks
+Run:
+- targeted format only on the two changed files
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint reports only the known unrelated monobank-webhook no-explicit-any baseline, report it and do not touch that file.
+
+Commit / push / deploy
+Only after PASS:
+1. Commit exactly the two files.
+2. SSH push to main only.
+3. No migration.
+4. Deploy ONLY novapay-data because it imports the helper.
+5. Do not deploy novapay-balance or unrelated functions.
+
+Production smoke
+Trigger exactly ONE NovaPay refresh.
+
+Expected:
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- top account balance remains 8000.43 unless NovaPay itself changed
+
+Also verify:
+- no duplicate payment event/email
+- cron active
+- no auth/circuit-breaker error
+
+If 19.09 is still null after this patch:
+STOP. Do not change math again. Report exact production result.
+
+Report
+- base/main SHA
+- helper/test base blobs
+- patch blob + SHA-256
+- git apply --check
+- changed files
+- focused test
+- type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production statement balances
