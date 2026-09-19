@@ -1,16 +1,21 @@
 const LOCK_LEASE_SECONDS = 90
-const LOCK_WAIT_ATTEMPTS = 20
+const LOCK_WAIT_ATTEMPTS = 121
 const LOCK_WAIT_MS = 250
-const JWT_SAFETY_MARGIN_MS = 60_000
+// Six SOAP calls with a 20s timeout and one retry each: 240s + 60s headroom.
+const JWT_SAFETY_MARGIN_MS = 300_000
 const AUTH_STATE_SAVE_ATTEMPTS = 2
 const AUTH_STATE_SAVE_RETRY_MS = 250
 const AUTH_FINGERPRINT_HEX_LENGTH = 16
 
-const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export class NovaPayAuthError extends Error {
-  constructor(public status: number, public code: string, message: string) {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
     super(message)
     this.name = 'NovaPayAuthError'
   }
@@ -56,46 +61,76 @@ function jwtExpiryMs(jwt: string): number | null {
   }
 }
 
-async function acquireRotationLock(admin: any, owner: string) {
+interface NovaPayAdmin {
+  rpc(
+    name: string,
+    args?: Record<string, string | number>,
+  ): PromiseLike<{
+    data?: Record<string, unknown> | boolean | null
+    error?: { code?: string; message?: string } | null
+  }>
+}
+
+async function acquireRotationLock(admin: NovaPayAdmin, owner: string) {
   for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
-    const { data, error } = await admin.rpc('acquire_novapay_rotation_lock', {
+    const { data, error } = await admin.rpc('acquire_novapay_rotation_lock_owned', {
       lock_owner: owner,
       lease_seconds: LOCK_LEASE_SECONDS,
     })
-    if (error) throw new NovaPayAuthError(500, 'NOVAPAY_LOCK_FAILED', 'Failed to acquire NovaPay authorization lock.')
+    if (error)
+      throw new NovaPayAuthError(
+        500,
+        'NOVAPAY_LOCK_FAILED',
+        'Failed to acquire NovaPay authorization lock.',
+      )
     if (data === true) return
     if (attempt + 1 < LOCK_WAIT_ATTEMPTS) await sleep(LOCK_WAIT_MS)
   }
-  throw new NovaPayAuthError(409, 'NOVAPAY_AUTH_BUSY', 'NovaPay authorization is busy. Retry shortly.')
+  throw new NovaPayAuthError(
+    409,
+    'NOVAPAY_AUTH_BUSY',
+    'NovaPay authorization is busy. Retry shortly.',
+  )
 }
 
-function retryableAuthenticationError(error: unknown) {
+function ambiguousAuthenticationError(error: unknown) {
   if (error instanceof NovaPayTransportError) return true
   if (!error || typeof error !== 'object') return false
   const code = text((error as { code?: unknown }).code)
   return code === 'NOVAPAY_SOAP_PARSE_ERROR' || code === 'NOVAPAY_SOAP_RESULT_MISSING'
 }
 
-async function authenticateWithRetry(
+async function authenticateOnce(
   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>,
   state: { refreshToken: string; publicCertificate: string },
 ) {
   try {
     return await authenticate(state)
   } catch (error) {
-    if (!retryableAuthenticationError(error)) throw error
-    console.warn('NovaPay JWT rotation response was unavailable; retrying once.')
-    return await authenticate(state)
+    if (!ambiguousAuthenticationError(error)) throw error
+    throw new NovaPayAuthError(
+      502,
+      'NOVAPAY_AUTH_UNCERTAIN',
+      'NovaPay may have rotated credentials, but its response was unavailable. Authorization was not retried; verify authorization state before trying again.',
+    )
   }
 }
 
-async function saveRotatedAuthState(admin: any, state: Record<string, string>) {
+async function saveRotatedAuthState(admin: NovaPayAdmin, state: Record<string, string>) {
   for (let attempt = 0; attempt < AUTH_STATE_SAVE_ATTEMPTS; attempt += 1) {
     let failed = true
     try {
-      const { error } = await admin.rpc('save_novapay_auth_state', state)
+      const { error } = await admin.rpc('save_novapay_auth_state_owned', state)
+      if (error?.code === 'NP001') {
+        throw new NovaPayAuthError(
+          409,
+          'NOVAPAY_AUTH_LOCK_LOST',
+          'NovaPay authorization lock was lost; credentials were not overwritten.',
+        )
+      }
       failed = Boolean(error)
-    } catch {
+    } catch (error) {
+      if (error instanceof NovaPayAuthError) throw error
       failed = true
     }
     if (!failed) return
@@ -104,11 +139,18 @@ async function saveRotatedAuthState(admin: any, state: Record<string, string>) {
       await sleep(AUTH_STATE_SAVE_RETRY_MS)
     }
   }
-  throw new NovaPayAuthError(500, 'NOVAPAY_CREDENTIAL_ROTATION_FAILED', 'NovaPay credentials could not be saved.')
+  throw new NovaPayAuthError(
+    500,
+    'NOVAPAY_CREDENTIAL_ROTATION_FAILED',
+    'NovaPay credentials could not be saved.',
+  )
 }
 
-export async function getValidNovaPayJwt({ admin, authenticate }: {
-  admin: any
+export async function getValidNovaPayJwt({
+  admin,
+  authenticate,
+}: {
+  admin: NovaPayAdmin
   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>
 }) {
   const owner = crypto.randomUUID()
@@ -117,16 +159,23 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
     await acquireRotationLock(admin, owner)
     locked = true
     const { data, error } = await admin.rpc('get_novapay_auth_state')
-    if (error || !data) throw new NovaPayAuthError(500, 'NOVAPAY_SECRET_READ_FAILED', 'Failed to read NovaPay authorization state.')
+    if (error || !data || typeof data !== 'object')
+      throw new NovaPayAuthError(
+        500,
+        'NOVAPAY_SECRET_READ_FAILED',
+        'Failed to read NovaPay authorization state.',
+      )
 
     const jwt = text(data.jwt)
     const tokenExpiry = jwtExpiryMs(jwt)
     const storedExpiryText = text(data.jwt_expires_at)
     const storedExpirySeconds = storedExpiryText ? Number(storedExpiryText) : NaN
-    const storedExpiry = Number.isFinite(storedExpirySeconds) && storedExpirySeconds > 0
-      ? storedExpirySeconds * 1000
-      : null
-    const expiresAt = tokenExpiry && storedExpiry ? Math.min(tokenExpiry, storedExpiry) : tokenExpiry
+    const storedExpiry =
+      Number.isFinite(storedExpirySeconds) && storedExpirySeconds > 0
+        ? storedExpirySeconds * 1000
+        : null
+    const expiresAt =
+      tokenExpiry && storedExpiry ? Math.min(tokenExpiry, storedExpiry) : tokenExpiry
 
     if (jwt && expiresAt && expiresAt - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
 
@@ -136,19 +185,36 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
     }
     console.info('NovaPay JWT rotation started.')
     await logCredentialFingerprints('input', authState)
-    const result: any = await authenticateWithRetry(authenticate, authState)
+    const result = (await authenticateOnce(authenticate, authState)) as Record<
+      string,
+      unknown
+    > | null
     console.info('NovaPay JWT rotation response received.')
     const nextJwt = text(result?.jwt)
     const refreshToken = text(result?.refresh_token)
     const publicCertificate = text(result?.public_certificate)
     const jwtExpiresAt = jwtExpiryMs(nextJwt)
-    if (!nextJwt || !refreshToken || !publicCertificate || !jwtExpiresAt || jwtExpiresAt <= Date.now()) {
-      throw new NovaPayAuthError(502, 'NOVAPAY_AUTH_INVALID_RESPONSE', 'NovaPay authentication response is incomplete or has no valid expiry.')
+    if (
+      !nextJwt ||
+      !refreshToken ||
+      !publicCertificate ||
+      !jwtExpiresAt ||
+      jwtExpiresAt <= Date.now()
+    ) {
+      throw new NovaPayAuthError(
+        502,
+        'NOVAPAY_AUTH_INVALID_RESPONSE',
+        'NovaPay authentication response is incomplete or has no valid expiry.',
+      )
     }
 
-    const responseFingerprints = await logCredentialFingerprints('response', { refreshToken, publicCertificate })
+    const responseFingerprints = await logCredentialFingerprints('response', {
+      refreshToken,
+      publicCertificate,
+    })
 
     await saveRotatedAuthState(admin, {
+      lock_owner: owner,
       new_refresh_token: refreshToken,
       new_public_certificate: publicCertificate,
       new_jwt: nextJwt,
@@ -157,8 +223,9 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
     console.info('NovaPay JWT rotation state saved.')
 
     try {
-      const { data: storedState, error: storedStateError } = await admin.rpc('get_novapay_auth_state')
-      if (storedStateError || !storedState) {
+      const { data: storedState, error: storedStateError } =
+        await admin.rpc('get_novapay_auth_state')
+      if (storedStateError || !storedState || typeof storedState !== 'object') {
         console.warn('NovaPay auth fingerprint stored read failed.')
       } else {
         const storedFingerprints = await logCredentialFingerprints('stored', {
@@ -176,8 +243,12 @@ export async function getValidNovaPayJwt({ admin, authenticate }: {
     return nextJwt
   } finally {
     if (locked) {
-      const { error } = await admin.rpc('release_novapay_rotation_lock', { lock_owner: owner })
-      if (error) console.error('NovaPay rotation lock release failed.')
+      try {
+        const { error } = await admin.rpc('release_novapay_rotation_lock', { lock_owner: owner })
+        if (error) console.error('NovaPay rotation lock release failed.')
+      } catch {
+        console.error('NovaPay rotation lock release failed.')
+      }
     }
   }
 }
