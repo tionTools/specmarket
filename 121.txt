@@ -1,0 +1,182 @@
+PATCH 121 — NovaPay cron: increase pg_net HTTP timeout
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 121.patch
+Patch SHA-256: 0f704b260cd30026bbf6b5431c1915a63920d6b5d4e83ce3fd9faa16d2955748
+Published patch blob SHA: 0f9f2b8224cfc3d5f09c1a671b8e09ed68c9c28f
+
+Expected base main:
+03ea09115b914cc15dd88c3a1ccf605a053b6954
+
+Relevant base blob:
+- supabase/migrations/20260918170000_prepare_novapay_sync_schedule.sql
+  e262748dea33c8c2a3f1b543c76b044f4ed8d07c
+
+Context
+Patch 120 fixed the Edge gateway rejection for scheduled NovaPay requests.
+Controlled scheduled invocation request 12582 then reached novapay-data successfully, but pg_net recorded:
+- timed_out = true
+- timeout = 5000 ms
+- status_code = null
+- content = null
+The same invocation nevertheless completed inside novapay-data and updated bank_account_cache:
+- request created: 2026-09-19 13:57:11 UTC
+- novapay cache updated_at: 2026-09-19 13:57:22.632 UTC
+
+Therefore the remaining issue is not NovaPay auth, cron, or the Edge Function. pg_net stops waiting after its current 5-second timeout before novapay-data normally finishes.
+
+Goal
+Make the scheduled HTTP request wait long enough to capture the actual Edge Function response instead of storing a false timeout.
+
+Implementation
+Add one new migration:
+- supabase/migrations/20260919160000_novapay_sync_http_timeout.sql
+
+The migration must replace only public.invoke_crm_novapay_sync() with the same current implementation plus:
+  timeout_milliseconds := 180000
+
+Why 180000
+Supabase Edge Functions have a 150-second request idle timeout. A 180-second pg_net timeout intentionally exceeds that gateway limit, so pg_net should receive either the real function response or the platform's terminal HTTP error instead of timing out first.
+This is a low-frequency job (every 15 minutes during the daytime window), so the longer per-request timeout does not create meaningful request pressure.
+
+Exact scope
+Only:
+- supabase/migrations/20260919160000_novapay_sync_http_timeout.sql
+
+Do NOT change:
+- the old 20260918170000 migration;
+- cron schedule or job 21;
+- novapay-data source/config;
+- NovaPay auth/rotation/circuit breaker;
+- full-sync lock;
+- Vault secrets/tokens;
+- Prom;
+- Monobank;
+- Android;
+- AGENTS.md;
+- unrelated formatting/refactors.
+
+Preflight
+1. Work only in the clean auxiliary SpecMarket worktree, not the user's dirty main worktree.
+2. git fetch origin.
+3. Verify:
+   git rev-parse origin/main
+   Expected exactly:
+   03ea09115b914cc15dd88c3a1ccf605a053b6954
+   If main advanced — STOP and report. Do not force-apply.
+4. Verify:
+   git rev-parse origin/main:supabase/migrations/20260918170000_prepare_novapay_sync_schedule.sql
+   Expected:
+   e262748dea33c8c2a3f1b543c76b044f4ed8d07c
+5. Confirm this path does not already exist:
+   supabase/migrations/20260919160000_novapay_sync_http_timeout.sql
+6. Fetch 121.patch byte-for-byte from origin/chatgpt-patches.
+7. Verify SHA-256:
+   0f704b260cd30026bbf6b5431c1915a63920d6b5d4e83ce3fd9faa16d2955748
+8. Run:
+   git apply --check 121.patch
+   If FAIL — STOP.
+9. Apply patch unchanged.
+10. Verify real diff and changed-file list. Scope must be exactly the one new migration file above.
+11. Run:
+   git diff --check
+
+Review
+Confirm the replacement public.invoke_crm_novapay_sync() is byte-for-byte equivalent in behavior to the existing helper except for the explicit net.http_post argument:
+  timeout_milliseconds := 180000
+
+In particular preserve:
+- URL;
+- Content-Type header;
+- Authorization Bearer crm_sync_cron_secret;
+- body {"scheduled":true,"refresh":true,"compact":true};
+- SECURITY DEFINER;
+- search_path;
+- missing-secret guard;
+- postgres-only execute permissions.
+
+Project checks
+This is SQL-only. Do not run broad formatter/autofix.
+Run:
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint reports only the already-known unrelated monobank-webhook no-explicit-any baseline, report it and do not touch that file.
+
+Commit / push
+Only after PASS:
+1. Commit only the new migration.
+2. Push main only through existing GitHub SSH.
+3. No Edge Function deploy is required for Patch 121.
+
+Production migration
+Apply only:
+  20260919160000_novapay_sync_http_timeout.sql
+
+Use the existing authorized Supabase workflow. Do not create new credentials or browser login.
+Do not re-run old migrations manually.
+Do not alter cron job 21.
+
+Post-migration verification
+1. Confirm the installed function contains timeout_milliseconds := 180000:
+   select pg_get_functiondef('public.invoke_crm_novapay_sync()'::regprocedure);
+
+2. Record current cache timestamp:
+   select bank, updated_at
+   from public.bank_account_cache
+   where bank = 'novapay';
+
+3. Controlled scheduled call:
+   select public.invoke_crm_novapay_sync();
+   Record returned request_id.
+
+4. Wait long enough for novapay-data to finish, then query exactly that request:
+   select id, status_code, timed_out, error_msg, created, content
+   from net._http_response
+   where id = <request_id>;
+
+Success criteria:
+- status_code = 200
+- timed_out = false
+- error_msg is null
+- content contains:
+  "ok":true
+  "refreshed":true
+  "bank":"novapay"
+
+5. Verify cache advanced:
+   select bank, updated_at
+   from public.bank_account_cache
+   where bank = 'novapay';
+
+6. Verify cron unchanged:
+   select jobid, jobname, schedule, active
+   from cron.job
+   where jobname = 'crm-sync-novapay';
+
+Expected:
+- exactly one row;
+- current jobid 21;
+- schedule */15 * * * *;
+- active = true.
+
+Do not manually refresh CRM during the controlled scheduled test.
+
+Report
+- actual base/main SHA;
+- relevant base blob;
+- 121.patch blob + SHA-256;
+- git apply --check;
+- exact changed files;
+- type-check/lint/build/diff-check;
+- commit SHA;
+- SSH push result;
+- migration apply result;
+- installed function timeout;
+- controlled request_id;
+- pg_net status/timed_out/content;
+- cache updated_at before/after;
+- cron job row.
