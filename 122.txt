@@ -1,0 +1,174 @@
+PATCH 122 — NovaPay: restore per-payment running balances for multiple receipts in one day
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 122.patch
+Patch SHA-256: 7a9fb785fa19a926436ad67558ac39d70e8cfedc9e4f0f6be6937897d06bed23
+Published patch blob SHA: c1ae64e28e38d9f27c31234a2844019221d193c6
+
+Expected base main:
+b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+
+Expected base blob:
+- supabase/functions/novapay-data/index.ts
+  3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+
+Context / regression
+The NovaPay statement currently assigns the same day-closing balance to every incoming payment of the same day.
+
+Current wrong behavior on 19.09.2026:
+- 13:56:25 +125.37 -> 8000.43  (WRONG)
+- 19:47:04 +626.85 -> 8000.43  (latest row is correct)
+
+Expected running balances:
+- previous day 18.09 closing / latest receipt balance: 7248.21
+- 19.09 13:56:25 +125.37 -> 7373.58
+- 19.09 19:47:04 +626.85 -> 8000.43
+
+Math:
+7248.21 + 125.37 = 7373.58
+7373.58 + 626.85 = 8000.43
+
+Root cause
+Patch 115 restored balances by mapping each receipt to one daily close:
+  balance: dailyBalances.get(paymentDate)
+
+Patch 116 then overrides today's daily close with current available balance:
+  dailyBalances.set(dateTo, available)
+
+Therefore all same-day receipts get the same final/current balance.
+
+Goal
+Keep the existing daily closing balance source, but reconstruct the balance of each displayed incoming receipt within a day.
+
+Algorithm
+Input receipts are already sorted newest-first.
+For each calendar date independently:
+- newest incoming receipt gets the daily closing balance;
+- moving backwards in time, subtract the amounts of later incoming receipts;
+- use integer cents for arithmetic to avoid floating-point rounding drift.
+
+For the exact production regression:
+- daily close = 8000.43
+- newest +626.85 => 8000.43
+- earlier +125.37 => 8000.43 - 626.85 = 7373.58
+
+The updated-payments path must reuse balances already calculated from the full statement by provider ID/UETR alias. Do not independently recalculate from the partial updated subset.
+
+Exact scope
+Only these three files:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Do NOT touch:
+- NovaPay auth/rotation/circuit breaker
+- full-sync lock
+- cron schedule / pg_net timeout
+- Vault
+- bank_account_cache schema
+- bank_payment_events schema
+- Prom / marketplace code
+- Monobank
+- Android
+- AGENTS.md
+- unrelated formatting/refactors
+
+Implementation notes
+1. extractReceipt() no longer assigns a day close directly. It starts with balance: null.
+2. Full statement incoming receipts are sorted newest-first, then passed to:
+   assignIncomingBalancesFromDailyClose(receipts, dailyBalances)
+3. The helper reconstructs balances by day using integer cents.
+4. Updated-payment receipts reuse the balance from the full statement by provider alias via:
+   copyKnownBalancesByProviderAlias(...)
+5. The helper must not mutate the original receipt objects.
+6. Preserve all existing receipt/event dedupe logic.
+
+Required preflight
+1. Work only in a clean auxiliary SpecMarket worktree.
+2. Do not touch the user's dirty main worktree.
+3. git fetch origin.
+4. Verify:
+   git rev-parse origin/main
+   Expected exactly:
+   b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+   If main advanced: STOP and report. Do not force-apply.
+5. Verify:
+   git rev-parse origin/main:supabase/functions/novapay-data/index.ts
+   Expected:
+   3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+6. Confirm the two new shared files do not already exist.
+7. Fetch 122.patch byte-for-byte from origin/chatgpt-patches.
+8. Verify SHA-256:
+   7a9fb785fa19a926436ad67558ac39d70e8cfedc9e4f0f6be6937897d06bed23
+9. Run:
+   git apply --check 122.patch
+   If FAIL: STOP. Do not rewrite the patch.
+10. Apply unchanged.
+11. Inspect real git diff and changed-file list. Scope must be exactly the three files above.
+12. Run:
+   git diff --check
+
+Focused regression test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+Expected: exit code 0.
+
+The test must prove:
+- latest 19.09 payment -> 8000.43
+- earlier 19.09 payment -> 7373.58
+- single receipt on 18.09 -> 7248.21
+- updated-payment path reuses 7373.58 by provider alias
+
+Project checks
+Run without broad auto-fixes:
+- pnpm format only on the three changed files, or use the project's targeted formatter command
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+Do NOT run a formatter across unrelated files.
+If lint reports only the existing monobank-webhook no-explicit-any baseline, report it and do not touch that file.
+
+Review requirements
+Inspect the real diff and explicitly confirm:
+- no auth changes;
+- no cron changes;
+- no lock changes;
+- no database/migration changes;
+- no notification/dedupe behavioral changes beyond corrected balance values;
+- current overall account balance still comes from GetAccountRest.available_balance;
+- day closing values still come from GetAccountExtract, with today's close overridden by current available balance as before.
+
+Commit / push
+Only after PASS:
+1. Commit only the three Patch 122 files.
+2. Push main only through existing GitHub SSH.
+3. No migration.
+4. Deploy ONLY novapay-data.
+5. Do not deploy novapay-balance or any unrelated Edge Function.
+
+Post-deploy production verification
+1. Trigger one ordinary NovaPay refresh from CRM, or perform the existing controlled scheduled refresh.
+2. Verify the statement rows for 19.09:
+   - 19.09.2026 19:47:04 / +626.85 -> balance 8000.43
+   - 19.09.2026 13:56:25 / +125.37 -> balance 7373.58
+3. Verify 18.09.2026 19:55:54 / +1248.72 remains 7248.21.
+4. Verify the top account balance remains 8000.43 unless NovaPay itself has changed since the screenshot.
+5. Verify automatic cron remains active and no auth/circuit-breaker errors appear.
+
+Report
+- actual base/main SHA
+- base index.ts blob
+- patch blob + SHA-256
+- git apply --check
+- exact changed files
+- focused test
+- format/type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production statement values for the two 19.09 receipts
+- top NovaPay balance after refresh
