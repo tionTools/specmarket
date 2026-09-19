@@ -5,6 +5,10 @@ import {
   NovaPayAuthError,
   NovaPayTransportError,
 } from '../_shared/novapay-auth.ts'
+import {
+  assignRunningBalances,
+  copyKnownBalancesByProviderAlias,
+} from '../_shared/novapay-running-balance.ts'
 
 const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
 const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
@@ -254,8 +258,11 @@ function parseExtractDayBalances(rawXml) {
   for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
     const statement = normalizeXmlRecord(day)
     const date = pick(statement, 'Date')
-    const balance = optionalNumber(pick(statement, 'OutCome', 'MainOutCome'))
-    if (date && balance !== null) balances.set(date, balance)
+    if (!date) continue
+    balances.set(date, {
+      opening: optionalNumber(pick(statement, 'InCome', 'MainInCome')),
+      closing: optionalNumber(pick(statement, 'OutCome', 'MainOutCome')),
+    })
   }
   return balances
 }
@@ -320,7 +327,7 @@ function parseNovaDateTime(value) {
   }
 }
 
-function extractReceipt(document, dailyBalances = new Map()) {
+function extractReceipt(document) {
   const amount = optionalNumber(
     pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
   )
@@ -347,7 +354,7 @@ function extractReceipt(document, dailyBalances = new Map()) {
     occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
     amount,
-    balance: dailyBalances.get(paymentDate) ?? null,
+    balance: null,
     comment: pick(document, 'Purpose', 'Comment', 'Description'),
     legacyDate: paymentDate,
     legacyCreatedDate: createdAt?.date ?? '',
@@ -355,6 +362,36 @@ function extractReceipt(document, dailyBalances = new Map()) {
     stableDebitIban: debitIban,
     stableCreditIban: creditIban,
     eventKnown: false,
+  }
+}
+
+function extractAccountMovement(document, accountIban) {
+  const amount = optionalNumber(
+    pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
+  )
+  const changedAt = parseNovaDateTime(pick(document, 'Changed'))
+  const createdAt = parseNovaDateTime(pick(document, 'Created'))
+  const eventDateTime = changedAt ?? createdAt
+  const paymentDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
+  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
+  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
+  const providerId = pick(document, 'ID', 'id')
+  const uetr = pick(document, 'UETR')
+  const providerAliases = [providerId ? `id:${providerId}` : '', uetr ? `uetr:${uetr}` : ''].filter(
+    Boolean,
+  )
+
+  return {
+    legacyDate: paymentDate,
+    occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
+    amount,
+    providerAliases,
+    direction:
+      creditIban === accountIban && debitIban !== accountIban
+        ? 'credit'
+        : debitIban === accountIban && creditIban !== accountIban
+          ? 'debit'
+          : 'unknown',
   }
 }
 
@@ -955,7 +992,11 @@ Deno.serve(async (request) => {
       true,
     )
     const dailyBalances = parseExtractDayBalances(extractResult.extract)
-    dailyBalances.set(dateTo, available)
+    const todayBalances = dailyBalances.get(dateTo) ?? { opening: null, closing: null }
+    dailyBalances.set(dateTo, {
+      ...todayBalances,
+      closing: available,
+    })
     const statementPaymentsResult = await soapCall(
       'GetPaymentsList',
       {
@@ -986,10 +1027,17 @@ Deno.serve(async (request) => {
     const statementIncomingDocuments = statementConductedDocuments.filter((document) =>
       isIncomingPaymentDocument(document, accountIban),
     )
-    const receipts = sortReceiptsNewestFirst(
-      statementIncomingDocuments
-        .map((document) => extractReceipt(document, dailyBalances))
-        .filter((receipt) => receipt !== null),
+    const statementMovements = statementConductedDocuments.map((document) =>
+      extractAccountMovement(document, accountIban),
+    )
+    const receipts = assignRunningBalances(
+      sortReceiptsNewestFirst(
+        statementIncomingDocuments
+          .map((document) => extractReceipt(document))
+          .filter((receipt) => receipt !== null),
+      ),
+      statementMovements,
+      dailyBalances,
     )
 
     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
@@ -997,10 +1045,13 @@ Deno.serve(async (request) => {
     const updatedIncomingDocuments = updatedConductedDocuments.filter((document) =>
       isIncomingPaymentDocument(document, accountIban),
     )
-    const updatedReceipts = sortReceiptsNewestFirst(
-      updatedIncomingDocuments
-        .map((document) => extractReceipt(document, dailyBalances))
-        .filter((receipt) => receipt !== null),
+    const updatedReceipts = copyKnownBalancesByProviderAlias(
+      sortReceiptsNewestFirst(
+        updatedIncomingDocuments
+          .map((document) => extractReceipt(document))
+          .filter((receipt) => receipt !== null),
+      ),
+      receipts,
     )
 
     const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
