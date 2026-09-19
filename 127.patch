@@ -24,11 +24,10 @@ diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/fu
 diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
 --- a/supabase/functions/_shared/novapay-running-balance_test.ts
 +++ b/supabase/functions/_shared/novapay-running-balance_test.ts
-@@ -44,6 +44,32 @@ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
+@@ -44,6 +44,31 @@ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
  assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
  assertEquals(result[2].balance, 7248.21, '18.09 receipt')
  
-+
 +const withUnrelatedConductedDocument = assignRunningBalances(
 +  receipts,
 +  [
