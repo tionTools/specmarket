@@ -1,0 +1,166 @@
+PATCH 126 — NovaPay: fill current-day opening balance from previous day close
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 126.patch
+Patch SHA-256: c11354b8364de5b1ff46570419f0718afe11a9f2b96a05a66a584f1791183ac9
+
+Expected base main:
+f90fec7b50302980ee623fdabc3a2095a8b6c06d
+
+Expected base blob:
+- supabase/functions/novapay-data/index.ts
+  6bda2f2ae9897e7c71ab057002307b5bcf068bd4
+
+Context
+Patch 125 is deployed and its running-balance math works for historical 18.09, but both 19.09 receipts became balance=null during the production smoke.
+
+Observed:
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21 (correct)
+- 19.09.2026 13:56:25 +125.37 -> null
+- 19.09.2026 19:47:04 +626.85 -> null
+- overall current account balance -> 8000.43
+- refresh itself returned HTTP 200 with no auth/circuit-breaker error
+
+Relevant current code
+Patch 125 parses GetAccountExtract into:
+  { opening: InCome, closing: OutCome }
+
+For the current day it already overrides closing with fresh GetAccountRest.available_balance:
+  closing: available
+
+But if GetAccountExtract does not provide a usable current-day opening value, current code leaves:
+  opening: null
+
+assignRunningBalances intentionally refuses to calculate a day without both opening and closing, therefore all current-day receipt balances become null.
+
+Patch 126 is intentionally tiny:
+- keep the current-day opening returned by GetAccountExtract when present;
+- only when today's opening is missing, use the previous calendar day's closing balance from the same GetAccountExtract result;
+- keep today's closing = fresh available_balance;
+- change nothing else.
+
+Expected 19.09:
+previous day 18.09 close = 7248.21
+therefore current-day opening = 7248.21
+13:56:25 +125.37 = 7373.58
+19:47:04 +626.85 = 8000.43
+
+Exact code change
+Before:
+  const todayBalances = dailyBalances.get(dateTo) ?? { opening: null, closing: null }
+  dailyBalances.set(dateTo, {
+    ...todayBalances,
+    closing: available,
+  })
+
+After:
+  const previousDate = formatNovaDate(new Date(now.getTime() - 24 * 60 * 60 * 1000))
+  const previousClosing = dailyBalances.get(previousDate)?.closing ?? null
+  const todayBalances = dailyBalances.get(dateTo) ?? { opening: null, closing: null }
+  dailyBalances.set(dateTo, {
+    ...todayBalances,
+    opening: todayBalances.opening ?? previousClosing,
+    closing: available,
+  })
+
+Scope
+Exactly ONE file:
+- supabase/functions/novapay-data/index.ts
+
+Do NOT touch:
+- novapay-running-balance helper or tests
+- NovaPay auth / rotation / circuit breaker
+- full-sync lock
+- cron / pg_net timeout
+- Vault
+- bank_payment_events / email / dedupe
+- migrations/schema
+- Prom / other marketplaces
+- Monobank
+- Android
+- AGENTS.md
+- unrelated formatting/refactors
+
+Preflight
+1. Work only in a clean auxiliary SpecMarket worktree. Do not touch the user's main working tree or the old dirty Patch 124 worktree.
+2. git fetch origin
+3. Verify:
+   git rev-parse origin/main
+   Must equal exactly:
+   f90fec7b50302980ee623fdabc3a2095a8b6c06d
+   If main advanced: STOP.
+4. Verify:
+   git rev-parse origin/main:supabase/functions/novapay-data/index.ts
+   Must equal:
+   6bda2f2ae9897e7c71ab057002307b5bcf068bd4
+5. Fetch origin/chatgpt-patches:126.patch byte-for-byte.
+6. Verify SHA-256:
+   c11354b8364de5b1ff46570419f0718afe11a9f2b96a05a66a584f1791183ac9
+7. Run:
+   git apply --check 126.patch
+   If FAIL: STOP.
+8. Apply unchanged.
+9. Verify real diff and changed-file list:
+   exactly supabase/functions/novapay-data/index.ts
+10. git diff --check
+
+Review gate
+Confirm explicitly:
+- this patch changes ONLY current-day opening fallback;
+- if GetAccountExtract already provides today opening, it is preserved;
+- fallback is previous day's closing only;
+- today's closing remains GetAccountRest.available_balance;
+- Patch 125 forward running-balance algorithm is unchanged;
+- auth/dedupe/cron/lock behavior is untouched.
+
+Checks
+Run:
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+No broad formatter/autofix.
+If lint reports only the existing unrelated monobank-webhook no-explicit-any baseline, report it and do not touch it.
+
+Commit / push / deploy
+Only after PASS:
+1. Commit exactly the one changed file.
+2. SSH push to main only.
+3. No migration.
+4. Deploy ONLY novapay-data.
+5. Do not deploy novapay-balance or any unrelated function.
+
+Production smoke
+Trigger exactly ONE NovaPay refresh.
+
+Verify:
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+- 18.09.2026 19:55:54 +1248.72 remains 7248.21
+- top account balance remains current available balance
+
+Because the calendar may already be 20.09 by smoke time, 19.09 may now be a historical day and can also recalculate correctly from its own GetAccountExtract opening/closing. Still verify the current day too: if there are current-day receipts, their balances must use previous-day close when current-day InCome is absent.
+
+Also verify:
+- no duplicate payment event/email;
+- cron remains active;
+- no auth/circuit-breaker error.
+
+If balances are still null:
+STOP after that one refresh.
+Do not add another fallback automatically.
+Report the exact production values and whether today's opening came from GetAccountExtract or previousClosing if visible in logs/debugging.
+
+Report
+- actual base/main SHA
+- base index blob
+- patch blob + SHA-256
+- git apply --check
+- exact changed files
+- type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production balances after the single smoke refresh
