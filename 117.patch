@@ -1,0 +1,58 @@
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -20,6 +20,16 @@ const parser = new XMLParser({
+   trimValues: true,
+ })
+ 
++// NovaPay can encode PEM line breaks as numeric XML character references.
++// fast-xml-parser only decodes those when htmlEntities is enabled.
++const authParser = new XMLParser({
++  ignoreAttributes: false,
++  removeNSPrefix: true,
++  parseTagValue: false,
++  trimValues: true,
++  htmlEntities: true,
++})
++
+ class HttpError extends Error {
+   constructor(status, code, message, details = undefined) {
+     super(message)
+@@ -109,7 +119,7 @@ async function soapCallOnce(method, params) {
+ 
+   let document
+   try {
+-    document = parser.parse(responseText)
++    document = (method === 'UserAuthenticationJWT' ? authParser : parser).parse(responseText)
+   } catch {
+     throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
+   }
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -20,6 +20,16 @@ const parser = new XMLParser({
+   trimValues: true,
+ })
+ 
++// NovaPay can encode PEM line breaks as numeric XML character references.
++// fast-xml-parser only decodes those when htmlEntities is enabled.
++const authParser = new XMLParser({
++  ignoreAttributes: false,
++  removeNSPrefix: true,
++  parseTagValue: false,
++  trimValues: true,
++  htmlEntities: true,
++})
++
+ class HttpError extends Error {
+   constructor(status, code, message, details = undefined) {
+     super(message)
+@@ -109,7 +119,7 @@ async function soapCallOnce(method, params) {
+ 
+   let document
+   try {
+-    document = parser.parse(responseText)
++    document = (method === 'UserAuthenticationJWT' ? authParser : parser).parse(responseText)
+   } catch {
+     throw new HttpError(502, 'NOVAPAY_SOAP_PARSE_ERROR', `NovaPay ${method} returned invalid XML.`)
+   }
