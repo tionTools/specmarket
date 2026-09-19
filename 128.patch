@@ -1,0 +1,50 @@
+diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/functions/_shared/novapay-running-balance.ts
+--- a/supabase/functions/_shared/novapay-running-balance.ts
++++ b/supabase/functions/_shared/novapay-running-balance.ts
+@@ -45,9 +45,18 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
+     if (invalidDates.has(date)) continue
+ 
+     const day = dailyBalances.get(date)
+-    const openingCents = moneyCents(day?.opening)
+     const closingCents = moneyCents(day?.closing)
+-    if (openingCents === null || closingCents === null) continue
++    if (closingCents === null) continue
++
++    let openingCents = moneyCents(day?.opening)
++    if (openingCents === null) {
++      const netMovementCents = dayMovements.reduce(
++        (sum, entry) =>
++          sum + (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents),
++        0,
++      )
++      openingCents = closingCents - netMovementCents
++    }
+ 
+     let runningCents = openingCents
+     const dayAliases = []
+diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
+--- a/supabase/functions/_shared/novapay-running-balance_test.ts
++++ b/supabase/functions/_shared/novapay-running-balance_test.ts
+@@ -69,6 +69,22 @@ assertEquals(
+   'unrelated conducted document does not affect account balance',
+ )
+ 
++const missingOpeningBalances = new Map([
++  ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
++  ['19.09.2026', { opening: null, closing: 8000.43 }],
++])
++const missingOpeningResult = assignRunningBalances(receipts, movements, missingOpeningBalances)
++assertEquals(
++  missingOpeningResult[1].balance,
++  7373.58,
++  'missing 19.09 opening is derived from closing and day movements',
++)
++assertEquals(
++  missingOpeningResult[0].balance,
++  8000.43,
++  'derived opening still produces the exact 19.09 closing balance',
++)
++
+ const debitReceipts = [
+   {
+     legacyDate: '20.09.2026',
