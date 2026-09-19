@@ -1,0 +1,186 @@
+diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/functions/_shared/novapay-running-balance.ts
+new file mode 100644
+index 0000000..240075a
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-running-balance.ts
+@@ -0,0 +1,50 @@
++function moneyCents(value) {
++  const number = Number(value)
++  return Number.isFinite(number) ? Math.round(number * 100) : null
++}
++
++function text(value) {
++  return typeof value === 'string' ? value.trim() : ''
++}
++
++function aliases(receipt) {
++  if (!Array.isArray(receipt?.providerAliases)) return []
++  return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
++}
++
++// Receipts must be ordered newest-first. The daily close belongs to the newest
++// incoming receipt of that day; each earlier receipt subtracts the incoming
++// amounts that happened after it.
++export function assignIncomingBalancesFromDailyClose(receipts, dailyBalances) {
++  const result = receipts.map((receipt) => ({ ...receipt }))
++  const laterIncomingByDate = new Map()
++
++  for (const receipt of result) {
++    const date = text(receipt?.legacyDate)
++    const closingCents = moneyCents(dailyBalances.get(date))
++    const amountCents = moneyCents(receipt?.amount)
++    if (!date || closingCents === null || amountCents === null || amountCents <= 0) continue
++
++    const laterIncomingCents = laterIncomingByDate.get(date) ?? 0
++    receipt.balance = (closingCents - laterIncomingCents) / 100
++    laterIncomingByDate.set(date, laterIncomingCents + amountCents)
++  }
++
++  return result
++}
++
++export function copyKnownBalancesByProviderAlias(receipts, statementReceipts) {
++  const balanceByAlias = new Map()
++  for (const receipt of statementReceipts) {
++    const balance = receipt?.balance
++    if (typeof balance !== 'number' || !Number.isFinite(balance)) continue
++    for (const alias of aliases(receipt)) balanceByAlias.set(alias, balance)
++  }
++
++  return receipts.map((receipt) => {
++    for (const alias of aliases(receipt)) {
++      if (balanceByAlias.has(alias)) return { ...receipt, balance: balanceByAlias.get(alias) }
++    }
++    return receipt
++  })
++}
+diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
+new file mode 100644
+index 0000000..b0a7681
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-running-balance_test.ts
+@@ -0,0 +1,56 @@
++import {
++  assignIncomingBalancesFromDailyClose,
++  copyKnownBalancesByProviderAlias,
++} from './novapay-running-balance.ts'
++
++function assertEquals(actual, expected, message) {
++  if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
++}
++
++const dailyBalances = new Map([
++  ['18.09.2026', 7248.21],
++  ['19.09.2026', 8000.43],
++])
++
++const statementReceipts = assignIncomingBalancesFromDailyClose(
++  [
++    {
++      legacyDate: '19.09.2026',
++      occurredAt: '2026-09-19T16:47:04.000Z',
++      amount: 626.85,
++      balance: null,
++      providerAliases: ['id:later'],
++    },
++    {
++      legacyDate: '19.09.2026',
++      occurredAt: '2026-09-19T10:56:25.000Z',
++      amount: 125.37,
++      balance: null,
++      providerAliases: ['id:earlier'],
++    },
++    {
++      legacyDate: '18.09.2026',
++      occurredAt: '2026-09-18T16:55:54.000Z',
++      amount: 1248.72,
++      balance: null,
++      providerAliases: ['id:previous-day'],
++    },
++  ],
++  dailyBalances,
++)
++
++assertEquals(statementReceipts[0].balance, 8000.43, 'latest payment gets day close')
++assertEquals(statementReceipts[1].balance, 7373.58, 'earlier same-day payment subtracts later credit')
++assertEquals(statementReceipts[2].balance, 7248.21, 'single payment day keeps day close')
++
++const updatedReceipts = copyKnownBalancesByProviderAlias(
++  [
++    {
++      providerAliases: ['uetr:shared', 'id:earlier'],
++      balance: null,
++    },
++  ],
++  statementReceipts,
++)
++
++assertEquals(updatedReceipts[0].balance, 7373.58, 'updated payment reuses statement balance')
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -5,6 +5,10 @@ import {
+   NovaPayAuthError,
+   NovaPayTransportError,
+ } from '../_shared/novapay-auth.ts'
++import {
++  assignIncomingBalancesFromDailyClose,
++  copyKnownBalancesByProviderAlias,
++} from '../_shared/novapay-running-balance.ts'
+ 
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
+@@ -301,7 +305,7 @@ function parseNovaDateTime(value) {
+   }
+ }
+ 
+-function extractReceipt(document, dailyBalances = new Map()) {
++function extractReceipt(document) {
+   const amount = optionalNumber(
+     pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
+   )
+@@ -328,7 +332,7 @@ function extractReceipt(document, dailyBalances = new Map()) {
+     occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
+     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
+     amount,
+-    balance: dailyBalances.get(paymentDate) ?? null,
++    balance: null,
+     comment: pick(document, 'Purpose', 'Comment', 'Description'),
+     legacyDate: paymentDate,
+     legacyCreatedDate: createdAt?.date ?? '',
+@@ -979,10 +983,13 @@ function extractReceipt(document, dailyBalances = new Map()) {
+     const statementIncomingDocuments = statementConductedDocuments.filter((document) =>
+       isIncomingPaymentDocument(document, accountIban),
+     )
+-    const receipts = sortReceiptsNewestFirst(
+-      statementIncomingDocuments
+-        .map((document) => extractReceipt(document, dailyBalances))
+-        .filter((receipt) => receipt !== null),
++    const receipts = assignIncomingBalancesFromDailyClose(
++      sortReceiptsNewestFirst(
++        statementIncomingDocuments
++          .map((document) => extractReceipt(document))
++          .filter((receipt) => receipt !== null),
++      ),
++      dailyBalances,
+     )
+ 
+     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
+@@ -990,10 +997,13 @@ function extractReceipt(document, dailyBalances = new Map()) {
+     const updatedIncomingDocuments = updatedConductedDocuments.filter((document) =>
+       isIncomingPaymentDocument(document, accountIban),
+     )
+-    const updatedReceipts = sortReceiptsNewestFirst(
+-      updatedIncomingDocuments
+-        .map((document) => extractReceipt(document, dailyBalances))
+-        .filter((receipt) => receipt !== null),
++    const updatedReceipts = copyKnownBalancesByProviderAlias(
++      sortReceiptsNewestFirst(
++        updatedIncomingDocuments
++          .map((document) => extractReceipt(document))
++          .filter((receipt) => receipt !== null),
++      ),
++      receipts,
+     )
+ 
+     const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
