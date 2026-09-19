@@ -1,0 +1,168 @@
+PATCH 127 — NovaPay: ignore unrelated conducted documents in running-balance validation
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 127.patch
+Patch SHA-256: 14454b5c2a944c6f60ec63b9ae7096539c8a5e1874b656fbef39cce7549be3db
+Published patch blob SHA: e34c5a462bbcd2b09d32ed14c41aca6098458f67
+
+Expected base main:
+b44c6e723bb832bf218579f41204a56af71d17b2
+
+Expected base blob:
+- supabase/functions/_shared/novapay-running-balance.ts
+  5709f4463111403b4bdec45a5c1e8ba89960981d
+
+Context
+Patch 125 forward running-balance logic is deployed.
+Patch 126 only changed the CURRENT calendar day's opening fallback. At the time of the Patch 126 smoke test the local date was already 20.09.2026, so Patch 126 could not change the historical 19.09 calculation.
+
+Observed after Patch 126:
+- 18.09.2026 +1248.72 -> 7248.21
+- 19.09.2026 +125.37 -> null
+- 19.09.2026 +626.85 -> null
+- overall account balance -> 8000.43
+
+Concrete defect in current helper
+novapay-data sends ALL conducted documents from GetPaymentsList into extractAccountMovement().
+Documents not involving the selected account IBAN get:
+  direction: 'unknown'
+
+assignRunningBalances() currently treats any unknown-direction document as an INVALID DAY:
+  invalidDates.add(date)
+
+Therefore one unrelated conducted NovaPay document on 19.09 is sufficient to discard both otherwise-calculable 19.09 balances.
+
+That behavior is wrong.
+A document that is neither a debit nor a credit for the selected account must not invalidate that account's day.
+
+Patch 127 is intentionally tiny:
+- direction unknown => ignore that document;
+- known credit/debit with invalid amount or timestamp => still invalidates the day;
+- all known account movements still participate in + / - running balance;
+- final calculated close must still equal authoritative closing balance;
+- no fallback math is added.
+
+Expected production math remains:
+18.09 close = 7248.21
+19.09 opening = 7248.21
+13:56:25 +125.37 = 7373.58
+19:47:04 +626.85 = 8000.43
+
+Exact scope
+Only:
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Do NOT touch:
+- supabase/functions/novapay-data/index.ts
+- Patch 126 current-day fallback
+- NovaPay auth / rotation / circuit breaker
+- full-sync lock
+- cron / pg_net timeout
+- Vault
+- bank_payment_events / dedupe / email logic
+- schema/migrations
+- Prom / other marketplaces
+- Monobank
+- Android
+- AGENTS.md
+- unrelated formatting/refactors
+
+Preflight
+1. Work only in a clean auxiliary SpecMarket worktree based on current origin/main.
+2. Do not touch user's dirty main worktree or old Patch 124 worktree.
+3. git fetch origin
+4. Verify:
+   git rev-parse origin/main
+   Must equal:
+   b44c6e723bb832bf218579f41204a56af71d17b2
+   If main advanced: STOP.
+5. Verify:
+   git rev-parse origin/main:supabase/functions/_shared/novapay-running-balance.ts
+   Must equal:
+   5709f4463111403b4bdec45a5c1e8ba89960981d
+6. Fetch origin/chatgpt-patches:127.patch byte-for-byte.
+7. Verify SHA-256:
+   14454b5c2a944c6f60ec63b9ae7096539c8a5e1874b656fbef39cce7549be3db
+8. Run:
+   git apply --check 127.patch
+   If FAIL: STOP.
+9. Apply unchanged.
+10. Verify exact changed files: only the two declared helper/test files.
+11. git diff --check
+
+Focused regression test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+The test must still prove existing Patch 125 cases:
+- 19.09 +125.37 -> 7373.58
+- 19.09 +626.85 -> 8000.43
+- 18.09 +1248.72 -> 7248.21
+- debit between credits works
+- final close mismatch clears the day
+- updated-payments path reuses full-statement balance
+
+New regression:
+An unrelated conducted document on 19.09 with direction='unknown' must NOT invalidate the day and must NOT change the running balance.
+
+Review gate
+Confirm:
+- unknown/non-account document is ignored before amount/time validation;
+- known credit/debit with malformed amount/time still invalidates that day;
+- final closing-balance equality check is unchanged;
+- forward running math itself is unchanged;
+- no index.ts/auth/dedupe/cron/lock behavior changed.
+
+Checks
+Run:
+- node supabase/functions/_shared/novapay-running-balance_test.ts
+- targeted format only for the two changed files
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint reports only existing unrelated monobank-webhook no-explicit-any baseline, report it and do not modify it.
+
+Commit / push / deploy
+Only after PASS:
+1. Commit exactly the two changed files.
+2. SSH push main only.
+3. No migration.
+4. Deploy ONLY novapay-data, because it imports the changed shared helper.
+5. Do not deploy novapay-balance or unrelated functions.
+
+Production smoke
+Trigger exactly ONE NovaPay refresh.
+
+Verify:
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- top account balance remains current available balance
+
+Also verify:
+- no duplicate payment event/email
+- cron active
+- no auth/circuit-breaker error
+
+If 19.09 is still null:
+STOP after that one refresh.
+Do not add another fallback automatically.
+At that point add diagnostics before changing math again; do not guess.
+
+Report
+- base/main SHA
+- helper base blob
+- patch blob + SHA-256
+- git apply --check
+- exact changed files
+- focused test
+- review confirmation
+- type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production statement balances
