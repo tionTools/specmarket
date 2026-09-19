@@ -1,0 +1,136 @@
+PATCH 119 — Prom: решения по доставленным заказам и принятым возвратам
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 119.patch
+Patch SHA-256: a4a6cfe5b486992613638a781e1b0ca450b14623c9ea5c08543ac9b73e1292c9
+Expected base main: e5c206675a0c7e3e22389f7639013aafd1088c12
+
+Expected base blobs:
+- src/features/orders/types.ts
+  0bc934943ffa44ff589055223f512ad58f12908d
+- src/pages/HomeView.vue
+  ed19728fcd7fd83e7f1b6376342da218a3132d45
+- supabase/functions/sync-prom-orders/index.ts
+  2cf51420d88cfcae0075b368ee21d505c0cd0062
+
+Context
+Patch 118 уже опубликован отдельно. Этот следующий патч — Patch 119.
+Не переоткрывать и не переделывать Patch 118 / NovaPay.
+
+Goal
+Исправить зелёный блок «Получены перевозчиком — подтвердить в Prom», сохранив существующий workflow с чекбоксами.
+
+Required behavior
+1. ОСТАВИТЬ существующие чекбоксы у заказов и «Выбрать все».
+2. Переместить существующую массовую кнопку «Подтвердить в Prom (N)» из правой стороны ВЛЕВО внизу зелёного блока.
+3. Рядом добавить вторую массовую кнопку «Не подтверждать (N)».
+4. Обе кнопки работают с ОДНИМИ И ТЕМИ ЖЕ отмеченными чекбоксами заказами.
+5. «Подтвердить в Prom» сохраняет текущее поведение: выбранные заказы Prom переводятся в «Виконано».
+6. «Не подтверждать» НЕ ДОЛЖНА ничего менять в Prom. Она только навсегда убирает выбранные заказы из этой зелёной плашки CRM.
+7. Это исключение должно храниться в общей БД, не в localStorage, чтобы refresh/realtime/другое устройство не возвращали заказ.
+8. Полностью принятый возврат автоматически исключается из зелёной плашки.
+9. Частично принятый возврат сам по себе НЕ исключается.
+10. Если позже статус Prom вручную изменён на выполненный/отменённый/возвратный и CRM синхронизирована, существующая логика также должна убрать заказ из зелёной плашки.
+11. Нужен серверный guard: заказ, уже вручную исключённый из этой плашки или полностью возвращённый, нельзя провести через существующий completeExternalIds даже из старой вкладки браузера.
+
+Data model
+Добавить nullable column:
+- public.crm_orders.prom_completion_dismissed_at timestamptz
+
+Этот флаг означает только:
+«Больше не предлагать этот заказ CRM для подтверждения Prom».
+Это НЕ отмена заказа, НЕ статус возврата и НЕ влияет на финансы/учёт.
+
+Exact scope
+Только эти четыре файла:
+- src/features/orders/types.ts
+- src/pages/HomeView.vue
+- supabase/functions/sync-prom-orders/index.ts
+- supabase/migrations/20260919150000_prom_completion_dismissal.sql
+
+Do NOT touch
+- финансовую логику возвратов;
+- другие marketplace sync functions;
+- NovaPay/Monobank;
+- Android;
+- print registry;
+- reconciliation;
+- AGENTS.md;
+- unrelated formatting/refactors.
+
+Implementation notes
+- computed зелёной плашки исключает:
+  a) promCompletionDismissedAt;
+  b) полный принятый возврат через существующий isOrderFullyReturned(order);
+  c) существующие выполненные/отменённые/возвратные статусы Prom.
+- «Не подтверждать» вызывает sync-prom-orders с dismissCompletionExternalIds.
+- Этот action только пишет prom_completion_dismissed_at и возвращает changedOrderIds, чтобы существующий refresh/realtime обновил UI.
+- completeExternalIds дополнительно отклоняет dismissed и fully-returned заказы на сервере.
+- Пока выполняется одна массовая операция, обе кнопки disabled.
+
+Required preflight
+1. git fetch origin.
+2. Рабочее дерево должно быть чистым.
+3. Проверить HEAD origin/main. Он должен быть ровно:
+   e5c206675a0c7e3e22389f7639013aafd1088c12
+4. Если main ушёл вперёд — STOP. Не force-apply.
+5. Забрать 119.patch byte-for-byte из origin/chatgpt-patches.
+6. Проверить SHA-256:
+   a4a6cfe5b486992613638a781e1b0ca450b14623c9ea5c08543ac9b73e1292c9
+7. Проверить три base blob SHA выше.
+8. Выполнить:
+   git apply --check 119.patch
+   Если FAIL — STOP.
+9. Применить 119.patch.
+10. Посмотреть РЕАЛЬНЫЙ git diff и список изменённых файлов. Scope — ровно четыре файла выше.
+11. Выполнить:
+   git diff --check
+
+Required checks
+Выполнить проверки проекта в требуемом порядке. Не делать широких unrelated auto-fixes:
+- pnpm format
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+Review scenarios
+Проверить кодом и, где возможно, вручную:
+- 0 выбранных => обе массовые кнопки disabled;
+- выбран один/несколько => обе показывают одинаковый N;
+- confirm => текущий Prom «Виконано» path работает как раньше;
+- «Не подтверждать» => запрос на изменение статуса Prom НЕ отправляется; выбранные строки исчезают из зелёной плашки после refresh CRM;
+- после reload/realtime dismissed заказ не возвращается;
+- полный принятый возврат исчезает автоматически;
+- частичный возврат остаётся eligible, если остальные условия зелёной плашки соблюдены;
+- stale browser tab не может complete dismissed или fully returned заказ.
+
+Deployment
+Только после PASS проверок:
+1. Commit.
+2. Push main только через существующий GitHub SSH.
+3. Применить migration:
+   supabase/migrations/20260919150000_prom_completion_dismissal.sql
+4. Deploy ТОЛЬКО изменённую Edge Function:
+   sync-prom-orders
+5. Обычный frontend deploy — через существующий main workflow.
+6. Не деплоить unrelated Supabase functions.
+
+Post-deploy verification
+- колонка prom_completion_dismissed_at существует;
+- на безопасном тестовом заказе «Не подтверждать» убирает его из зелёной плашки, не меняя статус в Prom;
+- reload CRM: заказ остаётся скрытым;
+- полностью принятый возврат отсутствует в зелёной плашке;
+- обычные eligible delivered Prom orders всё ещё появляются и массово подтверждаются.
+
+Report
+- actual base/main SHA;
+- patch SHA-256;
+- git apply --check;
+- exact changed files;
+- format/type-check/lint/build/diff-check;
+- migration result;
+- sync-prom-orders deploy result/version;
+- frontend deploy result;
+- smoke test: confirm / do-not-confirm / full return.
