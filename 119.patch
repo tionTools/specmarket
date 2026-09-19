@@ -1,0 +1,333 @@
+diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
+index 0bc9349..31254e5 100644
+--- a/src/features/orders/types.ts
++++ b/src/features/orders/types.ts
+@@ -106,6 +106,8 @@ export interface Order {
+   internalComment?: string
+   platform: Platform
+   status: string
++  /** Заказ Prom вручную исключён из блока подтверждения «Виконано». */
++  promCompletionDismissedAt?: string
+   products: OrderProduct[]
+   shipping: number
+   paymentAmount?: number
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index ed19728..1c2b33d 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -193,6 +193,7 @@ const isMarketplaceSyncBusy = computed(
+ )
+ const isApplyingPromRegistry = ref(false)
+ const isConfirmingPromDelivered = ref(false)
++const isDismissingPromDelivered = ref(false)
+ const selectedPromDeliveredOrderIds = ref(new Set<string>())
+ const syncEpicentrMessage = ref('')
+ const syncNoticeVisible = ref(false)
+@@ -1395,6 +1396,7 @@ const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
+ const promDeliveredConfirmationOrders = computed(() =>
+   orders.value.filter((order) => {
+     if (order.platform !== 'Пром' || !order.externalId) return false
++    if (order.promCompletionDismissedAt || isOrderFullyReturned(order)) return false
+     if (order.delivery.trackingNormalizedStatus?.trim().toLowerCase() !== 'delivered') return false
+     const status = displayOrderStatus(order.status).toLowerCase()
+     return !/виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
+@@ -2276,7 +2278,13 @@ function selectAllPromDeliveredOrders() {
+ }
+ 
+ async function confirmPromDeliveredOrders() {
+-  if (!supabase || isGuest.value || isConfirmingPromDelivered.value) return
++  if (
++    !supabase ||
++    isGuest.value ||
++    isConfirmingPromDelivered.value ||
++    isDismissingPromDelivered.value
++  )
++    return
+   const selectedOrders = selectedPromDeliveredOrders.value
+   if (!selectedOrders.length) return
+   if (!window.confirm(`Перевести ${selectedOrders.length} заказов Prom в статус «Виконано»?`))
+@@ -2315,6 +2323,52 @@ async function confirmPromDeliveredOrders() {
+   }
+ }
+ 
++async function dismissPromDeliveredOrders() {
++  if (
++    !supabase ||
++    isGuest.value ||
++    isConfirmingPromDelivered.value ||
++    isDismissingPromDelivered.value
++  )
++    return
++  const selectedOrders = selectedPromDeliveredOrders.value
++  if (!selectedOrders.length) return
++
++  const dismissCompletionExternalIds = selectedOrders
++    .map((order) => order.externalId)
++    .filter((value): value is string => typeof value === 'string' && value.length > 0)
++  if (dismissCompletionExternalIds.length !== selectedOrders.length) {
++    showSyncError('Не удалось определить ID всех выбранных заказов Prom.')
++    return
++  }
++
++  isDismissingPromDelivered.value = true
++  try {
++    const { data, error } = await supabase.functions.invoke<{
++      ok?: boolean
++      message?: string
++      dismissed?: number
++      changedOrderIds?: string[]
++    }>('sync-prom-orders', {
++      method: 'POST',
++      body: { dismissCompletionExternalIds },
++    })
++    if (error || !data?.ok) {
++      showSyncError(
++        data?.message ?? error?.message ?? 'Не удалось убрать заказы из подтверждения Prom.',
++      )
++      return
++    }
++    selectedPromDeliveredOrderIds.value = new Set()
++    await refreshOrdersAfterMarketplaceSync(data)
++    showSyncMessage(
++      `Prom: убрано из подтверждения — ${data.dismissed ?? selectedOrders.length}.`,
++    )
++  } finally {
++    isDismissingPromDelivered.value = false
++  }
++}
++
+ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
+   if (!supabase || isGuest.value || isSyncingKasta.value) return
+   isSyncingKasta.value = true
+@@ -2709,6 +2763,8 @@ function mapRemoteOrders(
+         internalComment: (row.internal_comment as string | null) ?? undefined,
+         platform: row.platform as Platform,
+         status: row.status as string,
++        promCompletionDismissedAt:
++          (row.prom_completion_dismissed_at as string | null) ?? undefined,
+         shipping: Number(row.shipping),
+         paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
+         acquiring: Number(row.acquiring),
+@@ -4682,10 +4738,14 @@ function orderDateTime(order: Order) {
+             >
+           </label>
+         </div>
+-        <div class="mt-3 flex justify-end">
++        <div class="mt-3 flex flex-wrap justify-start gap-2">
+           <button
+             class="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-wait disabled:opacity-50"
+-            :disabled="isConfirmingPromDelivered || selectedPromDeliveredOrdersCount === 0"
++            :disabled="
++              isConfirmingPromDelivered ||
++              isDismissingPromDelivered ||
++              selectedPromDeliveredOrdersCount === 0
++            "
+             type="button"
+             @click="confirmPromDeliveredOrders"
+           >
+@@ -4695,6 +4755,22 @@ function orderDateTime(order: Order) {
+                 : `Подтвердить в Prom (${selectedPromDeliveredOrdersCount})`
+             }}
+           </button>
++          <button
++            class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
++            :disabled="
++              isConfirmingPromDelivered ||
++              isDismissingPromDelivered ||
++              selectedPromDeliveredOrdersCount === 0
++            "
++            type="button"
++            @click="dismissPromDeliveredOrders"
++          >
++            {{
++              isDismissingPromDelivered
++                ? 'Убираем…'
++                : `Не подтверждать (${selectedPromDeliveredOrdersCount})`
++            }}
++          </button>
+         </div>
+       </section>
+       <section
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+index 2cf5142..c26f7a3 100644
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -633,6 +633,7 @@ Deno.serve(async (request) => {
+     full?: unknown
+     manual?: unknown
+     completeExternalIds?: unknown
++    dismissCompletionExternalIds?: unknown
+     acceptExternalIds?: unknown
+   }
+   if (body.acceptExternalIds !== undefined) {
+@@ -642,7 +643,12 @@ Deno.serve(async (request) => {
+     let ids: string[]
+     try { ids = normalizePromExternalIds(body.acceptExternalIds) }
+     catch { return Response.json({ ok: false, message: 'Неверный список ID заказов Prom для принятия.' }, { status: 400, headers: corsHeaders }) }
+-    if (body.completeExternalIds !== undefined || body.manual !== undefined || body.externalId !== undefined) {
++    if (
++      body.completeExternalIds !== undefined ||
++      body.dismissCompletionExternalIds !== undefined ||
++      body.manual !== undefined ||
++      body.externalId !== undefined
++    ) {
+       return Response.json({ ok: false, message: 'Нельзя совмещать принятие с другими действиями Prom.' }, { status: 400, headers: corsHeaders })
+     }
+     if (!ids.length) return Response.json({ ok: true, accepted: 0, changedOrderIds: [], alreadyAccepted: [] }, { headers: corsHeaders })
+@@ -677,6 +683,80 @@ Deno.serve(async (request) => {
+       return Response.json({ ok: false, message: 'Не удалось подтвердить принятие. Обновите заказ и проверьте статус Prom перед повтором.' }, { status: 502, headers: corsHeaders })
+     }
+   }
++  if (body.dismissCompletionExternalIds !== undefined) {
++    if (!Array.isArray(body.dismissCompletionExternalIds)) {
++      return Response.json(
++        { ok: false, message: 'Неверный список заказов Prom для исключения из подтверждения.' },
++        { status: 400, headers: corsHeaders },
++      )
++    }
++    if (isScheduledRequest) {
++      return Response.json(
++        { ok: false, message: 'Исключение из подтверждения Prom доступно только пользователю CRM.' },
++        { status: 403, headers: corsHeaders },
++      )
++    }
++    if (
++      body.completeExternalIds !== undefined ||
++      body.acceptExternalIds !== undefined ||
++      body.manual !== undefined ||
++      body.externalId !== undefined
++    ) {
++      return Response.json(
++        { ok: false, message: 'Нельзя совмещать исключение из подтверждения с другими действиями Prom.' },
++        { status: 400, headers: corsHeaders },
++      )
++    }
++
++    const requestedDismissalIds = [
++      ...new Set(
++        body.dismissCompletionExternalIds
++          .map(text)
++          .map((id) => id.replace(/^prom:/, '').trim())
++          .filter(Boolean),
++      ),
++    ]
++    if (
++      requestedDismissalIds.length > 100 ||
++      requestedDismissalIds.some((id) => !/^\d+$/.test(id))
++    ) {
++      return Response.json(
++        { ok: false, message: 'Неверные ID заказов Prom для исключения из подтверждения.' },
++        { status: 400, headers: corsHeaders },
++      )
++    }
++    if (!requestedDismissalIds.length) {
++      return Response.json(
++        { ok: true, dismissed: 0, changedOrderIds: [] },
++        { headers: corsHeaders },
++      )
++    }
++
++    const crmExternalIds = requestedDismissalIds.map((id) => `prom:${id}`)
++    const dismissedAt = new Date().toISOString()
++    const { data: dismissedOrders, error: dismissError } = await admin
++      .from('crm_orders')
++      .update({ prom_completion_dismissed_at: dismissedAt })
++      .eq('platform', 'Пром')
++      .in('external_id', crmExternalIds)
++      .select('id')
++    if (dismissError) {
++      return Response.json(
++        { ok: false, message: dismissError.message },
++        { status: 500, headers: corsHeaders },
++      )
++    }
++
++    return Response.json(
++      {
++        ok: true,
++        dismissed: dismissedOrders?.length ?? 0,
++        changedOrderIds: (dismissedOrders ?? []).map((order) => order.id),
++      },
++      { headers: corsHeaders },
++    )
++  }
++
+   if (body.completeExternalIds !== undefined && !Array.isArray(body.completeExternalIds)) {
+     return Response.json(
+       { ok: false, message: 'Неверный список заказов Prom для подтверждения.' },
+@@ -713,7 +793,7 @@ Deno.serve(async (request) => {
+     const crmExternalIds = requestedCompletionIds.map((id) => `prom:${id}`)
+     const { data: crmOrders, error: crmOrdersError } = await admin
+       .from('crm_orders')
+-      .select('id, external_id, status, delivery')
++      .select('id, external_id, status, delivery, prom_completion_dismissed_at')
+       .eq('platform', 'Пром')
+       .in('external_id', crmExternalIds)
+     if (crmOrdersError) {
+@@ -724,13 +804,58 @@ Deno.serve(async (request) => {
+     }
+ 
+     const byExternalId = new Map((crmOrders ?? []).map((order) => [order.external_id, order]))
++    const crmOrderIds = (crmOrders ?? []).map((order) => order.id)
++    const [{ data: itemRows, error: itemRowsError }, { data: returnRows, error: returnRowsError }] =
++      crmOrderIds.length
++        ? await Promise.all([
++            admin
++              .from('crm_order_items')
++              .select('order_id, position, quantity')
++              .in('order_id', crmOrderIds),
++            admin
++              .from('crm_order_item_returns')
++              .select('order_id, item_position, returned_quantity')
++              .in('order_id', crmOrderIds),
++          ])
++        : [
++            { data: [], error: null },
++            { data: [], error: null },
++          ]
++    if (itemRowsError || returnRowsError) {
++      return Response.json(
++        { ok: false, message: itemRowsError?.message ?? returnRowsError?.message ?? 'Не удалось проверить возвраты заказов Prom.' },
++        { status: 500, headers: corsHeaders },
++      )
++    }
++    const returnedQuantityByPosition = new Map(
++      (returnRows ?? []).map((row) => [`${row.order_id}:${row.item_position}`, number(row.returned_quantity)]),
++    )
++    const itemsByOrderId = new Map<string, RecordValue[]>()
++    for (const row of itemRows ?? []) {
++      itemsByOrderId.set(row.order_id, [...(itemsByOrderId.get(row.order_id) ?? []), row])
++    }
++    const fullyReturnedOrderIds = new Set(
++      crmOrderIds.filter((orderId) => {
++        const items = itemsByOrderId.get(orderId) ?? []
++        return (
++          items.length > 0 &&
++          items.every(
++            (item) =>
++              number(returnedQuantityByPosition.get(`${orderId}:${item.position}`)) >=
++              number(item.quantity),
++          )
++        )
++      }),
++    )
+     const invalidIds = requestedCompletionIds.filter((id) => {
+       const order = byExternalId.get(`prom:${id}`)
+       if (!order) return true
+       const delivery = asRecord(order.delivery)
+       const trackingStatus = text(delivery.trackingNormalizedStatus).trim().toLowerCase()
+       const status = text(order.status).trim().toLowerCase()
+       return (
++        Boolean(order.prom_completion_dismissed_at) ||
++        fullyReturnedOrderIds.has(order.id) ||
+         trackingStatus !== 'delivered' ||
+         /виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
+           status,
+diff --git a/supabase/migrations/20260919150000_prom_completion_dismissal.sql b/supabase/migrations/20260919150000_prom_completion_dismissal.sql
+new file mode 100644
+index 0000000..beb8218
+--- /dev/null
++++ b/supabase/migrations/20260919150000_prom_completion_dismissal.sql
+@@ -0,0 +1,2 @@
++alter table public.crm_orders
++  add column if not exists prom_completion_dismissed_at timestamptz;
