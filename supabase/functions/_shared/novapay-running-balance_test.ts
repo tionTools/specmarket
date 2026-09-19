@@ -44,6 +44,31 @@ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
 assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
 assertEquals(result[2].balance, 7248.21, '18.09 receipt')
 
+const withUnrelatedConductedDocument = assignRunningBalances(
+  receipts,
+  [
+    ...movements,
+    {
+      legacyDate: '19.09.2026',
+      occurredAt: '2026-09-19T15:00:00.000Z',
+      amount: 999,
+      providerAliases: ['id:unrelated'],
+      direction: 'unknown',
+    },
+  ],
+  balances,
+)
+assertEquals(
+  withUnrelatedConductedDocument[1].balance,
+  7373.58,
+  'unrelated conducted document does not invalidate the account day',
+)
+assertEquals(
+  withUnrelatedConductedDocument[0].balance,
+  8000.43,
+  'unrelated conducted document does not affect account balance',
+)
+
 const debitReceipts = [
   {
     legacyDate: '20.09.2026',

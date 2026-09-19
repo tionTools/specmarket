@@ -23,15 +23,12 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
     const date = text(movement?.legacyDate)
     if (!date) continue
 
+    const direction = movement?.direction
+    if (direction !== 'credit' && direction !== 'debit') continue
+
     const amountCents = moneyCents(movement?.amount)
     const timestamp = Date.parse(text(movement?.occurredAt))
-    const direction = movement?.direction
-    if (
-      amountCents === null ||
-      amountCents <= 0 ||
-      !Number.isFinite(timestamp) ||
-      (direction !== 'credit' && direction !== 'debit')
-    ) {
+    if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) {
       invalidDates.add(date)
       continue
     }
