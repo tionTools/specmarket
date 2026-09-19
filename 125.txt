@@ -1,0 +1,202 @@
+PATCH 125 — NovaPay: simple forward running balance by transaction time
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 125.patch
+Patch SHA-256: 6db3e8d3443df5f6bd21f5da6368116337943967ca00ce8b0e1bd9b198d8002b
+Published patch blob SHA: 4fac65dd0d14701af80094d5f6f045e69b441a0b
+
+Expected base main:
+b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+
+Expected base blob:
+- supabase/functions/novapay-data/index.ts
+  3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+
+Supersedes
+- Patch 122: BLOCKED
+- Patch 123: BLOCKED
+- Patch 124: BLOCKED
+Do not commit/deploy any of 122/123/124.
+
+Context
+The visible NovaPay statement already has per-document time values used for the rows:
+- 19.09.2026 13:56:25
+- 19.09.2026 19:47:04
+
+The bug is simple:
+the current code assigns one end-of-day balance to every payment of the same day.
+
+Expected 19.09 math:
+opening 7248.21
+13:56:25 +125.37 = 7373.58
+19:47:04 +626.85 = 8000.43
+
+Previous one-payment days looked correct only because a single payment's running balance equals the day closing balance.
+
+Goal
+Implement the running balance exactly like a spreadsheet:
+- start from the day's opening balance (InCome);
+- sort ALL conducted account movements by the same occurredAt timestamp already used for statement rows;
+- credit => add Amount;
+- debit => subtract Amount;
+- after each incoming payment, store the current running balance for that payment;
+- at the end, the calculated balance must equal the day closing balance;
+- if it does not match, leave balances for that day null instead of inventing values.
+
+Current day
+GetAccountExtract may not provide current OutCome.
+Preserve existing behavior:
+- opening comes from GetAccountExtract InCome;
+- today's closing is overridden by GetAccountRest.available_balance.
+
+No reverse reconstruction.
+No Created-vs-Changed ordering proof.
+No new API calls.
+No schema changes.
+
+Timestamp
+Use the exact same event timestamp logic already used by receipt rows:
+- Changed when valid;
+- fallback Created.
+The balance calculation and displayed row therefore use the same occurredAt value.
+
+Exact scope
+Only:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Do NOT touch:
+- NovaPay auth / token rotation / circuit breaker
+- full-sync lock
+- cron / pg_net timeout
+- Vault
+- bank_payment_events schema or dedupe logic
+- email notification logic
+- Prom / marketplaces
+- Monobank
+- Android
+- AGENTS.md
+- unrelated formatting/refactors
+
+Important worktree rule
+The old auxiliary worktree where Patch 124 was applied locally is dirty and must NOT be reused as-is.
+Use a fresh clean auxiliary worktree based on current origin/main, e.g.:
+C:\Users\Вадим\Documents\CRM-specmarket-p125
+Do not touch the user's main working tree.
+Do not delete or alter the Patch 124 worktree unless explicitly needed; just leave it alone.
+
+Preflight
+1. git fetch origin
+2. Create/use a fresh clean detached worktree at origin/main.
+3. Verify:
+   git rev-parse HEAD
+   git rev-parse origin/main
+   Both must equal:
+   b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+   If main advanced: STOP and report.
+4. Verify:
+   git rev-parse HEAD:supabase/functions/novapay-data/index.ts
+   Must equal:
+   3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+5. Confirm these helper files do not already exist:
+   supabase/functions/_shared/novapay-running-balance.ts
+   supabase/functions/_shared/novapay-running-balance_test.ts
+6. Fetch origin/chatgpt-patches:125.patch byte-for-byte.
+7. Verify SHA-256:
+   6db3e8d3443df5f6bd21f5da6368116337943967ca00ce8b0e1bd9b198d8002b
+8. Run:
+   git apply --check 125.patch
+   If FAIL: STOP.
+9. Apply unchanged.
+10. Inspect real git diff and changed-file list.
+    Exactly the three declared files.
+11. Run:
+    git diff --check
+
+Focused regression test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+Expected exit code 0.
+
+The test must prove:
+1. Production case:
+   - 18.09 +1248.72 -> 7248.21
+   - 19.09 13:56 +125.37 -> 7373.58
+   - 19.09 19:47 +626.85 -> 8000.43
+2. Debit-between-credits:
+   opening 1000
+   10:00 +100 -> 1100
+   11:00 -50 -> 1050
+   12:00 +200 -> 1250
+3. Final mismatch:
+   if calculated day close != authoritative close, all calculated balances for that day remain null.
+4. updated-payments path reuses the full-statement balance by provider alias.
+
+Review gate before commit
+Confirm explicitly:
+- all conducted statement documents participate in running balance math;
+- only incoming receipts are displayed/saved as receipts;
+- running balance starts from InCome;
+- credits add, debits subtract;
+- movements are sorted ascending by the same occurredAt used for displayed payment time;
+- after each incoming movement its current balance is stored;
+- end-of-day result must equal OutCome/current available balance;
+- no auth/dedupe/cron/lock behavior changed;
+- no reverse-math code from 122-124 remains.
+
+Project checks
+No broad autofix.
+Target formatting only on the three changed files.
+
+Run:
+- node supabase/functions/_shared/novapay-running-balance_test.ts
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint reports only the existing unrelated monobank-webhook no-explicit-any baseline, report it and do not modify that file.
+
+Commit / push / deploy
+Only after every check PASS:
+1. Commit exactly the three files.
+2. Push to main through existing GitHub SSH only.
+3. No migration.
+4. Deploy ONLY novapay-data.
+5. Do not deploy novapay-balance or unrelated functions.
+
+Production smoke
+After deploy, trigger exactly one NovaPay refresh.
+
+Verify:
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- top account balance remains current GetAccountRest.available_balance
+
+Also verify:
+- no duplicate payment event/email was generated by the refresh;
+- cron remains active;
+- no auth/circuit-breaker error appeared.
+
+If production values are null or incorrect:
+STOP and report the exact statement movements/times/opening/closing used.
+Do not add further fallback math automatically.
+
+Report
+- actual base/main SHA
+- base index blob
+- patch blob + SHA-256
+- git apply --check
+- exact changed files
+- focused test
+- review-gate confirmations
+- type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production statement balances
+- top account balance
