@@ -3,7 +3,7 @@ PATCH 120 — NovaPay cron: allow scheduled secret through Edge gateway
 Repository: tionTools/specmarket
 Patch branch: chatgpt-patches
 Patch file: 120.patch
-Patch SHA-256: 6decf4b8d8a6cc984037a6bf875642cdd84432fb729afdfb56216d189c7159d2
+Patch SHA-256: e68412dc841ea9e5ec17ef0d8113f2b367a46b019237be04625a31ed932608f2
 Published patch blob SHA: a3052143f21ac63e964a2e983fea180a5d191cf5
 
 Base at preparation time
@@ -68,7 +68,7 @@ Preflight:
    Otherwise STOP and report; do not rewrite or force-apply.
 7. Fetch 120.patch byte-for-byte from origin/chatgpt-patches.
 8. Verify SHA-256:
-   6decf4b8d8a6cc984037a6bf875642cdd84432fb729afdfb56216d189c7159d2
+   e68412dc841ea9e5ec17ef0d8113f2b367a46b019237be04625a31ed932608f2
 9. Run:
    git apply --check 120.patch
    If FAIL — STOP.
