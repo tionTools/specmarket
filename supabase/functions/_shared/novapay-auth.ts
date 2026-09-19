@@ -77,6 +77,13 @@ async function acquireRotationLock(admin: NovaPayAdmin, owner: string) {
       lock_owner: owner,
       lease_seconds: LOCK_LEASE_SECONDS,
     })
+    if (error?.code === 'NP002') {
+      throw new NovaPayAuthError(
+        409,
+        'NOVAPAY_AUTH_RECOVERY_REQUIRED',
+        'NovaPay authorization is blocked. Install a fresh credential pair and manually reset the recovery flag.',
+      )
+    }
     if (error)
       throw new NovaPayAuthError(
         500,
@@ -166,6 +173,14 @@ export async function getValidNovaPayJwt({
         'Failed to read NovaPay authorization state.',
       )
 
+    if (data.novapay_auth_uncertain === true) {
+      throw new NovaPayAuthError(
+        409,
+        'NOVAPAY_AUTH_RECOVERY_REQUIRED',
+        'NovaPay authorization is blocked after an uncertain rotation. Install a fresh credential pair and manually reset the recovery flag.',
+      )
+    }
+
     const jwt = text(data.jwt)
     const tokenExpiry = jwtExpiryMs(jwt)
     const storedExpiryText = text(data.jwt_expires_at)
@@ -185,6 +200,19 @@ export async function getValidNovaPayJwt({
     }
     console.info('NovaPay JWT rotation started.')
     await logCredentialFingerprints('input', authState)
+    // Arm durably before sending a single-use credential. Only an atomic save or manual recovery clears it.
+    try {
+      const { error: beginError } = await admin.rpc('begin_novapay_auth_rotation', {
+        lock_owner: owner,
+      })
+      if (beginError) throw beginError
+    } catch {
+      throw new NovaPayAuthError(
+        503,
+        'NOVAPAY_AUTH_GUARD_FAILED',
+        'Could not confirm the persistent authorization guard. NovaPay was not contacted; check recovery state before trying again.',
+      )
+    }
     const result = (await authenticateOnce(authenticate, authState)) as Record<
       string,
       unknown

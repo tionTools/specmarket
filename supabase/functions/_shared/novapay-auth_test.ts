@@ -37,11 +37,154 @@ Deno.test('NovaPay auth XML preserves returned credentials through the next SOAP
 const jwt = (exp: number) =>
   `x.${btoa(JSON.stringify({ exp })).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')}.x`
 
+Deno.test('uncertain persists across invocations until manual recovery; success clears guard', async () => {
+  let state: Record<string, unknown> = {
+    refresh_token: 'old',
+    public_certificate: 'old',
+    novapay_auth_uncertain: false,
+  }
+  let calls = 0
+  let begins = 0
+  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
+  const admin = {
+    rpc: async (name: string, args?: Record<string, string>) => {
+      if (
+        name === 'acquire_novapay_rotation_lock_owned' ||
+        name === 'release_novapay_rotation_lock'
+      )
+        return { data: true }
+      if (name === 'get_novapay_auth_state') return { data: { ...state } }
+      if (name === 'begin_novapay_auth_rotation') {
+        begins++
+        state.novapay_auth_uncertain = true
+        return { data: null }
+      }
+      if (name === 'save_novapay_auth_state_owned') {
+        state = {
+          refresh_token: args!.new_refresh_token,
+          public_certificate: args!.new_public_certificate,
+          jwt: args!.new_jwt,
+          novapay_auth_uncertain: false,
+        }
+        return { data: null }
+      }
+      throw new Error(name)
+    },
+  }
+  await getValidNovaPayJwt({
+    admin,
+    authenticate: async () => {
+      calls++
+      if (state.novapay_auth_uncertain !== true) throw new Error('guard not durable before request')
+      throw new NovaPayTransportError('response lost')
+    },
+  })
+    .then(() => {
+      throw new Error('uncertain accepted')
+    })
+    .catch((error) => {
+      if (error.code !== 'NOVAPAY_AUTH_UNCERTAIN') throw error
+    })
+  if (state.novapay_auth_uncertain !== true) throw new Error('uncertain flag not persisted')
+  // Even a cached valid JWT must not bypass recovery.
+  state.jwt = nextJwt
+  await getValidNovaPayJwt({
+    admin,
+    authenticate: async () => {
+      calls++
+      return {}
+    },
+  })
+    .then(() => {
+      throw new Error('recovery bypassed')
+    })
+    .catch((error) => {
+      if (error.code !== 'NOVAPAY_AUTH_RECOVERY_REQUIRED') throw error
+    })
+  if (calls !== 1 || begins !== 1) throw new Error('blocked invocation contacted NovaPay')
+  // Model the administrator installing a fresh pair and invoking the SQL reset.
+  state = { refresh_token: 'fresh', public_certificate: 'fresh', novapay_auth_uncertain: false }
+  const result = await getValidNovaPayJwt({
+    admin,
+    authenticate: async (credentials) => {
+      calls++
+      if (credentials.refreshToken !== 'fresh') throw new Error('old pair reused')
+      return { jwt: nextJwt, refresh_token: 'returned', public_certificate: 'returned' }
+    },
+  })
+  if (result !== nextJwt || state.novapay_auth_uncertain !== false)
+    throw new Error('successful rotation left guard set')
+  await getValidNovaPayJwt({
+    admin,
+    authenticate: async () => {
+      throw new Error('unnecessary auth')
+    },
+  })
+  if (Number(calls) !== 2 || Number(begins) !== 2)
+    throw new Error('manual recovery did not restore normal flow')
+})
+
+Deno.test('guard write failure prevents any NovaPay request', async () => {
+  let calls = 0
+  const admin = {
+    rpc: async (name: string) => {
+      if (
+        name === 'acquire_novapay_rotation_lock_owned' ||
+        name === 'release_novapay_rotation_lock'
+      )
+        return { data: true }
+      if (name === 'get_novapay_auth_state')
+        return {
+          data: { refresh_token: 'old', public_certificate: 'old', novapay_auth_uncertain: false },
+        }
+      if (name === 'begin_novapay_auth_rotation')
+        return { error: { message: 'database unavailable' } }
+      throw new Error(name)
+    },
+  }
+  await getValidNovaPayJwt({
+    admin,
+    authenticate: async () => {
+      calls++
+      return {}
+    },
+  })
+    .then(() => {
+      throw new Error('guard failure ignored')
+    })
+    .catch((error) => {
+      if (error.code !== 'NOVAPAY_AUTH_GUARD_FAILED') throw error
+    })
+  if (calls !== 0) throw new Error('NovaPay contacted without persistent guard')
+})
+
+Deno.test('database circuit breaker denies lock with recovery-required error', async () => {
+  const admin = {
+    rpc: async (name: string) => {
+      if (name === 'acquire_novapay_rotation_lock_owned') return { error: { code: 'NP002' } }
+      throw new Error('blocked invocation continued')
+    },
+  }
+  await getValidNovaPayJwt({
+    admin,
+    authenticate: async () => {
+      throw new Error('NovaPay contacted')
+    },
+  })
+    .then(() => {
+      throw new Error('database guard bypassed')
+    })
+    .catch((error) => {
+      if (error.code !== 'NOVAPAY_AUTH_RECOVERY_REQUIRED') throw error
+    })
+})
+
 Deno.test('reuses a valid shared NovaPay JWT without authenticating', async () => {
   let authenticated = 0
   const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (name === 'acquire_novapay_rotation_lock_owned') return { data: true }
       if (name === 'release_novapay_rotation_lock') return { data: true }
       if (name === 'get_novapay_auth_state')
@@ -66,6 +209,7 @@ Deno.test('uses JWT exp when stored expiry is empty', async () => {
   const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -92,6 +236,7 @@ Deno.test('authenticates once then saves shared state', async () => {
   const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string, args?: Record<string, string>) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -129,6 +274,7 @@ Deno.test('does not continue when saving credentials fails twice', async () => {
   const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -163,6 +309,7 @@ Deno.test('retries a transient credential save failure without re-authenticating
   const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string, args?: Record<string, string>) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -203,6 +350,7 @@ Deno.test('does not retry logical NovaPay API errors during JWT rotation', async
   })
   const admin = {
     rpc: async (name: string) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -234,6 +382,7 @@ Deno.test('rejects rotated credentials with unknown JWT expiry before saving', a
   let saved = 0
   const admin = {
     rpc: async (name: string) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (
         name === 'acquire_novapay_rotation_lock_owned' ||
         name === 'release_novapay_rotation_lock'
@@ -275,6 +424,7 @@ for (const failure of [
     let released = false
     const admin = {
       rpc: async (name: string) => {
+        if (name === 'begin_novapay_auth_rotation') return { data: null }
         if (name === 'acquire_novapay_rotation_lock_owned') return { data: true }
         if (name === 'get_novapay_auth_state')
           return { data: { refresh_token: 'old', public_certificate: 'old' } }
@@ -307,6 +457,7 @@ Deno.test('lost lock prevents save retry and carries acquisition owner to save',
   let saves = 0
   const admin = {
     rpc: async (name: string, args?: Record<string, string>) => {
+      if (name === 'begin_novapay_auth_rotation') return { data: null }
       if (name === 'acquire_novapay_rotation_lock_owned') {
         owner = args!.lock_owner
         return { data: true }
@@ -352,6 +503,7 @@ Deno.test('waits past old lock deadline, rereads state and has a bounded busy ex
     const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
     const admin = {
       rpc: async (name: string) => {
+        if (name === 'begin_novapay_auth_rotation') return { data: null }
         if (name === 'acquire_novapay_rotation_lock_owned') return { data: ++attempts === 81 }
         if (name === 'release_novapay_rotation_lock') return { data: true }
         if (name === 'get_novapay_auth_state') return { data: { jwt: validJwt } }
@@ -393,6 +545,7 @@ for (const downstreamFailure of ['GetPaymentsList', 'cache write']) {
     const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
     const admin = {
       rpc: async (name: string, args?: Record<string, string>) => {
+        if (name === 'begin_novapay_auth_rotation') return { data: null }
         if (
           name === 'acquire_novapay_rotation_lock_owned' ||
           name === 'release_novapay_rotation_lock'
