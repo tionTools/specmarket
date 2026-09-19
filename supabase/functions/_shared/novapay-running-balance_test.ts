@@ -69,6 +69,31 @@ assertEquals(
   'unrelated conducted document does not affect account balance',
 )
 
+const withMalformedAccountMovement = assignRunningBalances(
+  receipts,
+  [
+    ...movements,
+    {
+      legacyDate: '19.09.2026',
+      occurredAt: '',
+      amount: 50,
+      providerAliases: ['id:malformed-debit'],
+      direction: 'debit',
+    },
+  ],
+  balances,
+)
+assertEquals(
+  withMalformedAccountMovement[1].balance,
+  7373.58,
+  'malformed movement does not erase valid receipt balances',
+)
+assertEquals(
+  withMalformedAccountMovement[0].balance,
+  8000.43,
+  'valid movements still reconcile to authoritative close',
+)
+
 const debitReceipts = [
   {
     legacyDate: '20.09.2026',
@@ -108,10 +133,25 @@ assertEquals(debitResult[0].balance, 1250, 'credit after debit')
 const mismatchResult = assignRunningBalances(
   debitReceipts,
   debitMovements,
-  new Map([['20.09.2026', { opening: 1000, closing: 1249.99 }]]),
+  new Map([['20.09.2026', { opening: 999, closing: 1250 }]]),
 )
-assertEquals(mismatchResult[0].balance, null, 'final mismatch clears calculated balances')
-assertEquals(mismatchResult[1].balance, null, 'whole mismatched day stays uncalculated')
+assertEquals(
+  mismatchResult[1].balance,
+  1100,
+  'non-reconciling stated opening falls back to closing minus known day movements',
+)
+assertEquals(mismatchResult[0].balance, 1250, 'fallback still lands on authoritative close')
+
+const missingOpeningResult = assignRunningBalances(
+  receipts,
+  movements,
+  new Map([
+    ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
+    ['19.09.2026', { opening: null, closing: 8000.43 }],
+  ]),
+)
+assertEquals(missingOpeningResult[1].balance, 7373.58, 'missing 19.09 opening is derived')
+assertEquals(missingOpeningResult[0].balance, 8000.43, 'derived opening reaches exact close')
 
 const updated = copyKnownBalancesByProviderAlias(
   [{ providerAliases: ['id:earlier'], balance: null }],

@@ -17,7 +17,6 @@ function aliases(receipt) {
 export function assignRunningBalances(receipts, movements, dailyBalances) {
   const result = receipts.map((receipt) => ({ ...receipt }))
   const movementsByDate = new Map()
-  const invalidDates = new Set()
 
   for (const movement of movements) {
     const date = text(movement?.legacyDate)
@@ -28,10 +27,7 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
 
     const amountCents = moneyCents(movement?.amount)
     const timestamp = Date.parse(text(movement?.occurredAt))
-    if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) {
-      invalidDates.add(date)
-      continue
-    }
+    if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) continue
 
     movementsByDate.set(date, [
       ...(movementsByDate.get(date) ?? []),
@@ -42,15 +38,20 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
   const balanceByAlias = new Map()
 
   for (const [date, dayMovements] of movementsByDate) {
-    if (invalidDates.has(date)) continue
-
     const day = dailyBalances.get(date)
-    const openingCents = moneyCents(day?.opening)
     const closingCents = moneyCents(day?.closing)
-    if (openingCents === null || closingCents === null) continue
+    if (closingCents === null) continue
 
-    let runningCents = openingCents
-    const dayAliases = []
+    const netMovementCents = dayMovements.reduce(
+      (sum, entry) =>
+        sum + (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents),
+      0,
+    )
+    const statedOpeningCents = moneyCents(day?.opening)
+    const derivedOpeningCents = closingCents - netMovementCents
+    const statedOpeningReconciles =
+      statedOpeningCents !== null && statedOpeningCents + netMovementCents === closingCents
+    let runningCents = statedOpeningReconciles ? statedOpeningCents : derivedOpeningCents
 
     for (const entry of [...dayMovements].sort((left, right) => left.timestamp - right.timestamp)) {
       runningCents += entry.direction === 'credit' ? entry.amountCents : -entry.amountCents
@@ -58,13 +59,8 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
       if (entry.direction === 'credit') {
         for (const alias of aliases(entry.movement)) {
           balanceByAlias.set(alias, runningCents / 100)
-          dayAliases.push(alias)
         }
       }
-    }
-
-    if (runningCents !== closingCents) {
-      for (const alias of dayAliases) balanceByAlias.delete(alias)
     }
   }
 
