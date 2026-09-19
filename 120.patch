@@ -1,0 +1,15 @@
+diff --git a/supabase/config.toml b/supabase/config.toml
+--- a/supabase/config.toml
++++ b/supabase/config.toml
+@@ -386,8 +386,11 @@ verify_jwt = false
+ [functions.monobank-webhook]
+ verify_jwt = false
+ 
+ [functions.send-order-label-email]
+ verify_jwt = false
+ 
++[functions.novapay-data]
++verify_jwt = false
++
+ [edge_runtime]
+ enabled = true
