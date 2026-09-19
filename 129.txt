@@ -1,0 +1,100 @@
+PATCH 129 — NovaPay running balance anchored to current account balance
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 129.patch
+Patch SHA-256: 295bdc57ca86693e2edb26cc5873a3bb3625926c6e58bf29343143b4057f593e
+Published patch blob SHA: 6bd0dafc3957c898d8383b9585b661ef718f36c3
+
+Expected base main:
+141a3da659099e573524a0929f8a8791f9b70de9
+
+Expected base blobs:
+- supabase/functions/novapay-data/index.ts
+  7d37456154b2d4a123708a9e84df6711f0bba351
+- supabase/functions/_shared/novapay-running-balance.ts
+  396add5e20b093a09fe2758a00fae3f1af02b763
+- supabase/functions/_shared/novapay-running-balance_test.ts
+  45a7d6b267de2557f12ec417a858c4eadd1bf927
+
+Purpose
+Stop depending on GetAccountExtract opening/closing for per-payment balances.
+The current account balance is already authoritative and available as GetAccountRest.available_balance.
+The 7-day GetPaymentsList already supplies all conducted movements needed to reconstruct balances for rows inside that same window.
+
+Algorithm
+Start from current account balance and walk all valid account movements backwards in time:
+- current balance = balance after the newest movement;
+- newest credit: store current balance for that receipt, then subtract its amount;
+- newest debit: add its amount back;
+- continue backwards.
+
+For production:
+current = 8000.43
+reverse +626.85 => that receipt balance 8000.43; previous running 7373.58
+reverse +125.37 => that receipt balance 7373.58; previous running 7248.21
+reverse +1248.72 => that receipt balance 7248.21
+
+This uses ALL valid credit/debit movements, including debits not displayed in the incoming-only table.
+
+Matching
+Prefer provider ID/UETR aliases.
+If NovaPay does not expose an alias for a receipt, fallback match uses:
+- legacyDate
+- occurredAt
+- amount
+This prevents a valid receipt from staying null only because ID/UETR is absent.
+
+Scope
+Exactly:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Do not touch auth, cron, locks, Vault, dedupe, email, schema/migrations, Monobank, marketplaces, Android.
+
+Important
+No diagnostics patch.
+No GetAccountExtract-derived per-row math.
+No daily opening/closing is required by assignRunningBalances after this patch.
+The existing GetAccountExtract call is left in place for minimal scope, but it no longer controls row balances.
+
+Preflight
+- origin/main must be exactly 141a3da659099e573524a0929f8a8791f9b70de9
+- verify the three base blobs above
+- verify patch SHA-256
+- git apply --check must PASS
+- exact changed files must be the three listed files
+
+Focused test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+The test covers:
+- production 19.09 values 7373.58 / 8000.43
+- 18.09 value 7248.21
+- debit between credits
+- unknown conducted documents ignored
+- malformed movement ignored
+- missing provider aliases matched by date/time/amount fallback
+- updated path fallback without provider alias
+
+Standard checks
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+Known unrelated monobank-webhook no-explicit-any lint baseline may remain.
+
+Commit / push / deploy
+After PASS:
+- commit only the three changed files
+- SSH push main
+- deploy only novapay-data:
+  npx.cmd -y supabase@2.114.0 functions deploy novapay-data --project-ref rtkhgldaswsclkorlyxx --no-verify-jwt
+- one NovaPay refresh
+
+Expected production
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
