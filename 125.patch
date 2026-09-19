@@ -1,0 +1,339 @@
+diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/functions/_shared/novapay-running-balance.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-running-balance.ts
+@@ -0,0 +1,98 @@
++function text(value) {
++  return typeof value === 'string' ? value.trim() : ''
++}
++
++function moneyCents(value) {
++  if (value === null || value === undefined) return null
++  if (typeof value === 'string' && value.trim() === '') return null
++  const number = Number(value)
++  return Number.isFinite(number) ? Math.round(number * 100) : null
++}
++
++function aliases(receipt) {
++  if (!Array.isArray(receipt?.providerAliases)) return []
++  return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
++}
++
++export function assignRunningBalances(receipts, movements, dailyBalances) {
++  const result = receipts.map((receipt) => ({ ...receipt }))
++  const movementsByDate = new Map()
++  const invalidDates = new Set()
++
++  for (const movement of movements) {
++    const date = text(movement?.legacyDate)
++    if (!date) continue
++
++    const amountCents = moneyCents(movement?.amount)
++    const timestamp = Date.parse(text(movement?.occurredAt))
++    const direction = movement?.direction
++    if (
++      amountCents === null ||
++      amountCents <= 0 ||
++      !Number.isFinite(timestamp) ||
++      (direction !== 'credit' && direction !== 'debit')
++    ) {
++      invalidDates.add(date)
++      continue
++    }
++
++    movementsByDate.set(date, [
++      ...(movementsByDate.get(date) ?? []),
++      { movement, amountCents, timestamp, direction },
++    ])
++  }
++
++  const balanceByAlias = new Map()
++
++  for (const [date, dayMovements] of movementsByDate) {
++    if (invalidDates.has(date)) continue
++
++    const day = dailyBalances.get(date)
++    const openingCents = moneyCents(day?.opening)
++    const closingCents = moneyCents(day?.closing)
++    if (openingCents === null || closingCents === null) continue
++
++    let runningCents = openingCents
++    const dayAliases = []
++
++    for (const entry of [...dayMovements].sort((left, right) => left.timestamp - right.timestamp)) {
++      runningCents += entry.direction === 'credit' ? entry.amountCents : -entry.amountCents
++
++      if (entry.direction === 'credit') {
++        for (const alias of aliases(entry.movement)) {
++          balanceByAlias.set(alias, runningCents / 100)
++          dayAliases.push(alias)
++        }
++      }
++    }
++
++    if (runningCents !== closingCents) {
++      for (const alias of dayAliases) balanceByAlias.delete(alias)
++    }
++  }
++
++  return result.map((receipt) => {
++    for (const alias of aliases(receipt)) {
++      if (balanceByAlias.has(alias)) {
++        return { ...receipt, balance: balanceByAlias.get(alias) }
++      }
++    }
++    return receipt
++  })
++}
++
++export function copyKnownBalancesByProviderAlias(receipts, statementReceipts) {
++  const balanceByAlias = new Map()
++  for (const receipt of statementReceipts) {
++    const balance = receipt?.balance
++    if (typeof balance !== 'number' || !Number.isFinite(balance)) continue
++    for (const alias of aliases(receipt)) balanceByAlias.set(alias, balance)
++  }
++
++  return receipts.map((receipt) => {
++    for (const alias of aliases(receipt)) {
++      if (balanceByAlias.has(alias)) return { ...receipt, balance: balanceByAlias.get(alias) }
++    }
++    return receipt
++  })
++}
+diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-running-balance_test.ts
+@@ -0,0 +1,95 @@
++import {
++  assignRunningBalances,
++  copyKnownBalancesByProviderAlias,
++} from './novapay-running-balance.ts'
++
++function assertEquals(actual, expected, message) {
++  if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
++}
++
++const balances = new Map([
++  ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
++  ['19.09.2026', { opening: 7248.21, closing: 8000.43 }],
++])
++
++const receipts = [
++  {
++    legacyDate: '19.09.2026',
++    occurredAt: '2026-09-19T16:47:04.000Z',
++    amount: 626.85,
++    balance: null,
++    providerAliases: ['id:later'],
++  },
++  {
++    legacyDate: '19.09.2026',
++    occurredAt: '2026-09-19T10:56:25.000Z',
++    amount: 125.37,
++    balance: null,
++    providerAliases: ['id:earlier'],
++  },
++  {
++    legacyDate: '18.09.2026',
++    occurredAt: '2026-09-18T16:55:54.000Z',
++    amount: 1248.72,
++    balance: null,
++    providerAliases: ['id:previous-day'],
++  },
++]
++
++const movements = receipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
++
++const result = assignRunningBalances(receipts, movements, balances)
++
++assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
++assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
++assertEquals(result[2].balance, 7248.21, '18.09 receipt')
++
++const debitReceipts = [
++  {
++    legacyDate: '20.09.2026',
++    occurredAt: '2026-09-20T12:00:00.000Z',
++    amount: 200,
++    balance: null,
++    providerAliases: ['id:credit-2'],
++  },
++  {
++    legacyDate: '20.09.2026',
++    occurredAt: '2026-09-20T10:00:00.000Z',
++    amount: 100,
++    balance: null,
++    providerAliases: ['id:credit-1'],
++  },
++]
++const debitMovements = [
++  { ...debitReceipts[1], direction: 'credit' },
++  {
++    legacyDate: '20.09.2026',
++    occurredAt: '2026-09-20T11:00:00.000Z',
++    amount: 50,
++    providerAliases: ['id:debit'],
++    direction: 'debit',
++  },
++  { ...debitReceipts[0], direction: 'credit' },
++]
++const debitResult = assignRunningBalances(
++  debitReceipts,
++  debitMovements,
++  new Map([['20.09.2026', { opening: 1000, closing: 1250 }]]),
++)
++
++assertEquals(debitResult[1].balance, 1100, 'credit before debit')
++assertEquals(debitResult[0].balance, 1250, 'credit after debit')
++
++const mismatchResult = assignRunningBalances(
++  debitReceipts,
++  debitMovements,
++  new Map([['20.09.2026', { opening: 1000, closing: 1249.99 }]]),
++)
++assertEquals(mismatchResult[0].balance, null, 'final mismatch clears calculated balances')
++assertEquals(mismatchResult[1].balance, null, 'whole mismatched day stays uncalculated')
++
++const updated = copyKnownBalancesByProviderAlias(
++  [{ providerAliases: ['id:earlier'], balance: null }],
++  result,
++)
++assertEquals(updated[0].balance, 7373.58, 'updated path reuses statement balance')
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -5,6 +5,10 @@ import {
+   NovaPayAuthError,
+   NovaPayTransportError,
+ } from '../_shared/novapay-auth.ts'
++import {
++  assignRunningBalances,
++  copyKnownBalancesByProviderAlias,
++} from '../_shared/novapay-running-balance.ts'
+ 
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
+@@ -254,8 +258,11 @@ function parseExtractDayBalances(rawXml) {
+   for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
+     const statement = normalizeXmlRecord(day)
+     const date = pick(statement, 'Date')
+-    const balance = optionalNumber(pick(statement, 'OutCome', 'MainOutCome'))
+-    if (date && balance !== null) balances.set(date, balance)
++    if (!date) continue
++    balances.set(date, {
++      opening: optionalNumber(pick(statement, 'InCome', 'MainInCome')),
++      closing: optionalNumber(pick(statement, 'OutCome', 'MainOutCome')),
++    })
+   }
+   return balances
+ }
+@@ -320,7 +327,7 @@ function parseNovaDateTime(value) {
+   }
+ }
+ 
+-function extractReceipt(document, dailyBalances = new Map()) {
++function extractReceipt(document) {
+   const amount = optionalNumber(
+     pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
+   )
+@@ -347,7 +354,7 @@ function extractReceipt(document, dailyBalances = new Map()) {
+     occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
+     description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
+     amount,
+-    balance: dailyBalances.get(paymentDate) ?? null,
++    balance: null,
+     comment: pick(document, 'Purpose', 'Comment', 'Description'),
+     legacyDate: paymentDate,
+     legacyCreatedDate: createdAt?.date ?? '',
+@@ -358,6 +365,36 @@ function extractReceipt(document, dailyBalances = new Map()) {
+   }
+ }
+ 
++function extractAccountMovement(document, accountIban) {
++  const amount = optionalNumber(
++    pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
++  )
++  const changedAt = parseNovaDateTime(pick(document, 'Changed'))
++  const createdAt = parseNovaDateTime(pick(document, 'Created'))
++  const eventDateTime = changedAt ?? createdAt
++  const paymentDate = pick(document, 'DayDate', 'OrgDate', 'PaymentDate', 'Date', 'date')
++  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
++  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
++  const providerId = pick(document, 'ID', 'id')
++  const uetr = pick(document, 'UETR')
++  const providerAliases = [providerId ? `id:${providerId}` : '', uetr ? `uetr:${uetr}` : ''].filter(
++    Boolean,
++  )
++
++  return {
++    legacyDate: paymentDate,
++    occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
++    amount,
++    providerAliases,
++    direction:
++      creditIban === accountIban && debitIban !== accountIban
++        ? 'credit'
++        : debitIban === accountIban && creditIban !== accountIban
++          ? 'debit'
++          : 'unknown',
++  }
++}
++
+ function kyivDateTimeParts(utcMs) {
+   const parts = new Intl.DateTimeFormat('en-CA', {
+     timeZone: 'Europe/Kyiv',
+@@ -955,7 +992,11 @@ Deno.serve(async (request) => {
+       true,
+     )
+     const dailyBalances = parseExtractDayBalances(extractResult.extract)
+-    dailyBalances.set(dateTo, available)
++    const todayBalances = dailyBalances.get(dateTo) ?? { opening: null, closing: null }
++    dailyBalances.set(dateTo, {
++      ...todayBalances,
++      closing: available,
++    })
+     const statementPaymentsResult = await soapCall(
+       'GetPaymentsList',
+       {
+@@ -986,21 +1027,31 @@ Deno.serve(async (request) => {
+     const statementIncomingDocuments = statementConductedDocuments.filter((document) =>
+       isIncomingPaymentDocument(document, accountIban),
+     )
+-    const receipts = sortReceiptsNewestFirst(
+-      statementIncomingDocuments
+-        .map((document) => extractReceipt(document, dailyBalances))
+-        .filter((receipt) => receipt !== null),
++    const statementMovements = statementConductedDocuments.map((document) =>
++      extractAccountMovement(document, accountIban),
++    )
++    const receipts = assignRunningBalances(
++      sortReceiptsNewestFirst(
++        statementIncomingDocuments
++          .map((document) => extractReceipt(document))
++          .filter((receipt) => receipt !== null),
++      ),
++      statementMovements,
++      dailyBalances,
+     )
+ 
+     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
+     const updatedConductedDocuments = updatedDocuments.filter(isConductedPaymentDocument)
+     const updatedIncomingDocuments = updatedConductedDocuments.filter((document) =>
+       isIncomingPaymentDocument(document, accountIban),
+     )
+-    const updatedReceipts = sortReceiptsNewestFirst(
+-      updatedIncomingDocuments
+-        .map((document) => extractReceipt(document, dailyBalances))
+-        .filter((receipt) => receipt !== null),
++    const updatedReceipts = copyKnownBalancesByProviderAlias(
++      sortReceiptsNewestFirst(
++        updatedIncomingDocuments
++          .map((document) => extractReceipt(document))
++          .filter((receipt) => receipt !== null),
++      ),
++      receipts,
+     )
+ 
+     const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
