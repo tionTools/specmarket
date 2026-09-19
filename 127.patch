@@ -1,0 +1,59 @@
+diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/functions/_shared/novapay-running-balance.ts
+--- a/supabase/functions/_shared/novapay-running-balance.ts
++++ b/supabase/functions/_shared/novapay-running-balance.ts
+@@ -23,15 +23,12 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
+     const date = text(movement?.legacyDate)
+     if (!date) continue
+ 
++    const direction = movement?.direction
++    if (direction !== 'credit' && direction !== 'debit') continue
++
+     const amountCents = moneyCents(movement?.amount)
+     const timestamp = Date.parse(text(movement?.occurredAt))
+-    const direction = movement?.direction
+-    if (
+-      amountCents === null ||
+-      amountCents <= 0 ||
+-      !Number.isFinite(timestamp) ||
+-      (direction !== 'credit' && direction !== 'debit')
+-    ) {
++    if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) {
+       invalidDates.add(date)
+       continue
+     }
+diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supabase/functions/_shared/novapay-running-balance_test.ts
+--- a/supabase/functions/_shared/novapay-running-balance_test.ts
++++ b/supabase/functions/_shared/novapay-running-balance_test.ts
+@@ -44,6 +44,32 @@ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
+ assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
+ assertEquals(result[2].balance, 7248.21, '18.09 receipt')
+ 
++
++const withUnrelatedConductedDocument = assignRunningBalances(
++  receipts,
++  [
++    ...movements,
++    {
++      legacyDate: '19.09.2026',
++      occurredAt: '2026-09-19T15:00:00.000Z',
++      amount: 999,
++      providerAliases: ['id:unrelated'],
++      direction: 'unknown',
++    },
++  ],
++  balances,
++)
++assertEquals(
++  withUnrelatedConductedDocument[1].balance,
++  7373.58,
++  'unrelated conducted document does not invalidate the account day',
++)
++assertEquals(
++  withUnrelatedConductedDocument[0].balance,
++  8000.43,
++  'unrelated conducted document does not affect account balance',
++)
++
+ const debitReceipts = [
+   {
+     legacyDate: '20.09.2026',
