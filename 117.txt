@@ -1,0 +1,101 @@
+PATCH 117 — NovaPay returned certificate XML entity decoding
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 117.patch
+Patch SHA-256: fd89aca55908e1b47d0d03fafd3a247bc1e926de1b135234bc43b74aae096733
+Expected base main: 1fb251857849190c24f9a92fe8cadca1561002ca
+
+Goal
+Fix the reproducible NovaPay JWT rotation failure where:
+1. production successfully authenticates with a fresh UI-generated refresh_token/public_certificate pair;
+2. NovaPay returns a new refresh_token/public_certificate pair;
+3. production stores that returned pair and stored fingerprints match response fingerprints;
+4. after forcing JWT renewal immediately, NovaPay rejects the stored returned pair with:
+   logic_error — Access Denied! Refresh token does not apply to login
+5. the independent PowerShell XML client can use a NovaPay-returned pair successfully even after ~596 minutes.
+
+Working hypothesis
+Production parses UserAuthenticationJWT SOAP XML with fast-xml-parser@5.11.1. The current parser does not enable htmlEntities. NovaPay/WCF may encode PEM line breaks as numeric XML character references. If those references remain literal text, response/stored fingerprints still match each other, but the persisted certificate is not the certificate NovaPay issued. PowerShell [xml] decodes XML character references, matching the observed difference.
+
+Patch 117 changes only the parser used for UserAuthenticationJWT responses in:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/novapay-balance/index.ts
+
+It leaves all other NovaPay XML parsing unchanged.
+
+IMPORTANT — narrow review only
+This is a fresh Codex/Astra branch and model budget is limited. DO NOT scan or reread the whole repository.
+
+Start only with these NovaPay/payment-auth files:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/novapay-balance/index.ts
+- supabase/functions/_shared/novapay-auth.ts
+- supabase/functions/_shared/novapay-auth_test.ts
+
+Only if needed to understand persistence/locking, inspect:
+- supabase/migrations/20260916190000_novapay_rotation_lock.sql
+- supabase/migrations/20260916220000_novapay_auth_session.sql
+
+Do not inspect unrelated frontend, marketplace, Android, delivery, reconciliation, or other project areas.
+
+Astra review allowance
+Before applying, spend a small amount of reasoning on the NovaPay auth path only. Check whether Patch 117 is logically consistent with the current code and the failure sequence above.
+
+If you find a concrete defect in Patch 117 or a clearly more correct minimal fix, you MAY adjust it, but only inside the NovaPay auth/payment scope above. Keep the change minimal. Do not redesign the auth system. Report exactly what you changed and why.
+
+If the hypothesis cannot be supported from the narrow NovaPay context, STOP and report the exact contradiction instead of inventing a broad fix.
+
+Required workflow
+1. Fetch current main.
+2. Confirm HEAD/main base. Expected when this instruction was published:
+   1fb251857849190c24f9a92fe8cadca1561002ca
+   If main has advanced, rebase/re-evaluate Patch 117 against the new main before applying.
+3. Retrieve 117.patch byte-for-byte from branch chatgpt-patches.
+4. Verify SHA-256:
+   fd89aca55908e1b47d0d03fafd3a247bc1e926de1b135234bc43b74aae096733
+5. Run git apply --check 117.patch.
+6. Apply Patch 117.
+7. Inspect the real git diff.
+8. Confirm scope. Expected changed production files are only:
+   - supabase/functions/novapay-data/index.ts
+   - supabase/functions/novapay-balance/index.ts
+   A targeted NovaPay test file may be changed only if Astra adds a necessary regression test.
+9. Run git diff --check.
+10. Run the normal project checks available in this repo. Do not fix unrelated pre-existing lint problems.
+11. If any required validation fails, STOP. Do not improvise unrelated changes.
+
+Deployment workflow
+After successful checks:
+- commit;
+- push to main using the existing GitHub SSH configuration only;
+- never switch to HTTPS;
+- never launch browser GitHub auth;
+- never create new credentials;
+- deploy only Supabase Edge Functions:
+  - novapay-data
+  - novapay-balance
+- do not change Vault secrets;
+- do not change NovaPay token blocks;
+- do not enable/modify cron;
+- do not touch migrations unless a concrete blocker is found and reported before changing scope.
+
+Post-deploy test is manual
+Do NOT regenerate NovaPay production tokens or mutate Vault automatically.
+The user will perform the live two-step validation:
+fresh production pair -> first authorization -> returned pair saved -> clear JWT/expiry -> immediate second authorization.
+Success criterion: the immediate second UserAuthenticationJWT accepts the returned pair.
+
+Report
+- base/main SHA;
+- whether Patch 117 was applied unchanged or adjusted;
+- patch SHA-256;
+- exact changed files;
+- git apply --check result;
+- git diff --check result;
+- typecheck/lint/build/test results;
+- commit SHA;
+- SSH push result;
+- novapay-data deploy result;
+- novapay-balance deploy result;
+- any remaining uncertainty.
