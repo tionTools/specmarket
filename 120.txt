@@ -1,0 +1,138 @@
+PATCH 120 — NovaPay cron: allow scheduled secret through Edge gateway
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 120.patch
+Patch SHA-256: 6decf4b8d8a6cc984037a6bf875642cdd84432fb729afdfb56216d189c7159d2
+Published patch blob SHA: a3052143f21ac63e964a2e983fea180a5d191cf5
+
+Base at preparation time
+- origin/main: e5c206675a0c7e3e22389f7639013aafd1088c12
+- supabase/config.toml blob: a3977266f55db8e1802ad9764ed5507342675f61
+
+Context
+Patch 119 is being prepared separately for Prom order-status/completion UI and must not be mixed into this task.
+Current NovaPay cron job 21 is active and pg_cron itself succeeds at :00/:15/:30/:45.
+Observed scheduled HTTP response at 2026-09-19 13:00 UTC:
+- HTTP 401
+- code: UNAUTHORIZED_INVALID_JWT_FORMAT
+- message: Invalid JWT
+bank_account_cache for novapay remained at 2026-09-19 12:44:23.146+00.
+
+Root cause
+invoke_crm_novapay_sync() sends the Vault value crm_sync_cron_secret as:
+Authorization: Bearer <cron-secret>
+
+novapay-data intentionally accepts this secret inside the function and distinguishes it from a normal user JWT. However Supabase Edge gateway currently has JWT verification enabled for novapay-data, so the gateway rejects the opaque cron secret as an invalid JWT before novapay-data code runs.
+
+Goal
+Disable only the gateway JWT parser for novapay-data so the scheduled secret reaches the function. Do NOT weaken application-level authorization:
+- scheduled requests are still accepted only when Authorization exactly equals Bearer <crm_sync_cron_secret>;
+- all other requests still call auth.getUser() and reject unauthenticated/guest users.
+
+Exact scope
+Only:
+- supabase/config.toml
+
+Required change
+Add:
+[functions.novapay-data]
+verify_jwt = false
+
+Do NOT change:
+- novapay-data source code;
+- NovaPay auth/rotation/circuit breaker;
+- full-sync lock;
+- cron SQL or schedule;
+- Vault secrets;
+- Prom/Patch 119 files;
+- any other Edge Function configuration;
+- AGENTS.md or unrelated files.
+
+Concurrency with Patch 119
+Patch 120 was prepared while Patch 119 was still in progress. Do not force-apply against an unknown changed main.
+
+Preflight:
+1. git fetch origin.
+2. Use a clean auxiliary worktree; do not touch the user's dirty main worktree.
+3. Record actual origin/main SHA.
+4. Verify the current blob:
+   git rev-parse origin/main:supabase/config.toml
+   It MUST equal:
+   a3977266f55db8e1802ad9764ed5507342675f61
+5. If origin/main is still e5c206675a0c7e3e22389f7639013aafd1088c12, continue.
+6. If main advanced because Patch 119 landed first, continue ONLY if:
+   - e5c206675a0c7e3e22389f7639013aafd1088c12 is an ancestor of origin/main;
+   - supabase/config.toml blob is still exactly the SHA above;
+   - git diff from e5c206... to origin/main shows no change to supabase/config.toml.
+   Otherwise STOP and report; do not rewrite or force-apply.
+7. Fetch 120.patch byte-for-byte from origin/chatgpt-patches.
+8. Verify SHA-256:
+   6decf4b8d8a6cc984037a6bf875642cdd84432fb729afdfb56216d189c7159d2
+9. Run:
+   git apply --check 120.patch
+   If FAIL — STOP.
+10. Apply patch.
+11. Verify real git diff: exactly one file, supabase/config.toml.
+12. Run:
+   git diff --check
+
+Required checks
+Because this is config-only, do not run broad auto-fixes. Run the project's normal non-mutating checks where applicable:
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint shows only an already-known unrelated baseline issue in monobank-webhook, report it exactly; do not modify unrelated code.
+
+Deployment
+Only after checks pass:
+1. Commit Patch 120.
+2. Push main only through the existing GitHub SSH configuration.
+3. Deploy ONLY novapay-data.
+4. Ensure deployment uses verify_jwt=false from supabase/config.toml. Do not deploy other functions.
+5. Do not alter cron job 21, schedule, Vault, auth tokens, or NovaPay credentials.
+
+Post-deploy verification
+Do not wait for the next quarter-hour; perform one controlled scheduled invocation:
+  select public.invoke_crm_novapay_sync();
+
+Then verify the corresponding pg_net response. It must no longer be:
+  401 UNAUTHORIZED_INVALID_JWT_FORMAT
+
+Expected successful response shape from novapay-data:
+  {"ok":true,"refreshed":true,"bank":"novapay",...}
+
+Also verify:
+  select bank, updated_at
+  from public.bank_account_cache
+  where bank = 'novapay';
+
+updated_at must advance after the controlled invocation.
+
+Finally verify cron remains exactly one active job:
+  select jobid, jobname, schedule, active
+  from cron.job
+  where jobname = 'crm-sync-novapay';
+
+Expected: one active job; currently jobid 21, schedule */15 * * * *.
+
+Security smoke test
+Confirm a normal manual CRM NovaPay refresh still works after gateway verification is disabled. The function itself must continue enforcing authenticated non-guest users.
+
+Report
+- actual base/main SHA;
+- config.toml blob before apply;
+- patch SHA-256;
+- git apply --check;
+- exact changed files;
+- type-check/lint/build/diff-check;
+- commit SHA;
+- SSH push result;
+- novapay-data deploy result/version;
+- controlled invoke request id;
+- pg_net HTTP status/content;
+- bank_account_cache updated_at before/after;
+- cron job row;
+- manual CRM refresh result.
