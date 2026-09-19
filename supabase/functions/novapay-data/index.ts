@@ -1040,7 +1040,7 @@ Deno.serve(async (request) => {
           .filter((receipt) => receipt !== null),
       ),
       statementMovements,
-      dailyBalances,
+      available,
     )
 
     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)

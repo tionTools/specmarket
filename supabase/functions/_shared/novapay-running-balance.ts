@@ -14,14 +14,31 @@ function aliases(receipt) {
   return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
 }
 
-export function assignRunningBalances(receipts, movements, dailyBalances) {
+function receiptKey(value) {
+  const date = text(value?.legacyDate)
+  const occurredAt = text(value?.occurredAt)
+  const amountCents = moneyCents(value?.amount)
+  if (!date || !occurredAt || amountCents === null) return ''
+  return [date, occurredAt, amountCents].join('\u0000')
+}
+
+function addIndex(map, key, index) {
+  if (!key) return
+  map.set(key, [...(map.get(key) ?? []), index])
+}
+
+function firstUnassigned(indexes, assigned) {
+  if (!Array.isArray(indexes)) return null
+  return indexes.find((index) => !assigned.has(index)) ?? null
+}
+
+export function assignRunningBalances(receipts, movements, currentBalance) {
   const result = receipts.map((receipt) => ({ ...receipt }))
-  const movementsByDate = new Map()
+  const currentCents = moneyCents(currentBalance)
+  if (currentCents === null) return result
 
+  const validMovements = []
   for (const movement of movements) {
-    const date = text(movement?.legacyDate)
-    if (!date) continue
-
     const direction = movement?.direction
     if (direction !== 'credit' && direction !== 'debit') continue
 
@@ -29,63 +46,63 @@ export function assignRunningBalances(receipts, movements, dailyBalances) {
     const timestamp = Date.parse(text(movement?.occurredAt))
     if (amountCents === null || amountCents <= 0 || !Number.isFinite(timestamp)) continue
 
-    movementsByDate.set(date, [
-      ...(movementsByDate.get(date) ?? []),
-      { movement, amountCents, timestamp, direction },
-    ])
+    validMovements.push({ movement, amountCents, timestamp, direction })
   }
 
-  const balanceByAlias = new Map()
+  const receiptIndexesByAlias = new Map()
+  const receiptIndexesByKey = new Map()
+  for (let index = 0; index < result.length; index += 1) {
+    const receipt = result[index]
+    for (const alias of aliases(receipt)) addIndex(receiptIndexesByAlias, alias, index)
+    addIndex(receiptIndexesByKey, receiptKey(receipt), index)
+  }
 
-  for (const [date, dayMovements] of movementsByDate) {
-    const day = dailyBalances.get(date)
-    const closingCents = moneyCents(day?.closing)
-    if (closingCents === null) continue
+  const assigned = new Set()
+  let runningCents = currentCents
 
-    const netMovementCents = dayMovements.reduce(
-      (sum, entry) =>
-        sum + (entry.direction === 'credit' ? entry.amountCents : -entry.amountCents),
-      0,
-    )
-    const statedOpeningCents = moneyCents(day?.opening)
-    const derivedOpeningCents = closingCents - netMovementCents
-    const statedOpeningReconciles =
-      statedOpeningCents !== null && statedOpeningCents + netMovementCents === closingCents
-    let runningCents = statedOpeningReconciles ? statedOpeningCents : derivedOpeningCents
-
-    for (const entry of [...dayMovements].sort((left, right) => left.timestamp - right.timestamp)) {
-      runningCents += entry.direction === 'credit' ? entry.amountCents : -entry.amountCents
-
-      if (entry.direction === 'credit') {
-        for (const alias of aliases(entry.movement)) {
-          balanceByAlias.set(alias, runningCents / 100)
-        }
+  for (const entry of validMovements.sort((left, right) => right.timestamp - left.timestamp)) {
+    if (entry.direction === 'credit') {
+      let receiptIndex = null
+      for (const alias of aliases(entry.movement)) {
+        receiptIndex = firstUnassigned(receiptIndexesByAlias.get(alias), assigned)
+        if (receiptIndex !== null) break
       }
+      if (receiptIndex === null) {
+        receiptIndex = firstUnassigned(
+          receiptIndexesByKey.get(receiptKey(entry.movement)),
+          assigned,
+        )
+      }
+      if (receiptIndex !== null) {
+        result[receiptIndex] = { ...result[receiptIndex], balance: runningCents / 100 }
+        assigned.add(receiptIndex)
+      }
+      runningCents -= entry.amountCents
+    } else {
+      runningCents += entry.amountCents
     }
   }
 
-  return result.map((receipt) => {
-    for (const alias of aliases(receipt)) {
-      if (balanceByAlias.has(alias)) {
-        return { ...receipt, balance: balanceByAlias.get(alias) }
-      }
-    }
-    return receipt
-  })
+  return result
 }
 
 export function copyKnownBalancesByProviderAlias(receipts, statementReceipts) {
   const balanceByAlias = new Map()
+  const balanceByKey = new Map()
   for (const receipt of statementReceipts) {
     const balance = receipt?.balance
     if (typeof balance !== 'number' || !Number.isFinite(balance)) continue
     for (const alias of aliases(receipt)) balanceByAlias.set(alias, balance)
+    const key = receiptKey(receipt)
+    if (key) balanceByKey.set(key, balance)
   }
 
   return receipts.map((receipt) => {
     for (const alias of aliases(receipt)) {
       if (balanceByAlias.has(alias)) return { ...receipt, balance: balanceByAlias.get(alias) }
     }
+    const key = receiptKey(receipt)
+    if (key && balanceByKey.has(key)) return { ...receipt, balance: balanceByKey.get(key) }
     return receipt
   })
 }

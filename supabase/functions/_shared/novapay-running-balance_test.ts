@@ -7,11 +7,6 @@ function assertEquals(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
 }
 
-const balances = new Map([
-  ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
-  ['19.09.2026', { opening: 7248.21, closing: 8000.43 }],
-])
-
 const receipts = [
   {
     legacyDate: '19.09.2026',
@@ -37,12 +32,18 @@ const receipts = [
 ]
 
 const movements = receipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
-
-const result = assignRunningBalances(receipts, movements, balances)
+const result = assignRunningBalances(receipts, movements, 8000.43)
 
 assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
 assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
 assertEquals(result[2].balance, 7248.21, '18.09 receipt')
+
+const noAliasReceipts = receipts.map((receipt) => ({ ...receipt, providerAliases: [] }))
+const noAliasMovements = noAliasReceipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
+const noAliasResult = assignRunningBalances(noAliasReceipts, noAliasMovements, 8000.43)
+assertEquals(noAliasResult[0].balance, 8000.43, 'fallback match without provider alias')
+assertEquals(noAliasResult[1].balance, 7373.58, 'fallback earlier match without provider alias')
+assertEquals(noAliasResult[2].balance, 7248.21, 'fallback previous-day match without provider alias')
 
 const withUnrelatedConductedDocument = assignRunningBalances(
   receipts,
@@ -56,42 +57,17 @@ const withUnrelatedConductedDocument = assignRunningBalances(
       direction: 'unknown',
     },
   ],
-  balances,
+  8000.43,
 )
 assertEquals(
   withUnrelatedConductedDocument[1].balance,
   7373.58,
-  'unrelated conducted document does not invalidate the account day',
+  'unrelated conducted document does not affect running balance',
 )
 assertEquals(
   withUnrelatedConductedDocument[0].balance,
   8000.43,
-  'unrelated conducted document does not affect account balance',
-)
-
-const withMalformedAccountMovement = assignRunningBalances(
-  receipts,
-  [
-    ...movements,
-    {
-      legacyDate: '19.09.2026',
-      occurredAt: '',
-      amount: 50,
-      providerAliases: ['id:malformed-debit'],
-      direction: 'debit',
-    },
-  ],
-  balances,
-)
-assertEquals(
-  withMalformedAccountMovement[1].balance,
-  7373.58,
-  'malformed movement does not erase valid receipt balances',
-)
-assertEquals(
-  withMalformedAccountMovement[0].balance,
-  8000.43,
-  'valid movements still reconcile to authoritative close',
+  'unrelated conducted document does not affect latest balance',
 )
 
 const debitReceipts = [
@@ -121,40 +97,29 @@ const debitMovements = [
   },
   { ...debitReceipts[0], direction: 'credit' },
 ]
-const debitResult = assignRunningBalances(
-  debitReceipts,
-  debitMovements,
-  new Map([['20.09.2026', { opening: 1000, closing: 1250 }]]),
-)
-
+const debitResult = assignRunningBalances(debitReceipts, debitMovements, 1250)
 assertEquals(debitResult[1].balance, 1100, 'credit before debit')
 assertEquals(debitResult[0].balance, 1250, 'credit after debit')
 
-const mismatchResult = assignRunningBalances(
-  debitReceipts,
-  debitMovements,
-  new Map([['20.09.2026', { opening: 999, closing: 1250 }]]),
-)
-assertEquals(
-  mismatchResult[1].balance,
-  1100,
-  'non-reconciling stated opening falls back to closing minus known day movements',
-)
-assertEquals(mismatchResult[0].balance, 1250, 'fallback still lands on authoritative close')
-
-const missingOpeningResult = assignRunningBalances(
+const withMalformedMovement = assignRunningBalances(
   receipts,
-  movements,
-  new Map([
-    ['18.09.2026', { opening: 5999.49, closing: 7248.21 }],
-    ['19.09.2026', { opening: null, closing: 8000.43 }],
-  ]),
+  [
+    ...movements,
+    {
+      legacyDate: '19.09.2026',
+      occurredAt: '',
+      amount: 50,
+      providerAliases: ['id:malformed'],
+      direction: 'debit',
+    },
+  ],
+  8000.43,
 )
-assertEquals(missingOpeningResult[1].balance, 7373.58, 'missing 19.09 opening is derived')
-assertEquals(missingOpeningResult[0].balance, 8000.43, 'derived opening reaches exact close')
+assertEquals(withMalformedMovement[1].balance, 7373.58, 'malformed movement is ignored')
+assertEquals(withMalformedMovement[0].balance, 8000.43, 'valid latest balance remains')
 
 const updated = copyKnownBalancesByProviderAlias(
-  [{ providerAliases: ['id:earlier'], balance: null }],
-  result,
+  [{ ...noAliasReceipts[1], balance: null }],
+  noAliasResult,
 )
-assertEquals(updated[0].balance, 7373.58, 'updated path reuses statement balance')
+assertEquals(updated[0].balance, 7373.58, 'updated path also falls back without provider alias')
