@@ -1,0 +1,265 @@
+PATCH 124 — NovaPay: exact per-payment running balance with completeness + ordering safeguards
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 124.patch
+Patch SHA-256: f65de288b9a54bae94299122bed594b067f4a0594eb67056749deecfe790cfab
+Published patch blob SHA: 87105c3fe492b44752292b4e0aaa93b25ba7dd9e
+
+Expected base main:
+b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+
+Expected base blob:
+- supabase/functions/novapay-data/index.ts
+  3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+
+Supersedes
+- Patch 122: BLOCKED because it ignored intervening debits.
+- Patch 123: BLOCKED because the published patch was syntactically corrupt and because missing aggregate fields were incorrectly coerced to zero.
+
+Patch 124 is a fresh patch generated from an exact scratch commit against the expected base, not a hand-edited continuation of Patch 123.
+
+Production regression
+Current wrong statement on 19.09.2026 assigns one day-close balance to both receipts.
+
+Expected:
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+
+Required debit scenario:
+- opening 1000
+- +100 -> 1100
+- -50 -> 1050
+- +200 -> 1250
+- closing 1250
+
+The earlier +100 receipt must be 1100.
+
+Official NovaPay facts used by the algorithm
+GetAccountExtract day summary provides:
+- InCome = opening balance
+- DebitAmount = total debits/write-offs
+- CreditAmount = total credits/incoming
+- OutCome = closing balance
+
+GetPaymentsList provides conducted payment documents with:
+- ID for conducted payments
+- DayDate = posting date
+- DebitCodeIBAN / CreditCodeIBAN
+- Amount
+- Created
+- Changed
+- UETR when available
+
+Changed is documented as last-change datetime; Created is creation datetime. Neither is documented as a formal account-ledger sequence number.
+
+Therefore Patch 124 does NOT blindly trust one timestamp. It calculates a day only when Created and Changed independently imply the same strict ordering of all account movements.
+
+Correctness algorithm
+
+1. GetAccountExtract is parsed into day summaries:
+   opening / debitTotal / creditTotal / closing.
+
+2. Missing or invalid aggregate values remain null.
+   IMPORTANT: null / undefined / blank strings MUST NOT become numeric zero.
+
+3. Today's closing balance is still overridden by the fresh
+   GetAccountRest.available_balance, preserving existing behavior.
+
+4. Use ALL conducted statement GetPaymentsList(date_type=0) documents for balance math:
+   not only incoming/displayed receipts.
+
+5. Classify every conducted document:
+   credit when CreditCodeIBAN == account IBAN and DebitCodeIBAN != account IBAN;
+   debit when DebitCodeIBAN == account IBAN and CreditCodeIBAN != account IBAN;
+   otherwise unknown.
+
+6. Every movement must have:
+   - a date;
+   - a positive amount;
+   - known direction;
+   - valid Created datetime;
+   - valid Changed datetime.
+
+7. Validate the daily aggregate identity:
+   opening + creditTotal - debitTotal == closing
+   using integer cents.
+
+8. Validate movement completeness:
+   sum(all credit movements) == CreditAmount
+   sum(all debit movements) == DebitAmount
+
+9. Validate ordering:
+   - Changed timestamps are unique;
+   - Created timestamps are unique;
+   - sorting all movements by Changed gives exactly the same movement order as sorting by Created.
+
+If the two documented timestamps disagree on movement order, Patch 124 refuses to invent a balance for that day.
+
+10. For a fully validated day:
+    start from closing and reverse every movement newest -> oldest:
+    - credit +A: balance after it is current running balance; reverse by subtracting A;
+    - debit -A: reverse by adding A.
+
+11. After reverse traversal, the reconstructed balance must equal opening.
+    Otherwise discard all calculated balances for that day.
+
+12. Only incoming/displayed receipts receive the calculated balance, matched by provider ID/UETR alias.
+
+13. The partial updated-payments path does not calculate balances independently.
+    It reuses balances from the validated full statement by provider alias.
+
+Fail-safe rule
+If completeness, aggregate identity, timestamp validity, timestamp uniqueness, timestamp-order agreement, movement direction, or final opening-balance check fails:
+- balance stays null for that day.
+- NEVER fall back to one day-close value for every same-day receipt.
+- NEVER guess.
+
+Exact scope
+Only:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/_shared/novapay-running-balance.ts
+- supabase/functions/_shared/novapay-running-balance_test.ts
+
+Do NOT touch:
+- NovaPay auth / rotation / circuit breaker
+- full-sync lock
+- cron / pg_net timeout
+- Vault
+- notification/dedupe state machine
+- DB schema/migrations
+- Prom / other marketplaces
+- Monobank
+- Android
+- AGENTS.md
+- unrelated formatting/refactors
+
+Preflight
+1. Work only in a clean auxiliary SpecMarket worktree.
+2. Do not touch the user's dirty main worktree.
+3. git fetch origin
+4. Verify:
+   git rev-parse origin/main
+   Must equal:
+   b31bffb23ecc0f7c41baf09b5e7cd93be56707ca
+   If main advanced: STOP and report.
+5. Verify:
+   git rev-parse origin/main:supabase/functions/novapay-data/index.ts
+   Must equal:
+   3cf1ee6f3cbf9676ec4e7daf4456cdcc0a0acd6e
+6. Confirm these files do not already exist in base:
+   supabase/functions/_shared/novapay-running-balance.ts
+   supabase/functions/_shared/novapay-running-balance_test.ts
+7. Fetch origin/chatgpt-patches:124.patch byte-for-byte.
+8. Verify SHA-256:
+   f65de288b9a54bae94299122bed594b067f4a0594eb67056749deecfe790cfab
+9. Run:
+   git apply --check 124.patch
+   If FAIL: STOP. Do not edit patch manually.
+10. Apply patch unchanged.
+11. Inspect real diff and changed-file list.
+    Exactly the three files above.
+12. git diff --check
+
+Focused regression test
+Run:
+  node supabase/functions/_shared/novapay-running-balance_test.ts
+
+Expected exit code 0.
+
+The test must explicitly cover:
+- production 19.09 values 8000.43 / 7373.58
+- 18.09 value 7248.21
+- debit between credits -> earlier +100 gets 1100
+- missing aggregate fields remain null and are NOT coerced to zero
+- aggregate totals mismatch -> null
+- duplicate Changed timestamp -> null
+- Created/Changed ordering disagreement -> null
+- missing one of the two timestamps -> null
+- updated-payments path reuses full-statement balance
+
+Astra independent review gate
+Before formatting/commit, independently review Patch 124 for mathematical/data-completeness holes.
+
+In particular answer explicitly:
+1. Can any missing/null aggregate value be converted to 0?
+   Expected: no.
+2. Can an intervening debit be omitted while the day still passes completeness checks?
+   Expected: no, because GetPaymentsList movement totals must equal GetAccountExtract DebitAmount/CreditAmount.
+3. Can differing Created and Changed order silently produce a balance?
+   Expected: no.
+4. Can same-second movement order be guessed?
+   Expected: no.
+5. Can partial updatedPaymentsResult independently derive balance?
+   Expected: no.
+6. Does top account balance still come from GetAccountRest.available_balance?
+   Expected: yes.
+7. Are dedupe/eventKnown/auth/cron/full-sync lock untouched?
+   Expected: yes.
+
+If any correctness blocker remains:
+STOP and report.
+Do not redesign or modify the published patch without agreement.
+
+Project checks
+No broad auto-fix.
+Use targeted formatting only on the three changed files.
+
+Run:
+- node supabase/functions/_shared/novapay-running-balance_test.ts
+- pnpm type-check
+- pnpm lint
+- pnpm build
+- git diff --check
+
+If lint reports only the known unrelated monobank-webhook no-explicit-any baseline:
+report it; do not touch that file.
+
+Before commit:
+- git status --short
+- git diff --stat
+- git diff
+- verify only declared scope
+- verify no formatter churn
+
+Commit / push
+Only after every check and Astra review PASS:
+1. Commit exactly the three files.
+2. SSH push to main only.
+3. No migration.
+4. Deploy ONLY novapay-data.
+5. Do not deploy novapay-balance or unrelated functions.
+
+Production verification
+After deploy, run exactly one NovaPay refresh.
+
+Verify:
+- 19.09.2026 19:47:04 +626.85 -> 8000.43
+- 19.09.2026 13:56:25 +125.37 -> 7373.58
+- 18.09.2026 19:55:54 +1248.72 -> 7248.21
+- top NovaPay account balance remains current GetAccountRest.available_balance
+
+If 19.09 becomes balance=null because live aggregate/order safeguards reject the day:
+STOP and report exact diagnostics.
+Do not relax safeguards automatically.
+
+Also verify:
+- automatic cron remains active;
+- no auth/circuit-breaker errors;
+- no duplicate payment email/event was generated by the refresh.
+
+Report
+- actual base/main SHA
+- index.ts base blob
+- patch blob + SHA-256
+- git apply --check
+- exact changed files
+- focused test
+- answers to 7 Astra review questions
+- format/type-check/lint/build/diff-check
+- commit SHA
+- SSH push
+- novapay-data deploy result/version
+- production statement values
+- top account balance
