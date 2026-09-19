@@ -3,7 +3,7 @@ PATCH 117 — NovaPay returned certificate XML entity decoding
 Repository: tionTools/specmarket
 Patch branch: chatgpt-patches
 Patch file: 117.patch
-Patch SHA-256: fd89aca55908e1b47d0d03fafd3a247bc1e926de1b135234bc43b74aae096733
+Patch SHA-256: a13abbccb03e85af5ba0391dd9e70385c75de4a469658f0350b34037c7576a2e
 Expected base main: 1fb251857849190c24f9a92fe8cadca1561002ca
 
 Goal
@@ -53,7 +53,7 @@ Required workflow
    If main has advanced, rebase/re-evaluate Patch 117 against the new main before applying.
 3. Retrieve 117.patch byte-for-byte from branch chatgpt-patches.
 4. Verify SHA-256:
-   fd89aca55908e1b47d0d03fafd3a247bc1e926de1b135234bc43b74aae096733
+   a13abbccb03e85af5ba0391dd9e70385c75de4a469658f0350b34037c7576a2e
 5. Run git apply --check 117.patch.
 6. Apply Patch 117.
 7. Inspect the real git diff.
