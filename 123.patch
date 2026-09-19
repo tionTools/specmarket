@@ -262,7 +262,18 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
 +  const createdAt = parseNovaDateTime(pick(document, 'Created'))
 +  const eventDateTime = changedAt ?? createdAt
 +  const amount = optionalNumber(
-+    pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
++    pick(
++      document,
++      'Amount',
++      'CrncyCredit',
++      'CreditAmount',
++      'Credit',
++      'SumCredit',
++      'CrncyDebit',
++      'DebitAmount',
++      'Debit',
++      'SumDebit',
++    ),
 +  )
 +  const debitIban = normalizeIban(pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN'))
 +  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
