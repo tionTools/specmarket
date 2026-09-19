@@ -1,0 +1,134 @@
+PATCH 118 — NovaPay full refresh synchronization lock
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 118.patch
+Patch SHA-256: e0f32feede7bfdf3c85fd1f7f4a0a216b7c7a7becd96312aebb4639c074eb690
+Expected base main: 067595a8cda3b752785097e93bc1e084449cbec2
+Expected base blob:
+- supabase/functions/novapay-data/index.ts
+  c462a260ae360ff7c91a9686044c95d705d04c6b
+
+Context
+The previous NovaPay auth/circuit-breaker task is complete and already in production. Do NOT reopen or redesign auth in this task.
+Natural production refresh after the JWT lifetime also passed.
+Cron remains disabled.
+
+Goal
+Prevent overlapping full novapay-data refreshes, especially:
+- cron + manual refresh;
+- cron + cron;
+- manual + manual.
+
+The auth rotation lock is NOT a full-sync lock and must not be repurposed.
+
+Patch behavior
+1. Adds a dedicated public.novapay_full_sync_lock singleton and service-role-only RPCs:
+   - acquire_novapay_full_sync_lock
+   - renew_novapay_full_sync_lock
+   - release_novapay_full_sync_lock
+2. novapay-data acquires the full-sync lock before auth/API work and re-reads the cache after acquisition.
+3. Lease is 600 seconds.
+4. Before payment-event/cache writes, ownership is renewed. If ownership was lost or expired, the invocation stops with NOVAPAY_SYNC_LOCK_LOST before the stale cache write.
+5. A scheduled request that finds another full sync running returns a successful skipped response:
+   refreshed=false, skipped=sync_busy.
+6. A manual refresh that finds another full sync running returns NOVAPAY_SYNC_BUSY (409).
+7. Release is owner-checked and runs in finally. A stale owner cannot release a newer owner's lock.
+8. Cron is NOT enabled by this patch.
+
+Exact scope
+Only these three files may change:
+- supabase/functions/novapay-data/index.ts
+- supabase/functions/_shared/novapay-full-sync-lock_test.sql
+- supabase/migrations/20260919140000_novapay_full_sync_lock.sql
+
+Do NOT touch:
+- novapay-auth.ts or auth migrations;
+- novapay-balance;
+- Vault values/tokens/certificates;
+- cron schedule or enable_crm_novapay_sync();
+- frontend, Android, marketplaces;
+- AGENTS.md;
+- unrelated lint/baseline issues.
+
+Required preflight
+1. Fetch current origin/main.
+2. Working tree must be clean.
+3. Confirm main HEAD.
+   Expected base:
+   067595a8cda3b752785097e93bc1e084449cbec2
+4. If main has advanced, STOP and report; do not force-apply this patch.
+5. Fetch 118.patch byte-for-byte from origin/chatgpt-patches.
+6. Verify SHA-256:
+   e0f32feede7bfdf3c85fd1f7f4a0a216b7c7a7becd96312aebb4639c074eb690
+7. Confirm the base blob of novapay-data/index.ts:
+   c462a260ae360ff7c91a9686044c95d705d04c6b
+8. Run:
+   git apply --check 118.patch
+   If it fails, STOP.
+9. Apply 118.patch.
+10. Inspect the real git diff and changed-file list. Scope must be exactly the three files above.
+11. Run git diff --check.
+
+Required tests/checks
+- Run the new SQL regression only against the disposable local database novapay_auth_test:
+  supabase/functions/_shared/novapay-full-sync-lock_test.sql
+- The SQL regression must confirm:
+  - first owner acquires;
+  - concurrent owner is rejected;
+  - current owner renews;
+  - expired owner cannot renew;
+  - new owner can acquire after expiry;
+  - stale owner cannot release the new owner's lock;
+  - anon/authenticated cannot execute lock RPCs.
+- Run changed-file formatting/checks without broad auto-fixes.
+- Run normal project checks:
+  - type-check;
+  - build;
+  - oxlint;
+  - eslint without --fix;
+  - git diff --check.
+- Do not fix unrelated existing ESLint failures. The previously known monobank-webhook baseline error is outside scope.
+
+Deployment
+Only after all patch checks pass:
+1. Create/verify a fresh production DB backup before applying the migration.
+2. Confirm NovaPay cron jobs are still 0.
+3. Do not trigger a manual NovaPay refresh during the migration/deploy window.
+4. Commit.
+5. Push main using the existing GitHub SSH configuration only.
+   - no HTTPS;
+   - no browser authentication;
+   - no new credentials.
+6. Apply migration:
+   supabase/migrations/20260919140000_novapay_full_sync_lock.sql
+7. Deploy ONLY:
+   novapay-data
+8. Do not deploy novapay-balance; Patch 118 does not change it.
+9. Keep cron disabled.
+
+Post-deploy verification
+Read-only verification only:
+- novapay_full_sync_lock row exists;
+- owner_id is null when idle;
+- locked_until is expired/-infinity when idle;
+- the three lock RPCs exist with intended privileges;
+- novapay-data shows a new deployed version;
+- NovaPay cron jobs remain 0.
+
+Do NOT run artificial production concurrency against NovaPay and do not change Vault/auth credentials.
+
+Report
+- actual base/main SHA;
+- patch SHA-256 verification;
+- git apply --check result;
+- exact changed files;
+- SQL regression result;
+- format/type-check/build/oxlint/eslint/diff-check results;
+- backup path;
+- commit SHA;
+- SSH push result;
+- migration result;
+- novapay-data deploy result/version;
+- final idle lock state;
+- confirmation that cron remains disabled.
