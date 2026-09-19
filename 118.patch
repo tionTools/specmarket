@@ -168,7 +168,7 @@ diff --git a/supabase/migrations/20260919140000_novapay_full_sync_lock.sql b/sup
 new file mode 100644
 --- /dev/null
 +++ b/supabase/migrations/20260919140000_novapay_full_sync_lock.sql
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,104 @@
 +create table public.novapay_full_sync_lock (
 +  lock_name text primary key check (lock_name = 'full-sync'),
 +  owner_id uuid,
@@ -203,7 +203,6 @@ new file mode 100644
 +    and (
 +      owner_id is null
 +      or locked_until <= clock_timestamp()
-+      or owner_id = lock_owner
 +    )
 +  returning true into acquired;
 +
