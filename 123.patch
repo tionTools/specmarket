@@ -2,7 +2,7 @@ diff --git a/supabase/functions/_shared/novapay-running-balance.ts b/supabase/fu
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/_shared/novapay-running-balance.ts
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,142 @@
 +function text(value) {
 +  return typeof value === 'string' ? value.trim() : ''
 +}
@@ -17,7 +17,26 @@ new file mode 100644
 +  return [...new Set(receipt.providerAliases.map(text).filter(Boolean))]
 +}
 +
-+export function assignBalancesFromAllMovements(receipts, movements, dailyClosingBalances) {
++function summaryCents(summary) {
++  if (!summary) return null
++  const opening = moneyCents(summary.opening)
++  const debitTotal = moneyCents(summary.debitTotal)
++  const creditTotal = moneyCents(summary.creditTotal)
++  const closing = moneyCents(summary.closing)
++  if (
++    opening === null ||
++    debitTotal === null ||
++    creditTotal === null ||
++    closing === null ||
++    debitTotal < 0 ||
++    creditTotal < 0
++  )
++    return null
++  if (opening + creditTotal - debitTotal !== closing) return null
++  return { opening, debitTotal, creditTotal, closing }
++}
++
++export function assignBalancesFromAllMovements(receipts, movements, daySummaries) {
 +  const result = receipts.map((receipt) => ({ ...receipt }))
 +  const movementsByDate = new Map()
 +  const invalidDates = new Set()
@@ -49,16 +68,32 @@ new file mode 100644
 +    ])
 +  }
 +
-+  // If an account-affecting movement cannot even be tied to a date, no day can
-+  // be proven complete. Prefer no historical balance to a fabricated one.
++  // An undated account movement cannot be assigned to a day, so the completeness
++  // of every daily movement set is unknown. Prefer no balances to fabricated ones.
 +  if (hasUndatedInvalidMovement) return result
 +
 +  const balanceByAlias = new Map()
 +  for (const [date, dayMovements] of movementsByDate) {
 +    if (invalidDates.has(date)) continue
 +
-+    const closingCents = moneyCents(dailyClosingBalances.get(date))
-+    if (closingCents === null) continue
++    const summary = summaryCents(daySummaries.get(date))
++    if (!summary) continue
++
++    let movementDebitCents = 0
++    let movementCreditCents = 0
++    for (const entry of dayMovements) {
++      if (entry.direction === 'credit') movementCreditCents += entry.amountCents
++      else movementDebitCents += entry.amountCents
++    }
++
++    // GetAccountExtract is the authoritative daily aggregate. If GetPaymentsList
++    // does not account for every debit and credit, exact per-payment balances
++    // cannot be reconstructed safely.
++    if (
++      movementDebitCents !== summary.debitTotal ||
++      movementCreditCents !== summary.creditTotal
++    )
++      continue
 +
 +    const ordered = [...dayMovements].sort((left, right) => right.timestamp - left.timestamp)
 +    const duplicateTimestamp = ordered.some(
@@ -66,7 +101,7 @@ new file mode 100644
 +    )
 +    if (duplicateTimestamp) continue
 +
-+    let balanceAfterCents = closingCents
++    let balanceAfterCents = summary.closing
 +    for (const entry of ordered) {
 +      if (entry.direction === 'credit') {
 +        for (const alias of aliases(entry.movement)) {
@@ -75,6 +110,12 @@ new file mode 100644
 +        balanceAfterCents -= entry.amountCents
 +      } else {
 +        balanceAfterCents += entry.amountCents
++      }
++    }
++
++    if (balanceAfterCents !== summary.opening) {
++      for (const entry of ordered) {
++        for (const alias of aliases(entry.movement)) balanceByAlias.delete(alias)
 +      }
 +    }
 +  }
@@ -108,7 +149,7 @@ diff --git a/supabase/functions/_shared/novapay-running-balance_test.ts b/supaba
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/_shared/novapay-running-balance_test.ts
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,170 @@
 +import {
 +  assignBalancesFromAllMovements,
 +  copyKnownBalancesByProviderAlias,
@@ -118,9 +159,15 @@ new file mode 100644
 +  if (actual !== expected) throw new Error(`${message}: ${actual} !== ${expected}`)
 +}
 +
-+const dailyClosingBalances = new Map([
-+  ['18.09.2026', 7248.21],
-+  ['19.09.2026', 8000.43],
++const productionSummaries = new Map([
++  [
++    '18.09.2026',
++    { opening: 5999.49, debitTotal: 0, creditTotal: 1248.72, closing: 7248.21 },
++  ],
++  [
++    '19.09.2026',
++    { opening: 7248.21, debitTotal: 0, creditTotal: 752.22, closing: 8000.43 },
++  ],
 +])
 +
 +const productionReceipts = [
@@ -146,7 +193,6 @@ new file mode 100644
 +    providerAliases: ['id:previous-day'],
 +  },
 +]
-+
 +const productionMovements = productionReceipts.map((receipt) => ({
 +  ...receipt,
 +  direction: 'credit',
@@ -155,15 +201,16 @@ new file mode 100644
 +const productionResult = assignBalancesFromAllMovements(
 +  productionReceipts,
 +  productionMovements,
-+  dailyClosingBalances,
++  productionSummaries,
 +)
-+
 +assertEquals(productionResult[0].balance, 8000.43, 'latest 19.09 credit gets day close')
 +assertEquals(productionResult[1].balance, 7373.58, 'earlier 19.09 credit gets running balance')
 +assertEquals(productionResult[2].balance, 7248.21, 'single 18.09 credit keeps day close')
 +
-+const debitScenarioClosing = new Map([['20.09.2026', 1250]])
-+const debitScenarioReceipts = [
++const debitSummaries = new Map([
++  ['20.09.2026', { opening: 1000, debitTotal: 50, creditTotal: 300, closing: 1250 }],
++])
++const debitReceipts = [
 +  {
 +    legacyDate: '20.09.2026',
 +    occurredAt: '2026-09-20T09:00:00.000Z',
@@ -179,8 +226,8 @@ new file mode 100644
 +    providerAliases: ['id:credit-1'],
 +  },
 +]
-+const debitScenarioMovements = [
-+  { ...debitScenarioReceipts[0], direction: 'credit' },
++const debitMovements = [
++  { ...debitReceipts[0], direction: 'credit' },
 +  {
 +    legacyDate: '20.09.2026',
 +    occurredAt: '2026-09-20T08:00:00.000Z',
@@ -188,32 +235,59 @@ new file mode 100644
 +    providerAliases: ['id:debit-1'],
 +    direction: 'debit',
 +  },
-+  { ...debitScenarioReceipts[1], direction: 'credit' },
++  { ...debitReceipts[1], direction: 'credit' },
 +]
-+
-+const debitResult = assignBalancesFromAllMovements(
-+  debitScenarioReceipts,
-+  debitScenarioMovements,
-+  debitScenarioClosing,
-+)
++const debitResult = assignBalancesFromAllMovements(debitReceipts, debitMovements, debitSummaries)
 +assertEquals(debitResult[0].balance, 1250, 'later credit balance after intervening debit')
 +assertEquals(debitResult[1].balance, 1100, 'earlier credit restores intervening debit')
 +
-+const ambiguousResult = assignBalancesFromAllMovements(
-+  debitScenarioReceipts,
++const totalsMismatch = assignBalancesFromAllMovements(
++  debitReceipts,
++  debitMovements,
++  new Map([
++    ['20.09.2026', { opening: 990, debitTotal: 60, creditTotal: 300, closing: 1230 }],
++  ]),
++)
++assertEquals(totalsMismatch[0].balance, null, 'daily aggregate mismatch does not invent balance')
++assertEquals(totalsMismatch[1].balance, null, 'aggregate mismatch suppresses whole day')
++
++const ambiguousTimestamp = assignBalancesFromAllMovements(
++  debitReceipts,
 +  [
-+    { ...debitScenarioReceipts[0], direction: 'credit' },
++    { ...debitReceipts[0], direction: 'credit' },
 +    {
 +      legacyDate: '20.09.2026',
-+      occurredAt: debitScenarioReceipts[0].occurredAt,
++      occurredAt: debitReceipts[0].occurredAt,
 +      amount: 50,
 +      providerAliases: ['id:same-second-debit'],
 +      direction: 'debit',
 +    },
++    { ...debitReceipts[1], direction: 'credit' },
 +  ],
-+  debitScenarioClosing,
++  debitSummaries,
 +)
-+assertEquals(ambiguousResult[0].balance, null, 'same-second ambiguity does not invent balance')
++assertEquals(
++  ambiguousTimestamp[0].balance,
++  null,
++  'same-second ordering ambiguity does not invent balance',
++)
++
++const invalidMovement = assignBalancesFromAllMovements(
++  debitReceipts,
++  [
++    { ...debitReceipts[0], direction: 'credit' },
++    {
++      legacyDate: '20.09.2026',
++      occurredAt: '',
++      amount: 50,
++      providerAliases: ['id:no-time-debit'],
++      direction: 'debit',
++    },
++    { ...debitReceipts[1], direction: 'credit' },
++  ],
++  debitSummaries,
++)
++assertEquals(invalidMovement[0].balance, null, 'movement without timestamp suppresses day')
 +
 +const updatedResult = copyKnownBalancesByProviderAlias(
 +  [{ providerAliases: ['uetr:shared', 'id:earlier'], balance: null }],
@@ -234,7 +308,40 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
  
  const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
  const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
-@@ -301,7 +305,7 @@ function parseNovaDateTime(value) {
+@@ -226,7 +230,7 @@ function parsePaymentsDocuments(rawXml) {
+   return collectNestedRecords(root, 'Docs').map(normalizeXmlRecord)
+ }
+ 
+-function parseExtractDayBalances(rawXml) {
++function parseExtractDaySummaries(rawXml) {
+   const xml = text(rawXml)
+   if (!xml) return new Map()
+ 
+@@ -240,13 +244,22 @@ function parseExtractDayBalances(rawXml) {
+   const root = findKey(document, 'Extract')
+   if (!isRecord(root)) return new Map()
+ 
+-  const balances = new Map()
++  const summaries = new Map()
+   for (const day of collectNestedRecords(root, 'GetExtractForXML')) {
+     const statement = normalizeXmlRecord(day)
+     const date = pick(statement, 'Date')
+-    const balance = optionalNumber(pick(statement, 'OutCome', 'MainOutCome'))
+-    if (date && balance !== null) balances.set(date, balance)
++    if (!date) continue
++    summaries.set(date, {
++      opening: optionalNumber(pick(statement, 'InCome', 'MainInCome')),
++      debitTotal: optionalNumber(pick(statement, 'DebitAmount', 'MainDebitAmount')),
++      creditTotal: optionalNumber(pick(statement, 'CreditAmount', 'MainCreditAmount')),
++      closing: optionalNumber(pick(statement, 'OutCome', 'MainOutCome')),
++    })
+   }
+-  return balances
++  return summaries
+ }
+ 
+ function pick(record, ...keys) {
+@@ -301,7 +314,7 @@ function parseNovaDateTime(value) {
    }
  }
  
@@ -243,7 +350,7 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
    const amount = optionalNumber(
      pick(document, 'Amount', 'CrncyCredit', 'CreditAmount', 'Credit', 'SumCredit'),
    )
-@@ -328,7 +332,7 @@ function extractReceipt(document, dailyBalances = new Map()) {
+@@ -328,7 +341,7 @@ function extractReceipt(document, dailyBalances = new Map()) {
      occurredAt: eventDateTime ? receiptOccurredAt(eventDateTime.date, eventDateTime.time) : '',
      description: pick(document, 'DebitName', 'PayerName', 'SenderName', 'Description'),
      amount,
@@ -252,7 +359,7 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
      comment: pick(document, 'Purpose', 'Comment', 'Description'),
      legacyDate: paymentDate,
      legacyCreatedDate: createdAt?.date ?? '',
-@@ -340,6 +344,41 @@ function extractReceipt(document, dailyBalances = new Map()) {
+@@ -340,6 +353,52 @@ function extractReceipt(document, dailyBalances = new Map()) {
    }
  }
  
@@ -297,7 +404,22 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
  function kyivDateTimeParts(utcMs) {
    const parts = new Intl.DateTimeFormat('en-CA', {
      timeZone: 'Europe/Kyiv',
-@@ -979,10 +1018,17 @@ function extractReceipt(document, dailyBalances = new Map()) {
+@@ -953,8 +1012,14 @@ function extractReceipt(document, dailyBalances = new Map()) {
+       },
+       true,
+     )
+-    const dailyBalances = parseExtractDayBalances(extractResult.extract)
+-    dailyBalances.set(dateTo, available)
++    const daySummaries = parseExtractDaySummaries(extractResult.extract)
++    const todaySummary = daySummaries.get(dateTo) ?? {}
++    daySummaries.set(dateTo, {
++      ...todaySummary,
++      closing: available,
++    })
+     const statementPaymentsResult = await soapCall(
+       'GetPaymentsList',
+       {
+@@ -979,10 +1044,17 @@ function extractReceipt(document, dailyBalances = new Map()) {
      const statementIncomingDocuments = statementConductedDocuments.filter((document) =>
        isIncomingPaymentDocument(document, accountIban),
      )
@@ -315,11 +437,11 @@ diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novap
 +          .filter((receipt) => receipt !== null),
 +      ),
 +      statementMovements,
-+      dailyBalances,
++      daySummaries,
      )
  
      const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
-@@ -990,10 +1036,13 @@ function extractReceipt(document, dailyBalances = new Map()) {
+@@ -990,10 +1062,13 @@ function extractReceipt(document, dailyBalances = new Map()) {
      const updatedIncomingDocuments = updatedConductedDocuments.filter((document) =>
        isIncomingPaymentDocument(document, accountIban),
      )
