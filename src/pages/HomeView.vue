@@ -193,6 +193,7 @@ const isMarketplaceSyncBusy = computed(
 )
 const isApplyingPromRegistry = ref(false)
 const isConfirmingPromDelivered = ref(false)
+const isDismissingPromDelivered = ref(false)
 const selectedPromDeliveredOrderIds = ref(new Set<string>())
 const syncEpicentrMessage = ref('')
 const syncNoticeVisible = ref(false)
@@ -1395,6 +1396,7 @@ const isPromRegistryView = computed(() => promRegistryEntries.value.length > 0)
 const promDeliveredConfirmationOrders = computed(() =>
   orders.value.filter((order) => {
     if (order.platform !== 'Пром' || !order.externalId) return false
+    if (order.promCompletionDismissedAt || isOrderFullyReturned(order)) return false
     if (order.delivery.trackingNormalizedStatus?.trim().toLowerCase() !== 'delivered') return false
     const status = displayOrderStatus(order.status).toLowerCase()
     return !/виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
@@ -2276,7 +2278,13 @@ function selectAllPromDeliveredOrders() {
 }
 
 async function confirmPromDeliveredOrders() {
-  if (!supabase || isGuest.value || isConfirmingPromDelivered.value) return
+  if (
+    !supabase ||
+    isGuest.value ||
+    isConfirmingPromDelivered.value ||
+    isDismissingPromDelivered.value
+  )
+    return
   const selectedOrders = selectedPromDeliveredOrders.value
   if (!selectedOrders.length) return
   if (!window.confirm(`Перевести ${selectedOrders.length} заказов Prom в статус «Виконано»?`))
@@ -2312,6 +2320,50 @@ async function confirmPromDeliveredOrders() {
     )
   } finally {
     isConfirmingPromDelivered.value = false
+  }
+}
+
+async function dismissPromDeliveredOrders() {
+  if (
+    !supabase ||
+    isGuest.value ||
+    isConfirmingPromDelivered.value ||
+    isDismissingPromDelivered.value
+  )
+    return
+  const selectedOrders = selectedPromDeliveredOrders.value
+  if (!selectedOrders.length) return
+
+  const dismissCompletionExternalIds = selectedOrders
+    .map((order) => order.externalId)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  if (dismissCompletionExternalIds.length !== selectedOrders.length) {
+    showSyncError('Не удалось определить ID всех выбранных заказов Prom.')
+    return
+  }
+
+  isDismissingPromDelivered.value = true
+  try {
+    const { data, error } = await supabase.functions.invoke<{
+      ok?: boolean
+      message?: string
+      dismissed?: number
+      changedOrderIds?: string[]
+    }>('sync-prom-orders', {
+      method: 'POST',
+      body: { dismissCompletionExternalIds },
+    })
+    if (error || !data?.ok) {
+      showSyncError(
+        data?.message ?? error?.message ?? 'Не удалось убрать заказы из подтверждения Prom.',
+      )
+      return
+    }
+    selectedPromDeliveredOrderIds.value = new Set()
+    await refreshOrdersAfterMarketplaceSync(data)
+    showSyncMessage(`Prom: убрано из подтверждения — ${data.dismissed ?? selectedOrders.length}.`)
+  } finally {
+    isDismissingPromDelivered.value = false
   }
 }
 
@@ -2709,6 +2761,7 @@ function mapRemoteOrders(
         internalComment: (row.internal_comment as string | null) ?? undefined,
         platform: row.platform as Platform,
         status: row.status as string,
+        promCompletionDismissedAt: (row.prom_completion_dismissed_at as string | null) ?? undefined,
         shipping: Number(row.shipping),
         paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
         acquiring: Number(row.acquiring),
@@ -2840,7 +2893,11 @@ function notifyBankPayment(event: BankPaymentEvent) {
       `${event.bank === 'monobank' ? 'Monobank' : 'NovaPay'} · +${formatMoney(event.amount)}`,
       event.payer,
       event.comment || event.description,
-    ].filter((value, index, lines) => Boolean(value) && (index === 0 || value !== lines[index - 1])).join('\n'),
+    ]
+      .filter(
+        (value, index, lines) => Boolean(value) && (index === 0 || value !== lines[index - 1]),
+      )
+      .join('\n'),
   })
   playToastSound()
 }
@@ -4682,10 +4739,14 @@ function orderDateTime(order: Order) {
             >
           </label>
         </div>
-        <div class="mt-3 flex justify-end">
+        <div class="mt-3 flex flex-wrap justify-start gap-2">
           <button
             class="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-wait disabled:opacity-50"
-            :disabled="isConfirmingPromDelivered || selectedPromDeliveredOrdersCount === 0"
+            :disabled="
+              isConfirmingPromDelivered ||
+              isDismissingPromDelivered ||
+              selectedPromDeliveredOrdersCount === 0
+            "
             type="button"
             @click="confirmPromDeliveredOrders"
           >
@@ -4693,6 +4754,22 @@ function orderDateTime(order: Order) {
               isConfirmingPromDelivered
                 ? 'Подтверждаем…'
                 : `Подтвердить в Prom (${selectedPromDeliveredOrdersCount})`
+            }}
+          </button>
+          <button
+            class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+            :disabled="
+              isConfirmingPromDelivered ||
+              isDismissingPromDelivered ||
+              selectedPromDeliveredOrdersCount === 0
+            "
+            type="button"
+            @click="dismissPromDeliveredOrders"
+          >
+            {{
+              isDismissingPromDelivered
+                ? 'Убираем…'
+                : `Не подтверждать (${selectedPromDeliveredOrdersCount})`
             }}
           </button>
         </div>

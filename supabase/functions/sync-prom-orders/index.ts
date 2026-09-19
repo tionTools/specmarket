@@ -1,6 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
-import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
+import {
+  findPlatformPriceCostSnapshot,
+  loadPlatformPriceCostSnapshots,
+  resolvedOrderItemCost,
+} from '../_shared/price-cost.ts'
 import {
   loadMarketplaceFamilyMappings,
   mappedFamilyKey,
@@ -11,10 +15,18 @@ import {
   rememberMarketplaceFamily,
   type MarketplaceFamilyIdentity,
 } from '../_shared/marketplace-family.ts'
-import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+import {
+  marketplaceMatchesCarrierDelivery,
+  marketplaceMustKeepCarrierDelivery,
+  marketplaceReplacementHistory,
+} from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
-import { acceptPromOrders, normalizePromExternalIds, promConfirmedAcceptance } from '../_shared/prom-order-action.ts'
+import {
+  acceptPromOrders,
+  normalizePromExternalIds,
+  promConfirmedAcceptance,
+} from '../_shared/prom-order-action.ts'
 import {
   hasPromInstallmentPayment,
   isPromWebsiteOrder,
@@ -29,20 +41,37 @@ const corsHeaders = {
 type RecordValue = Record<string, unknown>
 
 const asRecord = (value: unknown): RecordValue =>
-  value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
-const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {}
+const text = (value: unknown) =>
+  typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`
+  if (value && typeof value === 'object')
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(',')}}`
   return JSON.stringify(value)
 }
 async function sourceHash(value: unknown) {
   const bytes = new TextEncoder().encode(stableStringify(value))
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
 }
 const same = (left: unknown, right: unknown) => stableStringify(left) === stableStringify(right)
-const number = (value: unknown) => Number(text(value).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')) || 0
-const pick = (record: RecordValue, ...keys: string[]) => keys.map((key) => record[key]).find((value) => value !== undefined && value !== null && value !== '')
+const number = (value: unknown) =>
+  Number(
+    text(value)
+      .replace(/\s/g, '')
+      .replace(',', '.')
+      .replace(/[^\d.-]/g, ''),
+  ) || 0
+const pick = (record: RecordValue, ...keys: string[]) =>
+  keys
+    .map((key) => record[key])
+    .find((value) => value !== undefined && value !== null && value !== '')
 function promProductKey(item: RecordValue) {
   // Legacy fallback only. Canonical cost identity is variation_group:<id>.
   const sku = text(item.sku).trim()
@@ -67,9 +96,12 @@ async function promProductById(
 
   const pending = (async () => {
     try {
-      const response = await fetch(`https://my.prom.ua/api/v1/products/${encodeURIComponent(productId)}`, {
-        headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
-      })
+      const response = await fetch(
+        `https://my.prom.ua/api/v1/products/${encodeURIComponent(productId)}`,
+        {
+          headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+        },
+      )
       if (!response.ok) return null
       const payload = asRecord(await response.json())
       const product = asRecord(payload.product ?? payload.data ?? payload)
@@ -115,9 +147,12 @@ function preserveTracking(
     return marketplaceReplacementHistory(delivery, carrier, ttn, destination)
   const keepCarrierDelivery = marketplaceMustKeepCarrierDelivery(delivery, carrier, ttn)
   const preserved = Object.fromEntries(
-    Object.entries(delivery).filter(([key, value]) =>
-      (key.startsWith('tracking') && !['trackingLastCheckedAt', 'trackingLastError'].includes(key) && value !== undefined) ||
-      (['shipmentHistory', 'ttnHistory', 'addressHistory'].includes(key) && value !== undefined),
+    Object.entries(delivery).filter(
+      ([key, value]) =>
+        (key.startsWith('tracking') &&
+          !['trackingLastCheckedAt', 'trackingLastError'].includes(key) &&
+          value !== undefined) ||
+        (['shipmentHistory', 'ttnHistory', 'addressHistory'].includes(key) && value !== undefined),
     ),
   )
   if (keepCarrierDelivery) {
@@ -161,8 +196,12 @@ function deliveryPayer(value: unknown): string {
   if (/(?:отримувач|получател|recipient|buyer|customer)/i.test(normalized)) return 'Получатель'
   if (/(?:відправник|отправител|sender|seller|merchant)/i.test(normalized)) return 'Отправитель'
   const names: Record<string, string> = {
-    recipient: 'Получатель', buyer: 'Получатель', customer: 'Получатель',
-    sender: 'Отправитель', seller: 'Отправитель', merchant: 'Отправитель',
+    recipient: 'Получатель',
+    buyer: 'Получатель',
+    customer: 'Получатель',
+    sender: 'Отправитель',
+    seller: 'Отправитель',
+    merchant: 'Отправитель',
   }
   return names[normalized] ?? payer
 }
@@ -219,15 +258,19 @@ function promRecipientAddress(value: unknown): string {
   const street = readable(pick(address, 'address', 'full_address', 'street_name', 'street'))
   const building = text(pick(address, 'building_number', 'house_number', 'building'))
   const apartment = text(pick(address, 'apartment_number', 'apartment', 'flat'))
-  return [street, building && `буд. ${building}`, apartment && `кв. ${apartment}`].filter(Boolean).join(', ')
+  return [street, building && `буд. ${building}`, apartment && `кв. ${apartment}`]
+    .filter(Boolean)
+    .join(', ')
 }
 
 function findDeliveryPayer(value: unknown, depth = 0): string {
   if (depth > 5) return ''
   const record = asRecord(value)
   for (const [key, candidate] of Object.entries(record)) {
-    if (/(?:sender_pays|seller_pays|merchant_pays)/i.test(key) && candidate === true) return 'Отправитель'
-    if (/(?:recipient_pays|buyer_pays|customer_pays)/i.test(key) && candidate === true) return 'Получатель'
+    if (/(?:sender_pays|seller_pays|merchant_pays)/i.test(key) && candidate === true)
+      return 'Отправитель'
+    if (/(?:recipient_pays|buyer_pays|customer_pays)/i.test(key) && candidate === true)
+      return 'Получатель'
     if (/(?:payer|payor|sender_pays|recipient_pays)/i.test(key)) {
       const found = deliveryPayer(candidate)
       if (found) return found
@@ -265,28 +308,59 @@ function dateParts(value: unknown) {
   if (match) return { date: `${match[3]}.${match[2]}.${match[1]}`, time: `${match[4]}:${match[5]}` }
   const parsed = new Date(source)
   if (!Number.isNaN(parsed.getTime())) {
-    const parts = new Intl.DateTimeFormat('uk-UA', { timeZone: 'Europe/Kyiv', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(parsed)
+    const parts = new Intl.DateTimeFormat('uk-UA', {
+      timeZone: 'Europe/Kyiv',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(parsed)
     const get = (kind: string) => parts.find((part) => part.type === kind)?.value ?? ''
-    return { date: `${get('day')}.${get('month')}.${get('year')}`, time: `${get('hour')}:${get('minute')}` }
+    return {
+      date: `${get('day')}.${get('month')}.${get('year')}`,
+      time: `${get('hour')}:${get('minute')}`,
+    }
   }
   return { date: '', time: '' }
 }
 
 function customerName(order: RecordValue) {
-  return [text(order.client_last_name), text(order.client_first_name), text(order.client_second_name)]
-    .filter(Boolean).join(' ') || text(order.name) || 'Покупатель Prom'
+  return (
+    [text(order.client_last_name), text(order.client_first_name), text(order.client_second_name)]
+      .filter(Boolean)
+      .join(' ') ||
+    text(order.name) ||
+    'Покупатель Prom'
+  )
 }
 
 function promClientName(client: RecordValue) {
-  return [
-    text(pick(client, 'client_last_name', 'last_name', 'lastName', 'surname')),
-    text(pick(client, 'client_first_name', 'first_name', 'firstName', 'name_first')),
-    text(pick(client, 'client_second_name', 'middle_name', 'middleName', 'second_name', 'patronymic')),
-  ].filter(Boolean).join(' ') || readable(pick(client, 'full_name', 'fullName', 'name'))
+  return (
+    [
+      text(pick(client, 'client_last_name', 'last_name', 'lastName', 'surname')),
+      text(pick(client, 'client_first_name', 'first_name', 'firstName', 'name_first')),
+      text(
+        pick(
+          client,
+          'client_second_name',
+          'middle_name',
+          'middleName',
+          'second_name',
+          'patronymic',
+        ),
+      ),
+    ]
+      .filter(Boolean)
+      .join(' ') || readable(pick(client, 'full_name', 'fullName', 'name'))
+  )
 }
 
 function promClientPhone(client: RecordValue) {
-  return text(pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'))
+  return text(
+    pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'),
+  )
 }
 
 function promClientEmail(client: RecordValue) {
@@ -304,9 +378,12 @@ async function promClientById(
 
   const pending = (async () => {
     try {
-      const response = await fetch(`https://my.prom.ua/api/v1/clients/${encodeURIComponent(clientId)}`, {
-        headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
-      })
+      const response = await fetch(
+        `https://my.prom.ua/api/v1/clients/${encodeURIComponent(clientId)}`,
+        {
+          headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+        },
+      )
       if (!response.ok) return null
       const payload = asRecord(await response.json())
       const client = asRecord(payload.client ?? payload.data ?? payload)
@@ -326,8 +403,14 @@ function recipientName(value: unknown): string {
     text(pick(record, 'last_name', 'lastName', 'surname')),
     text(pick(record, 'first_name', 'firstName', 'name_first')),
     text(pick(record, 'middle_name', 'middleName', 'second_name', 'patronymic')),
-  ].filter(Boolean).join(' ')
-  return fullName || readable(pick(record, 'full_name', 'fullName', 'name', 'title', 'value')) || text(value)
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return (
+    fullName ||
+    readable(pick(record, 'full_name', 'fullName', 'name', 'title', 'value')) ||
+    text(value)
+  )
 }
 
 function recipientPhone(value: unknown): string {
@@ -337,25 +420,29 @@ function recipientPhone(value: unknown): string {
 
 function deliveryRecipientName(...sources: RecordValue[]): string {
   for (const source of sources) {
-    const direct = readable(pick(
-      source,
-      'delivery_recipient_name',
-      'recipient_name',
-      'recipientName',
-      'receiver_name',
-      'receiverName',
-    ))
+    const direct = readable(
+      pick(
+        source,
+        'delivery_recipient_name',
+        'recipient_name',
+        'recipientName',
+        'receiver_name',
+        'receiverName',
+      ),
+    )
     if (direct) return direct
-    const nested = recipientName(pick(
-      source,
-      'delivery_recipient',
-      'recipient',
-      'receiver',
-      'recipient_data',
-      'recipientData',
-      'receiver_data',
-      'receiverData',
-    ))
+    const nested = recipientName(
+      pick(
+        source,
+        'delivery_recipient',
+        'recipient',
+        'receiver',
+        'recipient_data',
+        'recipientData',
+        'receiver_data',
+        'receiverData',
+      ),
+    )
     if (nested) return nested
   }
   return ''
@@ -363,25 +450,29 @@ function deliveryRecipientName(...sources: RecordValue[]): string {
 
 function deliveryRecipientPhone(...sources: RecordValue[]): string {
   for (const source of sources) {
-    const direct = text(pick(
-      source,
-      'delivery_recipient_phone',
-      'recipient_phone',
-      'recipientPhone',
-      'receiver_phone',
-      'receiverPhone',
-    ))
+    const direct = text(
+      pick(
+        source,
+        'delivery_recipient_phone',
+        'recipient_phone',
+        'recipientPhone',
+        'receiver_phone',
+        'receiverPhone',
+      ),
+    )
     if (direct) return direct
-    const nested = recipientPhone(pick(
-      source,
-      'delivery_recipient',
-      'recipient',
-      'receiver',
-      'recipient_data',
-      'recipientData',
-      'receiver_data',
-      'receiverData',
-    ))
+    const nested = recipientPhone(
+      pick(
+        source,
+        'delivery_recipient',
+        'recipient',
+        'receiver',
+        'recipient_data',
+        'recipientData',
+        'receiver_data',
+        'receiverData',
+      ),
+    )
     if (nested) return nested
   }
   return ''
@@ -438,7 +529,9 @@ async function ukrainianProductNameById(
 
   const pending = (async (): Promise<ProductTranslationResult> => {
     try {
-      const endpoint = new URL(`https://my.prom.ua/api/v1/products/translation/${encodeURIComponent(productId)}`)
+      const endpoint = new URL(
+        `https://my.prom.ua/api/v1/products/translation/${encodeURIComponent(productId)}`,
+      )
       endpoint.searchParams.set('lang', 'uk')
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
@@ -471,7 +564,9 @@ async function resolvedUkrainianProductName(
   promToken: string,
   cache: Map<string, Promise<ProductTranslationResult>>,
 ): Promise<ProductTranslationResult> {
-  const direct = readable(pick(item, 'name_ua', 'name_uk', 'product_name_ua', 'product_name_uk')).trim()
+  const direct = readable(
+    pick(item, 'name_ua', 'name_uk', 'product_name_ua', 'product_name_uk'),
+  ).trim()
   if (direct) return { name: direct, retry: false }
 
   const productId = promTranslationProductId(item)
@@ -481,14 +576,31 @@ async function resolvedUkrainianProductName(
 }
 
 function productSize(item: RecordValue, name: string) {
-  const direct = readable(pick(item, 'variation', 'size', 'option', 'options', 'variant', 'variation_name', 'size_name'))
+  const direct = readable(
+    pick(item, 'variation', 'size', 'option', 'options', 'variant', 'variation_name', 'size_name'),
+  )
   if (direct) return direct
-  const nested = findNestedSize(pick(item, 'product', 'product_data', 'product_variant', 'variants', 'options', 'attributes', 'characteristics', 'parameters', 'properties'))
+  const nested = findNestedSize(
+    pick(
+      item,
+      'product',
+      'product_data',
+      'product_variant',
+      'variants',
+      'options',
+      'attributes',
+      'characteristics',
+      'parameters',
+      'properties',
+    ),
+  )
   if (nested) return nested
   // For text modifications Prom appends the selected value to the order item
   // name: "... трикотажні 09" or "... черевики (42)". SKU stays an article
   // and is deliberately never used to determine a size.
-  const trailingSize = name.match(/(?:\s|\()((?:\d{1,2}(?:[.,]\d+)?)|xxxl|xxl|xl|xs|s|m|l)\)?\s*$/i)?.[1]
+  const trailingSize = name.match(
+    /(?:\s|\()((?:\d{1,2}(?:[.,]\d+)?)|xxxl|xxl|xl|xs|s|m|l)\)?\s*$/i,
+  )?.[1]
   return trailingSize?.replace(',', '.') ?? ''
   /* Legacy fallback retained only for source-history context; do not execute it.
   // In Prom order lines the selected size is often the final separate value in
@@ -507,12 +619,16 @@ type PromFeedProducts = {
 }
 
 function promFeedIdentifiers(item: RecordValue) {
-  return [...new Set([
-    text(pick(item, 'rzid', 'variation_id', 'id')).trim(),
-    text(pick(item, 'product_id', 'productId')).trim(),
-    text(item.external_id).trim(),
-    text(item.sku).trim(),
-  ].filter(Boolean))]
+  return [
+    ...new Set(
+      [
+        text(pick(item, 'rzid', 'variation_id', 'id')).trim(),
+        text(pick(item, 'product_id', 'productId')).trim(),
+        text(item.external_id).trim(),
+        text(item.sku).trim(),
+      ].filter(Boolean),
+    ),
+  ]
 }
 
 function productFromPromFeed(item: RecordValue, feedProducts: PromFeedProducts) {
@@ -562,13 +678,21 @@ function isSizeParameter(name: string) {
 }
 
 function decodeXmlText(value: string) {
-  return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
 }
 
 function productFromFeedBody(body: string): FeedProductInfo {
   const imageUrl = decodeXmlText(body.match(/<picture\b[^>]*>([\s\S]*?)<\/picture>/i)?.[1] ?? '')
-  for (const param of body.matchAll(/<param\b[^>]*\bname=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/param>/gi)) {
+  for (const param of body.matchAll(
+    /<param\b[^>]*\bname=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/param>/gi,
+  )) {
     if (isSizeParameter(decodeXmlText(param[2]))) return { size: decodeXmlText(param[3]), imageUrl }
   }
   return { size: '', imageUrl }
@@ -584,14 +708,18 @@ async function productsFromPromFeed(feedUrl: string | undefined): Promise<PromFe
     const response = await fetch(feedUrl)
     if (!response.ok) return { byOfferId, byUniqueAlias }
     const xml = await response.text()
-    for (const match of xml.matchAll(/<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi)) {
+    for (const match of xml.matchAll(
+      /<offer\b[^>]*\bid=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/offer>/gi,
+    )) {
       const offerId = match[2].trim()
       const body = match[3]
       const product = productFromFeedBody(body)
       if (!product.size && !product.imageUrl) continue
       byOfferId.set(offerId, product)
 
-      const vendorCode = decodeXmlText(body.match(/<vendorCode\b[^>]*>([\s\S]*?)<\/vendorCode>/i)?.[1] ?? '')
+      const vendorCode = decodeXmlText(
+        body.match(/<vendorCode\b[^>]*>([\s\S]*?)<\/vendorCode>/i)?.[1] ?? '',
+      )
       if (!vendorCode || ambiguousAliases.has(vendorCode)) continue
       const owner = aliasOwner.get(vendorCode)
       if (owner && owner !== offerId) {
@@ -617,46 +745,90 @@ Deno.serve(async (request) => {
   const promToken = Deno.env.get('PROM_API_TOKEN')
   const authorization = request.headers.get('Authorization')
   if (!url || !anonKey || !serviceKey || !promToken || !authorization) {
-    return Response.json({ ok: false, message: 'Не хватает настроек Prom.' }, { status: 500, headers: corsHeaders })
+    return Response.json(
+      { ok: false, message: 'Не хватает настроек Prom.' },
+      { status: 500, headers: corsHeaders },
+    )
   }
 
   const admin = createClient(url, serviceKey)
   const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
-  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
+  const isScheduledRequest =
+    typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
-  if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
-  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  const {
+    data: { user },
+  } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
+  if (!isScheduledRequest && !user)
+    return Response.json(
+      { ok: false, message: 'Нужен вход в CRM.' },
+      { status: 401, headers: corsHeaders },
+    )
+  if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com')
+    return Response.json(
+      { ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' },
+      { status: 403, headers: corsHeaders },
+    )
 
-  const body = await request.json().catch(() => ({})) as {
+  const body = (await request.json().catch(() => ({}))) as {
     externalId?: unknown
     full?: unknown
     manual?: unknown
     completeExternalIds?: unknown
+    dismissCompletionExternalIds?: unknown
     acceptExternalIds?: unknown
   }
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || (body as RecordValue).scheduled === true) {
-      return Response.json({ ok: false, message: 'Принятие заказов доступно только пользователю CRM.' }, { status: 403, headers: corsHeaders })
+      return Response.json(
+        { ok: false, message: 'Принятие заказов доступно только пользователю CRM.' },
+        { status: 403, headers: corsHeaders },
+      )
     }
     let ids: string[]
-    try { ids = normalizePromExternalIds(body.acceptExternalIds) }
-    catch { return Response.json({ ok: false, message: 'Неверный список ID заказов Prom для принятия.' }, { status: 400, headers: corsHeaders }) }
-    if (body.completeExternalIds !== undefined || body.manual !== undefined || body.externalId !== undefined) {
-      return Response.json({ ok: false, message: 'Нельзя совмещать принятие с другими действиями Prom.' }, { status: 400, headers: corsHeaders })
+    try {
+      ids = normalizePromExternalIds(body.acceptExternalIds)
+    } catch {
+      return Response.json(
+        { ok: false, message: 'Неверный список ID заказов Prom для принятия.' },
+        { status: 400, headers: corsHeaders },
+      )
     }
-    if (!ids.length) return Response.json({ ok: true, accepted: 0, changedOrderIds: [], alreadyAccepted: [] }, { headers: corsHeaders })
+    if (
+      body.completeExternalIds !== undefined ||
+      body.dismissCompletionExternalIds !== undefined ||
+      body.manual !== undefined ||
+      body.externalId !== undefined
+    ) {
+      return Response.json(
+        { ok: false, message: 'Нельзя совмещать принятие с другими действиями Prom.' },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+    if (!ids.length)
+      return Response.json(
+        { ok: true, accepted: 0, changedOrderIds: [], alreadyAccepted: [] },
+        { headers: corsHeaders },
+      )
     try {
       const result = await acceptPromOrders(ids, {
         load: async (externalIds) => {
-          const { data, error } = await admin.from('crm_orders').select('id, external_id, status, updated_at').eq('platform', 'Пром').in('external_id', externalIds)
+          const { data, error } = await admin
+            .from('crm_orders')
+            .select('id, external_id, status, updated_at')
+            .eq('platform', 'Пром')
+            .in('external_id', externalIds)
           if (error) throw error
           return data ?? []
         },
         setReceived: async (ids) => {
           const response = await fetch('https://my.prom.ua/api/v1/orders/set_status', {
             method: 'POST',
-            headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+            headers: {
+              Authorization: `Bearer ${promToken}`,
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify({ status: 'received', ids }),
             signal: AbortSignal.timeout(30_000),
           })
@@ -665,18 +837,111 @@ Deno.serve(async (request) => {
           return promConfirmedAcceptance(result, ids)
         },
         save: async (order) => {
-          const { data, error } = await admin.from('crm_orders').update({ status: 'Принято' })
-            .eq('id', order.id).eq('platform', 'Пром').eq('external_id', order.external_id)
-            .eq('status', order.status).eq('updated_at', order.updated_at).select('id')
+          const { data, error } = await admin
+            .from('crm_orders')
+            .update({ status: 'Принято' })
+            .eq('id', order.id)
+            .eq('platform', 'Пром')
+            .eq('external_id', order.external_id)
+            .eq('status', order.status)
+            .eq('updated_at', order.updated_at)
+            .select('id')
           if (error) throw error
           return data?.length === 1
         },
       })
       return Response.json(result.body, { status: result.status, headers: corsHeaders })
     } catch {
-      return Response.json({ ok: false, message: 'Не удалось подтвердить принятие. Обновите заказ и проверьте статус Prom перед повтором.' }, { status: 502, headers: corsHeaders })
+      return Response.json(
+        {
+          ok: false,
+          message:
+            'Не удалось подтвердить принятие. Обновите заказ и проверьте статус Prom перед повтором.',
+        },
+        { status: 502, headers: corsHeaders },
+      )
     }
   }
+  if (body.dismissCompletionExternalIds !== undefined) {
+    if (!Array.isArray(body.dismissCompletionExternalIds)) {
+      return Response.json(
+        { ok: false, message: 'Неверный список заказов Prom для исключения из подтверждения.' },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+    if (isScheduledRequest) {
+      return Response.json(
+        {
+          ok: false,
+          message: 'Исключение из подтверждения Prom доступно только пользователю CRM.',
+        },
+        { status: 403, headers: corsHeaders },
+      )
+    }
+    if (
+      body.completeExternalIds !== undefined ||
+      body.acceptExternalIds !== undefined ||
+      body.manual !== undefined ||
+      body.externalId !== undefined
+    ) {
+      return Response.json(
+        {
+          ok: false,
+          message: 'Нельзя совмещать исключение из подтверждения с другими действиями Prom.',
+        },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+
+    const requestedDismissalIds = [
+      ...new Set(
+        body.dismissCompletionExternalIds
+          .map(text)
+          .map((id) => id.replace(/^prom:/, '').trim())
+          .filter(Boolean),
+      ),
+    ]
+    if (
+      requestedDismissalIds.length > 100 ||
+      requestedDismissalIds.some((id) => !/^\d+$/.test(id))
+    ) {
+      return Response.json(
+        { ok: false, message: 'Неверные ID заказов Prom для исключения из подтверждения.' },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+    if (!requestedDismissalIds.length) {
+      return Response.json(
+        { ok: true, dismissed: 0, changedOrderIds: [] },
+        { headers: corsHeaders },
+      )
+    }
+
+    const crmExternalIds = requestedDismissalIds.map((id) => `prom:${id}`)
+    const dismissedAt = new Date().toISOString()
+    const { data: dismissedOrders, error: dismissError } = await admin
+      .from('crm_orders')
+      .update({ prom_completion_dismissed_at: dismissedAt })
+      .eq('platform', 'Пром')
+      .in('external_id', crmExternalIds)
+      .select('id')
+    if (dismissError) {
+      return Response.json(
+        { ok: false, message: dismissError.message },
+        { status: 500, headers: corsHeaders },
+      )
+    }
+
+    return Response.json(
+      {
+        ok: true,
+        dismissed: dismissedOrders?.length ?? 0,
+        changedOrderIds: (dismissedOrders ?? []).map((order) => order.id),
+      },
+      { headers: corsHeaders },
+    )
+  }
+
   if (body.completeExternalIds !== undefined && !Array.isArray(body.completeExternalIds)) {
     return Response.json(
       { ok: false, message: 'Неверный список заказов Prom для подтверждения.' },
@@ -713,7 +978,7 @@ Deno.serve(async (request) => {
     const crmExternalIds = requestedCompletionIds.map((id) => `prom:${id}`)
     const { data: crmOrders, error: crmOrdersError } = await admin
       .from('crm_orders')
-      .select('id, external_id, status, delivery')
+      .select('id, external_id, status, delivery, prom_completion_dismissed_at')
       .eq('platform', 'Пром')
       .in('external_id', crmExternalIds)
     if (crmOrdersError) {
@@ -724,6 +989,58 @@ Deno.serve(async (request) => {
     }
 
     const byExternalId = new Map((crmOrders ?? []).map((order) => [order.external_id, order]))
+    const crmOrderIds = (crmOrders ?? []).map((order) => order.id)
+    const [{ data: itemRows, error: itemRowsError }, { data: returnRows, error: returnRowsError }] =
+      crmOrderIds.length
+        ? await Promise.all([
+            admin
+              .from('crm_order_items')
+              .select('order_id, position, quantity')
+              .in('order_id', crmOrderIds),
+            admin
+              .from('crm_order_item_returns')
+              .select('order_id, item_position, returned_quantity')
+              .in('order_id', crmOrderIds),
+          ])
+        : [
+            { data: [], error: null },
+            { data: [], error: null },
+          ]
+    if (itemRowsError || returnRowsError) {
+      return Response.json(
+        {
+          ok: false,
+          message:
+            itemRowsError?.message ??
+            returnRowsError?.message ??
+            'Не удалось проверить возвраты заказов Prom.',
+        },
+        { status: 500, headers: corsHeaders },
+      )
+    }
+    const returnedQuantityByPosition = new Map(
+      (returnRows ?? []).map((row) => [
+        `${row.order_id}:${row.item_position}`,
+        number(row.returned_quantity),
+      ]),
+    )
+    const itemsByOrderId = new Map<string, RecordValue[]>()
+    for (const row of itemRows ?? []) {
+      itemsByOrderId.set(row.order_id, [...(itemsByOrderId.get(row.order_id) ?? []), row])
+    }
+    const fullyReturnedOrderIds = new Set(
+      crmOrderIds.filter((orderId) => {
+        const items = itemsByOrderId.get(orderId) ?? []
+        return (
+          items.length > 0 &&
+          items.every(
+            (item) =>
+              number(returnedQuantityByPosition.get(`${orderId}:${item.position}`)) >=
+              number(item.quantity),
+          )
+        )
+      }),
+    )
     const invalidIds = requestedCompletionIds.filter((id) => {
       const order = byExternalId.get(`prom:${id}`)
       if (!order) return true
@@ -731,6 +1048,8 @@ Deno.serve(async (request) => {
       const trackingStatus = text(delivery.trackingNormalizedStatus).trim().toLowerCase()
       const status = text(order.status).trim().toLowerCase()
       return (
+        Boolean(order.prom_completion_dismissed_at) ||
+        fullyReturnedOrderIds.has(order.id) ||
         trackingStatus !== 'delivered' ||
         /виконан|выполн|completed|delivered|скас|отмен|cancel|повер|возврат|return|refund/.test(
           status,
@@ -797,7 +1116,8 @@ Deno.serve(async (request) => {
     )
   }
 
-  const requestedExternalId = typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
+  const requestedExternalId =
+    typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
   const fullSync = body.full === true
   const manual = asRecord(body.manual)
   const manualItems = Array.isArray(manual.items) ? manual.items.map(asRecord) : []
@@ -807,33 +1127,86 @@ Deno.serve(async (request) => {
   const response = await fetch(endpoint, {
     headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
   })
-  if (!response.ok) return Response.json({ ok: false, message: 'Prom не отдал заказы.', status: response.status }, { status: 502, headers: corsHeaders })
+  if (!response.ok)
+    return Response.json(
+      { ok: false, message: 'Prom не отдал заказы.', status: response.status },
+      { status: 502, headers: corsHeaders },
+    )
 
   const payload = asRecord(await response.json())
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
-    : Array.isArray(payload.orders) ? payload.orders.map(asRecord) : []
-  const hashes = new Map<string, string>(await Promise.all(orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const)))
+    : Array.isArray(payload.orders)
+      ? payload.orders.map(asRecord)
+      : []
+  const hashes = new Map<string, string>(
+    await Promise.all(
+      orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const),
+    ),
+  )
   const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
   const { data: syncRows, error: syncStateError } = externalIds.length
-    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, order_id').eq('platform', 'Пром').in('external_id', externalIds)
+    ? await admin
+        .from('crm_marketplace_order_sync_state')
+        .select('external_id, source_hash, order_id')
+        .eq('platform', 'Пром')
+        .in('external_id', externalIds)
     : { data: [] }
-  if (syncStateError) return Response.json({ ok: false, message: syncStateError.message }, { status: 500, headers: corsHeaders })
+  if (syncStateError)
+    return Response.json(
+      { ok: false, message: syncStateError.message },
+      { status: 500, headers: corsHeaders },
+    )
   const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
-  const candidates = orders.filter((order) => requestedExternalId || fullSync || stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !== hashes.get(`prom:${text(order.id)}`))
+  const candidates = orders.filter(
+    (order) =>
+      requestedExternalId ||
+      fullSync ||
+      stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
+        hashes.get(`prom:${text(order.id)}`),
+  )
   const skippedUnchanged = orders.length - candidates.length
-  if (!candidates.length) return Response.json({ ok: true, received: orders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
+  if (!candidates.length)
+    return Response.json(
+      {
+        ok: true,
+        received: orders.length,
+        created: 0,
+        updated: 0,
+        skipped: skippedUnchanged,
+        skippedUnchanged,
+        changedOrderIds: [],
+      },
+      { headers: corsHeaders },
+    )
   const candidateExternalIds = candidates.map((order) => `prom:${text(order.id)}`)
-  const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
-  if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
+  const { data: existingRows, error: existingError } = await admin
+    .from('crm_orders')
+    .select('*')
+    .in('external_id', candidateExternalIds)
+  if (existingError)
+    return Response.json(
+      { ok: false, message: existingError.message },
+      { status: 500, headers: corsHeaders },
+    )
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
   const candidateOrderIds = (existingRows ?? []).map((row) => row.id)
   const { data: existingItems, error: existingItemsError } = candidateOrderIds.length
-    ? await admin.from('crm_order_items').select('order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual, marketplace_product_key, cost_manual, price_item_id').in('order_id', candidateOrderIds)
+    ? await admin
+        .from('crm_order_items')
+        .select(
+          'order_id, position, product_name, size, image_url, quantity, price, cost, cost_usd, royalty_percent, royalty_amount, royalty_manual, marketplace_product_key, cost_manual, price_item_id',
+        )
+        .in('order_id', candidateOrderIds)
     : { data: [] }
-  if (existingItemsError) return Response.json({ ok: false, message: existingItemsError.message }, { status: 500, headers: corsHeaders })
+  if (existingItemsError)
+    return Response.json(
+      { ok: false, message: existingItemsError.message },
+      { status: 500, headers: corsHeaders },
+    )
   const itemsByOrder = new Map<string, RecordValue[]>()
-  for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
+  for (const item of existingItems ?? [])
+    itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
   let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
   let productFamilyMappings: Awaited<ReturnType<typeof loadMarketplaceFamilyMappings>>
   let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
@@ -844,7 +1217,13 @@ Deno.serve(async (request) => {
       loadUsdRateSchedule(admin),
     ])
   } catch (error) {
-    return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+    return Response.json(
+      {
+        ok: false,
+        message: `Не удалось загрузить привязки себестоимости Prom: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      { status: 500, headers: corsHeaders },
+    )
   }
   const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
   let created = 0
@@ -868,9 +1247,16 @@ Deno.serve(async (request) => {
     const orderCustomer = customerName(order)
     const orderPhone = text(order.phone) || text(order.client_phone)
     const orderEmail = text(order.email) || text(order.client_email)
-    const buyerName = promClientName(promClient ?? {}) || (clientId ? text(existingOrder.customer) : '') || orderCustomer
-    const buyerPhone = promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
-    const buyerEmail = promClientEmail(promClient ?? {}) || (clientId ? text(existingOrder.customer_email) : '') || orderEmail
+    const buyerName =
+      promClientName(promClient ?? {}) ||
+      (clientId ? text(existingOrder.customer) : '') ||
+      orderCustomer
+    const buyerPhone =
+      promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
+    const buyerEmail =
+      promClientEmail(promClient ?? {}) ||
+      (clientId ? text(existingOrder.customer_email) : '') ||
+      orderEmail
     // Массовая кнопка ищет только новые заказы. Старые обновляются только
     // отдельной кнопкой в карточке конкретного заказа.
     const previousDelivery = asRecord(existing?.delivery)
@@ -879,17 +1265,28 @@ Deno.serve(async (request) => {
     const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
     const paymentData = asRecord(order.payment_data)
     const savedPayment = paymentDetails(previousDelivery, {
-      paymentMethod: readable(pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment')),
+      paymentMethod: readable(
+        pick(order, 'payment_option', 'payment_method', 'payment_type', 'payment'),
+      ),
       paymentStatus:
         text(pick(paymentData, 'status', 'payment_status', 'state')) ||
         text(pick(order, 'payment_status', 'payment_state')),
     })
     const trackingNumber =
-      text(pick(order, 'delivery_declaration_number', 'delivery_declaration_id', 'declaration_number', 'tracking_number')) ||
+      text(
+        pick(
+          order,
+          'delivery_declaration_number',
+          'delivery_declaration_id',
+          'declaration_number',
+          'tracking_number',
+        ),
+      ) ||
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order) ||
       text(previousDelivery.ttn)
-    const deliveryCarrier = readable(pick(order, 'delivery_option', 'delivery_service')) ||
+    const deliveryCarrier =
+      readable(pick(order, 'delivery_option', 'delivery_service')) ||
       readable(pick(rawDelivery, 'service', 'provider', 'option')) ||
       text(previousDelivery.carrier) ||
       'Prom'
@@ -898,18 +1295,28 @@ Deno.serve(async (request) => {
       text(previousDelivery.ttn),
       trackingNumber,
     ])
-    const ttnHistory = currentTtnHistory.filter((ttn) => historyKey(ttn) !== historyKey(trackingNumber))
+    const ttnHistory = currentTtnHistory.filter(
+      (ttn) => historyKey(ttn) !== historyKey(trackingNumber),
+    )
     const rawOrderStatus = text(order.status)
     const orderStatus = (promStatusNames[rawOrderStatus.toLowerCase()] ?? rawOrderStatus) || 'Новий'
     const apiDeliveryStatus =
-      readable(pick(deliveryProvider, 'status_name', 'statusName', 'unified_status', 'unifiedStatus')) ||
+      readable(
+        pick(deliveryProvider, 'status_name', 'statusName', 'unified_status', 'unifiedStatus'),
+      ) ||
       readable(pick(rawDelivery, 'status', 'shipment_status', 'delivery_status', 'status_name')) ||
       text(pick(order, 'shipment_status', 'delivery_status'))
-    const deliveryStatus = displayDeliveryStatus(apiDeliveryStatus) ||
-      (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus ? text(previousDelivery.status) : 'Заплановано')
+    const deliveryStatus =
+      displayDeliveryStatus(apiDeliveryStatus) ||
+      (text(previousDelivery.status) && text(previousDelivery.status) !== orderStatus
+        ? text(previousDelivery.status)
+        : 'Заплановано')
     const isPromFreeDelivery = order.has_order_promo_free_delivery === true
-    const payer = deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
-      deliveryPayer(pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer')) ||
+    const payer =
+      deliveryPayer(pick(order, 'delivery_payer', 'shipping_payer', 'payer')) ||
+      deliveryPayer(
+        pick(rawDelivery, 'payer', 'delivery_payer', 'shipping_payer', 'payment_payer'),
+      ) ||
       findDeliveryPayer(order) ||
       payerFromDeliveryOption(pick(order, 'delivery_option', 'delivery_service')) ||
       // В части заказов API Prom вообще не возвращает плательщика. Обычная
@@ -931,12 +1338,16 @@ Deno.serve(async (request) => {
       fullDeliveryAddress(deliveryCity, deliveryAddress),
     ])
     const addressHistory = currentAddressHistory.filter(
-      (address) => historyKey(address) !== historyKey(fullDeliveryAddress(deliveryCity, deliveryAddress)),
+      (address) =>
+        historyKey(address) !== historyKey(fullDeliveryAddress(deliveryCity, deliveryAddress)),
     )
     // Общая «delivery_cost» Prom может быть стоимостью для покупателя.
     // Для прибыли используем только отдельную сумму, которую платит продавец.
-    const sellerDeliveryCost = pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ?? pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
-    const hasSellerDeliveryCost = sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+    const sellerDeliveryCost =
+      pick(order, 'seller_delivery_cost', 'delivery_seller_cost', 'delivery_cost_seller') ??
+      pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
+    const hasSellerDeliveryCost =
+      sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
     const orderLevelCommissionAmount = promOrderLevelCommission(order)
     const isWebsiteOrder = isPromWebsiteOrder(order)
     const isInstallmentPayment =
@@ -956,23 +1367,39 @@ Deno.serve(async (request) => {
     const orderUsdRate = usdRateForDate(usdRateSchedule, date)
     const data = {
       external_id: externalId,
-      order_number: number(order.id), order_date: date, order_time: time,
-      customer: buyerName, phone: buyerPhone,
+      order_number: number(order.id),
+      order_date: date,
+      order_time: time,
+      customer: buyerName,
+      phone: buyerPhone,
       customer_email: buyerEmail || null,
       customer_comment: text(order.client_notes) || text(order.comment) || null,
-      platform: 'Пром', status: orderStatus,
+      platform: 'Пром',
+      status: orderStatus,
       shipping: resolvedShipping.shipping,
-      acquiring: manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
-      acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : number(manual.acquiringPercent)) : existing?.acquiring_percent ?? null,
+      acquiring:
+        manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
+      acquiring_percent:
+        manual.acquiringPercent !== undefined
+          ? manual.acquiringPercent === null
+            ? null
+            : number(manual.acquiringPercent)
+          : (existing?.acquiring_percent ?? null),
       delivery: {
         carrier: deliveryCarrier,
         ttn: trackingNumber,
-        recipient: deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
-        recipientPhone: deliveryRecipientPhone(order, rawDelivery, deliveryProvider) || text(order.phone) || text(order.client_phone),
-        city: deliveryCity, address: deliveryAddress,
+        recipient:
+          deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
+        recipientPhone:
+          deliveryRecipientPhone(order, rawDelivery, deliveryProvider) ||
+          text(order.phone) ||
+          text(order.client_phone),
+        city: deliveryCity,
+        address: deliveryAddress,
         ttnHistory: ttnHistory.length ? ttnHistory : undefined,
         addressHistory: addressHistory.length ? addressHistory : undefined,
-        status: deliveryStatus, payer,
+        status: deliveryStatus,
+        payer,
         ...savedPayment,
         rozetkaPayOperationIds: Array.isArray(previousDelivery.rozetkaPayOperationIds)
           ? previousDelivery.rozetkaPayOperationIds.filter((value) => typeof value === 'string')
@@ -980,7 +1407,10 @@ Deno.serve(async (request) => {
         hasWebsiteCommission: isWebsiteOrder,
         isInstallmentPayment,
         shippingSource: resolvedShipping.shippingSource,
-        ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, { city: deliveryCity, address: deliveryAddress }),
+        ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, {
+          city: deliveryCity,
+          address: deliveryAddress,
+        }),
         printCheckedAt: text(previousDelivery.printCheckedAt) || undefined,
         printedAt: text(previousDelivery.printedAt) || undefined,
         labelEmailSentAt: text(previousDelivery.labelEmailSentAt) || undefined,
@@ -989,9 +1419,32 @@ Deno.serve(async (request) => {
       },
     }
     let orderId = existing?.id
-    const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
-    if (orderId && orderChanged) { const { error } = await admin.from('crm_orders').update(data).eq('id', orderId); if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders }); updated += 1; changedOrderIds.push(orderId) }
-    else if (!orderId) { const { data: inserted, error } = await admin.from('crm_orders').insert(data).select('id').single(); if (error || !inserted?.id) return Response.json({ ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' }, { status: 500, headers: corsHeaders }); orderId = inserted.id; created += 1 }
+    const orderChanged =
+      !existing ||
+      !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
+    if (orderId && orderChanged) {
+      const { error } = await admin.from('crm_orders').update(data).eq('id', orderId)
+      if (error)
+        return Response.json(
+          { ok: false, message: error.message },
+          { status: 500, headers: corsHeaders },
+        )
+      updated += 1
+      changedOrderIds.push(orderId)
+    } else if (!orderId) {
+      const { data: inserted, error } = await admin
+        .from('crm_orders')
+        .insert(data)
+        .select('id')
+        .single()
+      if (error || !inserted?.id)
+        return Response.json(
+          { ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' },
+          { status: 500, headers: corsHeaders },
+        )
+      orderId = inserted.id
+      created += 1
+    }
     if (!orderId) continue
     if (!existing) changedOrderIds.push(orderId)
 
@@ -999,35 +1452,42 @@ Deno.serve(async (request) => {
     const byPosition = new Map((currentItems ?? []).map((item) => [item.position, item]))
     const byName = new Map((currentItems ?? []).map((item) => [item.product_name, item]))
     const variantKey = (marketplaceProductKey: string, size: string) =>
-      marketplaceProductKey && size ? `${marketplaceProductKey}\u0000${size.trim().toLowerCase()}` : ''
+      marketplaceProductKey && size
+        ? `${marketplaceProductKey}\u0000${size.trim().toLowerCase()}`
+        : ''
     const byVariant = new Map(
       currentItems
-        .map((item) => [
-          variantKey(text(item.marketplace_product_key), text(item.size)),
-          item,
-        ] as const)
+        .map(
+          (item) =>
+            [variantKey(text(item.marketplace_product_key), text(item.size)), item] as const,
+        )
         .filter(([key]) => Boolean(key)),
     )
     const manualByVariant = new Map(
       manualItems
-        .map((item) => [
-          variantKey(text(item.marketplaceProductKey), text(item.size)),
-          item,
-        ] as const)
+        .map(
+          (item) => [variantKey(text(item.marketplaceProductKey), text(item.size)), item] as const,
+        )
         .filter(([key]) => Boolean(key)),
     )
     const items = sourceItems(order)
     const itemPrice = (item: RecordValue) => {
       const quantity = number(pick(item, 'quantity', 'amount')) || 1
-      return firstNumber(pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'), number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity)
+      return firstNumber(
+        pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'),
+        number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity,
+      )
     }
-    const itemsAmount = items.reduce((total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1), 0)
+    const itemsAmount = items.reduce(
+      (total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1),
+      0,
+    )
     const orderCommission = number(asRecord(order.cpa_commission).amount)
     let needsTranslationRetry = false
     if (items.length) {
       const familyIdentities = await Promise.all(
         items.map((item) =>
-          resolvedPromFamilyIdentity(item, promToken, productFamilyMappings, productDetailsCache)
+          resolvedPromFamilyIdentity(item, promToken, productFamilyMappings, productDetailsCache),
         ),
       )
       const familyConflicts = new Set<string>()
@@ -1042,9 +1502,13 @@ Deno.serve(async (request) => {
         )
         if (!remembered) familyConflicts.add(identity.familyKey)
       }
-      for (const familyKey of new Set(familyIdentities.map((identity) => identity.familyKey).filter(Boolean))) {
+      for (const familyKey of new Set(
+        familyIdentities.map((identity) => identity.familyKey).filter(Boolean),
+      )) {
         if (familyConflicts.has(familyKey)) continue
-        const representativePosition = familyIdentities.findIndex((identity) => identity.familyKey === familyKey)
+        const representativePosition = familyIdentities.findIndex(
+          (identity) => identity.familyKey === familyKey,
+        )
         const representative = items[representativePosition]
         const representativeName =
           text(representative?.name) || text(representative?.product_name) || 'Товар Prom'
@@ -1060,132 +1524,179 @@ Deno.serve(async (request) => {
         if (promotion.conflict) familyConflicts.add(familyKey)
       }
 
-      const itemRows = await Promise.all(items.map(async (item, position) => {
-      const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
-      const localizedName = await resolvedUkrainianProductName(item, sourceName, promToken, productNameCache)
-      if (localizedName.retry) needsTranslationRetry = true
-      const name = localizedName.name
-      const quantity = number(pick(item, 'quantity', 'amount')) || 1
-      const price = itemPrice(item)
-      const apiSize = await resolvedProductSize(
-        item,
-        sourceName,
-        promToken,
-        feedProducts,
-        productDetailsCache,
-        Boolean(requestedExternalId),
+      const itemRows = await Promise.all(
+        items.map(async (item, position) => {
+          const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+          const localizedName = await resolvedUkrainianProductName(
+            item,
+            sourceName,
+            promToken,
+            productNameCache,
+          )
+          if (localizedName.retry) needsTranslationRetry = true
+          const name = localizedName.name
+          const quantity = number(pick(item, 'quantity', 'amount')) || 1
+          const price = itemPrice(item)
+          const apiSize = await resolvedProductSize(
+            item,
+            sourceName,
+            promToken,
+            feedProducts,
+            productDetailsCache,
+            Boolean(requestedExternalId),
+          )
+          const identity = familyIdentities[position]
+          const legacyMarketplaceProductKey = promProductKey(item)
+          const canonicalMarketplaceProductKey =
+            identity?.familyKey && !familyConflicts.has(identity.familyKey)
+              ? identity.familyKey
+              : ''
+          const candidateMarketplaceKeys = [
+            identity?.familyKey ?? '',
+            legacyMarketplaceProductKey,
+            ...(identity?.legacyKeys ?? []),
+          ].filter(Boolean)
+          const currentVariant = candidateMarketplaceKeys
+            .map((key) => byVariant.get(variantKey(key, apiSize)))
+            .find(Boolean)
+          const manualVariant = candidateMarketplaceKeys
+            .map((key) => manualByVariant.get(variantKey(key, apiSize)))
+            .find(Boolean)
+          const manualItem =
+            manualVariant ??
+            manualItems.find(
+              (candidate) =>
+                text(candidate.name) === name && (!apiSize || text(candidate.size) === apiSize),
+            )
+          const matchesCurrentVariant = (candidate: RecordValue | undefined) => {
+            if (!candidate || (apiSize && text(candidate.size) !== apiSize)) return false
+            if (!candidateMarketplaceKeys.length) return true
+            const candidateKey = text(
+              candidate.marketplace_product_key ?? candidate.marketplaceProductKey,
+            )
+            return candidateMarketplaceKeys.includes(candidateKey)
+          }
+          const namePrevious = byName.get(name)
+          const positionPrevious = byPosition.get(position)
+          const previous =
+            currentVariant ??
+            (matchesCurrentVariant(namePrevious) ? namePrevious : undefined) ??
+            (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
+          const itemCommission = commissionAmount(item)
+          const cpaCommission =
+            itemCommission ??
+            (orderCommission && itemsAmount
+              ? orderCommission * ((price * quantity) / itemsAmount)
+              : 0)
+          const orderLevelCommissionShare =
+            orderLevelCommissionAmount && itemsAmount
+              ? orderLevelCommissionAmount * ((price * quantity) / itemsAmount)
+              : 0
+          const hasApiCommission =
+            itemCommission !== undefined ||
+            orderCommission !== 0 ||
+            orderLevelCommissionAmount !== 0
+          const royaltyAmount = hasApiCommission
+            ? number(cpaCommission) + orderLevelCommissionShare
+            : (previous?.royalty_amount ?? null)
+          // Фиксированные комиссии уровня заказа не входят в процент комиссии позиции.
+          const royaltyPercent = hasApiCommission
+            ? number(cpaCommission) === 0 || price * quantity === 0
+              ? 0
+              : (number(cpaCommission) / (price * quantity)) * 100
+            : (previous?.royalty_percent ?? null)
+          const royaltyManual =
+            manualItem?.royaltyManual === true || previous?.royalty_manual === true
+          const preservedRoyaltyPercent =
+            manualItem?.royaltyManual === true
+              ? manualItem.royaltyPercent
+              : previous?.royalty_percent
+          const preservedRoyaltyAmount =
+            manualItem?.royaltyManual === true ? manualItem.royaltyAmount : previous?.royalty_amount
+          // A missing value in Prom's response must never erase a manually saved size.
+          const size = apiSize || text(previous?.size) || ''
+          const previousMarketplaceProductKey = text(
+            previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
+          )
+          const resolvedMarketplaceProductKey =
+            canonicalMarketplaceProductKey ||
+            legacyMarketplaceProductKey ||
+            previousMarketplaceProductKey
+          const priceCostMatch = findPlatformPriceCostSnapshot(
+            priceCostSnapshots,
+            'Пром',
+            resolvedMarketplaceProductKey,
+            name,
+            size,
+          )
+          const linkedPriceCost = priceCostMatch?.snapshot
+          const imageUrl =
+            productFromPromFeed(item, feedProducts)?.imageUrl ||
+            text(pick(item, 'image', 'image_url', 'imageUrl')) ||
+            text(previous?.image_url)
+          const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)
+          return {
+            order_id: orderId,
+            position,
+            product_name: name,
+            size,
+            image_url: imageUrl || null,
+            quantity,
+            price,
+            cost: resolvedCost.cost,
+            cost_usd: resolvedCost.costUsd,
+            marketplace_product_key: resolvedMarketplaceProductKey || null,
+            cost_manual: resolvedCost.costManual,
+            price_item_id: resolvedCost.priceItemId,
+            royalty_percent: royaltyManual ? (preservedRoyaltyPercent ?? null) : royaltyPercent,
+            royalty_amount: royaltyManual ? (preservedRoyaltyAmount ?? null) : royaltyAmount,
+            royalty_manual: royaltyManual,
+          }
+        }),
       )
-      const identity = familyIdentities[position]
-      const legacyMarketplaceProductKey = promProductKey(item)
-      const canonicalMarketplaceProductKey =
-        identity?.familyKey && !familyConflicts.has(identity.familyKey) ? identity.familyKey : ''
-      const candidateMarketplaceKeys = [
-        identity?.familyKey ?? '',
-        legacyMarketplaceProductKey,
-        ...(identity?.legacyKeys ?? []),
-      ].filter(Boolean)
-      const currentVariant = candidateMarketplaceKeys
-        .map((key) => byVariant.get(variantKey(key, apiSize)))
-        .find(Boolean)
-      const manualVariant = candidateMarketplaceKeys
-        .map((key) => manualByVariant.get(variantKey(key, apiSize)))
-        .find(Boolean)
-      const manualItem =
-        manualVariant ??
-        manualItems.find(
-          (candidate) =>
-            text(candidate.name) === name && (!apiSize || text(candidate.size) === apiSize),
-        )
-      const matchesCurrentVariant = (candidate: RecordValue | undefined) => {
-        if (!candidate || (apiSize && text(candidate.size) !== apiSize)) return false
-        if (!candidateMarketplaceKeys.length) return true
-        const candidateKey = text(
-          candidate.marketplace_product_key ?? candidate.marketplaceProductKey,
-        )
-        return candidateMarketplaceKeys.includes(candidateKey)
-      }
-      const namePrevious = byName.get(name)
-      const positionPrevious = byPosition.get(position)
-      const previous =
-        currentVariant ??
-        (matchesCurrentVariant(namePrevious) ? namePrevious : undefined) ??
-        (matchesCurrentVariant(positionPrevious) ? positionPrevious : undefined)
-      const itemCommission = commissionAmount(item)
-      const cpaCommission = itemCommission ?? (orderCommission && itemsAmount ? orderCommission * (price * quantity / itemsAmount) : 0)
-      const orderLevelCommissionShare = orderLevelCommissionAmount && itemsAmount
-        ? orderLevelCommissionAmount * (price * quantity / itemsAmount)
-        : 0
-      const hasApiCommission = itemCommission !== undefined || orderCommission !== 0 || orderLevelCommissionAmount !== 0
-      const royaltyAmount = hasApiCommission
-        ? number(cpaCommission) + orderLevelCommissionShare
-        : previous?.royalty_amount ?? null
-      // Фиксированные комиссии уровня заказа не входят в процент комиссии позиции.
-      const royaltyPercent = hasApiCommission
-        ? (number(cpaCommission) === 0 || price * quantity === 0 ? 0 : (number(cpaCommission) / (price * quantity)) * 100)
-        : previous?.royalty_percent ?? null
-      const royaltyManual =
-        manualItem?.royaltyManual === true || previous?.royalty_manual === true
-      const preservedRoyaltyPercent =
-        manualItem?.royaltyManual === true
-          ? manualItem.royaltyPercent
-          : previous?.royalty_percent
-      const preservedRoyaltyAmount =
-        manualItem?.royaltyManual === true
-          ? manualItem.royaltyAmount
-          : previous?.royalty_amount
-      // A missing value in Prom's response must never erase a manually saved size.
-      const size = apiSize || text(previous?.size) || ''
-      const previousMarketplaceProductKey = text(
-        previous?.marketplace_product_key ?? previous?.marketplaceProductKey,
-      )
-      const resolvedMarketplaceProductKey =
-        canonicalMarketplaceProductKey ||
-        legacyMarketplaceProductKey ||
-        previousMarketplaceProductKey
-      const priceCostMatch = findPlatformPriceCostSnapshot(
-        priceCostSnapshots,
-        'Пром',
-        resolvedMarketplaceProductKey,
-        name,
-        size,
-      )
-      const linkedPriceCost = priceCostMatch?.snapshot
-      const imageUrl =
-        productFromPromFeed(item, feedProducts)?.imageUrl ||
-        text(pick(item, 'image', 'image_url', 'imageUrl')) ||
-        text(previous?.image_url)
-      const resolvedCost = resolvedOrderItemCost(previous, linkedPriceCost, orderUsdRate)
-      return {
-        order_id: orderId,
-        position,
-        product_name: name,
-        size,
-        image_url: imageUrl || null,
-        quantity,
-        price,
-        cost: resolvedCost.cost,
-        cost_usd: resolvedCost.costUsd,
-        marketplace_product_key: resolvedMarketplaceProductKey || null,
-        cost_manual: resolvedCost.costManual,
-        price_item_id: resolvedCost.priceItemId,
-        royalty_percent: royaltyManual ? preservedRoyaltyPercent ?? null : royaltyPercent,
-        royalty_amount: royaltyManual ? preservedRoyaltyAmount ?? null : royaltyAmount,
-        royalty_manual: royaltyManual,
-      }
-      }))
       const comparableRows = itemRows.map(({ order_id: _orderId, ...item }) => item)
-      const comparableCurrent = currentItems.map(({ order_id: _orderId, ...item }) => item).sort((left, right) => number(left.position) - number(right.position))
+      const comparableCurrent = currentItems
+        .map(({ order_id: _orderId, ...item }) => item)
+        .sort((left, right) => number(left.position) - number(right.position))
       if (!same(comparableRows, comparableCurrent)) {
-        const { error: replaceError } = await admin.rpc('replace_crm_order_items', { p_order_id: orderId, p_items: itemRows })
-        if (replaceError) return Response.json({ ok: false, message: replaceError.message }, { status: 500, headers: corsHeaders })
+        const { error: replaceError } = await admin.rpc('replace_crm_order_items', {
+          p_order_id: orderId,
+          p_items: itemRows,
+        })
+        if (replaceError)
+          return Response.json(
+            { ok: false, message: replaceError.message },
+            { status: 500, headers: corsHeaders },
+          )
         if (!orderChanged) updated += 1
         changedOrderIds.push(orderId)
       } else if (orderChanged) changedOrderIds.push(orderId)
     }
     const sourceHashValue = hashes.get(externalId)
     const syncStateHash = needsTranslationRetry ? `retry:${sourceHashValue ?? ''}` : sourceHashValue
-    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Пром', external_id: externalId, order_id: orderId, source_hash: syncStateHash, synced_at: new Date().toISOString() })
-    if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({
+      platform: 'Пром',
+      external_id: externalId,
+      order_id: orderId,
+      source_hash: syncStateHash,
+      synced_at: new Date().toISOString(),
+    })
+    if (stateError)
+      return Response.json(
+        { ok: false, message: stateError.message },
+        { status: 500, headers: corsHeaders },
+      )
   }
-  return Response.json({ ok: true, received: orders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
+  return Response.json(
+    {
+      ok: true,
+      received: orders.length,
+      created,
+      updated,
+      skipped,
+      skippedUnchanged: skipped,
+      changedOrderIds: [...new Set(changedOrderIds)],
+    },
+    { headers: corsHeaders },
+  )
 })
