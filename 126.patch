@@ -1,0 +1,16 @@
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -992,9 +992,12 @@ Deno.serve(async (request) => {
+       true,
+     )
+     const dailyBalances = parseExtractDayBalances(extractResult.extract)
++    const previousDate = formatNovaDate(new Date(now.getTime() - 24 * 60 * 60 * 1000))
++    const previousClosing = dailyBalances.get(previousDate)?.closing ?? null
+     const todayBalances = dailyBalances.get(dateTo) ?? { opening: null, closing: null }
+     dailyBalances.set(dateTo, {
+       ...todayBalances,
++      opening: todayBalances.opening ?? previousClosing,
+       closing: available,
+     })
+     const statementPaymentsResult = await soapCall(
