@@ -11,6 +11,7 @@ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
 const SOAP_NAMESPACE = 'http://schemas.xmlsoap.org/soap/envelope/'
 const TEM_NAMESPACE = 'http://tempuri.org/'
 const SOAP_TIMEOUT_MS = 20_000
+const FULL_SYNC_LEASE_SECONDS = 600
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -687,6 +688,20 @@ async function readCache(admin) {
   return normalizeCache(data)
 }
 
+async function renewFullSyncLock(admin, owner) {
+  const { data, error } = await admin.rpc('renew_novapay_full_sync_lock', {
+    lock_owner: owner,
+    lease_seconds: FULL_SYNC_LEASE_SECONDS,
+  })
+  if (error || data !== true) {
+    throw new HttpError(
+      409,
+      'NOVAPAY_SYNC_LOCK_LOST',
+      'NovaPay refresh lost its synchronization lock before saving data.',
+    )
+  }
+}
+
 function errorResponse(error) {
   if (error instanceof HttpError) {
     return Response.json(
@@ -787,7 +802,38 @@ Deno.serve(async (request) => {
     )
   }
 
+  const syncOwner = crypto.randomUUID()
+  let syncLockAcquired = false
+
   try {
+    const { data: lockAcquired, error: lockError } = await admin.rpc(
+      'acquire_novapay_full_sync_lock',
+      {
+        lock_owner: syncOwner,
+        lease_seconds: FULL_SYNC_LEASE_SECONDS,
+      },
+    )
+    if (lockError) {
+      throw new HttpError(
+        500,
+        'NOVAPAY_SYNC_LOCK_FAILED',
+        'Failed to acquire the NovaPay refresh lock.',
+      )
+    }
+    if (lockAcquired !== true) {
+      if (isScheduledRequest) {
+        return Response.json(
+          { ok: true, refreshed: false, bank: 'novapay', skipped: 'sync_busy' },
+          { headers: corsHeaders },
+        )
+      }
+      throw new HttpError(409, 'NOVAPAY_SYNC_BUSY', 'Another NovaPay refresh is already running.')
+    }
+    syncLockAcquired = true
+
+    // A second request may have completed between the initial cache read and lock acquisition.
+    previousCache = await readCache(admin)
+
     const jwt = await getValidNovaPayJwt({
       admin,
       authenticate: ({ refreshToken, publicCertificate }) => {
@@ -973,8 +1019,11 @@ Deno.serve(async (request) => {
 
     const useLegacyMatcher = previousCache.account?.receiptSource !== 'payments-list-v1'
     const hasBaseline = Boolean(previousCache.updatedAt)
+    await renewFullSyncLock(admin, syncOwner)
     await saveNewReceipts(admin, previousCache.receipts, receipts, hasBaseline, useLegacyMatcher)
+    await renewFullSyncLock(admin, syncOwner)
     await saveNewReceipts(admin, receipts, updatedReceipts, hasBaseline, false)
+    await renewFullSyncLock(admin, syncOwner)
 
     const { error: cacheError } = await admin
       .from('bank_account_cache')
@@ -1088,5 +1137,12 @@ Deno.serve(async (request) => {
       )
     }
     return errorResponse(error)
+  } finally {
+    if (syncLockAcquired) {
+      const { error: releaseError } = await admin.rpc('release_novapay_full_sync_lock', {
+        lock_owner: syncOwner,
+      })
+      if (releaseError) console.error('Failed to release NovaPay refresh lock.')
+    }
   }
 })
