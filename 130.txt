@@ -1,0 +1,69 @@
+PATCH 130 — Restore intended CRM route after stale chunk / Cloudflare reload
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Patch file: 130.patch
+Patch SHA-256: 614570c2538a8ea98d994f8e3a5ec3172e6c2333fc634398b13e049bea581763
+Published patch blob SHA: 488892c01e76b3f1af15d8d7ad052ec90295f478
+Published patch commit: 03493b9cccc470e742952932277eea04520d19b1
+
+Base at preparation time
+- origin/main: 2451ba9fcdba021135af2f09bf9b634486247bf6
+- src/main.ts blob: 19b3df8ff6d086f65e320c524ec339603a8f13a3
+
+Problem
+Internal CRM pages such as /reconciliation and /prices are lazy-loaded.
+If loading the destination chunk is interrupted by Cloudflare verification, Vite emits vite:preloadError.
+Current code reloads the current page before the Vue Router navigation has completed, so after verification/reload the user can land back on the previous route (often /) instead of the page they clicked.
+
+Goal
+Remember the intended internal route before lazy component loading starts and restore that exact route after the one-time stale-chunk reload.
+Preserve fullPath, including query parameters and hash.
+
+Exact scope
+Only:
+- src/main.ts
+
+Implementation
+- Store to.fullPath in sessionStorage from a global router.beforeEach hook.
+- Do not overwrite the saved destination during stale-chunk recovery.
+- Clear the saved destination only after a successful navigation; keep it on failed navigation.
+- Keep the existing one-reload guard for vite:preloadError.
+- After router.isReady(), if a stale-chunk reload happened and the saved destination differs from the current route, router.replace() the saved destination.
+- Do not change Cloudflare, route definitions, Supabase auth, page-specific auth redirects, or lazy-loading strategy.
+
+Preflight
+1. git fetch origin
+2. Work from a clean auxiliary worktree based on current origin/main.
+3. If origin/main advanced from the base above, continue only if src/main.ts is unchanged from blob:
+   19b3df8ff6d086f65e320c524ec339603a8f13a3
+4. Fetch 130.patch byte-for-byte from origin/chatgpt-patches.
+5. Verify SHA-256:
+   614570c2538a8ea98d994f8e3a5ec3172e6c2333fc634398b13e049bea581763
+6. Run git apply --check 130.patch. Stop if it fails.
+7. Apply patch.
+8. Verify the real diff changes only src/main.ts.
+9. Run git diff --check.
+
+Formatting rule
+The published patch is intended as the final formatted diff.
+Do not run broad formatting across src/.
+If formatting is required, format only src/main.ts and verify it does not create extra churn.
+
+Checks
+- corepack pnpm type-check
+- corepack pnpm exec oxlint src/main.ts
+- corepack pnpm exec eslint src/main.ts
+- corepack pnpm build
+- git diff --check
+
+Deployment
+After checks pass:
+- commit the single-file change;
+- push to main through the existing SSH workflow;
+- verify Deploy to Production succeeds.
+No Supabase migration or Edge Function deploy is required.
+
+Expected behavior
+If navigation to an internal lazy-loaded CRM page is interrupted by stale chunk / Cloudflare verification and causes the existing reload, the CRM should return to the originally requested route rather than to the previous/root page.
+Normal navigation must remain unchanged.
