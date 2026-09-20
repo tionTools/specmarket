@@ -7,7 +7,21 @@ import App from './App.vue'
 import router from './router'
 
 const staleChunkReloadKey = 'specmarket:stale-chunk-reload'
+const pendingRouteKey = 'specmarket:pending-route'
 applyAppearance(parseAppearance(window.localStorage.getItem(appearanceStorageKey)))
+
+router.beforeEach((to) => {
+  const isRecoveringFromStaleChunk =
+    sessionStorage.getItem(staleChunkReloadKey) === '1' &&
+    Boolean(sessionStorage.getItem(pendingRouteKey))
+  if (!isRecoveringFromStaleChunk) sessionStorage.setItem(pendingRouteKey, to.fullPath)
+})
+
+router.afterEach((to, _from, failure) => {
+  if (!failure && sessionStorage.getItem(pendingRouteKey) === to.fullPath) {
+    sessionStorage.removeItem(pendingRouteKey)
+  }
+})
 
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault()
@@ -16,7 +30,24 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload()
 })
 
-void router.isReady().then(() => sessionStorage.removeItem(staleChunkReloadKey))
+void router.isReady().then(async () => {
+  const pendingRoute = sessionStorage.getItem(pendingRouteKey)
+  if (
+    sessionStorage.getItem(staleChunkReloadKey) === '1' &&
+    pendingRoute &&
+    pendingRoute !== router.currentRoute.value.fullPath
+  ) {
+    try {
+      await router.replace(pendingRoute)
+    } catch (error) {
+      console.error('Не удалось восстановить страницу после перезагрузки:', error)
+    } finally {
+      sessionStorage.removeItem(staleChunkReloadKey)
+    }
+    return
+  }
+  sessionStorage.removeItem(staleChunkReloadKey)
+})
 
 const app = createApp(App)
 
