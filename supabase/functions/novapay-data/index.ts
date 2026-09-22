@@ -5,6 +5,7 @@ import {
   NovaPayAuthError,
   NovaPayTransportError,
 } from '../_shared/novapay-auth.ts'
+import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
 import {
   assignRunningBalances,
   copyKnownBalancesByProviderAlias,
@@ -280,8 +281,9 @@ function normalizeIban(value) {
 }
 
 function isIncomingPaymentDocument(document, accountIban) {
-  const creditIban = normalizeIban(pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN'))
-  return Boolean(accountIban) && creditIban === accountIban
+  const debitIban = pick(document, 'DebitCodeIBAN', 'DebitIBAN', 'debitIBAN')
+  const creditIban = pick(document, 'CreditCodeIBAN', 'CreditIBAN', 'creditIBAN')
+  return isIncomingNovaPayPayment(debitIban, creditIban, accountIban)
 }
 
 function isConductedPaymentDocument(document) {
