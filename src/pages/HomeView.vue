@@ -104,6 +104,7 @@ const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-s
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
+const bankBalancesCard = useTemplateRef<InstanceType<typeof BankBalancesCard>>('bankBalancesCard')
 const { copy, copied, isSupported: isClipboardSupported } = useClipboard({ copiedDuring: 0 })
 const {
   files: promRegistryFiles,
@@ -2154,6 +2155,7 @@ async function saveAcceptedReturns(order: Order) {
     product.returnedQuantity = returnedQuantity
     product.returnedAt = returnDraftDate.value
   }
+  void bankBalancesCard.value?.refreshDebt()
   returnEditorOrderId.value = null
   showSyncMessage(`Принятый возврат по заказу № ${order.id} сохранён.`)
 }
@@ -6399,7 +6401,11 @@ function orderDateTime(order: Order) {
             Сверка расчётов
           </RouterLink>
         </div>
-        <BankBalancesCard :caches="bankCaches" :total-balance="bankTotalBalance" />
+        <BankBalancesCard
+          ref="bankBalancesCard"
+          :caches="bankCaches"
+          :total-balance="bankTotalBalance"
+        />
         <div
           v-if="isPromRegistryView"
           class="sticky bottom-4 z-10 ml-auto mt-5 flex w-fit max-w-full flex-wrap justify-end gap-3 rounded-2xl border border-violet-200 bg-violet-50/95 p-4 shadow-lg backdrop-blur"

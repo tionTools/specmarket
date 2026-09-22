@@ -114,6 +114,8 @@ async function loadSupplierDebt() {
   supplierDebt.value = debtUsd * usdRate + debtUah
 }
 
+defineExpose({ refreshDebt: loadSupplierDebt })
+
 function scrollToBankingBlock() {
   if (!consumeBankingReturn()) return
   window.requestAnimationFrame(() => {
