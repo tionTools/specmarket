@@ -1,0 +1,37 @@
+PATCH 131 — Refresh supplier debt after accepting an order return
+
+Repository: tionTools/specmarket
+Publication branch: chatgpt-patches
+Files: 131.patch and 131.txt (repository root)
+Patch SHA-256: 0116e1263aedb76dfbb3c97bc5526fc7f315e833a532c11aa6ffddd6e47846a5
+
+Base verified at preparation time:
+- origin/main: 85fd48d2829b6c9d42e53006cb1195210a0debb7
+- src/features/banking/BankBalancesCard.vue blob: fe97f2a4bd15ea9efc55e5e22cb7849bc9aeadae
+- src/pages/HomeView.vue blob: 1500dfc9e32362daa9f7cf99a23ebe33c6764817
+
+Goal
+After successful upsert of accepted item returns, refresh the supplier-debt card on the current Home page without F5 or a round trip through reconciliation. The displayed profit should update from the recalculated debt. Do not change cost/debt formulas, supplier payments, bank balances, reconciliation history, returns accounting, SQL, Edge Functions, or infrastructure.
+
+Exact production code scope:
+- src/features/banking/BankBalancesCard.vue
+- src/pages/HomeView.vue
+
+Implementation in the published patch:
+- Expose the existing loadSupplierDebt() as refreshDebt through defineExpose in BankBalancesCard.
+- Attach a typed component template ref in HomeView.
+- Request refreshDebt only after the return upsert has succeeded; keep the existing error path unchanged.
+- Keep the supplier-debt formula unchanged.
+
+Codex procedure:
+1. Fetch origin and work in a separate clean worktree at current origin/main. Do not overwrite or reset unrelated user changes. Use the existing SSH GitHub remote, not HTTPS or browser authentication.
+2. Fetch 131.patch byte-for-byte from origin/chatgpt-patches and verify its SHA-256 against the value above. Read this 131.txt from the same branch.
+3. Compare current origin/main to the base above. If main moved, verify BOTH declared source-file blobs still match the recorded blobs; otherwise STOP and report the drift, without applying or rewriting the patch.
+4. git apply --check 131.patch; on failure STOP, do not use --reject/--3way or hand-edit the patch. Apply with git apply 131.patch only after the check succeeds.
+5. Inspect the actual git diff and git diff --check; confirm exactly the two scoped Vue files changed and no unrelated formatter churn.
+6. Patch is already formatted for its scope. Do not run pnpm format (it formats all src/) or pnpm lint (its configured scripts include --fix over the whole tree). If necessary, run pnpm exec oxfmt only on the two changed files and verify no extraneous diff. Run corepack pnpm type-check; corepack pnpm exec oxlint on the two changed files without --fix; corepack pnpm exec eslint on the two changed files without --fix; corepack pnpm build; git diff --check. Resolve genuine blockers with minimal scoped edits, then repeat checks and review diff.
+7. Regression verification: saving a return with changed quantity recalculates debt and profit without navigation/reload; lowering an accepted returned quantity restores the cost to debt; a failed save must not emit a successful refresh; unaffected bank balances and reconciliation remain unchanged. Report manual scenarios as pending unless actually executed.
+8. Only after checks pass: commit only the two production files (never git add .), push to main via existing SSH, verify GitHub Actions Deploy to Production. No Supabase deploy.
+9. Report base/current main SHA, published patch SHA-256, production commit SHA, exact changed-file list, apply/type-check/oxlint/eslint/build/diff-check results, SSH push and production deploy status, plus any manual checks not performed.
+
+Prepublication verification: checked patch context against the recorded GitHub blobs; applied it and ran git diff --check in an isolated sparse source fixture. Full project type-check, lint and build have not been run here and remain Codex gates.
