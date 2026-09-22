@@ -1,0 +1,34 @@
+PATCH 132 — NovaPay incoming payments: exclude same-account cash withdrawal
+
+Repository: tionTools/specmarket
+Publication branch: chatgpt-patches (repository root)
+Patch SHA-256: b6c8a0cdf77b411965fbe6a2ab08aacb39519b7145082d962eed20430abfc350
+Patch Git blob: a38cf9fc6f772ceb62d759e599954a128cb880ae
+Base origin/main: 71e246fd24bed000f237571270066d31f4ec4722
+Base index.ts blob: 1621ff58c2a97da1cda9629bad88272dffad2d8b
+
+Confirmed read-only cache evidence:
+- 22 Sep 2026 cash withdrawal 8000 UAH: debit=ACCOUNT, credit=ACCOUNT.
+- Real receipt 208.95 UAH: debit=OTHER, credit=ACCOUNT.
+
+Goal: Only conducted documents with a populated debit IBAN DIFFERENT from the configured account AND credit IBAN EQUAL to the account are incoming. This prevents the cash withdrawal from creating receipts and bank_payment_events/email notices, while preserving real receipts. Both regular and date_type=3 updated payment paths already use the shared isIncomingPaymentDocument filter.
+
+Exact production scope:
+1. supabase/functions/novapay-data/index.ts — use the new predicate in isIncomingPaymentDocument.
+2. supabase/functions/_shared/novapay-incoming-payment.ts — pure normalized-IBAN predicate, fail closed if any IBAN is empty.
+3. supabase/functions/_shared/novapay-incoming-payment_test.ts — focused tests: cash, real receipts, outgoing/incomplete/unrelated, and mixed-day transactions.
+
+Do NOT change NovaPay authentication/tokens, balances, running-balance algorithm, database schema/events, frontend, migrations, cron, or other functions. Do not invent a Code/type whitelist without raw documentation. This patch does not correct intermediate running balances for movements with both IBANs equal. An already-sent email cannot be recalled. The false event row is not deleted by this patch; optional historical cleanup requires a separate exact-ID read-only verification. The payment Code is not necessarily provider ID/external_id.
+
+Codex deployment steps:
+1. Fetch origin and work in a separate clean worktree at current origin/main. Preserve local changes; use existing SSH remote, no HTTPS/browser credentials. Check AGENTS.md.
+2. Fetch 132.patch and 132.txt byte-for-byte from origin/chatgpt-patches. Verify patch SHA-256 above. Confirm main SHA and index.ts blob. If main advanced, verify the index.ts blob is still exactly as above and the two new files do not exist; otherwise STOP, report drift, and do not force-apply.
+3. git apply --check 132.patch, then git apply 132.patch. No --3way/--reject. Inspect full diff and git diff --check: exactly the three scoped files, no formatter churn.
+4. Run deno test supabase/functions/_shared/novapay-incoming-payment_test.ts and deno test supabase/functions/_shared/novapay-running-balance_test.ts if Deno is available. Run corepack pnpm type-check, non-mutating scoped lint, corepack pnpm build, and git diff --check. Do not run mass formatting/fix. Report unavailable tests honestly. Resolve only real blockers, minimally, then repeat checks.
+5. Confirm both statement and updated receipt paths use the stricter filter after StatusDocumentId=8. Test cash withdrawal 8000 UAH is excluded, while real receipts remain; verify auth and GetAccountRest stay untouched.
+6. Commit only the three files. SSH push to main. Verify GitHub Actions Deploy to Production. IMPORTANT: that action deploys the FRONTEND only, not Supabase Edge Functions.
+7. Separately deploy ONLY the existing Supabase function novapay-data via the already configured project/CLI. Do not deploy novapay-balance or all functions. If credentials or linkage are absent, report BLOCKED without changing any auth/config/secrets. Verify and report Supabase deployment separately.
+8. With existing authorization, trigger one normal CRM NovaPay refresh and verify that cash withdrawal is absent from incoming receipts, true receipts remain and direct bank balance is unchanged. Do not issue test payments. Already-sent email remains. Never automatically delete any historical event; optional cleanup is a separate task after exact identification.
+9. Report main/base SHA, patch SHA-256, production commit, changed paths, tests/type-check/lint/build/diff, SSH push, frontend CI, Supabase function deploy and manual/pending checks.
+
+Prepublication: source anchors verified against GitHub main; git apply --check, git apply and git diff --check PASS in an isolated source-context fixture; four focused cases PASS using Node TS stripping + Deno.test shim. Full project/native Deno/deployment checks remain Codex gates.
