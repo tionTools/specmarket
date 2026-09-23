@@ -90,6 +90,7 @@ function meestReadableStatus(source: string, code: string) {
   if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(source))
     return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
   if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
+  if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
   if (code === '1622' || /^доручено$/i.test(source.trim()))
     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
   return readableStatus(source, code)
