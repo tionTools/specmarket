@@ -4667,20 +4667,36 @@ function orderDateTime(order: Order) {
             />
             {{ isSyncingDelivery ? 'Обновление…' : 'Доставки' }}
           </button>
-          <button
-            v-if="!isGuest"
-            class="whitespace-nowrap rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
-            :disabled="isMarketplaceSyncBusy"
-            type="button"
-            @click="syncFullAllPlatforms"
-          >
-            <RefreshCw
-              class="mr-1 inline size-4"
-              :class="{ 'animate-spin': isSyncingAllPlatforms }"
-              aria-hidden="true"
-            />
-            {{ isSyncingAllPlatforms ? 'Синхронизация…' : 'Полная синхронизация' }}
-          </button>
+          <div class="relative shrink-0">
+            <button
+              v-if="!isGuest"
+              class="whitespace-nowrap rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
+              :disabled="isMarketplaceSyncBusy"
+              type="button"
+              @click="syncFullAllPlatforms"
+            >
+              <RefreshCw
+                class="mr-1 inline size-4"
+                :class="{ 'animate-spin': isSyncingAllPlatforms }"
+                aria-hidden="true"
+              />
+              {{ isSyncingAllPlatforms ? 'Синхронизация…' : 'Полная синхронизация' }}
+            </button>
+            <button
+              class="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50"
+              :class="{
+                'absolute inset-x-0 top-full z-20 mt-1.5': !isGuest,
+                'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
+                'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50':
+                  !isShowingNotInExcel,
+              }"
+              type="button"
+              :disabled="isPromRegistryView"
+              @click="toggleNotInExcel"
+            >
+              Не в Excel · {{ notInExcelOrdersCount }}
+            </button>
+          </div>
           <button
             v-if="!isGuest"
             class="whitespace-nowrap rounded-xl bg-emerald-700 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
@@ -5103,19 +5119,6 @@ function orderDateTime(order: Order) {
             @click="toggleReturns"
           >
             Возвраты
-          </button>
-          <button
-            class="rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50"
-            :class="
-              isShowingNotInExcel
-                ? 'border-amber-500 bg-amber-50 text-amber-800'
-                : 'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50'
-            "
-            type="button"
-            :disabled="isPromRegistryView"
-            @click="toggleNotInExcel"
-          >
-            Не в Excel · {{ notInExcelOrdersCount }}
           </button>
           <div class="flex items-center gap-2 sm:ml-auto">
             <label
