@@ -106,6 +106,7 @@ export interface Order {
   internalComment?: string
   platform: Platform
   status: string
+  excelCopied?: boolean
   /** Заказ Prom вручную исключён из блока подтверждения «Виконано». */
   promCompletionDismissedAt?: string
   products: OrderProduct[]
