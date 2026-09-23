@@ -1,0 +1,28 @@
+PATCH 136 — Move "Не в Excel" directly below "Полная синхронизация"
+
+Repository: tionTools/specmarket
+Publication branch: chatgpt-patches
+Patch: 136.patch
+Patch Git blob SHA: 7e99d01be54660f83f887cdd89d36a88b7b8e26f
+
+Verified base origin/main: 207c9a4fffd5ebcd2b5aace9b0dfa9f7f3df6e50
+Base src/pages/HomeView.vue blob: bd29114e6fc9423011948930f4cc15a7983baa1e
+
+User goal
+- Put the existing "Не в Excel · N" filter immediately UNDER the "Полная синхронизация" button in the top toolbar.
+- Keep the top toolbar controls in their present positions, and do not move or expand the filter/search row. Use an absolute-positioned child of a relative wrapper around the existing full-sync button. The filter is removed from the search row and occurs exactly once in the template.
+- On a guest session (where full sync is hidden), the filter remains normally visible in the toolbar as a regular, non-absolute child.
+- Preserve existing active appearance, counter, click handler toggleNotInExcel, disabled-in-registry behavior, and full-sync handler/disabled state. No business-logic change.
+
+Scope: ONLY src/pages/HomeView.vue. No Supabase/migrations, Edge Functions, types, JS business functions, auth, or other UI elements.
+
+Codex instructions
+1. Read root AGENTS.md and .agents/skills/frontend/SKILL.md. Use existing SSH remote. Fetch origin and work in a clean auxiliary worktree on origin/main without touching user changes.
+2. Fetch 136.patch and 136.txt byte-for-byte from origin/chatgpt-patches. Verify git hash-object 136.patch equals the patch blob above. Confirm main SHA and HomeView.vue blob; if main advanced, require same HomeView.vue blob or STOP and report drift.
+3. git apply --check 136.patch, then git apply 136.patch. Do not use --3way/--reject/force. Inspect exact one-file diff, git diff --check, and remove formatter churn if introduced.
+4. Run project type-check, scoped non-mutating oxlint/eslint on HomeView.vue, and build (production UI). Do not run mass formatting/fix. If a real blocker requires formatting, limit it to this file and review the diff. Report unavailable tests honestly.
+5. Inspect UI at desktop viewport: "Не в Excel" directly below "Полная синхронизация", no shift in neighbors and no duplicate in search filters; check filter toggle/count, registry disabled state, and guest visibility. Check narrower viewport for overlap and report any limitation. All logic remains unchanged.
+6. Commit ONLY HomeView.vue. SSH push main. Verify GitHub Actions Deploy to Production. No Supabase migration/deploy required.
+7. Report base/current SHA, patch blob, commit, actual diff, typecheck/lint/build/diff, SSH push, CI, visual/manual checks individually.
+
+Prepublication: GitHub compare of an unreferenced preview commit against base shows exactly HomeView.vue, 30 additions / 27 deletions; patch generated from that compare and whitespace PASS. Full project/native git apply and production visual checks remain Codex gates.
