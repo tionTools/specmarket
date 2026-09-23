@@ -1,0 +1,28 @@
+PATCH 137 — Remove redundant Excel status button from order cards
+
+Repository: tionTools/specmarket
+Published branch: chatgpt-patches
+Patch: 137.patch
+Patch Git blob: 0076579e8fe483b561b73eee3b6745d31709b487
+
+Verified base origin/main: e5e13b920b246ff1a1e2ec1df1c4ced2db106434 (Patch 136 already landed)
+Base HomeView.vue blob: 023771b933b8406ae98c8191155627e6dad421ad
+
+Goal:
+- Remove the separate order-card button labeled "Уже в Excel" / "Снять отметку Excel".
+- Remove its now unused toggleSpreadsheetCopied(order) handler.
+- Keep the main Excel clipboard button intact. Its existing behavior is COPY TSV; if not yet marked, successful copy followed by successful RPC sets excel_copied=true and turns button gray. Clicking the gray Excel button copies again and does NOT remove the mark. The user no longer needs an explicit unmark action.
+- Keep top toolbar "Не в Excel · N" filter in the location delivered by Patch 136, as well as all existing accounting/DB/status behavior. Do NOT turn the Excel button into an unmark toggle.
+
+Exact scope: ONLY src/pages/HomeView.vue, deletion of 17 lines; no schema migration, no Edge Function, no changes to Supabase RPC, imports, sync or other UI.
+
+Codex:
+1. Read repo AGENTS.md and .agents/skills/frontend/SKILL.md; fetch origin with SSH, clean auxiliary worktree on origin/main; preserve other changes.
+2. Fetch 137.patch/137.txt from origin/chatgpt-patches byte-for-byte. Verify git hash-object 137.patch equals 0076579e8fe483b561b73eee3b6745d31709b487. Verify main and HomeView.vue blob, or if main advanced verify file blob unchanged; otherwise STOP and report drift.
+3. git apply --check 137.patch; then git apply 137.patch. Review exact one-file diff; git diff --check. Never use --3way or --reject; no mass reformat/fix. Published patch is already formatted.
+4. Run pnpm type-check, scoped non-mutating Oxlint and ESLint for HomeView.vue, and pnpm build. Report any unavailable check honestly.
+5. Confirm order card contains only main Excel button, click uses copyOrderForSpreadsheet(order), no toggleSpreadsheetCopied symbol remains, Excel clipboard and persistence flow unchanged; filter remains under full-sync and counters still work.
+6. Commit ONLY HomeView.vue; SSH push main; verify GitHub Actions Deploy to Production. No Supabase or migration deploy.
+7. Return SHA/diff/checks/deploy report and state separately whether live UI was actually verified.
+
+Prepublication: GitHub compare against exact main; all hunks verified in memory to match expected new HomeView.vue; whitespace PASS. Native typecheck/lint/build and live UI pending Codex.

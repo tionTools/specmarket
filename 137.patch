@@ -1,0 +1,35 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 023771b..825db28 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -4026,14 +4026,6 @@ async function copyOrderNumber(order: Order) {
+   } catch {}
+ }
+ 
+-async function toggleSpreadsheetCopied(order: Order) {
+-  if (await setSpreadsheetOrderCopied(order, !isSpreadsheetOrderCopied(order)))
+-    showInlineActionNotice(
+-      `copy-excel:${order.id}`,
+-      isSpreadsheetOrderCopied(order) ? 'Отмечено в Excel' : 'Отметка снята',
+-    )
+-}
+-
+ async function copyOrderForSpreadsheet(order: Order) {
+   if (!isClipboardSupported.value) return
+ 
+@@ -5445,15 +5437,6 @@ function orderDateTime(order: Order) {
+                     >Строка скопирована</span
+                   >
+                 </span>
+-                <button
+-                  v-if="!isGuest"
+-                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+-                  type="button"
+-                  :disabled="!order.remoteId || isUpdatingSpreadsheetOrderId !== null"
+-                  @click="toggleSpreadsheetCopied(order)"
+-                >
+-                  {{ isSpreadsheetOrderCopied(order) ? 'Снять отметку Excel' : 'Уже в Excel' }}
+-                </button>
+                 <div class="ml-auto flex flex-wrap items-center justify-end gap-3">
+                   <span
+                     v-if="returnSignalLabel(order) && !isOrderFullyReturned(order)"
