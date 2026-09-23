@@ -103,6 +103,7 @@ const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-s
 const route = useRoute()
 const router = useRouter()
 const orderDialog = useTemplateRef<HTMLDialogElement>('orderDialog')
+const pricePickerDialog = useTemplateRef<HTMLDialogElement>('pricePickerDialog')
 const bankBalancesCard = useTemplateRef<InstanceType<typeof BankBalancesCard>>('bankBalancesCard')
 const { copy, copied, isSupported: isClipboardSupported } = useClipboard({ copiedDuring: 0 })
 const {
@@ -171,6 +172,18 @@ const editingOrderValue = ref<Record<string, string>>({})
 const editingManualOrderId = ref<string | number | null>(null)
 const isSavingOrderDraft = ref(false)
 const orderDraftError = ref('')
+const manualPriceItems = ref<ManualPriceItem[]>([])
+const manualPriceSearch = ref('')
+const manualPriceError = ref('')
+const isLoadingManualPrices = ref(false)
+const manualPriceProductId = ref<string | null>(null)
+const matchingManualPriceItems = computed(() => {
+  const query = manualPriceSearch.value.trim().toLowerCase()
+  return query
+    ? manualPriceItems.value.filter((item) => item.name.toLowerCase().includes(query))
+    : manualPriceItems.value
+})
+let manualPriceAbortController: AbortController | null = null
 const commentEditorOrderId = ref<string | number | null>(null)
 const editingInternalCommentOrderId = ref<string | number | null>(null)
 const editingInternalCommentValue = ref<Record<string, string>>({})
@@ -237,6 +250,12 @@ type UnopenedNewOrder = {
   remoteId: string
   orderId: string
   platform: Platform
+}
+type ManualPriceItem = {
+  id: string
+  name: string
+  usd: number | null
+  costUah: number | null
 }
 type ManualOrderPriceDraftState = {
   draft: Order
@@ -3057,6 +3076,7 @@ onScopeDispose(() => {
   document.removeEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
   bankingMonitor.stop()
+  manualPriceAbortController?.abort()
   if (audioContext) void audioContext.close()
 })
 
@@ -3130,20 +3150,78 @@ function removeProduct(productId: string) {
   }
 }
 
+function closeManualPricePicker() {
+  manualPriceAbortController?.abort()
+  manualPriceAbortController = null
+  isLoadingManualPrices.value = false
+  manualPriceProductId.value = null
+  pricePickerDialog.value?.close()
+}
+
 async function openDraftPricePicker(product: OrderProduct) {
-  if (isGuest.value) return
-  const state: ManualOrderPriceDraftState = {
-    draft: JSON.parse(JSON.stringify(toRaw(orderDraft.value))) as Order,
-    editingId: editingManualOrderId.value,
-    productId: product.id,
+  if (isGuest.value || !supabase || !user.value || !pricePickerDialog.value) return
+  manualPriceProductId.value = product.id
+  manualPriceSearch.value = ''
+  manualPriceError.value = ''
+  manualPriceItems.value = []
+  isLoadingManualPrices.value = true
+  const controller = new AbortController()
+  manualPriceAbortController?.abort()
+  manualPriceAbortController = controller
+  pricePickerDialog.value.showModal()
+
+  try {
+    const { data, error } = await supabase
+      .from('crm_price_items')
+      .select('id, kind, name, usd, cost_uah')
+      .order('position')
+      .abortSignal(controller.signal)
+    if (controller.signal.aborted) return
+    if (error) throw new Error(error.message)
+    manualPriceItems.value = (data ?? [])
+      .filter((row) => row.kind !== 'group')
+      .map((row) => ({
+        id: String(row.id),
+        name: String(row.name ?? ''),
+        usd: row.usd === null ? null : Number(row.usd),
+        costUah: row.cost_uah === null ? null : Number(row.cost_uah),
+      }))
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      manualPriceError.value = `Не удалось загрузить цены: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    }
+  } finally {
+    if (manualPriceAbortController === controller) {
+      manualPriceAbortController = null
+      isLoadingManualPrices.value = false
+    }
   }
-  window.sessionStorage.setItem(manualOrderPriceDraftStorageKey, JSON.stringify(state))
-  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
-  orderDialog.value?.close()
-  await router.push({
-    path: '/prices',
-    query: { manualSelect: '1', manualProductId: product.id },
-  })
+}
+
+function selectManualPriceItem(item: ManualPriceItem) {
+  const product = orderDraft.value.products.find((value) => value.id === manualPriceProductId.value)
+  if (!product) {
+    manualPriceError.value = 'Не удалось найти товар в черновике заказа.'
+    return
+  }
+
+  const costUsd = Number(item.usd ?? 0)
+  const costUah = Number(item.costUah ?? 0)
+  product.name = item.name.trim() || product.name
+  product.priceItemId = item.id
+  product.costUsd = Number.isFinite(costUsd) ? costUsd : 0
+  if (costUsd > 0) {
+    const rate = usdRateForOrderDate(orderDraft.value.date)
+    if (rate > 0) product.cost = costUsd * rate
+    else {
+      product.cost = 0
+      orderDraftError.value = 'Нет курса USD на дату заказа. Добавьте курс в прайсе.'
+    }
+  } else product.cost = Number.isFinite(costUah) ? costUah : 0
+  product.costManual = false
+  closeManualPricePicker()
 }
 
 function restoreManualOrderDraftFromPriceSelection() {
@@ -6823,6 +6901,80 @@ function orderDateTime(order: Order) {
           </div>
         </div>
       </form>
+    </dialog>
+    <dialog
+      ref="pricePickerDialog"
+      aria-labelledby="manual-price-picker-title"
+      class="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-3xl overflow-hidden rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/50"
+      @cancel.prevent="closeManualPricePicker"
+    >
+      <div class="flex max-h-[calc(100dvh-2rem)] flex-col bg-white">
+        <div class="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <h2 id="manual-price-picker-title" class="text-lg font-semibold text-slate-900">
+              Выбрать товар из цен
+            </h2>
+            <p class="mt-1 text-xs text-slate-500">
+              Название и себестоимость подтянутся в заказ. Количество и цена продажи не изменятся.
+            </p>
+          </div>
+          <button
+            class="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+            type="button"
+            aria-label="Закрыть выбор товара"
+            @click="closeManualPricePicker"
+          >
+            <X class="size-5" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="border-b border-slate-200 px-5 py-4">
+          <label class="block text-sm font-medium text-slate-700">
+            Поиск по названию
+            <input
+              v-model="manualPriceSearch"
+              class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              type="search"
+              autocomplete="off"
+              placeholder="Введите название товара"
+              autofocus
+            />
+          </label>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          <p v-if="isLoadingManualPrices" class="py-5 text-sm text-slate-600" role="status">
+            Загружаем цены…
+          </p>
+          <p
+            v-else-if="manualPriceError"
+            class="rounded-lg bg-rose-50 px-3 py-3 text-sm text-rose-700"
+            role="alert"
+          >
+            {{ manualPriceError }}
+          </p>
+          <p v-else-if="!matchingManualPriceItems.length" class="py-5 text-sm text-slate-600">
+            Позиции не найдены. Уточните поиск.
+          </p>
+          <div v-else class="space-y-2">
+            <button
+              v-for="item in matchingManualPriceItems.slice(0, 100)"
+              :key="item.id"
+              class="flex w-full items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3 text-left hover:border-emerald-400 hover:bg-emerald-50"
+              type="button"
+              @click="selectManualPriceItem(item)"
+            >
+              <span class="min-w-0 break-words text-sm font-medium text-slate-900">
+                {{ item.name }}
+              </span>
+              <span class="shrink-0 text-sm text-slate-600">
+                {{ item.usd === null ? `${item.costUah ?? 0} ₴` : `${item.usd} $` }}
+              </span>
+            </button>
+            <p v-if="matchingManualPriceItems.length > 100" class="py-2 text-xs text-slate-500">
+              Показаны первые 100 из {{ matchingManualPriceItems.length }}. Уточните поиск.
+            </p>
+          </div>
+        </div>
+      </div>
     </dialog>
     <PrintRegistry
       v-if="printRegistryMode"
