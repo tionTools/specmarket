@@ -1,0 +1,24 @@
+Patch 138 — inline price selection in manual order
+
+Base (main): 82ad9414fc954acb2d3ba820b778e3529912a220
+Patch blob: dbb979a12a17248b36b5befc577e7167bcffb79f
+Scope: src/pages/HomeView.vue only. Do not modify PricesView, database, migrations, routes, auth, Supabase functions or infrastructure.
+
+Goal:
+- "Выбрать из цен" in New order / Edit manual order opens a search dialog above the existing order dialog, without navigating to /prices or closing New order.
+- Load current crm_price_items from the existing Supabase session; exclude groups; show loading/error/empty state; search by name. Limit initial results to 100 with an explicit notice to refine search.
+- Selecting an item sets exactly the selected draft product name, priceItemId, USD/UAH cost using existing rate-for-order-date rules, and costManual=false. Preserve quantity and selling price and all other fields.
+- Close/ESC only dismisses the price dialog; order draft remains open and unchanged if nothing is selected. Errors remain inside picker, not route to main.
+- Loading is abortable on cancel/unmount.
+
+Instructions for Codex (follow AGENTS.md and .agents/skills/frontend/SKILL.md):
+1. Verify working tree clean and git rev-parse HEAD matches base. Source of truth is main. If HEAD differs, STOP and report actual HEAD; do not force apply or touch unrelated changes.
+2. Retrieve patch blob via established GitHub-blob workflow and materialize 138.patch locally.
+3. Run git apply --check 138.patch; only if PASS, git apply 138.patch; git diff --check.
+4. Review diff, ensure scope is one Vue file and no unrelated formatting churn.
+5. Run pnpm format for changed file only using the repo's oxfmt configuration (do not format all src/ or unrelated files). Confirm git diff is still minimal. Run pnpm type-check, pnpm lint:oxlint (without --fix if available via pnpm exec oxlint .), pnpm exec eslint . (without --fix), and pnpm build; report each result. Do not claim PASS if not run. Follow AGENTS order for applicable checks while avoiding unrelated formatter churn.
+6. Manual regression on production-like app: (a) New order -> enter buyer/phone, quantity and selling price -> Select from prices -> choose item -> new-order dialog remains visible and previous fields intact; (b) Edit existing manual order -> change item -> no navigation/reset; (c) cancel picker / Esc -> draft intact; (d) search and no-result; (e) backend error shows error and allows closing; (f) USD cost uses order-date rate and missing rate blocks save; (g) existing marketplace price links still work.
+7. After checks, commit and SSH push main using established workflow; observe Production Deploy, confirm live build SHA. No deploy before test results.
+8. Report base SHA, patch blob SHA, commit SHA, changed files, check outcomes, push/deploy status.
+
+Note: The patch's exact line-level contexts were independently replayed against the named base and verified; full pnpm/type-check/build and browser regression have not been run by ChatGPT and must be run by Codex before deployment.
