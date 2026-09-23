@@ -1,0 +1,52 @@
+PATCH 135 — Excel marks: all existing CRM orders gray, new orders green
+
+Repository: tionTools/specmarket
+Publication branch: chatgpt-patches
+Standalone replacement for UNDEPLOYED 134.patch / 134.txt. Apply 135 ONLY, do NOT apply 134 first.
+Patch file: 135.patch
+Patch SHA-256: 3e7fc135d43b3dc448da5d2c6ecf2e484a6f3ef89563b427919cb934b202ea8f
+Patch Git blob: 5a66996712a9c78214fbc43ad5e3ddc4bd848843
+
+Verified base main at preparation: 470a167a0e9c69c3ac29d4dcf4b592c57acbe4fe
+Base blobs:
+- src/pages/HomeView.vue c89d7f7a49f0ce771c7aec1a84a8f934ccee46ac
+- src/features/orders/types.ts 31254e57ecc821066f4a29b59112f0e826b88836
+- supabase/migrations/20260923130000_crm_order_excel_copied.sql must be ABSENT, and its migration MUST NOT have been applied in remote database.
+
+USER-APPROVED BASELINE (intentional, not factual proof of Google Sheets contents)
+- Every CRM row ALREADY in crm_orders at the instant this migration runs is treated as Excel-copied=true (gray button). This includes older rows whose former browser flags were false/absent. The user accepts this initial baseline to avoid manually processing all historical orders.
+- Every order INSERTED AFTER that migration has excel_copied=false by database default (green button).
+- A manually unmarked existing row becomes green; a new row becomes gray after successful clipboard copy + DB write or clicking "Уже в Excel".
+- The mark means "accounted for in Excel in CRM", NOT independently verified insertion in Google Sheets.
+- Do not import old localStorage flags or reset old marks based on localStorage; the one-time historical baseline supersedes 134's legacy-import scheme.
+
+Migration semantics:
+  ALTER TABLE public.crm_orders ADD COLUMN excel_copied boolean NOT NULL DEFAULT true;
+  ALTER TABLE public.crm_orders ALTER COLUMN excel_copied SET DEFAULT false;
+Run in a SINGLE transaction as normal Supabase migration. Existing rows stay true, later inserted rows default false. This avoids a table-wide UPDATE and does not create a new table or index. Do not split into separate transactions/deploys.
+
+Authenticated-only narrow RPC public.set_crm_orders_excel_copied(uuid[], boolean) updates only the mark; disallow guest and anonymous, max 100 IDs. Existing save-crm-orders/marketplace updates must not overwrite the field. No new Edge Function required.
+
+Exact changed files:
+- src/pages/HomeView.vue
+- src/features/orders/types.ts
+- supabase/migrations/20260923130000_crm_order_excel_copied.sql
+
+Frontend:
+- Always read excel_copied from Supabase order row, never localStorage.
+- "Не в Excel · N" counts and displays unmarked ordinary-list orders regardless of selected date, respecting active search; old and new orders remain visible under normal filters.
+- "Excel" copies TSV and then persists true. If clipboard fails, no DB write; if DB write fails, do not display a successful mark.
+- Separate "Уже в Excel" / "Снять отметку Excel" button to manually correct historical exceptions; no clipboard action.
+- Only update locally after RPC succeeds. No changes to TSV columns, financial calculations, marketplace sync, reconciliation, delivery or returns accounting.
+
+Codex execution:
+1) Read repo root AGENTS.md and .agents/skills/frontend/SKILL.md. Fetch origin using existing SSH; use auxiliary clean worktree at current origin/main, preserving existing local changes.
+2) Fetch 135.patch and 135.txt byte-for-byte from origin/chatgpt-patches. Verify 135.patch SHA-256 above, optionally Git blob via git hash-object.
+3) Check main and BOTH source blobs; if main moved, ensure both are identical to base and migration file absent. Confirm remote Supabase migration 20260923130000_crm_order_excel_copied has NOT been applied and column not already installed. If 134 was already applied in DB or source, STOP, report and request a separate corrective migration. Do not force-apply or silently mark already-existing new rows.
+4) git apply --check 135.patch; on PASS apply with git apply 135.patch; no --3way/--reject. Inspect exact 3-file diff and git diff --check. Published patch is formatted; no mass formatter churn or broad --fix commands. If necessary, only format the changed TS/Vue files and inspect resulting diff.
+5) Run corepack pnpm type-check; scoped non-mutating oxlint + eslint for two source files; corepack pnpm build; git diff --check; check SQL syntax/privileges. Report all real errors and unavailable checks without false PASS.
+6) Verify migration in controlled existing-project workflow FIRST and assert a pre-existing row=true, a NEW test-created order defaults false without creating unintended production test orders (SQL rollback/test transaction or authorized existing test environment); guest/anon cannot invoke RPC. Do not alter unrelated rows; avoid manually fabricating production orders.
+7) Once migration PASS, commit ONLY 3 scoped files, SSH push main, confirm GitHub Actions Deploy to Production. Frontend CI is not Supabase migration deployment; report both outcomes separately. No Edge Function deployment.
+8) Real-world verification after frontend deploy: old order gray, genuinely new order green, toggle true/false persists on refresh and another device, clipboard copy marks gray, "Не в Excel" count/filter includes newest orders regardless of date, failed RPC does not mark success. If not executed, list as pending. Do not claim Google Sheets itself was queried.
+
+Prepublication: patch generated from GitHub compare of exact main base; all hunks applied in memory against source blobs and exactly matched expected modified blobs; whitespace check PASS. Native git apply, Typecheck/Lint/Build, Supabase migration and manual UI validation remain Codex gates.

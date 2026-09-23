@@ -1,0 +1,303 @@
+diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
+index 31254e5..85a81b4 100644
+--- a/src/features/orders/types.ts
++++ b/src/features/orders/types.ts
+@@ -106,6 +106,7 @@ export interface Order {
+   internalComment?: string
+   platform: Platform
+   status: string
++  excelCopied?: boolean
+   /** Заказ Prom вручную исключён из блока подтверждения «Виконано». */
+   promCompletionDismissedAt?: string
+   products: OrderProduct[]
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index c89d7f7..bd29114 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -96,7 +96,6 @@ const storageKey = 'specmarket-crm-demo-orders'
+ const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
+ const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
+ const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
+-const copiedSpreadsheetOrderIdsStorageKey = 'specmarket-crm-copied-excel-orders'
+ const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
+ const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
+ const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
+@@ -158,6 +157,7 @@ const isPlatformSummaryExpanded = ref(false)
+ const isShowingCancellations = ref(false)
+ const isShowingReturns = ref(false)
+ const isShowingUnpaidOnly = ref(false)
++const isShowingNotInExcel = ref(false)
+ const expandedOrderId = ref<string | number | null>(null)
+ const deletingOrderId = ref<string | number | null>(null)
+ const user = ref<User | null>(null)
+@@ -284,6 +284,7 @@ const returnEditorOrderId = ref<string | number | null>(null)
+ const returnDraftQuantities = ref<Record<string, string>>({})
+ const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
+ const isSavingReturn = ref(false)
++const isUpdatingSpreadsheetOrderId = ref<string | null>(null)
+ let persistenceQueue: Promise<void> = Promise.resolve()
+ const pendingLocalOrderSaves = new Map<string, number>()
+ const deferredRemoteOrderIds = new Set<string>()
+@@ -423,23 +424,28 @@ function readStoredUnopenedOrders() {
+ let hasRemoteOrderBaseline = window.localStorage.getItem(knownRemoteOrderIdsStorageKey) !== null
+ let knownRemoteOrderIds = new Set(readStoredStringArray(knownRemoteOrderIdsStorageKey))
+ const unopenedNewOrders = ref<UnopenedNewOrder[]>(readStoredUnopenedOrders())
+-const copiedSpreadsheetOrderIds = ref(
+-  new Set(readStoredStringArray(copiedSpreadsheetOrderIdsStorageKey)),
+-)
+-
+ function isSpreadsheetOrderCopied(order: Order) {
+-  return copiedSpreadsheetOrderIds.value.has(String(order.id))
++  return order.excelCopied === true
+ }
+ 
+-function markSpreadsheetOrderCopied(order: Order) {
+-  const orderId = String(order.id)
+-  if (copiedSpreadsheetOrderIds.value.has(orderId)) return
+-
+-  copiedSpreadsheetOrderIds.value = new Set([...copiedSpreadsheetOrderIds.value, orderId])
+-  window.localStorage.setItem(
+-    copiedSpreadsheetOrderIdsStorageKey,
+-    JSON.stringify([...copiedSpreadsheetOrderIds.value]),
+-  )
++async function setSpreadsheetOrderCopied(order: Order, copied: boolean) {
++  if (!supabase || isGuest.value || !order.remoteId || isUpdatingSpreadsheetOrderId.value)
++    return false
++  isUpdatingSpreadsheetOrderId.value = order.remoteId
++  try {
++    const { data, error } = await supabase.rpc('set_crm_orders_excel_copied', {
++      p_order_ids: [order.remoteId],
++      p_copied: copied,
++    })
++    if (error || data !== 1) {
++      showSyncError(error?.message ?? 'Не удалось сохранить отметку Excel в CRM.')
++      return false
++    }
++    order.excelCopied = copied
++    return true
++  } finally {
++    isUpdatingSpreadsheetOrderId.value = null
++  }
+ }
+ 
+ function persistNewOrderTracking() {
+@@ -1160,6 +1166,7 @@ async function handlePromRegistryFile(file: File) {
+     isShowingCancellations.value = false
+     isShowingReturns.value = false
+     isShowingUnpaidOnly.value = false
++    isShowingNotInExcel.value = false
+     await persistenceQueue
+     await reconcileRemoteOrders(true)
+     applyPromRegistryPreview(entries)
+@@ -1460,10 +1467,12 @@ const matchingOrders = computed(() => {
+       isShowingReturns.value ||
+       platformFilter.value === 'all' ||
+       orderBusinessPlatform(order) === platformFilter.value
+-    const matchesOrderState = isPromRegistryView.value
+-      ? true
+-      : isShowingCancellations.value
+-        ? lifecycleState === 'cancelled_before_shipment'
++    const matchesOrderState = isShowingNotInExcel.value
++      ? isOrderVisibleInMainList(lifecycleState)
++      : isPromRegistryView.value
++        ? true
++        : isShowingCancellations.value
++          ? lifecycleState === 'cancelled_before_shipment'
+         : isShowingReturns.value
+           ? order.delivery.trackingReturnInProgress === true ||
+             isReturnLifecycleState(lifecycleState)
+@@ -1472,6 +1481,7 @@ const matchingOrders = computed(() => {
+     const matchesPeriod =
+       isPromRegistryView.value ||
+       isShowingUnpaidOnly.value ||
++      isShowingNotInExcel.value ||
+       (orderDate !== null && orderDate >= from && orderDate <= to)
+     return (
+       matchesPlatform &&
+@@ -1482,10 +1492,16 @@ const matchingOrders = computed(() => {
+   })
+ })
+ const unpaidOrdersCount = computed(() => orders.value.filter(isUnpaidShipmentOrder).length)
++const isOrderNotInExcel = (order: Order) =>
++  !isSpreadsheetOrderCopied(order) &&
++  isOrderVisibleInMainList(getOrderLifecycleState(order, displayOrderStatus(order.status)))
++const notInExcelOrdersCount = computed(() => orders.value.filter(isOrderNotInExcel).length)
+ const visibleOrders = computed(() =>
+-  isShowingUnpaidOnly.value
+-    ? matchingOrders.value.filter(isUnpaidShipmentOrder)
+-    : matchingOrders.value,
++  isShowingNotInExcel.value
++    ? matchingOrders.value.filter(isOrderNotInExcel)
++    : isShowingUnpaidOnly.value
++      ? matchingOrders.value.filter(isUnpaidShipmentOrder)
++      : matchingOrders.value,
+ )
+ 
+ function isOpenForPrintRegistry(order: Order) {
+@@ -1702,6 +1718,7 @@ function toggleCancellations() {
+     isShowingReturns.value = false
+     platformFilter.value = 'all'
+     isShowingUnpaidOnly.value = false
++    isShowingNotInExcel.value = false
+   }
+ }
+ 
+@@ -1711,6 +1728,7 @@ function toggleReturns() {
+     isShowingCancellations.value = false
+     platformFilter.value = 'all'
+     isShowingUnpaidOnly.value = false
++    isShowingNotInExcel.value = false
+   }
+ }
+ 
+@@ -1719,6 +1737,18 @@ function toggleUnpaidOrders() {
+   if (isShowingUnpaidOnly.value) {
+     isShowingCancellations.value = false
+     isShowingReturns.value = false
++    isShowingNotInExcel.value = false
++  }
++}
++
++function toggleNotInExcel() {
++  if (isPromRegistryView.value) return
++  isShowingNotInExcel.value = !isShowingNotInExcel.value
++  if (isShowingNotInExcel.value) {
++    isShowingCancellations.value = false
++    isShowingReturns.value = false
++    isShowingUnpaidOnly.value = false
++    platformFilter.value = 'all'
+   }
+ }
+ 
+@@ -2763,6 +2793,7 @@ function mapRemoteOrders(
+         internalComment: (row.internal_comment as string | null) ?? undefined,
+         platform: row.platform as Platform,
+         status: row.status as string,
++        excelCopied: row.excel_copied === true,
+         promCompletionDismissedAt: (row.prom_completion_dismissed_at as string | null) ?? undefined,
+         shipping: Number(row.shipping),
+         paymentAmount: Number((row.delivery as Delivery).paymentAmount ?? 0),
+@@ -3995,6 +4026,14 @@ async function copyOrderNumber(order: Order) {
+   } catch {}
+ }
+ 
++async function toggleSpreadsheetCopied(order: Order) {
++  if (await setSpreadsheetOrderCopied(order, !isSpreadsheetOrderCopied(order)))
++    showInlineActionNotice(
++      `copy-excel:${order.id}`,
++      isSpreadsheetOrderCopied(order) ? 'Отмечено в Excel' : 'Отметка снята',
++    )
++}
++
+ async function copyOrderForSpreadsheet(order: Order) {
+   if (!isClipboardSupported.value) return
+ 
+@@ -4019,9 +4058,12 @@ async function copyOrderForSpreadsheet(order: Order) {
+ 
+   try {
+     await copy(cells.join('\t'))
+-    markSpreadsheetOrderCopied(order)
++    if (!isSpreadsheetOrderCopied(order) && !(await setSpreadsheetOrderCopied(order, true)))
++      return
+     if (copied.value) showInlineActionNotice(`copy-excel:${order.id}`, 'Строка скопирована')
+-  } catch {}
++  } catch {
++    showSyncError('Не удалось скопировать строку для Excel.')
++  }
+ }
+ 
+ function oneCClipboardText(delivery: Delivery) {
+@@ -5062,6 +5104,19 @@ function orderDateTime(order: Order) {
+           >
+             Возвраты
+           </button>
++          <button
++            class="rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50"
++            :class="
++              isShowingNotInExcel
++                ? 'border-amber-500 bg-amber-50 text-amber-800'
++                : 'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50'
++            "
++            type="button"
++            :disabled="isPromRegistryView"
++            @click="toggleNotInExcel"
++          >
++            Не в Excel · {{ notInExcelOrdersCount }}
++          </button>
+           <div class="flex items-center gap-2 sm:ml-auto">
+             <label
+               class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
+@@ -5376,6 +5431,7 @@ function orderDateTime(order: Order) {
+                     type="button"
+                     title="Скопировать строку для Excel"
+                     aria-label="Скопировать строку для Excel"
++                    :disabled="isUpdatingSpreadsheetOrderId !== null"
+                     @click="copyOrderForSpreadsheet(order)"
+                   >
+                     Excel
+@@ -5386,6 +5442,15 @@ function orderDateTime(order: Order) {
+                     >Строка скопирована</span
+                   >
+                 </span>
++                <button
++                  v-if="!isGuest"
++                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
++                  type="button"
++                  :disabled="!order.remoteId || isUpdatingSpreadsheetOrderId !== null"
++                  @click="toggleSpreadsheetCopied(order)"
++                >
++                  {{ isSpreadsheetOrderCopied(order) ? 'Снять отметку Excel' : 'Уже в Excel' }}
++                </button>
+                 <div class="ml-auto flex flex-wrap items-center justify-end gap-3">
+                   <span
+                     v-if="returnSignalLabel(order) && !isOrderFullyReturned(order)"
+diff --git a/supabase/migrations/20260923130000_crm_order_excel_copied.sql b/supabase/migrations/20260923130000_crm_order_excel_copied.sql
+new file mode 100644
+index 0000000..0ca177c
+--- /dev/null
++++ b/supabase/migrations/20260923130000_crm_order_excel_copied.sql
+@@ -0,0 +1,44 @@
++alter table public.crm_orders
++  add column excel_copied boolean not null default true;
++
++alter table public.crm_orders
++  alter column excel_copied set default false;
++
++create or replace function public.set_crm_orders_excel_copied(
++  p_order_ids uuid[],
++  p_copied boolean
++)
++returns integer
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  updated_count integer;
++begin
++  if auth.uid() is null
++    or lower(coalesce(auth.jwt() ->> 'email', '')) = 'guest@gmail.com' then
++    raise exception 'Not allowed to update Excel marks';
++  end if;
++
++  if p_order_ids is null or p_copied is null
++    or cardinality(p_order_ids) = 0 or cardinality(p_order_ids) > 100
++    or array_position(p_order_ids, null) is not null then
++    raise exception 'Invalid Excel mark request';
++  end if;
++
++  update public.crm_orders
++     set excel_copied = p_copied
++   where id = any(p_order_ids);
++  get diagnostics updated_count = row_count;
++
++  if updated_count <> cardinality(array(select distinct unnest(p_order_ids))) then
++    raise exception 'Some orders were not found';
++  end if;
++
++  return updated_count;
++end;
++$$;
++
++revoke all on function public.set_crm_orders_excel_copied(uuid[], boolean) from public, anon;
++grant execute on function public.set_crm_orders_excel_copied(uuid[], boolean) to authenticated;
