@@ -1,0 +1,54 @@
+PATCH 134 — Persist Excel copy marks and add "Не в Excel" filter
+
+Repository: tionTools/specmarket
+Publication branch: chatgpt-patches (repository root)
+Patch: 134.patch
+Patch SHA-256: 7d255bb0386385cbc8f4610c267bd0d57c788fa99ea8528cf1681ff07c22265b
+Patch Git blob SHA: 9566e6134c0407b37b4e555e3800e972a4c35853
+
+Verified base origin/main: 470a167a0e9c69c3ac29d4dcf4b592c57acbe4fe
+Base file blobs:
+- src/pages/HomeView.vue: c89d7f7a49f0ce771c7aec1a84a8f934ccee46ac
+- src/features/orders/types.ts: 31254e57ecc821066f4a29b59112f0e826b88836
+- supabase/migrations/20260923130000_crm_order_excel_copied.sql: NEW, must not already exist
+
+Goal
+Store the "copied for Excel" mark for each CRM order in Supabase and show a "Не в Excel" historical filter with count. Existing localStorage flags should be migrated once from the browser where they were recorded; records not flagged in localStorage must NOT be auto-marked as copied. Allow manual mark/unmark when the user checks existing Google Sheets.
+
+Exact scope:
+1) src/pages/HomeView.vue
+2) src/features/orders/types.ts
+3) supabase/migrations/20260923130000_crm_order_excel_copied.sql
+
+Database design
+- One boolean crm_orders.excel_copied NOT NULL DEFAULT false. Existing rows without a mark become false. No new table/index or historical blanket update.
+- Narrow, authenticated-only SQL RPC set_crm_orders_excel_copied(uuid[], boolean), disallow guest and anonymous calls. It updates ONLY the mark and returns the matched row count. Maximum 100 IDs per call. Do not grant general update rights to unrelated columns.
+- Existing marketplace/order saves have explicit field lists and must not reset excel_copied.
+
+Frontend behavior
+- Use DB excel_copied as the source of truth, not localStorage. Click Excel: copy the tab-separated row, then persist true; on failure do not falsely change the mark. Button remains gray after page reload and on another device.
+- Manual "Уже в Excel" / "Снять отметку Excel" handles pre-existing rows or mistakes; no clipboard operation for manual toggle.
+- "Не в Excel · N" shows non-marked normal-list orders independent of selected date; exclude cancelled-before-shipment and fully returned lifecycle states in line with main-list behavior; preserve search and platform narrowing after entering the filter. Leave the registry draft alone (filter disabled in registry mode).
+- One-time import of old localStorage key specmarket-crm-copied-excel-orders: only IDs mapped unambiguously to CRM remote UUIDs and currently false. Batches of 100; set marker specmarket-crm-copied-excel-migrated-v1 ONLY after all writes succeeded; failed imports can retry; skip ambiguous duplicate display IDs for manual review. Do not clear or overwrite the legacy localStorage list.
+- A clipboard copy is NOT proof that the row was pasted into Excel/Google Sheets. The boolean tracks the CRM mark, not actual presence in Sheets.
+
+Existing orders: IMPORTANT
+- Old true marks recorded in THIS browser will be imported once after the migration is deployed and the new UI is loaded.
+- All other historical orders default false, even if the user previously pasted them in Sheets without clicking the CRM Excel button. Do not mark them all copied. Ask user to compare with their actual Google Sheet and manually mark confirmed existing rows using "Уже в Excel".
+- If localStorage was in a different browser, its flags are not visible until that browser runs the migration; avoid concurrent manual unmarks on the other device before it has run. No Google Sheets connector or automatic matching is added in this patch.
+
+Preflight / Codex workflow:
+1. Read root AGENTS.md and .agents/skills/frontend/SKILL.md; use existing SSH remote, no HTTPS or new credentials. Fetch origin and work in an auxiliary clean worktree at origin/main, preserving unrelated changes.
+2. Read 134.txt and fetch 134.patch byte-for-byte from origin/chatgpt-patches. Verify SHA-256 above (and optionally git hash-object = Git blob above).
+3. Compare current origin/main with verified base. If moved, ensure BOTH source-file blobs match exactly and NEW migration path is absent, or STOP. No --3way/--reject/force application.
+4. git apply --check 134.patch, then git apply 134.patch. Inspect git diff --check and actual diff: only three listed files. NO global formatting churn. If formatting is needed, run oxfmt only for modified TS/Vue files, review the diff, and keep production patch close to published patch.
+5. Run corepack pnpm type-check; non-mutating scoped oxlint/eslint on changed TS/Vue files; corepack pnpm build; git diff --check. Review SQL migration for syntax and privilege safety. Report failed/unavailable checks without claiming PASS.
+6. Verify integration scenarios: old marked local order migrates to DB/gray button, old unmarked remains false; unique ID mapping; repeat import idempotent; other browser shows DB mark; manual toggle true/false; click Excel persists only after copy; failed RPC keeps order unmarked and shows error; filter spans dates and count updates, excludes pre-shipment cancellations/full returns, and does not affect normal date filters, orders, reconciliation, returns, marketplace sync, or spreadsheet row content. Guest cannot write.
+7. IMPORTANT DEPLOY ORDER: after checks PASS, apply ONLY this existing-project Supabase SQL migration first through the configured migration workflow, and verify the column and the RPC are present and callable for an authorized user and denied for guest/anon. DO NOT push frontend to production before the database is ready. If migration cannot be applied, report BLOCKED and leave main/frontend unchanged. No Edge Function deployment is required.
+8. Commit ONLY the 3 files, SSH push to main using existing configuration, verify GitHub Actions Deploy to Production. Verify live UI on THIS browser for legacy migration, historical filter, manual mark, and check a second browser/device if available. No automatic write to Google Sheets.
+9. Report base/current SHA, patch SHA, commit, changed files, checks, DB migration, SSH push, CI deploy, manual/remaining tests independently.
+
+Prepublication evidence
+- The patch was generated from a GitHub compare against the exact main base.
+- All patch hunks were independently applied in memory to the original blobs and matched the exact expected GitHub content for each of the three scoped files; whitespace check PASS.
+- Native git apply, project typecheck/lint/build, actual Supabase migration and browser tests are Codex gates, not claimed as performed here.
