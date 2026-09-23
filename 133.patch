@@ -1,0 +1,77 @@
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/meest.ts b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/meest.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+@@ -90,6 +90,7 @@
+   if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(source))
+     return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
+   if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
++  if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
+   if (code === '1622' || /^доручено$/i.test(source.trim()))
+     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
+   return readableStatus(source, code)
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+@@ -132,4 +132,62 @@
+   })
+ })
+ 
++Deno.test('Meest public code 11 is still in transit and corrects a stale delivered status', async () => {
++  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
++  const xml = `<return><result_table>
++<items><DateTimeAction>2026-09-16 14:04:00</DateTimeAction><StatusCode>2</StatusCode><ActionMessages>Відправлення створено, але не передано на доставку</ActionMessages></items>
++<items><DateTimeAction>2026-09-16 19:04:19</DateTimeAction><StatusCode>606</StatusCode><ActionMessages>Відправлення прийнято до перевезення</ActionMessages></items>
++<items><DateTimeAction>2026-09-17 16:41:59</DateTimeAction><StatusCode>8081</StatusCode><ActionMessages>Відправлення в дорозі</ActionMessages></items>
++<items><DateTimeAction>2026-09-23 06:49:57</DateTimeAction><StatusCode>11</StatusCode><ActionMessages>Відправлено з сортувального центру</ActionMessages></items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } },
++    { body: html },
++    { body: xml },
++  ], async () => {
++    const result = await meestStatus('723-3447567')
++    assert(result.status === 'Відправлено з сортувального центру', 'Meest code 11 must keep the actual event text')
++    assert(result.normalizedStatus === 'in_transit', 'Meest code 11 must not be delivered')
++    assert(result.final === false, 'Meest code 11 must remain non-final')
++    assert(result.provider === 'meest_public_tracking', 'empty OpenAPI must use public fallback')
++    assert(result.details?.trackingStatusCode === '11', 'actual Meest code must be kept')
++    assert(result.details?.trackingEventAt === '2026-09-23 06:49:57', 'actual event time must be kept')
++    assert(result.details?.trackingDeliveredAt === '', 'sort-center departure must not set delivery time')
++    assert(result.events?.map((event) => event.code).join(',') === '2,606,8081,11', 'event history must remain intact')
++    assert(trackingChanged({
++      ttn: '723-3447567', trackingStatus: 'Получено', trackingNormalizedStatus: 'delivered',
++    }, result), 'forced refresh must be able to correct a previously false delivered status')
++  })
++})
++
++Deno.test('Meest OpenAPI code 11 is also non-final', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
++    eventDateTime: '2026-09-23 06:49:57', eventCode: '11',
++    eventDescr: { descrUA: 'Відправлено з сортувального центру' },
++  }] }, async () => {
++    const result = await meestStatus('723-3447567')
++    assert(result.normalizedStatus === 'in_transit', 'OpenAPI code 11 must be in transit')
++    assert(result.final === false, 'OpenAPI code 11 must remain non-final')
++    assert(result.status === 'Відправлено з сортувального центру', 'OpenAPI must preserve source text')
++  })
++})
++
++Deno.test('Meest public code 1622 still confirms delivered', async () => {
++  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
++  const xml = `<return><result_table>
++<items><DateTimeAction>2026-09-23 11:45:00</DateTimeAction><StatusCode>1622</StatusCode><ActionMessages>Доручено</ActionMessages></items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } },
++    { body: html },
++    { body: xml },
++  ], async () => {
++    const result = await meestStatus('723-3447567')
++    assert(result.status === 'Получено', 'code 1622 must remain delivered')
++    assert(result.normalizedStatus === 'delivered', 'code 1622 must remain delivered')
++    assert(result.final === true, 'code 1622 must remain final')
++    assert(result.details?.trackingDeliveredAt === '2026-09-23 11:45:00', 'real delivery time must be kept')
++  })
++})
++
+ Deno.test('Meest empty OpenAPI and unusable public fallback fails instead of inventing a created status', async () => {

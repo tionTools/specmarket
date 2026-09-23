@@ -1,0 +1,38 @@
+PATCH 133 — Meest code 11 is in transit, not delivered
+
+Repository: tionTools/specmarket
+Branch: chatgpt-patches
+Patch: 133.patch
+Patch SHA-256: 1ad1466cb72362cb6eb4cb09e3d31f0e71f563aab1ecb589c990ae28322d87af
+Patch blob: b810cad14fb65affc7ce58935c35a9628bcff468
+
+Verified base:
+main: 2a610b2c80694a5669e887ced1646d6e3096f310
+meest.ts blob: dfad422ecefb89baa51273fc32c227ff960e3530
+carrier-baseline_test.ts blob: 25288333a6f2388492bf1f93fb813c73d0dc7939
+
+Confirmed diagnostic:
+Order 428022669, Meest TTN 723-3447567. Code 11, event "Відправлено з сортувального центру" at 2026-09-23 06:49:57 was falsely normalized to delivered/Получено via generic readableStatus. The provider was meest_public_tracking, with empty trackingDeliveredAt. The erroneous final status excludes the order from normal automatic checks.
+
+Production code scope — exactly two files:
+- supabase/functions/sync-delivery-tracking/carriers/meest.ts
+- supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+
+Behavior:
+- Meest-specific code '11': normalizedStatus=in_transit, final=false, preserve actual source text.
+- Do not change the generic normalizer or other carrier semantics.
+- Keep Meest 1622 as delivered. Test public fallback 2 -> 606 -> 8081 -> 11, OpenAPI 11, public 1622, and trackingChanged correction of stale delivered.
+- Do not change marketplace order status, database, frontend, migrations, cron, tokens, or other functions.
+
+Codex instructions:
+1. Read AGENTS.md and sync-delivery-tracking/AGENTS.md. Fetch origin via existing SSH. Use clean auxiliary worktree on origin/main, preserving local changes. Retrieve 133.patch byte-for-byte from origin/chatgpt-patches.
+2. Verify patch SHA-256 and base. If main moved, compare both scoped file blob IDs to those above. STOP on drift.
+3. Run git apply --check 133.patch, then git apply 133.patch; do not force or 3-way apply. Inspect exact diff and git diff --check. Do not run broad format/fix; make only minimal adjustments for genuine blockers.
+4. Run focused carrier baseline Deno tests (with --allow-env if necessary), adjacent relevant tracking tests, available project typecheck, scoped non-mutating lint, build and git diff --check. Distinguish missing tools from PASS.
+5. Confirm 11 in both Meest data sources is non-final in_transit; source text/timestamp retained; 1622 remains final delivered; previously wrong delivered is detectable as changed.
+6. Commit ONLY the two files, SSH push to main, verify GitHub Actions Deploy to Production. This action does not establish that the Supabase Edge Function was deployed.
+7. Separately deploy ONLY sync-delivery-tracking to the existing Supabase project. No other function/migration/config changes; if credentials absent report BLOCKED.
+8. Existing wrong delivered state will NOT repair through ordinary batch polling. After function deployment, use the targeted delivery refresh in CRM for order 428022669; it invokes force=true, orderId. Verify current carrier event is shown, in_transit if latest code remains 11, trackingDeliveredAt empty. If the carrier has newer events, validate those instead. Once corrected, ordinary tracking can resume. Do not bulk-reset unrelated completed orders.
+9. Report main/base SHA, patch hash, production commit, exact changed paths, checks, SSH push, frontend CI, Supabase function deployment and targeted CRM refresh as separate outcomes.
+
+Prepublication: patch anchors checked against the GitHub blobs. git apply --check, apply and git diff --check PASS in an isolated source-context fixture. Native Deno, full build and deployment remain Codex gates.
