@@ -1,0 +1,163 @@
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/meest.ts b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/meest.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/meest.ts
+@@ -86,14 +86,27 @@
+ }
+ 
+ function meestReadableStatus(source: string, code: string) {
++  const status = source.replace(/\s+/g, ' ').trim()
+   if (code === '2') return { status: 'Создана накладная', final: false, normalizedStatus: 'created' }
+-  if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(source))
++  if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(status))
+     return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
+   if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
+   if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
+-  if (code === '1622' || /^доручено$/i.test(source.trim()))
++  if (
++    code === '1622' ||
++    /^доручено$/i.test(status) ||
++    /^(?:відправлення\s+)?(?:отримане|одержане|вручене)(?:$|[\s.,;:()])/iu.test(status) ||
++    /^(?:отправление\s+)?(?:получено|вручено|доставлено)(?:$|[\s.,;:()])/iu.test(status)
++  )
+     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
+-  return readableStatus(source, code)
++  if (/(?:готове\s+до\s+видачі|готово\s+к\s+выдаче)/iu.test(status))
++    return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
++  if (/(?:видан[ео]\s+кур['’ʼ]?єру|выдано\s+курьеру|прямує\s+у\s+підрозділ\s+отримання)/iu.test(status))
++    return { status: source, final: false, normalizedStatus: 'in_transit' }
++  const fallback = readableStatus(source, code)
++  return fallback.normalizedStatus === 'delivered'
++    ? { status: source, final: false, normalizedStatus: 'unknown' }
++    : fallback
+ }
+ 
+ function decodeXml(value: string) {
+@@ -187,7 +200,7 @@
+       trackingLocationCountry: latest.country,
+       trackingLocationDetails: latest.detail,
+       trackingStatusCode: latest.code,
+-      trackingDeliveredAt: latest.code === '1622' ? latest.at : '',
++      trackingDeliveredAt: base.normalizedStatus === 'delivered' ? latest.at : '',
+     },
+   }
+ }
+@@ -242,7 +255,7 @@
+       trackingLocationCountry: text(record(latest?.eventCountryDescr).descrUA),
+       trackingLocationDetails: text(record(latest?.eventDetailDescr).descrUA),
+       trackingStatusCode: eventCode,
+-      trackingDeliveredAt: eventCode === '1622' ? text(latest?.eventDateTime) : '',
++      trackingDeliveredAt: base.normalizedStatus === 'delivered' ? text(latest?.eventDateTime) : '',
+     },
+   }
+ }
+diff --git a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+--- a/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
++++ b/supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+@@ -1,7 +1,7 @@
+ import { meestStatus } from './meest.ts'
+ import { rozetkaStatus } from './rozetka-delivery.ts'
+ import { ukrposhtaStatus } from './ukrposhta.ts'
+-import { trackingChanged } from '../storage.ts'
++import { mergeTrackingDelivery, trackingChanged } from '../storage.ts'
+ 
+ function assert(value: unknown, message: string): asserts value {
+   if (!value) throw new Error(message)
+@@ -190,6 +190,98 @@
+   })
+ })
+ 
++Deno.test('Meest courier transfer is in transit, not recipient delivery, with OpenAPI', async () => {
++  const status = 'Відправлення видане кур’єру і прямує у підрозділ отримання'
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
++    eventDateTime: '2026-09-24 13:57:40', eventCode: '',
++    eventDescr: { descrUA: status },
++  }] }, async () => {
++    const result = await meestStatus('723-3447567')
++    assert(result.status === status, 'keep actual courier-transfer description')
++    assert(result.normalizedStatus === 'in_transit', 'courier transfer must not be delivered')
++    assert(result.final === false, 'courier transfer must remain active')
++    assert(result.details?.trackingDeliveredAt === '', 'courier transfer must not have a delivery timestamp')
++  })
++})
++
++Deno.test('Meest public courier transfer corrects a stale delivered status and clears delivery time', async () => {
++  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
++  const xml = `<return><result_table>
++<items><DateTimeAction>2026-09-21 12:07:43</DateTimeAction><StatusCode></StatusCode><ActionMessages>Відправлення готове до видачі</ActionMessages></items>
++<items><DateTimeAction>2026-09-24 13:57:40</DateTimeAction><StatusCode></StatusCode><ActionMessages>Відправлення видане кур’єру і прямує у підрозділ отримання</ActionMessages></items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } }, { body: html }, { body: xml },
++  ], async () => {
++    const result = await meestStatus('723-3447567')
++    assert(result.normalizedStatus === 'in_transit', 'newest public event must remain in transit')
++    assert(result.final === false, 'courier transfer must not be final')
++    assert(result.details?.trackingDeliveredAt === '', 'false delivery timestamp must be cleared')
++    const stale = {
++      ttn: '723-3447567', carrier: 'Meest', trackingStatus: 'Получено',
++      trackingNormalizedStatus: 'delivered', trackingDeliveredAt: '2026-09-23 11:45:00',
++    }
++    assert(trackingChanged(stale, result), 'forced per-order refresh must detect the correction')
++    const corrected = mergeTrackingDelivery(stale, result, '2026-09-24T14:00:00Z', 'manual')
++    assert(corrected.trackingNormalizedStatus === 'in_transit', 'merge must reopen tracking')
++    assert(corrected.trackingDeliveredAt === '', 'merge must remove previously incorrect delivery time')
++  })
++})
++
++Deno.test('Meest ready for pickup is not delivered', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
++    eventDateTime: '2026-09-21 12:07:43', eventCode: '',
++    eventDescr: { descrUA: 'Відправлення готове до видачі' },
++  }] }, async () => {
++    const result = await meestStatus('READY')
++    assert(result.normalizedStatus === 'ready_for_pickup', 'ready must remain ready for pickup')
++    assert(result.final === false, 'ready must remain non-final')
++    assert(result.details?.trackingDeliveredAt === '', 'ready must not have a delivery timestamp')
++  })
++})
++
++Deno.test('Meest explicit recipient receipt confirms delivery without requiring a known code', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
++    eventDateTime: '2026-09-22 19:53:08', eventCode: '',
++    eventDescr: { descrUA: 'Відправлення отримане' },
++  }] }, async () => {
++    const result = await meestStatus('RECEIVED')
++    assert(result.status === 'Получено', 'explicit receipt must display delivered')
++    assert(result.normalizedStatus === 'delivered', 'explicit receipt must normalize as delivered')
++    assert(result.final === true, 'actual receipt must be final')
++    assert(result.details?.trackingDeliveredAt === '2026-09-22 19:53:08', 'receipt must set actual delivery time')
++  })
++})
++
++Deno.test('Meest public explicit receipt confirms delivery', async () => {
++  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
++  const xml = `<return><result_table>
++<items><DateTimeAction>2026-09-21 12:07:43</DateTimeAction><StatusCode></StatusCode><ActionMessages>Відправлення готове до видачі</ActionMessages></items>
++<items><DateTimeAction>2026-09-22 19:53:08</DateTimeAction><StatusCode></StatusCode><ActionMessages>Відправлення отримане</ActionMessages></items>
++</result_table></return>`
++  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
++    { body: { status: 'OK', result: [] } }, { body: html }, { body: xml },
++  ], async () => {
++    const result = await meestStatus('RECEIVED')
++    assert(result.normalizedStatus === 'delivered', 'public receipt must normalize as delivered')
++    assert(result.status === 'Получено', 'public receipt must display delivered')
++    assert(result.final === true, 'public receipt must be final')
++    assert(result.details?.trackingDeliveredAt === '2026-09-22 19:53:08', 'public receipt must preserve delivery time')
++  })
++})
++
++Deno.test('Meest pickup location wording alone is not delivery', async () => {
++  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
++    eventDateTime: '2026-09-24 13:57:40', eventCode: '',
++    eventDescr: { descrUA: 'Підрозділ отримання' },
++  }] }, async () => {
++    const result = await meestStatus('PICKUP-LOCATION')
++    assert(result.normalizedStatus !== 'delivered', 'word отримання is not proof of receipt')
++    assert(result.final === false, 'pickup location alone must not finish tracking')
++    assert(result.details?.trackingDeliveredAt === '', 'no delivery event means no delivery time')
++  })
++})
++
+ Deno.test('Meest empty OpenAPI and unusable public fallback fails instead of inventing a created status', async () => {
+   await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
+     { body: { status: 'OK', result: [] } },
