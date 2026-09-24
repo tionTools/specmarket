@@ -33,13 +33,13 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +    return
 +  const target = event.target
 +  if (!(target instanceof HTMLInputElement)) return
++  const position = target.selectionStart
++  if (position === null) return
 +  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) {
 +    handleCustomDateBlur(field)
 +    target.value = customDateDisplay[field]
 +  }
 +  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
-+  const position = target.selectionStart
-+  if (position === null) return
 +  const segment = position <= 2 ? 0 : position <= 5 ? 1 : 2
 +  const next = Math.max(0, Math.min(2, segment + (event.key === 'ArrowRight' ? 1 : -1)))
 +  const range = ([
