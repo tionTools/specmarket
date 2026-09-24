@@ -1,0 +1,39 @@
+PATCH 149 — Android: call BUYER, recover refresh and Realtime without force-stopping the app
+
+Repo: tionTools/specmarket
+Base main SHA: 76754a76a020dae6e98706ad03fe15ab306ef35b
+Expected 149.patch blob SHA: 71249982840bf4cd75bbb4aa88fc571c0a0e5692
+Branch: chatgpt-patches
+Scope: android/** only. No changes to web CRM, Supabase schema, secrets or Edge Functions.
+APK versionCode 16, versionName 0.16.
+
+Confirmed current-code defects:
+- Android 'Позвонить', Viber and Telegram all use recipientPhone(), not buyer phone. Buyer was hidden in Extras.
+- recipientPhone() falls back to order.phone, including Prom where it is now confirmed that order.phone is the buyer in CRM and delivery.recipientPhone is the recipient. No recipient-to-buyer cross-call.
+- Offline header reflects only Realtime subscription status, even if REST refresh works.
+- watch() waits forever after successful subscribe even if channel later loses subscription; cleanup can also wait without bound.
+- refresh() lacks a deadline and refuses retries if loading is still true. These are concrete stuck-state risks. No production network trace establishes one exclusive root cause.
+
+Patch behavior:
+1. Buyer (crm_orders.phone) is the primary, explicitly labelled contact in Android details. Dialer, Viber and Telegram all use BUYER only. Recipient name and number stay visible in their own section, without a mistaken fallback for Prom. If buyer number is missing, do not substitute receiver.
+2. Restore network subscription with validated default-network callbacks (ACCESS_NETWORK_STATE); retry on foreground and from manual refresh (top-bar icon / pull-to-refresh). A forced retry cancels an old refresh and restarts Realtime; generations block stale callbacks.
+3. Bound order refresh to 30s, Realtime subscribe to 25s, old watcher join to 7s, channel removal to 5s. Retry Realtime if a subscribed channel disconnects. Cache remains available while offline. Display 'CRM доступна · live-подключение восстанавливается' when REST succeeded but Realtime has not.
+4. Add model/status unit tests. Existing push, auth, acceptance and marketplace actions must remain unchanged.
+
+Codex procedure:
+- Check current main SHA and working tree. Apply the latest origin/chatgpt-patches/149.patch only once; verify blob hash.
+- Run git apply --check and apply. Inspect diff and remove any unrelated formatter churn. Review coroutine/lifecycle code for compile errors, race conditions, timeouts, and cancellation (a true blocker can be corrected minimally). Do not rewrite the patch architecture on speculation.
+- Required: cd android && ./gradlew testDebugUnitTest lintDebug assembleRelease (Windows: gradlew.bat). Also git diff --check; inspect APK versionCode/versionName; verify release signature and GitHub Android APK workflow.
+- If local Android SDK unavailable, use the GitHub Actions Android APK workflow and require success before claiming the APK is ready. Never claim tests passed if they were not run.
+- Commit only Android files; SSH push main; wait for Android APK workflow to pass and its signed release APK to publish to android-latest. A Web Production Deploy does not publish the Android app.
+- No need to deploy Edge Function; backend unchanged.
+- Report one final concise summary: tests/lint/build results; commit SHA; Android workflow link; signed release APK link; version. If a real blocker prevents release, report it and do not claim success.
+
+Manual device QA (after installing v0.16 over v0.15, retaining data):
+A. For Prom order 429545614, calling buyer must target buyer phone ending 8765; recipient displays phone ending 8121; Viber/Telegram also target buyer. For 429674532, buyer ending 0482 and recipient ending 6710. Check other marketplaces do not regress.
+B. Disable Internet during loading, keep app open, then restore Internet; orders should refresh and Realtime should reconnect without force-stop.
+C. Switch Wi-Fi <-> mobile while app is open, pull-to-refresh and use toolbar refresh. If a request hangs, retry must remain possible and finish/reset within 30s.
+D. Confirm cached orders remain visible offline. Header must not say 'Офлайн' solely due to WebSocket failure after successful REST refresh.
+E. Background/resume, FCM notifications and 'Принять' must still function.
+
+Do not ask user for passwords, session JWT, tokens or hidden credentials.
