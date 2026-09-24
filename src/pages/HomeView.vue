@@ -4,6 +4,7 @@ import {
   nextTick,
   onMounted,
   onScopeDispose,
+  reactive,
   ref,
   toRaw,
   useTemplateRef,
@@ -37,6 +38,7 @@ import {
   getRemainingQuantity,
 } from '../features/orders/financials'
 import {
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -148,6 +150,20 @@ const orderListPeriod = ref<OrderListPeriod>(loadPreferredOrderListMonthPeriod()
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const orderListDate = ref('')
+const customDateFields = { platformSummaryFrom, platformSummaryTo, orderListFrom, orderListTo }
+type CustomDateField = keyof typeof customDateFields
+const customDateDisplay = reactive<Record<CustomDateField, string>>({
+  platformSummaryFrom: '',
+  platformSummaryTo: '',
+  orderListFrom: '',
+  orderListTo: '',
+})
+const customDatePickers = {
+  platformSummaryFrom: useTemplateRef<HTMLInputElement>('platformSummaryFromPicker'),
+  platformSummaryTo: useTemplateRef<HTMLInputElement>('platformSummaryToPicker'),
+  orderListFrom: useTemplateRef<HTMLInputElement>('orderListFromPicker'),
+  orderListTo: useTemplateRef<HTMLInputElement>('orderListToPicker'),
+}
 watch(orderListPeriod, (period) => {
   if (period === 'month' || period === 'last30') {
     window.localStorage.setItem(preferredOrderListMonthPeriodStorageKey, period)
@@ -619,6 +635,52 @@ function normalizeInputDate(value: string) {
   return `${yearValue}-${monthValue}-${String(lastDay).padStart(2, '0')}`
 }
 
+function formatCustomDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return ''
+  return `${match[3]}.${match[2]}.${match[1]}`
+}
+
+function parseCustomDate(value: string) {
+  const match = value.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (!match) return null
+  const [, dayValue, monthValue, yearValue] = match
+  const day = Number(dayValue)
+  const month = Number(monthValue)
+  const year = Number(yearValue)
+  if (!year || month < 1 || month > 12 || day < 1) return null
+  const lastDay = new Date(year, month, 0).getDate()
+  return `${yearValue}-${monthValue}-${String(Math.min(day, lastDay)).padStart(2, '0')}`
+}
+
+function handleCustomDateInput(field: CustomDateField, event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+  const typed = target.value
+  customDateDisplay[field] = typed
+  const parsed = parseCustomDate(typed)
+  if (!parsed) return
+  customDateFields[field].value = parsed
+  const formatted = formatCustomDate(parsed)
+  customDateDisplay[field] = formatted
+  if (formatted !== typed) target.value = formatted
+}
+
+function handleCustomDateBlur(field: CustomDateField) {
+  customDateDisplay[field] = formatCustomDate(customDateFields[field].value)
+}
+
+function handleCustomDatePicker(field: CustomDateField) {
+  customDatePickers[field].value?.showPicker()
+}
+
+function handleCustomDatePick(field: CustomDateField, event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) || !target.value) return
+  customDateFields[field].value = target.value
+  customDateDisplay[field] = formatCustomDate(target.value)
+}
+
 function parseInputDate(value: string) {
   const normalized = normalizeInputDate(value)
   const [year, month, day] = normalized.split('-').map(Number)
@@ -653,11 +715,24 @@ orderListFrom.value = inputDate(defaultOrderListDate)
 orderListTo.value = inputDate(defaultOrderListDate)
 orderListDate.value = inputDate(defaultOrderListDate)
 
-for (const date of [platformSummaryFrom, platformSummaryTo, orderListFrom, orderListTo]) {
-  watch(date, (value) => {
-    const normalized = normalizeInputDate(value)
-    if (normalized !== value) date.value = normalized
-  })
+for (const field of [
+  'platformSummaryFrom',
+  'platformSummaryTo',
+  'orderListFrom',
+  'orderListTo',
+] as const) {
+  watch(
+    customDateFields[field],
+    (value) => {
+      const normalized = normalizeInputDate(value)
+      if (normalized !== value) {
+        customDateFields[field].value = normalized
+        return
+      }
+      customDateDisplay[field] = formatCustomDate(value)
+    },
+    { immediate: true },
+  )
 }
 
 const getOrderAmount = (order: Order) =>
@@ -5107,23 +5182,73 @@ function orderDateTime(order: Order) {
             </select>
             <template v-if="platformSummaryPeriod === 'custom'">
               <span class="text-xs text-slate-400">с</span>
-              <input
-                v-model="platformSummaryFrom"
-                class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
-                type="text"
-                inputmode="numeric"
-                pattern="\\d{4}-\\d{2}-\\d{2}"
-                aria-label="Начало периода"
-              />
+              <div
+                class="relative flex h-8 w-44 items-center rounded-lg border border-slate-200 bg-white"
+              >
+                <input
+                  :value="customDateDisplay.platformSummaryFrom"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-xs tabular-nums outline-none"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="ДД.ММ.ГГГГ"
+                  aria-label="Начало периода"
+                  @input="handleCustomDateInput('platformSummaryFrom', $event)"
+                  @blur="handleCustomDateBlur('platformSummaryFrom')"
+                />
+                <button
+                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+                  type="button"
+                  aria-label="Открыть календарь начала периода"
+                  title="Открыть календарь начала периода"
+                  @click="handleCustomDatePicker('platformSummaryFrom')"
+                >
+                  <CalendarDays class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  ref="platformSummaryFromPicker"
+                  :value="platformSummaryFrom"
+                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
+                  type="date"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="handleCustomDatePick('platformSummaryFrom', $event)"
+                />
+              </div>
               <span class="text-xs text-slate-400">по</span>
-              <input
-                v-model="platformSummaryTo"
-                class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
-                type="text"
-                inputmode="numeric"
-                pattern="\\d{4}-\\d{2}-\\d{2}"
-                aria-label="Конец периода"
-              />
+              <div
+                class="relative flex h-8 w-44 items-center rounded-lg border border-slate-200 bg-white"
+              >
+                <input
+                  :value="customDateDisplay.platformSummaryTo"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-xs tabular-nums outline-none"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="ДД.ММ.ГГГГ"
+                  aria-label="Конец периода"
+                  @input="handleCustomDateInput('platformSummaryTo', $event)"
+                  @blur="handleCustomDateBlur('platformSummaryTo')"
+                />
+                <button
+                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+                  type="button"
+                  aria-label="Открыть календарь конца периода"
+                  title="Открыть календарь конца периода"
+                  @click="handleCustomDatePicker('platformSummaryTo')"
+                >
+                  <CalendarDays class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  ref="platformSummaryToPicker"
+                  :value="platformSummaryTo"
+                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
+                  type="date"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="handleCustomDatePick('platformSummaryTo', $event)"
+                />
+              </div>
             </template>
           </div>
         </div>
@@ -5277,23 +5402,73 @@ function orderDateTime(order: Order) {
               </button>
             </template>
             <template v-if="orderListPeriod === 'custom'">
-              <input
-                v-model="orderListFrom"
-                class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
-                type="text"
-                inputmode="numeric"
-                pattern="\\d{4}-\\d{2}-\\d{2}"
-                aria-label="Начало периода заказов"
-              />
+              <div
+                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
+              >
+                <input
+                  :value="customDateDisplay.orderListFrom"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="ДД.ММ.ГГГГ"
+                  aria-label="Начало периода заказов"
+                  @input="handleCustomDateInput('orderListFrom', $event)"
+                  @blur="handleCustomDateBlur('orderListFrom')"
+                />
+                <button
+                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+                  type="button"
+                  aria-label="Открыть календарь начала периода заказов"
+                  title="Открыть календарь начала периода заказов"
+                  @click="handleCustomDatePicker('orderListFrom')"
+                >
+                  <CalendarDays class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  ref="orderListFromPicker"
+                  :value="orderListFrom"
+                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
+                  type="date"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="handleCustomDatePick('orderListFrom', $event)"
+                />
+              </div>
               <span class="text-sm text-slate-400">—</span>
-              <input
-                v-model="orderListTo"
-                class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
-                type="text"
-                inputmode="numeric"
-                pattern="\\d{4}-\\d{2}-\\d{2}"
-                aria-label="Конец периода заказов"
-              />
+              <div
+                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
+              >
+                <input
+                  :value="customDateDisplay.orderListTo"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="ДД.ММ.ГГГГ"
+                  aria-label="Конец периода заказов"
+                  @input="handleCustomDateInput('orderListTo', $event)"
+                  @blur="handleCustomDateBlur('orderListTo')"
+                />
+                <button
+                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+                  type="button"
+                  aria-label="Открыть календарь конца периода заказов"
+                  title="Открыть календарь конца периода заказов"
+                  @click="handleCustomDatePicker('orderListTo')"
+                >
+                  <CalendarDays class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  ref="orderListToPicker"
+                  :value="orderListTo"
+                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
+                  type="date"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @change="handleCustomDatePick('orderListTo', $event)"
+                />
+              </div>
             </template>
           </div>
         </div>
