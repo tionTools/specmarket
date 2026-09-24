@@ -1,0 +1,38 @@
+Patch 144 — defer impossible-date correction until editing is finished
+
+Repo: tionTools/specmarket
+Patch branch: chatgpt-patches
+Base main SHA: 74a39f507b4f0d44593abb47fdcf879ecddac92e
+Base src/pages/HomeView.vue blob: dc346a1afeec274fd8ebbaca2ed04c1ec4df4102
+Patch: 144.patch
+Patch Git blob: 49a60a321768a9910f67ca8f42832e8b2b70c683
+
+The actual user experience:
+- In DD.MM.YYYY, while changing 15.09.2026 into 31.10.2026, typing day 31 must LEAVE 31.09.2026 visible as an editing draft, not silently change it to September 30.
+- Pressing ArrowRight selects the month without clamping the draft. Typing 10 yields 31.10.2026. On Enter or leaving the field, commit the final date to ISO 2026-10-31.
+- If the user leaves 31.09.2026 unchanged and finishes editing (Enter/blur), clamp to 30.09.2026 and show that result.
+- Month/year selection by left/right arrow, mouse segment selection, four native calendar buttons, localized display, and all existing filters/ranges must remain unchanged.
+
+What patch does (ONLY src/pages/HomeView.vue):
+1. handleCustomDateInput only stores typed display draft; it does not normalize or update the internal ISO model during editing.
+2. Arrow keydown does not call blur/commit. If the user has typed a one-digit day/month, pad its visible numeric component to two digits WITHOUT clamping the day or updating the internal model, and move selection to requested segment.
+3. Enter finalizes with the existing handleCustomDateBlur (parses/clamps), synchronizes the DOM value and blurs. Ordinary blur also finalizes. The picker still updates directly by existing handler.
+4. No dependencies, auth, data model, Supabase, or infra change.
+
+Verification already completed BEFORE publication by ChatGPT: exact patch applied/reconstructed against exact GitHub base with valid diff hunks, and actual patched JS handler source was executed in isolated input/event simulation. Nine scenarios PASS: initial day digit does not commit; 31 September draft stays raw; right-arrow selects month without clamping; one-digit month pads without committing; Enter commits 31 Oct; blur clamps Sept/Feb 2026/Feb 2028; paste full valid date; invalid month reverts. This is NOT a full Chromium/browser check or pnpm build.
+
+Codex instructions (avoid another test-harness ping-pong):
+1. Follow AGENTS.md and repo-local frontend skill. Confirm clean worktree + base SHA 74a39f507b4f0d44593abb47fdcf879ecddac92e. If main differs, verify exact HomeView.vue base blob; STOP on changed blob. Do not force apply or mass-format.
+2. Fetch 144.patch via existing patch-blob workflow. Verify git hash-object 49a60a321768a9910f67ca8f42832e8b2b70c683. Run git apply --check, apply; git diff --check; inspect only src/pages/HomeView.vue.
+3. Run scoped formatting only on changed file; type-check, scoped Oxlint/ESLint, production build. Do not edit anything outside HomeView.vue.
+4. Verify the real behavior with a concise isolated test (existing testing setup if available; do not create an elaborate browser harness):
+   - 15.09.2026: replace selected day with 31 => visible 31.09.2026; internal ISO still old.
+   - ArrowRight => month selected 3..5, displayed 31.09.2026 unchanged.
+   - Type 10 => visible 31.10.2026. Enter/blur => ISO 2026-10-31.
+   - Separate draft 31.09.2026 followed by blur => visible 30.09.2026, ISO 2026-09-30.
+   - February/leap year, paste, day/month/year arrow navigation, and calendar selection stay functional.
+5. Crucial: do NOT block deploy solely because a temporary Chromium harness/locator cannot run. Record the scenario as unverified. DO block and fix an actual reproduced product bug or failing type-check/lint/build/git apply. Do not request CRM login or passwords. The user will verify authorized CRM manually.
+6. After all code-level checks PASS and no reproduced product defect, commit ONLY HomeView.vue, SSH push main, verify Production Deploy. No Supabase deploy.
+7. Report changes, checks, commit SHA, push/deploy, and which interactive checks were and were not performed. No unsupported PASS claims.
+
+Keep this simple. No further feature work or new patches.
