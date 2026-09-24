@@ -490,7 +490,7 @@ async function linkPriceItem(item: PriceItem) {
   const orderUsdRate = currentOrderItem
     ? currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
     : 0
-  if (currentOrderItem && !currentOrderItem.cost_manual && costUsd > 0 && orderUsdRate <= 0) {
+  if (currentOrderItem && costUsd > 0 && orderUsdRate <= 0) {
     isLinking.value = false
     linkError.value =
       'Нет курса USD на дату заказа. Добавьте курс в «Ценах» перед обновлением себестоимости.'
@@ -513,8 +513,12 @@ async function linkPriceItem(item: PriceItem) {
     return
   }
 
+  const isRefreshingCurrentLink =
+    Boolean(currentOrderItem) && linkedPriceItemId.value === item.remoteId
   const shouldUpdateMapping =
-    !currentOrderItem || currentOrderItem.marketplaceProductKey !== targetLinkProductKey
+    !currentOrderItem ||
+    currentOrderItem.marketplaceProductKey !== targetLinkProductKey ||
+    linkedPriceItemId.value !== item.remoteId
   if (currentOrderItem) {
     const cost =
       savedPriceItem.usd === null ? Number(savedPriceItem.cost_uah ?? 0) : costUsd * orderUsdRate
@@ -522,9 +526,20 @@ async function linkPriceItem(item: PriceItem) {
       marketplace_product_key: targetLinkProductKey,
       price_item_id: item.remoteId,
     }
-    if (!currentOrderItem.cost_manual) {
+    if (
+      currentOrderItem.cost_manual &&
+      isRefreshingCurrentLink &&
+      !window.confirm(
+        'Себестоимость этой позиции изменена вручную. Заменить её актуальной себестоимостью из «Цен»?',
+      )
+    ) {
+      isLinking.value = false
+      return
+    }
+    if (!currentOrderItem.cost_manual || isRefreshingCurrentLink) {
       updatePayload.cost = cost
       updatePayload.cost_usd = costUsd
+      if (currentOrderItem.cost_manual) updatePayload.cost_manual = false
     }
     const { data: updatedItem, error: itemError } = await supabase
       .from('crm_order_items')
@@ -554,6 +569,7 @@ async function linkPriceItem(item: PriceItem) {
           price_item_id: currentOrderItem.priceItemId,
           cost: currentOrderItem.cost,
           cost_usd: currentOrderItem.costUsd,
+          cost_manual: currentOrderItem.cost_manual,
         }
         const { data: restoredItem, error: restoreError } = await supabase
           .from('crm_order_items')
