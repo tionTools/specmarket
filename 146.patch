@@ -1,0 +1,42 @@
+diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
+--- a/src/pages/PricesView.vue
++++ b/src/pages/PricesView.vue
+@@ -513,6 +513,8 @@
+     return
+   }
+ 
++  const isRefreshingCurrentLink =
++    Boolean(currentOrderItem) && linkedPriceItemId.value === item.remoteId
+   const shouldUpdateMapping =
+     !currentOrderItem || currentOrderItem.marketplaceProductKey !== targetLinkProductKey
+   if (currentOrderItem) {
+@@ -522,9 +524,20 @@
+       marketplace_product_key: targetLinkProductKey,
+       price_item_id: item.remoteId,
+     }
+-    if (!currentOrderItem.cost_manual) {
++    if (
++      currentOrderItem.cost_manual &&
++      isRefreshingCurrentLink &&
++      !window.confirm(
++        'Себестоимость этой позиции изменена вручную. Заменить её актуальной себестоимостью из «Цен»?',
++      )
++    ) {
++      isLinking.value = false
++      return
++    }
++    if (!currentOrderItem.cost_manual || isRefreshingCurrentLink) {
+       updatePayload.cost = cost
+       updatePayload.cost_usd = costUsd
++      if (currentOrderItem.cost_manual) updatePayload.cost_manual = false
+     }
+     const { data: updatedItem, error: itemError } = await supabase
+       .from('crm_order_items')
+@@ -554,6 +567,7 @@
+           price_item_id: currentOrderItem.priceItemId,
+           cost: currentOrderItem.cost,
+           cost_usd: currentOrderItem.costUsd,
++          cost_manual: currentOrderItem.cost_manual,
+         }
+         const { data: restoredItem, error: restoreError } = await supabase
+           .from('crm_order_items')
