@@ -211,10 +211,10 @@ new file mode 100644
 +)
 +assert.equal(typeof context.resolvePromPhones, 'function')
 +
-+const buyer = '+380631230482'
-+const receiver = '+380503316710'
-+const buyerName = 'Пістоль Ірина'
-+const receiverName = 'Батраков Петро'
++const buyer = '+380631234567'
++const receiver = '+380501112233'
++const buyerName = 'Тестовий Покупець'
++const receiverName = 'Тестовий Отримувач'
 +const cases = [
 +  ['independent buyer and receiver',
 +    { recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
@@ -227,10 +227,10 @@ new file mode 100644
 +    { phone: receiver, delivery: { recipient: receiverName, recipientPhone: receiver } },
 +    buyerName, buyer, receiver],
 +  ['national and international formatting match',
-+    { recipient_name: receiverName, recipient_phone: '0503316710' },
++    { recipient_name: receiverName, recipient_phone: '0501112233' },
 +    {},
 +    { phone: receiver, delivery: { recipient: receiverName, recipientPhone: receiver } },
-+    buyerName, '', '0503316710'],
++    buyerName, '', '0501112233'],
 +  ['known recipient is preserved when API omits phone',
 +    { phone: receiver, recipient_name: receiverName },
 +    { phone: buyer },
