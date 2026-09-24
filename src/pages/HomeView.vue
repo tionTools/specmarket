@@ -584,7 +584,10 @@ const orders = ref<Order[]>(
         delivery: {
           ...order.delivery,
           recipient: order.delivery.recipient || order.customer,
-          recipientPhone: order.delivery.recipientPhone || order.phone,
+          recipientPhone:
+            order.platform === 'Пром'
+              ? order.delivery.recipientPhone
+              : order.delivery.recipientPhone || order.phone,
         },
       }))
     : demoOrders,
@@ -5968,7 +5971,11 @@ function orderDateTime(order: Order) {
                     <span
                       ><span class="text-slate-500">Телефон: </span
                       ><strong>{{
-                        formatUkrainianPhone(order.phone || order.delivery.recipientPhone) || '—'
+                        formatUkrainianPhone(
+                          order.platform === 'Пром'
+                            ? order.phone
+                            : order.phone || order.delivery.recipientPhone,
+                        ) || '—'
                       }}</strong></span
                     >
                     <span v-if="order.customerEmail"

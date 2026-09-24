@@ -357,6 +357,23 @@ function promClientName(client: RecordValue) {
   )
 }
 
+function phoneKey(value: unknown) {
+  const digits = text(value).replace(/\D/g, '')
+  if (digits.length === 12 && digits.startsWith('380')) return `0${digits.slice(3)}`
+  if (digits.length === 9) return `0${digits}`
+  return digits.length >= 10 ? digits : ''
+}
+
+function samePhone(left: unknown, right: unknown) {
+  const leftKey = phoneKey(left)
+  const rightKey = phoneKey(right)
+  return Boolean(leftKey && rightKey && leftKey === rightKey)
+}
+
+function personNameKey(value: unknown) {
+  return text(value).trim().replace(/\s+/g, ' ').toLocaleLowerCase('uk-UA')
+}
+
 function promClientPhone(client: RecordValue) {
   return text(
     pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'),
@@ -476,6 +493,55 @@ function deliveryRecipientPhone(...sources: RecordValue[]): string {
     if (nested) return nested
   }
   return ''
+}
+
+function resolvePromPhones(
+  order: RecordValue,
+  client: RecordValue,
+  existingOrder: RecordValue,
+  buyerName: string,
+  previousDelivery: RecordValue,
+  rawDelivery: RecordValue,
+  deliveryProvider: RecordValue,
+) {
+  const rawRecipientAddress = asRecord(rawDelivery.recipient_address)
+  const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
+  const currentRecipientName = deliveryRecipientName(
+    order,
+    rawDelivery,
+    deliveryProvider,
+    rawRecipientAddress,
+    providerRecipientAddress,
+  )
+  const previousRecipientName = text(previousDelivery.recipient)
+  const recipientName = currentRecipientName || previousRecipientName
+  const canPreserveRecipientPhone =
+    !currentRecipientName ||
+    !previousRecipientName ||
+    personNameKey(currentRecipientName) === personNameKey(previousRecipientName)
+  const addressRecipientPhone =
+    recipientPhone(rawRecipientAddress) || recipientPhone(providerRecipientAddress)
+  const resolvedRecipientPhone =
+    deliveryRecipientPhone(
+      order,
+      rawDelivery,
+      deliveryProvider,
+      rawRecipientAddress,
+      providerRecipientAddress,
+    ) ||
+    addressRecipientPhone ||
+    (canPreserveRecipientPhone ? text(previousDelivery.recipientPhone) : '')
+  const differentPeople =
+    Boolean(personNameKey(buyerName) && personNameKey(recipientName)) &&
+    personNameKey(buyerName) !== personNameKey(recipientName)
+  const buyerCandidate = (value: unknown) =>
+    differentPeople && samePhone(value, resolvedRecipientPhone) ? '' : text(value)
+  const buyerPhone =
+    buyerCandidate(promClientPhone(client)) ||
+    buyerCandidate(order.client_phone) ||
+    buyerCandidate(existingOrder.phone) ||
+    (resolvedRecipientPhone ? buyerCandidate(order.phone) : '')
+  return { buyerPhone, recipientName, recipientPhone: resolvedRecipientPhone }
 }
 
 function sourceItems(order: RecordValue) {
@@ -1245,23 +1311,33 @@ Deno.serve(async (request) => {
       ? await promClientById(clientId, promToken, promClientCache)
       : null
     const orderCustomer = customerName(order)
-    const orderPhone = text(order.phone) || text(order.client_phone)
     const orderEmail = text(order.email) || text(order.client_email)
     const buyerName =
       promClientName(promClient ?? {}) ||
       (clientId ? text(existingOrder.customer) : '') ||
       orderCustomer
-    const buyerPhone =
-      promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
+    const previousDelivery = asRecord(existing?.delivery)
+    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
+    const deliveryProvider = asRecord(order.delivery_provider_data)
+    const {
+      buyerPhone,
+      recipientName: resolvedRecipientName,
+      recipientPhone,
+    } = resolvePromPhones(
+      order,
+      promClient ?? {},
+      existingOrder,
+      buyerName,
+      previousDelivery,
+      rawDelivery,
+      deliveryProvider,
+    )
     const buyerEmail =
       promClientEmail(promClient ?? {}) ||
       (clientId ? text(existingOrder.customer_email) : '') ||
       orderEmail
     // Массовая кнопка ищет только новые заказы. Старые обновляются только
     // отдельной кнопкой в карточке конкретного заказа.
-    const previousDelivery = asRecord(existing?.delivery)
-    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
-    const deliveryProvider = asRecord(order.delivery_provider_data)
     const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
     const paymentData = asRecord(order.payment_data)
     const savedPayment = paymentDetails(previousDelivery, {
@@ -1388,12 +1464,8 @@ Deno.serve(async (request) => {
       delivery: {
         carrier: deliveryCarrier,
         ttn: trackingNumber,
-        recipient:
-          deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
-        recipientPhone:
-          deliveryRecipientPhone(order, rawDelivery, deliveryProvider) ||
-          text(order.phone) ||
-          text(order.client_phone),
+        recipient: resolvedRecipientName || customerName(order),
+        recipientPhone,
         city: deliveryCity,
         address: deliveryAddress,
         ttnHistory: ttnHistory.length ? ttnHistory : undefined,
