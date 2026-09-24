@@ -1,0 +1,267 @@
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -384,38 +384,6 @@
+   return text(pick(client, 'email', 'client_email', 'email_address', 'emailAddress'))
+ }
+ 
+-function maskedPhone(value: unknown) {
+-  const digits = text(value).replace(/\D/g, '')
+-  return digits.length >= 4 ? `***${digits.slice(-4)}` : ''
+-}
+-
+-function phonePaths(value: unknown, path: string, depth = 0): { path: string; phone: string }[] {
+-  if (depth > 6 || !value || typeof value !== 'object') return []
+-  const found: { path: string; phone: string }[] = []
+-  for (const [key, candidate] of Object.entries(value as RecordValue)) {
+-    const nextPath = `${path}.${key}`
+-    if (/(?:phone|mobile)/i.test(key)) {
+-      const phone = maskedPhone(candidate)
+-      if (phone) found.push({ path: nextPath, phone })
+-    }
+-    found.push(...phonePaths(candidate, nextPath, depth + 1))
+-  }
+-  return found
+-}
+-
+-function promClientPhoneDiagnostic(client: RecordValue) {
+-  const keys = ['phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone']
+-  const key = keys.find((candidate) => text(client[candidate]))
+-  const phone = promClientPhone(client)
+-  return {
+-    path: key ? `client.${key}` : null,
+-    phone: maskedPhone(phone) || null,
+-    reason: phone
+-      ? 'Найдено поддерживаемое верхнеуровневое поле клиента.'
+-      : 'Поддерживаемые верхнеуровневые поля клиента отсутствуют или пусты.',
+-  }
+-}
+-
+ async function promClientById(
+   clientId: string,
+   promToken: string,
+@@ -569,6 +537,7 @@
+   const buyerCandidate = (value: unknown) =>
+     differentPeople && samePhone(value, resolvedRecipientPhone) ? '' : text(value)
+   const buyerPhone =
++    buyerCandidate(promClientPhone(asRecord(order.client))) ||
+     buyerCandidate(promClientPhone(client)) ||
+     buyerCandidate(order.client_phone) ||
+     buyerCandidate(existingOrder.phone) ||
+@@ -875,77 +844,7 @@
+     completeExternalIds?: unknown
+     dismissCompletionExternalIds?: unknown
+     acceptExternalIds?: unknown
+-    diagnosePromPhones?: unknown
+   }
+-  if (body.diagnosePromPhones === true) {
+-    if (isScheduledRequest)
+-      return Response.json(
+-        { ok: false, message: 'Диагностика доступна только пользователю CRM.' },
+-        { status: 403, headers: corsHeaders },
+-      )
+-    const orderIds = ['425246401', '429545614', '429674532']
+-    const diagnostics = await Promise.all(
+-      orderIds.map(async (orderId) => {
+-        try {
+-          const orderResponse = await fetch(`https://my.prom.ua/api/v1/orders/${orderId}`, {
+-            headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+-            signal: AbortSignal.timeout(30_000),
+-          })
+-          if (!orderResponse.ok)
+-            return { orderId, orderHttpStatus: orderResponse.status, clientIdPresent: false }
+-          const orderPayload = asRecord(await orderResponse.json())
+-          const order = asRecord(orderPayload.order ?? orderPayload)
+-          const clientId = text(pick(order, 'client_id', 'clientId')).trim()
+-          let clientHttpStatus: number | null = null
+-          let client: RecordValue = {}
+-          if (clientId) {
+-            const clientResponse = await fetch(
+-              `https://my.prom.ua/api/v1/clients/${encodeURIComponent(clientId)}`,
+-              {
+-                headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+-                signal: AbortSignal.timeout(30_000),
+-              },
+-            )
+-            clientHttpStatus = clientResponse.status
+-            if (clientResponse.ok) {
+-              const clientPayload = asRecord(await clientResponse.json())
+-              client = asRecord(clientPayload.client ?? clientPayload.data ?? clientPayload)
+-            }
+-          }
+-          return {
+-            orderId,
+-            orderHttpStatus: orderResponse.status,
+-            clientHttpStatus,
+-            clientIdPresent: Boolean(clientId),
+-            orderPhonePaths: phonePaths(order, 'order'),
+-            clientTopLevelKeys: Object.keys(client).sort(),
+-            clientPhonePaths: phonePaths(client, 'client'),
+-            promClientPhone: promClientPhoneDiagnostic(client),
+-            buyerPhone: (() => {
+-              const resolved = resolvePromPhones(
+-                order,
+-                client,
+-                {},
+-                promClientName(client) || customerName(order),
+-                {},
+-                asRecord(pick(order, 'delivery', 'delivery_data')),
+-                asRecord(order.delivery_provider_data),
+-              )
+-              return {
+-                phone: maskedPhone(resolved.buyerPhone) || null,
+-                reason: resolved.buyerPhone
+-                  ? 'Выбрано текущим порядком кандидатов синхронизации.'
+-                  : 'Ни один допустимый кандидат покупателя не найден.',
+-              }
+-            })(),
+-          }
+-        } catch {
+-          return { orderId, error: 'Сетевая ошибка при запросе к Prom.' }
+-        }
+-      }),
+-    )
+-    return Response.json({ ok: true, diagnostics }, { headers: corsHeaders })
+-  }
+   if (body.acceptExternalIds !== undefined) {
+     if (isScheduledRequest || (body as RecordValue).scheduled === true) {
+       return Response.json(
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -209,8 +209,6 @@
+ const isSyncingProm = ref(false)
+ const isSyncingKasta = ref(false)
+ const isSyncingAllPlatforms = ref(false)
+-const isDiagnosingPromPhones = ref(false)
+-const promPhoneDiagnostic = ref('')
+ const isSyncingDelivery = ref(false)
+ const syncingDeliveryOrderId = ref<string | null>(null)
+ const labelEmailOrderId = ref<Order['id'] | null>(null)
+@@ -2615,28 +2613,6 @@
+   }
+ }
+ 
+-async function diagnosePromPhones() {
+-  if (!supabase || isGuest.value || isDiagnosingPromPhones.value) return
+-  isDiagnosingPromPhones.value = true
+-  const { data, error } = await supabase.functions.invoke<{
+-    ok?: boolean
+-    message?: string
+-    diagnostics?: unknown
+-  }>('sync-prom-orders', {
+-    method: 'POST',
+-    body: { diagnosePromPhones: true },
+-  })
+-  isDiagnosingPromPhones.value = false
+-  if (error || !data?.ok || !data.diagnostics) {
+-    showSyncError(
+-      data?.message ?? error?.message ?? 'Не удалось выполнить диагностику телефонов Prom.',
+-    )
+-    return
+-  }
+-  promPhoneDiagnostic.value = JSON.stringify(data.diagnostics, null, 2)
+-  showSyncMessage('Диагностика телефонов Prom готова. Скопируйте обезличенный результат ниже.')
+-}
+-
+ async function syncFullAllPlatforms() {
+   if (isMarketplaceSyncBusy.value) return
+   if (
+@@ -4916,15 +4892,6 @@
+             />
+             {{ isSyncingDelivery ? 'Обновление…' : 'Доставки' }}
+           </button>
+-          <button
+-            v-if="!isGuest"
+-            class="whitespace-nowrap rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
+-            :disabled="isDiagnosingPromPhones"
+-            type="button"
+-            @click="diagnosePromPhones"
+-          >
+-            {{ isDiagnosingPromPhones ? 'Диагностика…' : 'Диагностика телефонов Prom' }}
+-          </button>
+           <div class="relative shrink-0">
+             <button
+               v-if="!isGuest"
+@@ -4987,10 +4954,6 @@
+       >
+         {{ syncEpicentrMessage }}
+       </p>
+-      <pre
+-        v-if="!isGuest && promPhoneDiagnostic"
+-        class="mt-5 max-h-96 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-xs text-slate-800"
+-        >{{ promPhoneDiagnostic }}</pre>
+       <p
+         v-if="promRegistryError"
+         class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800"
+diff --git a/src/features/orders/prom-phone-separation_test.mjs b/src/features/orders/prom-phone-separation_test.mjs
+--- a/src/features/orders/prom-phone-separation_test.mjs
++++ b/src/features/orders/prom-phone-separation_test.mjs
+@@ -50,6 +50,61 @@
+ const receiverName = 'Тестовий Отримувач'
+ const cases = [
+   [
++    'real Prom schema: order.client.phone buyer, order.phone receiver',
++    {
++      client: { phone: buyer },
++      recipient_name: receiverName,
++      delivery_recipient: { phone: receiver },
++      phone: receiver,
++    },
++    { phones: [receiver] },
++    { phone: receiver, delivery: { recipient: receiverName, recipientPhone: receiver } },
++    buyerName,
++    buyer,
++    receiver,
++  ],
++  [
++    'nested buyer overrides stale old CRM phone',
++    {
++      client: { phone: buyer },
++      recipient_name: receiverName,
++      recipient_phone: receiver,
++      phone: receiver,
++    },
++    {},
++    { phone: '+380991234567', delivery: { recipient: receiverName, recipientPhone: receiver } },
++    buyerName,
++    buyer,
++    receiver,
++  ],
++  [
++    'order.client.phone works without separate profile and client_id',
++    { client: { phone: buyer }, delivery: { recipient: { name: receiverName, phone: receiver } }, phone: receiver },
++    {},
++    {},
++    buyerName,
++    buyer,
++    receiver,
++  ],
++  [
++    'order.client.phone equal to another recipient does not override valid old buyer',
++    { client: { phone: receiver }, recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
++    {},
++    { phone: buyer, delivery: { recipient: receiverName, recipientPhone: receiver } },
++    buyerName,
++    buyer,
++    receiver,
++  ],
++  [
++    'same-person buyer and recipient may share nested order.client.phone',
++    { client: { phone: buyer }, recipient_name: buyerName, recipient_phone: buyer, phone: buyer },
++    {},
++    {},
++    buyerName,
++    buyer,
++    buyer,
++  ],
++  [
+     'independent buyer and receiver',
+     { recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
+     { phone: buyer },
+@@ -192,4 +247,4 @@
+   home,
+   /order\.platform === 'Пром'\s*\? order\.delivery\.recipientPhone\s*:\s*order\.delivery\.recipientPhone \|\| order\.phone/,
+ )
+-console.log('Prom phone regression: 12 actual-helper cases plus UI role checks PASS')
++console.log('Prom phone regression: 17 actual-helper cases plus UI role checks PASS')
