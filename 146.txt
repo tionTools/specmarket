@@ -1,0 +1,29 @@
+Patch 146 — explicit refresh must update manually edited cost
+
+Base main SHA: aaf6fb2fc8ab13785e5ffea3f4a9d46486bcf9cb
+Scope: only src/pages/PricesView.vue.
+
+Problem reproduced from production behavior:
+- order remains at old cost (e.g. $23 / 1039.6) while linked Prices row is already $23.50 / 1062.20;
+- user entered Prices through the order link button and explicitly pressed "Обновить";
+- Patch 145 intentionally preserves cost_manual=true, so the explicit refresh can complete without changing cost.
+
+Required behavior:
+1. When the user presses "Обновить" on the CURRENTLY linked price row, this is an explicit request to refresh the order cost.
+2. If cost_manual=false: update cost/cost_usd as usual.
+3. If cost_manual=true: ask confirmation. On confirm, replace cost/cost_usd from current persisted Prices data and set cost_manual=false. On cancel, do nothing.
+4. Selecting a DIFFERENT price row keeps the previous Patch 145 rule: manual cost is not overwritten automatically.
+5. If later mapping upsert fails and compensation runs, restore original cost, cost_usd AND cost_manual.
+6. Historical USD rate and exact id+order_id+position safeguards from Patch 145 remain unchanged.
+
+Codex:
+- Apply only on exact base aaf6fb2fc8ab13785e5ffea3f4a9d46486bcf9cb; if main moved, inspect PricesView.vue before applying.
+- Run formatter only on changed file, type-check, scoped Oxlint/ESLint, production build, git diff --check.
+- Functional test actual linkPriceItem:
+  a) current linked row + cost_manual=false refreshes;
+  b) current linked row + cost_manual=true + confirm refreshes and clears manual flag;
+  c) current linked row + cost_manual=true + cancel leaves everything unchanged;
+  d) different row + cost_manual=true preserves manual cost;
+  e) failed mapping after confirmed manual refresh restores cost/cost_usd/cost_manual.
+- If PASS: commit only PricesView.vue, SSH push main, verify Production Deploy.
+- Return final commit SHA and deploy run only. Do not create another patch unless a reproduced blocker requires it.
