@@ -656,15 +656,7 @@ function parseCustomDate(value: string) {
 function handleCustomDateInput(field: CustomDateField, event: Event) {
   const target = event.target
   if (!(target instanceof HTMLInputElement)) return
-  const typed = target.value
-  customDateDisplay[field] = typed
-  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(typed)) return
-  const parsed = parseCustomDate(typed)
-  if (!parsed) return
-  customDateFields[field].value = parsed
-  const formatted = formatCustomDate(parsed)
-  customDateDisplay[field] = formatted
-  if (formatted !== typed) target.value = formatted
+  customDateDisplay[field] = target.value
 }
 
 function handleCustomDateBlur(field: CustomDateField) {
@@ -694,6 +686,15 @@ function handleCustomDateSegmentClick(event: MouseEvent) {
 }
 
 function handleCustomDateKeydown(field: CustomDateField, event: KeyboardEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    handleCustomDateBlur(field)
+    target.value = customDateDisplay[field]
+    target.blur()
+    return
+  }
   if (
     (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
     event.altKey ||
@@ -702,15 +703,16 @@ function handleCustomDateKeydown(field: CustomDateField, event: KeyboardEvent) {
     event.shiftKey
   )
     return
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) return
   const position = target.selectionStart
   if (position === null) return
   if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) {
-    handleCustomDateBlur(field)
-    target.value = customDateDisplay[field]
+    const parts = target.value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+    if (!parts) return
+    const [, day = '', month = '', year = ''] = parts
+    const padded = `${day.padStart(2, '0')}.${month.padStart(2, '0')}.${year}`
+    target.value = padded
+    customDateDisplay[field] = padded
   }
-  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
   const segment = position <= 2 ? 0 : position <= 5 ? 1 : 2
   const next = Math.max(0, Math.min(2, segment + (event.key === 'ArrowRight' ? 1 : -1)))
   const range = (
