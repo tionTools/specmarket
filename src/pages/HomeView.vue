@@ -693,6 +693,38 @@ function handleCustomDateSegmentClick(event: MouseEvent) {
   target.setSelectionRange(start, end)
 }
 
+function handleCustomDateKeydown(field: CustomDateField, event: KeyboardEvent) {
+  if (
+    (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  )
+    return
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+  const position = target.selectionStart
+  if (position === null) return
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) {
+    handleCustomDateBlur(field)
+    target.value = customDateDisplay[field]
+  }
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
+  const segment = position <= 2 ? 0 : position <= 5 ? 1 : 2
+  const next = Math.max(0, Math.min(2, segment + (event.key === 'ArrowRight' ? 1 : -1)))
+  const range = (
+    [
+      [0, 2],
+      [3, 5],
+      [6, 10],
+    ] as const
+  )[next]
+  if (!range) return
+  event.preventDefault()
+  target.setSelectionRange(range[0], range[1])
+}
+
 function handleCustomDatePicker(field: CustomDateField) {
   customDatePickers[field].value?.showPicker()
 }
@@ -1611,10 +1643,10 @@ const matchingOrders = computed(() => {
         ? true
         : isShowingCancellations.value
           ? lifecycleState === 'cancelled_before_shipment'
-        : isShowingReturns.value
-          ? order.delivery.trackingReturnInProgress === true ||
-            isReturnLifecycleState(lifecycleState)
-          : isOrderVisibleInMainList(lifecycleState)
+          : isShowingReturns.value
+            ? order.delivery.trackingReturnInProgress === true ||
+              isReturnLifecycleState(lifecycleState)
+            : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
       isPromRegistryView.value ||
@@ -4247,8 +4279,7 @@ async function copyOrderForSpreadsheet(order: Order) {
 
   try {
     await copy(cells.join('\t'))
-    if (!isSpreadsheetOrderCopied(order) && !(await setSpreadsheetOrderCopied(order, true)))
-      return
+    if (!isSpreadsheetOrderCopied(order) && !(await setSpreadsheetOrderCopied(order, true))) return
     if (copied.value) showInlineActionNotice(`copy-excel:${order.id}`, 'Строка скопирована')
   } catch {
     showSyncError('Не удалось скопировать строку для Excel.')
@@ -5219,6 +5250,7 @@ function orderDateTime(order: Order) {
                   @input="handleCustomDateInput('platformSummaryFrom', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
+                  @keydown="handleCustomDateKeydown('platformSummaryFrom', $event)"
                   @blur="handleCustomDateBlur('platformSummaryFrom')"
                 />
                 <button
@@ -5255,6 +5287,7 @@ function orderDateTime(order: Order) {
                   @input="handleCustomDateInput('platformSummaryTo', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
+                  @keydown="handleCustomDateKeydown('platformSummaryTo', $event)"
                   @blur="handleCustomDateBlur('platformSummaryTo')"
                 />
                 <button
@@ -5443,6 +5476,7 @@ function orderDateTime(order: Order) {
                   @input="handleCustomDateInput('orderListFrom', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
+                  @keydown="handleCustomDateKeydown('orderListFrom', $event)"
                   @blur="handleCustomDateBlur('orderListFrom')"
                 />
                 <button
@@ -5479,6 +5513,7 @@ function orderDateTime(order: Order) {
                   @input="handleCustomDateInput('orderListTo', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
+                  @keydown="handleCustomDateKeydown('orderListTo', $event)"
                   @blur="handleCustomDateBlur('orderListTo')"
                 />
                 <button
