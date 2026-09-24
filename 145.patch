@@ -1,0 +1,124 @@
+diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
+--- a/src/pages/PricesView.vue
++++ b/src/pages/PricesView.vue
+@@ -389,6 +389,30 @@
+ 
+   linkError.value = ''
+   isLinking.value = true
++  if (savePromise) {
++    try {
++      await savePromise
++    } catch (error) {
++      isLinking.value = false
++      linkError.value = `Не удалось сохранить себестоимость в «Ценах»: ${error instanceof Error ? error.message : String(error)}`
++      return
++    }
++  }
++  const { data: savedPriceItem, error: priceError } = await supabase
++    .from('crm_price_items')
++    .select('usd, cost_uah')
++    .eq('id', item.remoteId)
++    .maybeSingle()
++  if (
++    priceError ||
++    !savedPriceItem ||
++    (savedPriceItem.usd === null ? null : Number(savedPriceItem.usd)) !== item.usd ||
++    (savedPriceItem.cost_uah === null ? null : Number(savedPriceItem.cost_uah)) !== item.costUah
++  ) {
++    isLinking.value = false
++    linkError.value = 'Не удалось подтвердить сохранение себестоимости в «Ценах». Повторите после сохранения.'
++    return
++  }
+   let targetLinkProductKey = linkProductKey.value
+   try {
+     targetLinkProductKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
+@@ -403,15 +427,13 @@
+   let currentOrderItem: {
+     id: string
+     cost_manual: boolean
+-    cost: number
+-    cost_usd: number
+     orderDate: string
+   } | null = null
+   if (linkOrderRemoteId.value && linkPosition.value !== null) {
+     const [itemResult, orderResult] = await Promise.all([
+       supabase
+         .from('crm_order_items')
+-        .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')
++        .select('id, product_name, marketplace_product_key, cost_manual')
+         .eq('order_id', linkOrderRemoteId.value)
+         .eq('position', linkPosition.value)
+         .maybeSingle(),
+@@ -445,12 +467,19 @@
+     currentOrderItem = {
+       id: String(data.id),
+       cost_manual: data.cost_manual === true,
+-      cost: Number(data.cost ?? 0),
+-      cost_usd: Number(data.cost_usd ?? 0),
+       orderDate: String(orderResult.data?.order_date ?? ''),
+     }
+   }
+ 
++  const costUsd = savedPriceItem.usd === null ? 0 : Number(savedPriceItem.usd)
++  const orderUsdRate = currentOrderItem
++    ? currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
++    : 0
++  if (currentOrderItem && !currentOrderItem.cost_manual && costUsd > 0 && orderUsdRate <= 0) {
++    isLinking.value = false
++    linkError.value = 'Нет курса USD на дату заказа. Добавьте курс в «Ценах» перед обновлением себестоимости.'
++    return
++  }
+   const now = new Date().toISOString()
+   let mappingRows: Awaited<ReturnType<typeof priceLinkRowsForTarget>>
+   try {
+@@ -479,18 +508,13 @@
+ 
+   linkedPriceItemId.value = item.remoteId
+   if (currentOrderItem) {
+-    const costUsd = item.usd ?? 0
+-    const orderUsdRate = currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
+-    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * orderUsdRate
++    const cost =
++      savedPriceItem.usd === null ? Number(savedPriceItem.cost_uah ?? 0) : costUsd * orderUsdRate
+     const updatePayload: Record<string, unknown> = {
+       marketplace_product_key: targetLinkProductKey,
+       price_item_id: item.remoteId,
+     }
+-    const mayAutofillCost =
+-      !currentOrderItem.cost_manual &&
+-      currentOrderItem.cost === 0 &&
+-      currentOrderItem.cost_usd === 0
+-    if (mayAutofillCost && (costUsd <= 0 || orderUsdRate > 0)) {
++    if (!currentOrderItem.cost_manual) {
+       updatePayload.cost = cost
+       updatePayload.cost_usd = costUsd
+     }
+@@ -840,7 +864,7 @@
+             >
+           </div>
+           <span class="text-xs text-slate-500"
+-            >Выберите другую строку ниже, чтобы перепривязать.</span
++            >Нажмите «Обновить» у привязанной строки, чтобы обновить себестоимость этой позиции. Ручная себестоимость сохранится.</span
+           >
+         </div>
+         <PricesTable
+diff --git a/src/features/prices/PricesTable.vue b/src/features/prices/PricesTable.vue
+--- a/src/features/prices/PricesTable.vue
++++ b/src/features/prices/PricesTable.vue
+@@ -195,14 +195,14 @@
+               title: props.selectMode
+                 ? 'Выбрать эту позицию'
+                 : linked
+-                  ? 'Текущая привязка'
++                  ? 'Обновить себестоимость этой позиции (ручная себестоимость сохранится)'
+                   : 'Привязать эту позицию',
+               type: 'button',
+               onClick: () => emit('linkItem', row.original),
+             },
+             [
+               h(Link2, { class: 'size-4', 'aria-hidden': 'true' }),
+-              h('span', props.selectMode ? 'Выбрать' : linked ? 'Привязано' : 'Привязать'),
++              h('span', props.selectMode ? 'Выбрать' : linked ? 'Обновить' : 'Привязать'),
+             ],
+           )
+         : h(
