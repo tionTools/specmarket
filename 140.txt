@@ -1,0 +1,49 @@
+Patch 140 — clamp impossible custom-period dates to the last valid day of month
+
+Repository: tionTools/specmarket
+Branch: chatgpt-patches
+Base main SHA: d1da90064a94c15b9d007e747a48b066f98c4922
+Base HomeView.vue blob: 87a4e107f8c7c323f58c825c13da3e1ccca65116
+Patch: 140.patch
+Patch Git blob: aa1105359166dc04cc4efe2bd88849528302e826
+
+Goal:
+- In custom date ranges, an impossible day for the selected month must clamp to that month's last valid day instead of rolling into the next month.
+- Example: 31.09.2026 -> 30.09.2026.
+- Same rule for February, April, June and November, including leap years.
+- The corrected value must also be written back to the visible date field.
+- Valid dates must remain unchanged.
+- Apply the same normalization to both custom ranges already present in HomeView.vue: platform summary and order-list range.
+- Do not alter day/week/decade/month/last30 semantics, comparison logic, filtering rules, or any other UI.
+
+Scope:
+- ONLY src/pages/HomeView.vue
+- No database, Supabase function, migration, backend, route, auth, or unrelated formatting changes.
+
+Implementation in the published patch:
+- Adds normalizeInputDate(value).
+- parseInputDate() uses the normalized value, preventing JS Date rollover.
+- Watches platformSummaryFrom/platformSummaryTo/orderListFrom/orderListTo and writes a clamped date back when needed.
+- Existing shiftDateByMonths() behavior stays unchanged.
+
+Codex:
+1. Follow repository AGENTS.md and the repo-local frontend skill. Use main as source of truth.
+2. Verify clean worktree and that HEAD/main equals d1da90064a94c15b9d007e747a48b066f98c4922. If main differs, compare HomeView.vue blob to 87a4e107f8c7c323f58c825c13da3e1ccca65116. If the file changed, STOP and report drift; do not force apply.
+3. Fetch 140.patch from origin/chatgpt-patches using the established blob workflow. Verify git hash-object 140.patch = aa1105359166dc04cc4efe2bd88849528302e826.
+4. Run git apply --check 140.patch; only if PASS, apply it. Then git diff --check and inspect the exact one-file diff. Do not use --3way/--reject and do not mass-format unrelated files.
+5. Run the project's required checks in applicable order, but keep formatting scoped to the changed file only. At minimum report type-check, non-mutating lint for HomeView.vue, and build. Do not claim PASS for checks not run.
+6. Manual regression in the actual Chromium/production-like UI is mandatory before deploy because native type=date behavior can differ by browser:
+   - custom period end: type/select 31.09.2026 -> visible field becomes 30.09.2026 and filtering uses 30 September;
+   - 31.11.2026 -> 30.11.2026;
+   - 31.02.2026 -> 28.02.2026;
+   - 31.02.2028 -> 29.02.2028;
+   - valid 30.09.2026 remains 30.09.2026;
+   - reversed custom ranges still swap logically exactly as before;
+   - both order-list custom range and platform-summary custom range behave the same.
+   If Chromium clears an invalid native date input to an empty string before Vue receives the typed day, this patch cannot infer the intended 31st. In that case STOP and report the reproduced browser behavior; do not deploy a partial fix.
+7. If all checks and manual regression PASS, commit ONLY src/pages/HomeView.vue, SSH push main, and observe Production Deploy. No Supabase deploy is needed.
+8. Report base SHA, patch blob SHA, commit SHA, changed file, checks, manual regression results, SSH push, production deploy, and whether live UI was verified.
+
+Prepublication verification:
+- 140.patch was checked against the exact HomeView.vue blob on the named base and applies cleanly at the source-text level.
+- Full pnpm checks and browser regression were NOT run by ChatGPT; Codex must run them before deployment.
