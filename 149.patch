@@ -1,0 +1,585 @@
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -23,6 +23,7 @@
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.filled.Close
+ import androidx.compose.material.icons.filled.Search
++import androidx.compose.material.icons.filled.Refresh
+ import androidx.compose.foundation.text.selection.SelectionContainer
+ import androidx.compose.material3.*
+ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+@@ -158,6 +159,14 @@
+ ) {
+     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
+     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
++    val context = LocalContext.current
++    val scope = rememberCoroutineScope()
++    DisposableEffect(vm, context) {
++        val monitor = NetworkRecoveryMonitor(context) {
++            scope.launch { vm.networkRestored() }
++        }
++        onDispose { monitor.close() }
++    }
+     NotificationPermissionGate(vm)
+     var settings by rememberSaveable { mutableStateOf(false) }
+     var confirmationId by remember { mutableStateOf<String?>(null) }
+@@ -475,7 +484,7 @@
+                         Column {
+                             Text("Заказы", fontWeight = FontWeight.Bold)
+                             Text(
+-                                if (vm.realtimeConnected) "Онлайн" else "Офлайн · сохранённые данные",
++                                connectionStatusLabel(vm.realtimeConnected, vm.lastRefreshSucceeded),
+                                 style = MaterialTheme.typography.labelSmall,
+                                 color = if (vm.realtimeConnected)
+                                     MaterialTheme.colorScheme.primary
+@@ -496,6 +505,9 @@
+                             contentDescription = if (searchOpen) "Закрыть поиск" else "Поиск",
+                         )
+                     }
++                    IconButton(onClick = { vm.retryConnection() }) {
++                        Icon(Icons.Filled.Refresh, contentDescription = "Переподключиться и обновить")
++                    }
+                     TextButton(onSettings) { Text("Настройки") }
+                 },
+             )
+@@ -504,7 +516,7 @@
+     ) { padding ->
+         PullToRefreshBox(
+             isRefreshing = vm.loading,
+-            onRefresh = { vm.refresh() },
++            onRefresh = { vm.retryConnection() },
+             modifier = Modifier.fillMaxSize().padding(padding),
+         ) {
+             LazyColumn(
+@@ -688,9 +700,9 @@
+ 
+         val recipient = order.recipientName()
+         val recipientPhone = order.recipientPhone()
+-        val rawPhone = recipientPhone.takeUnless { it == "—" }.orEmpty()
+-        val originalCustomer = order.customer.display()
+-        val originalPhone = order.phone.display()
++        val buyerName = order.customer.display()
++        val buyerPhone = order.buyerPhone()
++        val rawBuyerPhone = order.phone.orEmpty().trim()
+         val shipments = order.shipments()
+ 
+         LazyColumn(
+@@ -701,36 +713,36 @@
+             item { DetailsHeader(order) }
+ 
+             item {
+-                SectionCard("Получатель") {
++                SectionCard("Покупатель") {
+                     Text(
+-                        recipient,
++                        buyerName,
+                         style = MaterialTheme.typography.titleLarge,
+                         fontWeight = FontWeight.Bold,
+                         color = MaterialTheme.colorScheme.onSurface,
+                     )
+-                    if (recipientPhone != "—") {
++                    if (buyerPhone != "—") {
+                         SelectionContainer {
+                             Text(
+-                                recipientPhone,
++                                buyerPhone,
+                                 style = MaterialTheme.typography.bodyLarge,
+                                 fontWeight = FontWeight.SemiBold,
+                                 color = MaterialTheme.colorScheme.onSurface,
+                             )
+                         }
+                     }
+-                    if (normalizeCustomerPhone(rawPhone) != null) {
++                    if (normalizeCustomerPhone(rawBuyerPhone) != null) {
+                         FilledTonalButton(
+-                            onClick = { openDialer(context, rawPhone) },
++                            onClick = { openDialer(context, rawBuyerPhone) },
+                             modifier = Modifier.fillMaxWidth().height(48.dp),
+                         ) {
+-                            Text("Позвонить $recipientPhone", fontWeight = FontWeight.SemiBold)
++                            Text("Позвонить покупателю · $buyerPhone", fontWeight = FontWeight.SemiBold)
+                         }
+                         Row(
+                             Modifier.fillMaxWidth(),
+                             horizontalArrangement = Arrangement.spacedBy(8.dp),
+                         ) {
+                             Button(
+-                                onClick = { openViber(context, rawPhone) },
++                                onClick = { openViber(context, rawBuyerPhone) },
+                                 modifier = Modifier.weight(1f).height(46.dp),
+                                 colors = ButtonDefaults.buttonColors(
+                                     containerColor = Color(0xFF7360F2),
+@@ -738,7 +750,7 @@
+                                 ),
+                             ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
+                             Button(
+-                                onClick = { openTelegram(context, rawPhone) },
++                                onClick = { openTelegram(context, rawBuyerPhone) },
+                                 modifier = Modifier.weight(1f).height(46.dp),
+                                 colors = ButtonDefaults.buttonColors(
+                                     containerColor = Color(0xFF229ED9),
+@@ -751,6 +763,27 @@
+             }
+ 
+             item {
++                SectionCard("Получатель") {
++                    Text(
++                        recipient,
++                        style = MaterialTheme.typography.titleLarge,
++                        fontWeight = FontWeight.Bold,
++                        color = MaterialTheme.colorScheme.onSurface,
++                    )
++                    if (recipientPhone != "—") {
++                        SelectionContainer {
++                            Text(
++                                recipientPhone,
++                                style = MaterialTheme.typography.bodyLarge,
++                                fontWeight = FontWeight.SemiBold,
++                                color = MaterialTheme.colorScheme.onSurface,
++                            )
++                        }
++                    }
++                }
++            }
++
++            item {
+                 Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+             }
+             items(order.items.sortedBy { it.position }) { product ->
+@@ -811,15 +844,6 @@
+             if (extraExpanded) {
+                 item {
+                     SectionCard("Дополнительно") {
+-                        if (originalCustomer != recipient || originalPhone != recipientPhone) {
+-                            DetailField(
+-                                "Клиент",
+-                                listOf(originalCustomer, originalPhone)
+-                                    .filter { it != "—" }
+-                                    .joinToString(" · ")
+-                                    .ifBlank { "—" },
+-                            )
+-                        }
+                         DetailField("Плательщик доставки", order.deliveryField("payer"))
+                         DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
+                     }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderModels.kt b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderModels.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderModels.kt
+@@ -232,9 +232,13 @@
+ fun Order.recipientName(): String =
+     deliveryValue("recipient").trim().ifBlank { customer.orEmpty().trim() }.display()
+ 
++fun Order.buyerPhone(): String = formatCustomerPhoneForDisplay(phone)
++
+ fun Order.recipientPhone(): String =
+     formatCustomerPhoneForDisplay(
+-        deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() },
++        deliveryValue("recipientPhone").trim().ifBlank {
++            if (normalizedStatus(platform) == "пром") "" else phone.orEmpty().trim()
++        },
+     )
+ 
+ private val returnSignalRegex = Regex(
+diff --git a/android/app/src/main/java/ua/orders/crm/OrderSync.kt b/android/app/src/main/java/ua/orders/crm/OrderSync.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrderSync.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrderSync.kt
+@@ -1,5 +1,11 @@
+ package ua.orders.crm
+ 
++fun connectionStatusLabel(realtimeConnected: Boolean, lastRefreshSucceeded: Boolean): String = when {
++    realtimeConnected -> "Онлайн"
++    lastRefreshSucceeded -> "CRM доступна · live-подключение восстанавливается"
++    else -> "Офлайн · сохранённые данные"
++}
++
+ fun mergeOrders(current: List<Order>, changed: List<Order>): List<Order> {
+     if (changed.isEmpty()) return current
+     val merged = LinkedHashMap<String, Order>(current.size + changed.size)
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+@@ -107,17 +107,39 @@
+         }).bodyAsText())
+     }
+ 
+-    suspend fun watch(onConnection: (Boolean) -> Unit, onChange: suspend (OrderChange) -> Unit): Nothing = coroutineScope {
++    suspend fun watch(onConnection: (Boolean) -> Unit, onChange: suspend (OrderChange) -> Unit): Unit = coroutineScope {
+         val channel = client.channel("crm:orders") { isPrivate = true }
+         val events = channel.broadcastFlow<OrderChange>("order_changed")
++        val disconnected = CompletableDeferred<Unit>()
++        var wasSubscribed = false
++        val statusJob = launch {
++            channel.status.collect { status ->
++                val connected = status == RealtimeChannel.Status.SUBSCRIBED
++                onConnection(connected)
++                if (connected) wasSubscribed = true
++                else if (wasSubscribed) disconnected.complete(Unit)
++            }
++        }
++        val eventsJob = launch {
++            try {
++                events.collect { onChange(it) }
++            } catch (cancel: CancellationException) {
++                if (cancel is TimeoutCancellationException) disconnected.complete(Unit)
++                else throw cancel
++            } catch (_: Exception) {
++                disconnected.complete(Unit)
++            }
++        }
+         try {
+-            launch { channel.status.collect { onConnection(it == RealtimeChannel.Status.SUBSCRIBED) } }
+-            launch { events.collect { onChange(it) } }
+-            channel.subscribe(blockUntilSubscribed = true)
+-            awaitCancellation()
++            withTimeout(25_000) { channel.subscribe(blockUntilSubscribed = true) }
++            disconnected.await()
+         } finally {
++            statusJob.cancel()
++            eventsJob.cancel()
+             onConnection(false)
+-            withContext(NonCancellable) { client.realtime.removeChannel(channel) }
++            withContext(NonCancellable) {
++                withTimeoutOrNull(5_000) { client.realtime.removeChannel(channel) }
++            }
+         }
+     }
+ }
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -17,6 +17,9 @@
+     private val requests = Mutex()
+     private val pendingNotificationIds = linkedSetOf<String>()
+     private var realtimeJob: Job? = null
++    private var realtimeGeneration = 0L
++    private var refreshJob: Job? = null
++    private var refreshGeneration = 0L
+     private var pushRegistrationJob: Job? = null
+     private var visible = false
+     private var ordersBeforeDetail: List<Order> = emptyList()
+@@ -28,6 +31,7 @@
+     var loading by mutableStateOf(false); private set
+     var message by mutableStateOf<String?>(null); private set
+     var realtimeConnected by mutableStateOf(false); private set
++    var lastRefreshSucceeded by mutableStateOf(false); private set
+     var selectedId by mutableStateOf<String?>(null); private set
+     var detail by mutableStateOf<Order?>(null); private set
+     var acceptingId by mutableStateOf<String?>(null); private set
+@@ -82,12 +86,21 @@
+     fun foreground(active: Boolean) {
+         visible = active
+         if (active && email != null) {
+-            startRealtime(forceRestart = true)
+-            refresh()
++            retryConnection()
+             syncPushRegistration()
+         }
+     }
+ 
++    fun networkRestored() {
++        if (visible && email != null) retryConnection()
++    }
++
++    fun retryConnection() {
++        if (email == null) return
++        startRealtime(forceRestart = true)
++        refresh(force = true)
++    }
++
+     private fun syncPushRegistration(enabledOverride: Boolean? = null) {
+         if (email == null) return
+         pushRegistrationJob?.cancel()
+@@ -111,41 +124,51 @@
+     }
+ 
+     private fun startRealtime(forceRestart: Boolean = false) {
+-        if (email == null) return
++        val account = email ?: return
+         val previousJob = realtimeJob
+         if (!forceRestart && previousJob?.isActive == true) return
++        val generation = ++realtimeGeneration
+         if (forceRestart) {
+             realtimeConnected = false
+             previousJob?.cancel()
+         }
+         realtimeJob = viewModelScope.launch {
+-            previousJob?.join()
+-            while (isActive && email != null) {
++            // Old channel cleanup must not prevent a new connection indefinitely.
++            withTimeoutOrNull(7_000) { previousJob?.join() }
++            while (isActive && email == account && generation == realtimeGeneration) {
+                 try {
+                     repository.watch(onConnection = { connected ->
+-                        val reconnect = connected && !realtimeConnected
+-                        realtimeConnected = connected
+-                        if (reconnect) refresh()
++                        if (email == account && generation == realtimeGeneration) {
++                            val reconnect = connected && !realtimeConnected
++                            realtimeConnected = connected
++                            if (reconnect) refresh()
++                        }
+                     }) { change ->
+-                        requests.withLock {
+-                            val account = email ?: return@withLock
+-                            if (change.operation.equals("DELETE", ignoreCase = true)) {
+-                                orders = orders.filterNot { it.id == change.order_id }
+-                                pendingNotificationIds.remove(change.order_id)
+-                                if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
+-                            } else {
+-                                val order = repository.order(change.order_id)
+-                                if (order != null) {
+-                                    val known = orders.any { it.id == order.id }
+-                                    merge(order)
+-                                    if (!known) notifyOrQueue(order)
++                        withTimeout(25_000) {
++                            requests.withLock {
++                                if (email != account || generation != realtimeGeneration) return@withLock
++                                if (change.operation.equals("DELETE", ignoreCase = true)) {
++                                    orders = orders.filterNot { it.id == change.order_id }
++                                    pendingNotificationIds.remove(change.order_id)
++                                    if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
++                                } else {
++                                    val order = repository.order(change.order_id)
++                                    if (order != null) {
++                                        val known = orders.any { it.id == order.id }
++                                        merge(order)
++                                        if (!known) notifyOrQueue(order)
++                                    }
+                                 }
++                                persistCache(account)
+                             }
+-                            persistCache(account)
+                         }
+                     }
++                } catch (_: TimeoutCancellationException) {
++                    if (generation == realtimeGeneration) realtimeConnected = false
+                 } catch (cancel: CancellationException) { throw cancel }
+-                catch (_: Exception) { realtimeConnected = false }
++                catch (_: Exception) {
++                    if (generation == realtimeGeneration) realtimeConnected = false
++                }
+                 delay(5_000)
+             }
+         }
+@@ -210,6 +233,12 @@
+     }
+ 
+     private fun clearOrders() {
++        ++refreshGeneration
++        refreshJob?.cancel()
++        refreshJob = null
++        loading = false
++        lastRefreshSucceeded = false
++        ++realtimeGeneration
+         orders = emptyList()
+         ordersBeforeDetail = emptyList()
+         selectedId = null
+@@ -228,50 +257,69 @@
+         cache.save(currentAccount, orders, pendingNotificationIds)
+     }
+ 
+-    fun refresh() {
+-        if (email == null || loading) return
++    fun refresh(force: Boolean = false) {
+         val account = email ?: return
++        if (loading && !force) return
++        val generation = ++refreshGeneration
++        refreshJob?.cancel()
+         loading = true
+-        viewModelScope.launch {
++        refreshJob = viewModelScope.launch {
+             try {
+-                requests.withLock {
+-                    if (orders.isEmpty()) {
+-                        cache.load(account)?.let { cached ->
+-                            if (cached.orders.isNotEmpty()) {
+-                                orders = sortOrdersForDisplay(cached.orders)
+-                                pendingNotificationIds.clear()
+-                                pendingNotificationIds.addAll(cached.pendingNotificationIds)
+-                                initialLoadComplete = true
++                withTimeout(30_000) {
++                    requests.withLock {
++                        if (orders.isEmpty()) {
++                            cache.load(account)?.let { cached ->
++                                if (cached.orders.isNotEmpty()) {
++                                    orders = sortOrdersForDisplay(cached.orders)
++                                    pendingNotificationIds.clear()
++                                    pendingNotificationIds.addAll(cached.pendingNotificationIds)
++                                    initialLoadComplete = true
++                                }
+                             }
+                         }
+-                    }
+-                    val baselineComplete = initialLoadComplete
+-                    val knownIds = orders.mapTo(hashSetOf()) { it.id }
+-                    val cursor = latestOrderUpdatedAt(orders)
+-                    val fetched = if (cursor == null) {
+-                        val first = repository.orders()
+-                        if (!baselineComplete && first.isEmpty()) {
+-                            delay(750)
+-                            repository.orders()
+-                        } else first
+-                    } else {
+-                        repository.ordersChangedSince(cursor)
+-                    }
+-                    if (email != account) return@withLock
+-                    val discovered = if (baselineComplete) fetched.filter { it.id !in knownIds } else emptyList()
+-                    orders = mergeOrders(orders, fetched)
+-                    initialLoadComplete = true
+-                    for (order in discovered) notifyOrQueue(order)
+-                    selectedId?.let { id ->
+-                        val updated = repository.order(id)
+-                        if (email == account && selectedId == id && updated != null) merge(updated)
++                        val baselineComplete = initialLoadComplete
++                        val knownIds = orders.mapTo(hashSetOf()) { it.id }
++                        val cursor = latestOrderUpdatedAt(orders)
++                        val fetched = if (cursor == null) {
++                            val first = repository.orders()
++                            if (!baselineComplete && first.isEmpty()) {
++                                delay(750)
++                                repository.orders()
++                            } else first
++                        } else {
++                            repository.ordersChangedSince(cursor)
++                        }
++                        if (email != account || generation != refreshGeneration) return@withLock
++                        val discovered = if (baselineComplete) fetched.filter { it.id !in knownIds } else emptyList()
++                        orders = mergeOrders(orders, fetched)
++                        initialLoadComplete = true
++                        for (order in discovered) notifyOrQueue(order)
++                        selectedId?.let { id ->
++                            val updated = repository.order(id)
++                            if (email == account && selectedId == id && updated != null) merge(updated)
++                        }
++                        flushPendingNotificationsLocked()
++                        persistCache(account)
+                     }
+-                    flushPendingNotificationsLocked()
+-                    persistCache(account)
+                 }
++                if (generation == refreshGeneration && email == account) lastRefreshSucceeded = true
++            } catch (_: TimeoutCancellationException) {
++                if (generation == refreshGeneration) {
++                    lastRefreshSucceeded = false
++                    message = "Соединение не ответило за 30 секунд. Нажмите «Обновить» для повторного подключения."
++                }
+             } catch (cancel: CancellationException) { throw cancel }
+-            catch (_: Exception) { message = "Не удалось обновить заказы. Показаны сохранённые данные." }
+-            finally { loading = false }
++            catch (_: Exception) {
++                if (generation == refreshGeneration) {
++                    lastRefreshSucceeded = false
++                    message = "Не удалось обновить заказы. Показаны сохранённые данные."
++                }
++            } finally {
++                if (generation == refreshGeneration) {
++                    loading = false
++                    refreshJob = null
++                }
++            }
+         }
+     }
+ 
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -1,5 +1,6 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <application android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_orders_crm" android:roundIcon="@drawable/ic_orders_crm" android:label="Заказы" android:theme="@style/Theme.Orders" android:usesCleartextTraffic="false">
+         <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -19,8 +19,8 @@
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 15
+-        versionName = "0.15"
++        versionCode = 16
++        versionName = "0.16"
+     }
+     signingConfigs {
+         create("release") {
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt b/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderSyncTest.kt
+@@ -66,6 +66,33 @@
+         assertEquals("—", formatCustomerPhoneForDisplay(null))
+     }
+ 
++    @Test fun prom_buyer_and_recipient_phones_are_independent_for_calls() {
++        val order = Order(
++            "prom",
++            customer = "Покупатель",
++            phone = "0631234567",
++            platform = "Пром",
++            delivery = buildJsonObject {
++                put("recipient", "Получатель")
++                put("recipientPhone", "0501112233")
++            },
++        )
++        assertEquals("+38 063 123 45 67", order.buyerPhone())
++        assertEquals("+38 050 111 22 33", order.recipientPhone())
++        assertEquals("—", order.copy(phone = null).buyerPhone())
++        assertEquals("—", order.copy(delivery = buildJsonObject { put("recipient", "Другой") }).recipientPhone())
++        assertEquals("+38 063 123 45 67", order.copy(platform = "Каста", delivery = null).recipientPhone())
++    }
++
++    @Test fun connection_status_does_not_mistake_rest_success_for_offline() {
++        assertEquals("Онлайн", connectionStatusLabel(true, false))
++        assertEquals(
++            "CRM доступна · live-подключение восстанавливается",
++            connectionStatusLabel(false, true),
++        )
++        assertEquals("Офлайн · сохранённые данные", connectionStatusLabel(false, false))
++    }
++
+     @Test fun preferred_recipient_uses_delivery_recipient_with_customer_fallback() {
+         val deliveryRecipient = Order(
+             "recipient",
+diff --git a/android/app/src/main/java/ua/orders/crm/NetworkRecoveryMonitor.kt b/android/app/src/main/java/ua/orders/crm/NetworkRecoveryMonitor.kt
+new file mode 100644
+--- /dev/null
++++ b/android/app/src/main/java/ua/orders/crm/NetworkRecoveryMonitor.kt
+@@ -0,0 +1,36 @@
++package ua.orders.crm
++
++import android.content.Context
++import android.net.ConnectivityManager
++import android.net.Network
++import android.net.NetworkCapabilities
++
++/** Triggers recovery after Android's default network regains verified Internet access. */
++class NetworkRecoveryMonitor(context: Context, private val onRestored: () -> Unit) : AutoCloseable {
++    private val connectivity = context.getSystemService(ConnectivityManager::class.java)
++    @Volatile private var closed = false
++    @Volatile private var validated = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
++        ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
++
++    private val callback = object : ConnectivityManager.NetworkCallback() {
++        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
++            val nowValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
++            val recovered = nowValidated && !validated
++            validated = nowValidated
++            if (recovered && !closed) onRestored()
++        }
++
++        override fun onLost(network: Network) {
++            validated = false
++        }
++    }
++
++    init {
++        connectivity.registerDefaultNetworkCallback(callback)
++    }
++
++    override fun close() {
++        closed = true
++        connectivity.unregisterNetworkCallback(callback)
++    }
++}
