@@ -195,14 +195,14 @@ const columns = [
               title: props.selectMode
                 ? 'Выбрать эту позицию'
                 : linked
-                  ? 'Текущая привязка'
+                  ? 'Обновить себестоимость этой позиции (ручная себестоимость сохранится)'
                   : 'Привязать эту позицию',
               type: 'button',
               onClick: () => emit('linkItem', row.original),
             },
             [
               h(Link2, { class: 'size-4', 'aria-hidden': 'true' }),
-              h('span', props.selectMode ? 'Выбрать' : linked ? 'Привязано' : 'Привязать'),
+              h('span', props.selectMode ? 'Выбрать' : linked ? 'Обновить' : 'Привязать'),
             ],
           )
         : h(

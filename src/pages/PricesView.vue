@@ -389,6 +389,31 @@ async function linkPriceItem(item: PriceItem) {
 
   linkError.value = ''
   isLinking.value = true
+  if (savePromise) {
+    try {
+      await savePromise
+    } catch (error) {
+      isLinking.value = false
+      linkError.value = `Не удалось сохранить себестоимость в «Ценах»: ${error instanceof Error ? error.message : String(error)}`
+      return
+    }
+  }
+  const { data: savedPriceItem, error: priceError } = await supabase
+    .from('crm_price_items')
+    .select('usd, cost_uah')
+    .eq('id', item.remoteId)
+    .maybeSingle()
+  if (
+    priceError ||
+    !savedPriceItem ||
+    (savedPriceItem.usd === null ? null : Number(savedPriceItem.usd)) !== item.usd ||
+    (savedPriceItem.cost_uah === null ? null : Number(savedPriceItem.cost_uah)) !== item.costUah
+  ) {
+    isLinking.value = false
+    linkError.value =
+      'Не удалось подтвердить сохранение себестоимости в «Ценах». Повторите после сохранения.'
+    return
+  }
   let targetLinkProductKey = linkProductKey.value
   try {
     targetLinkProductKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
@@ -402,16 +427,22 @@ async function linkPriceItem(item: PriceItem) {
 
   let currentOrderItem: {
     id: string
+    orderId: string
+    position: number
     cost_manual: boolean
+    marketplaceProductKey: string
+    priceItemId: string | null
     cost: number
-    cost_usd: number
+    costUsd: number
     orderDate: string
   } | null = null
   if (linkOrderRemoteId.value && linkPosition.value !== null) {
     const [itemResult, orderResult] = await Promise.all([
       supabase
         .from('crm_order_items')
-        .select('id, product_name, marketplace_product_key, cost_manual, cost, cost_usd')
+        .select(
+          'id, order_id, position, product_name, marketplace_product_key, price_item_id, cost_manual, cost, cost_usd',
+        )
         .eq('order_id', linkOrderRemoteId.value)
         .eq('position', linkPosition.value)
         .maybeSingle(),
@@ -444,13 +475,27 @@ async function linkPriceItem(item: PriceItem) {
     }
     currentOrderItem = {
       id: String(data.id),
+      orderId: String(data.order_id),
+      position: Number(data.position),
       cost_manual: data.cost_manual === true,
+      marketplaceProductKey: currentMarketplaceProductKey,
+      priceItemId: data.price_item_id === null ? null : String(data.price_item_id),
       cost: Number(data.cost ?? 0),
-      cost_usd: Number(data.cost_usd ?? 0),
+      costUsd: Number(data.cost_usd ?? 0),
       orderDate: String(orderResult.data?.order_date ?? ''),
     }
   }
 
+  const costUsd = savedPriceItem.usd === null ? 0 : Number(savedPriceItem.usd)
+  const orderUsdRate = currentOrderItem
+    ? currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
+    : 0
+  if (currentOrderItem && !currentOrderItem.cost_manual && costUsd > 0 && orderUsdRate <= 0) {
+    isLinking.value = false
+    linkError.value =
+      'Нет курса USD на дату заказа. Добавьте курс в «Ценах» перед обновлением себестоимости.'
+    return
+  }
   const now = new Date().toISOString()
   let mappingRows: Awaited<ReturnType<typeof priceLinkRowsForTarget>>
   try {
@@ -468,42 +513,69 @@ async function linkPriceItem(item: PriceItem) {
     return
   }
 
-  const { error: mappingError } = await supabase
-    .from('crm_product_price_links')
-    .upsert(mappingRows, { onConflict: 'platform,marketplace_product_key' })
-  if (mappingError) {
-    isLinking.value = false
-    linkError.value = `Не удалось сохранить привязку: ${mappingError.message}`
-    return
-  }
-
-  linkedPriceItemId.value = item.remoteId
+  const shouldUpdateMapping =
+    !currentOrderItem || currentOrderItem.marketplaceProductKey !== targetLinkProductKey
   if (currentOrderItem) {
-    const costUsd = item.usd ?? 0
-    const orderUsdRate = currencyRateForDate(currencyRates.value, currentOrderItem.orderDate, 0)
-    const cost = item.usd === null ? Number(item.costUah ?? 0) : item.usd * orderUsdRate
+    const cost =
+      savedPriceItem.usd === null ? Number(savedPriceItem.cost_uah ?? 0) : costUsd * orderUsdRate
     const updatePayload: Record<string, unknown> = {
       marketplace_product_key: targetLinkProductKey,
       price_item_id: item.remoteId,
     }
-    const mayAutofillCost =
-      !currentOrderItem.cost_manual &&
-      currentOrderItem.cost === 0 &&
-      currentOrderItem.cost_usd === 0
-    if (mayAutofillCost && (costUsd <= 0 || orderUsdRate > 0)) {
+    if (!currentOrderItem.cost_manual) {
       updatePayload.cost = cost
       updatePayload.cost_usd = costUsd
     }
-    const { error: itemError } = await supabase
+    const { data: updatedItem, error: itemError } = await supabase
       .from('crm_order_items')
       .update(updatePayload)
       .eq('id', currentOrderItem.id)
-    if (itemError) {
+      .eq('order_id', currentOrderItem.orderId)
+      .eq('position', currentOrderItem.position)
+      .select('id')
+      .maybeSingle()
+    if (itemError || !updatedItem) {
       isLinking.value = false
-      linkError.value = `Привязка сохранена, но себестоимость текущего заказа не обновлена: ${itemError.message}`
+      linkError.value = `Не удалось обновить выбранную позицию заказа: ${
+        itemError?.message ?? 'позиция не найдена'
+      }`
       return
     }
   }
+
+  if (shouldUpdateMapping) {
+    const { error: mappingError } = await supabase
+      .from('crm_product_price_links')
+      .upsert(mappingRows, { onConflict: 'platform,marketplace_product_key' })
+    if (mappingError) {
+      if (currentOrderItem) {
+        const restorePayload: Record<string, unknown> = {
+          marketplace_product_key: currentOrderItem.marketplaceProductKey || null,
+          price_item_id: currentOrderItem.priceItemId,
+          cost: currentOrderItem.cost,
+          cost_usd: currentOrderItem.costUsd,
+        }
+        const { data: restoredItem, error: restoreError } = await supabase
+          .from('crm_order_items')
+          .update(restorePayload)
+          .eq('id', currentOrderItem.id)
+          .eq('order_id', currentOrderItem.orderId)
+          .eq('position', currentOrderItem.position)
+          .select('id')
+          .maybeSingle()
+        if (restoreError || !restoredItem) {
+          isLinking.value = false
+          linkError.value = `Не удалось сохранить привязку: ${mappingError.message}. Компенсация позиции заказа также не удалась: ${restoreError?.message ?? 'позиция не найдена'}`
+          return
+        }
+      }
+      isLinking.value = false
+      linkError.value = `Не удалось сохранить привязку: ${mappingError.message}. Позиция заказа восстановлена.`
+      return
+    }
+  }
+
+  linkedPriceItemId.value = item.remoteId
 
   isLinking.value = false
   await router.push({ path: '/', query: returnQuery() })
@@ -840,7 +912,8 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             >
           </div>
           <span class="text-xs text-slate-500"
-            >Выберите другую строку ниже, чтобы перепривязать.</span
+            >Нажмите «Обновить» у привязанной строки, чтобы обновить себестоимость этой позиции.
+            Ручная себестоимость сохранится.</span
           >
         </div>
         <PricesTable
