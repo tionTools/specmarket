@@ -50,6 +50,70 @@ const buyerName = 'Тестовий Покупець'
 const receiverName = 'Тестовий Отримувач'
 const cases = [
   [
+    'real Prom schema: order.client.phone buyer, order.phone receiver',
+    {
+      client: { phone: buyer },
+      recipient_name: receiverName,
+      delivery_recipient: { phone: receiver },
+      phone: receiver,
+    },
+    { phones: [receiver] },
+    { phone: receiver, delivery: { recipient: receiverName, recipientPhone: receiver } },
+    buyerName,
+    buyer,
+    receiver,
+  ],
+  [
+    'nested buyer overrides stale old CRM phone',
+    {
+      client: { phone: buyer },
+      recipient_name: receiverName,
+      recipient_phone: receiver,
+      phone: receiver,
+    },
+    {},
+    { phone: '+380991234567', delivery: { recipient: receiverName, recipientPhone: receiver } },
+    buyerName,
+    buyer,
+    receiver,
+  ],
+  [
+    'order.client.phone works without separate profile and client_id',
+    {
+      client: { phone: buyer },
+      delivery: { recipient: { name: receiverName, phone: receiver } },
+      phone: receiver,
+    },
+    {},
+    {},
+    buyerName,
+    buyer,
+    receiver,
+  ],
+  [
+    'order.client.phone equal to another recipient does not override valid old buyer',
+    {
+      client: { phone: receiver },
+      recipient_name: receiverName,
+      recipient_phone: receiver,
+      phone: receiver,
+    },
+    {},
+    { phone: buyer, delivery: { recipient: receiverName, recipientPhone: receiver } },
+    buyerName,
+    buyer,
+    receiver,
+  ],
+  [
+    'same-person buyer and recipient may share nested order.client.phone',
+    { client: { phone: buyer }, recipient_name: buyerName, recipient_phone: buyer, phone: buyer },
+    {},
+    {},
+    buyerName,
+    buyer,
+    buyer,
+  ],
+  [
     'independent buyer and receiver',
     { recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
     { phone: buyer },
@@ -192,4 +256,4 @@ assert.match(
   home,
   /order\.platform === 'Пром'\s*\? order\.delivery\.recipientPhone\s*:\s*order\.delivery\.recipientPhone \|\| order\.phone/,
 )
-console.log('Prom phone regression: 12 actual-helper cases plus UI role checks PASS')
+console.log('Prom phone regression: 17 actual-helper cases plus UI role checks PASS')
