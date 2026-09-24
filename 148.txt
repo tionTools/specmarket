@@ -1,0 +1,37 @@
+Patch 148 — FIX CONFIRMED BY ACTUAL PROM API DIAGNOSTICS
+
+Repository: tionTools/specmarket
+Base main: 2e1aae1b79d920efc7a7c9b2e3583067e0e66a47
+Expected 148.patch blob SHA: 95d27dc45fc428700ae064f7c3a8011d3232e2fe
+Production Supabase project ref: rtkhgldaswsclkorlyxx
+
+Confirmed reality (read-only production diagnosis on three different orders):
+- GET /orders/{id}: order.client.phone is buyer phone.
+- order.delivery_recipient.phone is recipient phone.
+- order.phone in these orders is recipient phone, NOT buyer phone.
+- GET /clients/{client_id} returns status 200 with 'phones' collection, but no supported top-level scalar phone. Do not guess the shape of 'phones': the confirmed per-order source is order.client.phone.
+
+Changes:
+- Give order.client.phone first priority for buyer, via existing promClientPhone(asRecord(order.client)) and existing buyerCandidate safeguard. The recipient extraction stays unchanged.
+- Keep prior customer-profile/legacy fallbacks after the real per-order field.
+- Remove the temporary diagnostic API mode, browser button and JSON panel.
+- Add 5 synthetic regression scenarios based on the real API response structure (total 17); no customer PII or live secrets in committed tests.
+- Scope exactly: supabase/functions/sync-prom-orders/index.ts; src/pages/HomeView.vue; src/features/orders/prom-phone-separation_test.mjs.
+- No SQL, migration, RLS, permission, credential, config or unrelated sync edits.
+
+Codex execution: Use the latest 148.patch from origin/chatgpt-patches. Check hash against expected SHA. Inspect current main SHA (and unrelated worktree changes). Do not layer over an already-applied patch. git apply --check then apply. Format only three touched files and inspect actual diff to avoid formatter churn. Run:
+node src/features/orders/prom-phone-separation_test.mjs  # must report 17/17 PASS
+pnpm type-check
+scoped Oxlint/ESLint
+pnpm build
+git diff --check
+available Edge Function type/check if the repo supports it
+No need to reconstruct the historical 145/146 tests or ask for additional invented scenarios.
+
+If checks PASS: commit only these three files, SSH push main, verify GitHub Production Deploy. Deploy backend explicitly:
+pnpm exec supabase functions deploy sync-prom-orders --project-ref rtkhgldaswsclkorlyxx
+Use already-authorized Supabase session; no new tokens supplied in chat. If Edge deploy fails, report actual error, do not claim done.
+
+IMPORTANT: A frontend Production Deploy alone does NOT deploy Edge Function. After both deploy success, the user will press 'Синхронизировать заказ' from their logged-in CRM for order 429545614 and order 429674532 and compare buyer vs recipient with the Prom cabinet. Codex has no local CRM JWT; do not block commit/deploy on this user-only check or claim it already passed.
+
+Report final result only: 17/17 test result, other checks, commit SHA, Edge deploy result, Production Deploy link, confirmation diagnostic is removed. If genuine failure occurs, report observed failed step succinctly, do not invent additional requirements.
