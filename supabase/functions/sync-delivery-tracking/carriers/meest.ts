@@ -86,14 +86,27 @@ function md5Hex(value: string) {
 }
 
 function meestReadableStatus(source: string, code: string) {
+  const status = source.replace(/\s+/g, ' ').trim()
   if (code === '2') return { status: 'Создана накладная', final: false, normalizedStatus: 'created' }
-  if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(source))
+  if (code === '606' || /(?:прийнято до перевезення|принято к перевозке)/i.test(status))
     return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
   if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
   if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
-  if (code === '1622' || /^доручено$/i.test(source.trim()))
+  if (
+    code === '1622' ||
+    /^доручено$/i.test(status) ||
+    /^(?:відправлення\s+)?(?:отримане|одержане|вручене)(?:$|[\s.,;:()])/iu.test(status) ||
+    /^(?:отправление\s+)?(?:получено|вручено|доставлено)(?:$|[\s.,;:()])/iu.test(status)
+  )
     return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
-  return readableStatus(source, code)
+  if (/(?:готове\s+до\s+видачі|готово\s+к\s+выдаче)/iu.test(status))
+    return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
+  if (/(?:видан[ео]\s+кур['’ʼ]?єру|выдано\s+курьеру|прямує\s+у\s+підрозділ\s+отримання)/iu.test(status))
+    return { status: source, final: false, normalizedStatus: 'in_transit' }
+  const fallback = readableStatus(source, code)
+  return fallback.normalizedStatus === 'delivered'
+    ? { status: source, final: false, normalizedStatus: 'unknown' }
+    : fallback
 }
 
 function decodeXml(value: string) {
@@ -187,7 +200,7 @@ async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationCountry: latest.country,
       trackingLocationDetails: latest.detail,
       trackingStatusCode: latest.code,
-      trackingDeliveredAt: latest.code === '1622' ? latest.at : '',
+      trackingDeliveredAt: base.normalizedStatus === 'delivered' ? latest.at : '',
     },
   }
 }
@@ -242,7 +255,7 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationCountry: text(record(latest?.eventCountryDescr).descrUA),
       trackingLocationDetails: text(record(latest?.eventDetailDescr).descrUA),
       trackingStatusCode: eventCode,
-      trackingDeliveredAt: eventCode === '1622' ? text(latest?.eventDateTime) : '',
+      trackingDeliveredAt: base.normalizedStatus === 'delivered' ? text(latest?.eventDateTime) : '',
     },
   }
 }
