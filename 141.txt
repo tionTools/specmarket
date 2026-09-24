@@ -1,0 +1,40 @@
+Patch 141 — restore DD.MM.YYYY display and calendar picker for four custom-range fields
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Base main SHA: bfc70593a908dd86b62f9e52fd653a4b356c311b
+Base src/pages/HomeView.vue blob SHA: 15600b8a1aa82e00a3f3c11de9f71da51ed26a6b
+Patch: 141.patch
+Patch Git blob SHA: 85f22a1807fc2c6cd87dad91df5afcc79ec0035e
+
+User-visible goal:
+- Four custom-range inputs display DD.MM.YYYY instead of YYYY-MM-DD (e.g. 23.09.2026).
+- Each input has a visible clickable calendar icon; clicking it opens Chromium's native date picker and selecting a date updates the visible text and existing internal range model.
+- Manual typing remains available: typing 31.09.2026 immediately clamps to 30.09.2026, including Feb/leap years.
+- Keep internal dates as YYYY-MM-DD, preserve reporting, range swap, comparison, date-by-day control, and existing auth.
+
+Patch details:
+- Only src/pages/HomeView.vue.
+- Four display drafts retain partially typed DD.MM.YYYY strings without changing the last valid internal ISO model; incomplete/invalid input reverts on blur.
+- Parsing of complete date clamps day of month and writes formatted result into the visible text input immediately.
+- Four visually hidden but rendered native date inputs provide showPicker() via visible calendar buttons. Inputs are not display:none, disabled, or readOnly so showPicker() can operate in Chromium.
+- Existing ISO normalization continues; the model remains ISO to avoid unrelated report filter changes.
+- No new dependencies, permissions, Supabase changes, or infrastructure changes.
+
+Apply/deploy:
+1. Follow AGENTS.md and repo-local frontend skill. Confirm clean worktree and main SHA bfc70593a908dd86b62f9e52fd653a4b356c311b. If changed, compare HomeView.vue blob to 15600b8a1aa82e00a3f3c11de9f71da51ed26a6b; stop on drift, do not force.
+2. Fetch 141.patch from origin/chatgpt-patches by the repository's established blob workflow. Verify git hash-object = 85f22a1807fc2c6cd87dad91df5afcc79ec0035e.
+3. git apply --check, then apply; git diff --check; inspect the one-file diff. Keep formatting limited to changed file. Do not mass-format the project or introduce unrelated edits.
+4. Run applicable checks: scoped format for HomeView.vue; type-check; scoped Oxlint and ESLint; production build; git diff --check. Report actual results, not assumed PASS.
+5. Mandatory isolated Vue/Chromium regression without CRM login:
+   - At least one platform-summary custom-range and one order-list custom-range text field display 23.09.2026 for an internal 2026-09-23.
+   - All FOUR calendar icons are visible and clickable; each opens the real native date picker. Selecting 24 Sep 2026 updates the corresponding visible field to 24.09.2026 and internal ISO to 2026-09-24. Check that picker opens when the icon is clicked, not merely that showPicker exists.
+   - Manual input 31.09.2026 -> 30.09.2026; 31.11.2026 -> 30.11.2026; 31.02.2026 -> 28.02.2026; 31.02.2028 -> 29.02.2028.
+   - Valid date 30.09.2026 unchanged. Partial input is not prematurely corrected; on blur incomplete/invalid text returns to last valid date.
+   - Range reversal, report filtering, previous-period comparison, normal day selector, and auth unchanged.
+   - Check desktop screenshot: no clipping and calendar icon visible at typical width.
+6. If the native picker cannot open from the visible button on Chromium, STOP and fix only this blocker before committing/deploying. Do not silently ship without calendar.
+7. If checks pass, commit only src/pages/HomeView.vue, SSH push to main and verify Production Deploy. Do not deploy Supabase.
+8. The user will do authorized production UI testing manually. Do not request credentials; clearly state authorized E2E not run.
+
+ChatGPT prepublication verification: connector-fetched source at exact base, generated patch reconstructed against source with passing contextual/hunk check; verified four picker refs/icons/placeholders, and published patch SHA. Local pnpm and full Chromium checks were not run by ChatGPT; Codex must perform them.
