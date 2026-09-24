@@ -606,8 +606,22 @@ function inputDate(value: Date) {
   return `${year}-${month}-${day}`
 }
 
+function normalizeInputDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return value
+  const [, yearValue, monthValue, dayValue] = match
+  const year = Number(yearValue)
+  const month = Number(monthValue)
+  const day = Number(dayValue)
+  if (!year || month < 1 || month > 12 || day < 1) return value
+  const lastDay = new Date(year, month, 0).getDate()
+  if (day <= lastDay) return value
+  return `${yearValue}-${monthValue}-${String(lastDay).padStart(2, '0')}`
+}
+
 function parseInputDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
+  const normalized = normalizeInputDate(value)
+  const [year, month, day] = normalized.split('-').map(Number)
   if (!year || !month || !day) return null
   return new Date(year, month - 1, day)
 }
@@ -638,6 +652,13 @@ defaultOrderListDate.setDate(defaultOrderListDate.getDate() - 1)
 orderListFrom.value = inputDate(defaultOrderListDate)
 orderListTo.value = inputDate(defaultOrderListDate)
 orderListDate.value = inputDate(defaultOrderListDate)
+
+for (const date of [platformSummaryFrom, platformSummaryTo, orderListFrom, orderListTo]) {
+  watch(date, (value) => {
+    const normalized = normalizeInputDate(value)
+    if (normalized !== value) date.value = normalized
+  })
+}
 
 const getOrderAmount = (order: Order) =>
   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
@@ -5089,14 +5110,18 @@ function orderDateTime(order: Order) {
               <input
                 v-model="platformSummaryFrom"
                 class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
-                type="date"
+                type="text"
+                inputmode="numeric"
+                pattern="\\d{4}-\\d{2}-\\d{2}"
                 aria-label="Начало периода"
               />
               <span class="text-xs text-slate-400">по</span>
               <input
                 v-model="platformSummaryTo"
                 class="h-8 w-32 rounded-lg border border-slate-200 px-2 text-xs"
-                type="date"
+                type="text"
+                inputmode="numeric"
+                pattern="\\d{4}-\\d{2}-\\d{2}"
                 aria-label="Конец периода"
               />
             </template>
@@ -5255,14 +5280,18 @@ function orderDateTime(order: Order) {
               <input
                 v-model="orderListFrom"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
-                type="date"
+                type="text"
+                inputmode="numeric"
+                pattern="\\d{4}-\\d{2}-\\d{2}"
                 aria-label="Начало периода заказов"
               />
               <span class="text-sm text-slate-400">—</span>
               <input
                 v-model="orderListTo"
                 class="w-32 rounded-xl border border-slate-200 px-2 py-2 text-sm"
-                type="date"
+                type="text"
+                inputmode="numeric"
+                pattern="\\d{4}-\\d{2}-\\d{2}"
                 aria-label="Конец периода заказов"
               />
             </template>
