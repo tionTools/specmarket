@@ -1,0 +1,42 @@
+Patch 142 — allow direct replacement of date components without manually deleting existing digits
+
+Repository: tionTools/specmarket
+Patch branch: chatgpt-patches
+Base main SHA: c6e98a81a7a2cb7d51e8405ab73b83e864a58855
+Base HomeView.vue blob SHA: 79aaa507983162d4dab9759475dd336eac39694d
+Patch: 142.patch
+Patch Git blob SHA: 27ee26da08dae83166a22fc77def20233c13edc4
+
+User experience required:
+- Keep the four custom-range fields in DD.MM.YYYY format and preserve all four calendar buttons.
+- Click day, month or year in an existing date: the whole clicked component becomes selected, so typing new digits replaces the existing digits WITHOUT Backspace/Delete.
+- Example: in 23.09.2026 click the day and type 25 -> 25.09.2026; click month and type 12 -> 25.12.2026; click year and type 2027 -> 25.12.2027.
+- Keyboard Tab into a valid date field selects the day so direct typing works immediately.
+- If only one digit is typed for day/month, completing the edit by leaving the field pads it with zero (5.09.2026 -> 05.09.2026), provided the resulting date is valid.
+- Keep automatic month-end correction (31.09.2026 -> 30.09.2026, February including leap years), complete-date pasting, and calendar-selection behavior.
+- Existing ISO model, range filtering, reversed-boundary handling, previous-period comparison, and other periods stay unchanged.
+
+Implementation in published patch:
+- Adds handleCustomDateFocus and handleCustomDateSegmentClick to select [0,2] for day, [3,5] for month and [6,10] for year in the four text fields.
+- Extends handleCustomDateBlur to finish a valid single-digit day/month with a leading zero; invalid/incomplete input still reverts to the last valid model.
+- No new dependencies, no database or auth changes; only src/pages/HomeView.vue.
+
+Codex workflow:
+1. Follow AGENTS.md and .agents/skills/frontend/SKILL.md. Work from main SHA c6e98a81a7a2cb7d51e8405ab73b83e864a58855; if main changed, compare HomeView.vue blob SHA 79aaa507983162d4dab9759475dd336eac39694d and STOP if file drifted.
+2. Verify patch Git blob 27ee26da08dae83166a22fc77def20233c13edc4 using git hash-object. Apply only after git apply --check PASS; no 3way/reject. Inspect exact one-file diff and git diff --check.
+3. Run scoped format on only changed file (no unrelated formatter churn), type-check, scoped oxlint/eslint, build. Follow existing repo deployment instructions. Report tests actually run.
+4. Mandatory isolated Vue/Chromium regression WITHOUT signing into CRM or requesting credentials. Render actual Vue handlers, not just regex unit tests. For EACH of the four fields:
+   a. Click an existing day 23 in 23.09.2026 and type 25 WITHOUT deleting; display/model should be 25.09.2026 / 2026-09-25.
+   b. Click month 09 and type 12 without deleting; display/model should become 25.12.2026 / 2026-12-25.
+   c. Click year 2026 and type 2027 without deleting; display/model should become 25.12.2027 / 2027-12-25.
+   d. Click the calendar icon and verify the native picker OPENS; select a date and verify display + ISO model update.
+   e. Tab-focus selects day; pressing digits replaces selected day without preliminary Delete/Backspace.
+   f. One-digit day/month followed by blur pads to two digits, while an unfinished year or invalid month reverts.
+   g. Paste a complete DD.MM.YYYY date; verify correct model. Verify 31.09.2026 -> 30.09.2026 and Feb leap/non-leap correction.
+   h. Test clicking day/month/year near separators and caret position; ensure correct component is selected.
+   i. Verify reversed range handling, previous-period comparison and filtering unchanged.
+5. If any of the above fails, fix narrowly and rerun the regression BEFORE deployment; do not deploy a patch that still requires manual deletion or has lost the picker. If a correction is necessary, report what changed beyond the published patch.
+6. After PASS, commit ONLY src/pages/HomeView.vue, SSH push main and verify Production Deploy. No Supabase deploy.
+7. User will test authorized CRM themselves afterward. Clearly state authorized E2E test was not run.
+
+Prepublication: patch was rebuilt exactly against the cited HomeView.vue source with valid unified diff hunks; published SHA verified and all four inputs wired. ChatGPT did not run pnpm checks or live Chromium here; Codex must run them.
