@@ -1,0 +1,112 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -684,14 +684,44 @@
+   }
+ }
+ 
+-function handleCustomDateSegmentClick(event: MouseEvent) {
+-  const target = event.target
+-  if (!(target instanceof HTMLInputElement) || !/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
+-  const position = target.selectionStart
+-  if (position === null) return
+-  const [start, end] = position <= 2 ? [0, 2] : position <= 5 ? [3, 5] : [6, 10]
+-  target.setSelectionRange(start, end)
+-}
++function handleCustomDateSegmentClick(event: MouseEvent) {
++  const target = event.target
++  if (!(target instanceof HTMLInputElement) || !/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
++  const position = target.selectionStart
++  if (position === null) return
++  const [start, end] = position <= 2 ? [0, 2] : position <= 5 ? [3, 5] : [6, 10]
++  target.setSelectionRange(start, end)
++}
++
++function handleCustomDateKeydown(field: CustomDateField, event: KeyboardEvent) {
++  if (
++    (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
++    event.altKey ||
++    event.ctrlKey ||
++    event.metaKey ||
++    event.shiftKey
++  )
++    return
++  const target = event.target
++  if (!(target instanceof HTMLInputElement)) return
++  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) {
++    handleCustomDateBlur(field)
++    target.value = customDateDisplay[field]
++  }
++  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
++  const position = target.selectionStart
++  if (position === null) return
++  const segment = position <= 2 ? 0 : position <= 5 ? 1 : 2
++  const next = Math.max(0, Math.min(2, segment + (event.key === 'ArrowRight' ? 1 : -1)))
++  const range = ([
++    [0, 2],
++    [3, 5],
++    [6, 10],
++  ] as const)[next]
++  if (!range) return
++  event.preventDefault()
++  target.setSelectionRange(range[0], range[1])
++}
+ 
+ function handleCustomDatePicker(field: CustomDateField) {
+   customDatePickers[field].value?.showPicker()
+@@ -5217,9 +5247,10 @@
+                   placeholder="ДД.ММ.ГГГГ"
+                   aria-label="Начало периода"
+                   @input="handleCustomDateInput('platformSummaryFrom', $event)"
+-                  @focus="handleCustomDateFocus"
+-                  @click="handleCustomDateSegmentClick"
+-                  @blur="handleCustomDateBlur('platformSummaryFrom')"
++                  @focus="handleCustomDateFocus"
++                  @click="handleCustomDateSegmentClick"
++                  @keydown="handleCustomDateKeydown('platformSummaryFrom', $event)"
++                  @blur="handleCustomDateBlur('platformSummaryFrom')"
+                 />
+                 <button
+                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+@@ -5253,9 +5284,10 @@
+                   placeholder="ДД.ММ.ГГГГ"
+                   aria-label="Конец периода"
+                   @input="handleCustomDateInput('platformSummaryTo', $event)"
+-                  @focus="handleCustomDateFocus"
+-                  @click="handleCustomDateSegmentClick"
+-                  @blur="handleCustomDateBlur('platformSummaryTo')"
++                  @focus="handleCustomDateFocus"
++                  @click="handleCustomDateSegmentClick"
++                  @keydown="handleCustomDateKeydown('platformSummaryTo', $event)"
++                  @blur="handleCustomDateBlur('platformSummaryTo')"
+                 />
+                 <button
+                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+@@ -5441,9 +5473,10 @@
+                   placeholder="ДД.ММ.ГГГГ"
+                   aria-label="Начало периода заказов"
+                   @input="handleCustomDateInput('orderListFrom', $event)"
+-                  @focus="handleCustomDateFocus"
+-                  @click="handleCustomDateSegmentClick"
+-                  @blur="handleCustomDateBlur('orderListFrom')"
++                  @focus="handleCustomDateFocus"
++                  @click="handleCustomDateSegmentClick"
++                  @keydown="handleCustomDateKeydown('orderListFrom', $event)"
++                  @blur="handleCustomDateBlur('orderListFrom')"
+                 />
+                 <button
+                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
+@@ -5477,9 +5510,10 @@
+                   placeholder="ДД.ММ.ГГГГ"
+                   aria-label="Конец периода заказов"
+                   @input="handleCustomDateInput('orderListTo', $event)"
+-                  @focus="handleCustomDateFocus"
+-                  @click="handleCustomDateSegmentClick"
+-                  @blur="handleCustomDateBlur('orderListTo')"
++                  @focus="handleCustomDateFocus"
++                  @click="handleCustomDateSegmentClick"
++                  @keydown="handleCustomDateKeydown('orderListTo', $event)"
++                  @blur="handleCustomDateBlur('orderListTo')"
+                 />
+                 <button
+                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
