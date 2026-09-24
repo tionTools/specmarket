@@ -658,6 +658,7 @@ function handleCustomDateInput(field: CustomDateField, event: Event) {
   if (!(target instanceof HTMLInputElement)) return
   const typed = target.value
   customDateDisplay[field] = typed
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(typed)) return
   const parsed = parseCustomDate(typed)
   if (!parsed) return
   customDateFields[field].value = parsed
@@ -667,7 +668,29 @@ function handleCustomDateInput(field: CustomDateField, event: Event) {
 }
 
 function handleCustomDateBlur(field: CustomDateField) {
+  const parts = customDateDisplay[field].match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/)
+  if (parts) {
+    const [, day = '', month = '', year = ''] = parts
+    const parsed = parseCustomDate(`${day.padStart(2, '0')}.${month.padStart(2, '0')}.${year}`)
+    if (parsed) customDateFields[field].value = parsed
+  }
   customDateDisplay[field] = formatCustomDate(customDateFields[field].value)
+}
+
+function handleCustomDateFocus(event: FocusEvent) {
+  const target = event.target
+  if (target instanceof HTMLInputElement && /^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) {
+    target.setSelectionRange(0, 2)
+  }
+}
+
+function handleCustomDateSegmentClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) || !/^\d{2}\.\d{2}\.\d{4}$/.test(target.value)) return
+  const position = target.selectionStart
+  if (position === null) return
+  const [start, end] = position <= 2 ? [0, 2] : position <= 5 ? [3, 5] : [6, 10]
+  target.setSelectionRange(start, end)
 }
 
 function handleCustomDatePicker(field: CustomDateField) {
@@ -5194,6 +5217,8 @@ function orderDateTime(order: Order) {
                   placeholder="ДД.ММ.ГГГГ"
                   aria-label="Начало периода"
                   @input="handleCustomDateInput('platformSummaryFrom', $event)"
+                  @focus="handleCustomDateFocus"
+                  @click="handleCustomDateSegmentClick"
                   @blur="handleCustomDateBlur('platformSummaryFrom')"
                 />
                 <button
@@ -5228,6 +5253,8 @@ function orderDateTime(order: Order) {
                   placeholder="ДД.ММ.ГГГГ"
                   aria-label="Конец периода"
                   @input="handleCustomDateInput('platformSummaryTo', $event)"
+                  @focus="handleCustomDateFocus"
+                  @click="handleCustomDateSegmentClick"
                   @blur="handleCustomDateBlur('platformSummaryTo')"
                 />
                 <button
@@ -5414,6 +5441,8 @@ function orderDateTime(order: Order) {
                   placeholder="ДД.ММ.ГГГГ"
                   aria-label="Начало периода заказов"
                   @input="handleCustomDateInput('orderListFrom', $event)"
+                  @focus="handleCustomDateFocus"
+                  @click="handleCustomDateSegmentClick"
                   @blur="handleCustomDateBlur('orderListFrom')"
                 />
                 <button
@@ -5448,6 +5477,8 @@ function orderDateTime(order: Order) {
                   placeholder="ДД.ММ.ГГГГ"
                   aria-label="Конец периода заказов"
                   @input="handleCustomDateInput('orderListTo', $event)"
+                  @focus="handleCustomDateFocus"
+                  @click="handleCustomDateSegmentClick"
                   @blur="handleCustomDateBlur('orderListTo')"
                 />
                 <button
