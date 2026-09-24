@@ -1,0 +1,36 @@
+Patch 139 — Meest: distinguish courier transfer from confirmed recipient receipt
+
+Repository: tionTools/specmarket
+Branch: chatgpt-patches
+Base main SHA: 56dc43d04cd4a33810ace0608738bea510536576
+Patch: 139.patch
+Patch Git blob: 26c07bb85eee24831a9fb0f83174e485a0277266
+
+Scope: ONLY
+- supabase/functions/sync-delivery-tracking/carriers/meest.ts
+- supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts
+
+Problem:
+- Meest event "Відправлення видане кур’єру і прямує у підрозділ отримання" was misclassified as delivered due to the general fallback matching "отриман" within "отримання".
+- This prematurely stopped scheduled tracking and displayed "Получено" for TTN 723-3447567.
+- A separately shown shipment had the genuinely final event "Відправлення отримане" on 2026-09-22 19:53:08. Preserve recognition of real receipt.
+- The UI already has a per-order forced tracking refresh, including on a previously delivered shipment. Do NOT add a new UI or administrative mechanism.
+
+Changes:
+1. Meest-specific exact/anchored receipt wording: "Відправлення отримане" and the existing code 1622 remain delivered.
+2. Courier transfer is in_transit; ready for pickup is ready_for_pickup.
+3. For Meest only, generic readableStatus() cannot prove delivery from a mere substring: an otherwise unknown delivered fallback becomes unknown/nonfinal rather than a false positive.
+4. trackingDeliveredAt is populated only for a verified delivered status and cleared on correction.
+5. Six regression tests cover OpenAPI and public fallback, correction of stale delivered tracking, readiness, actual receipt, and misleading location wording.
+6. Preserve existing code 11 and 1622 tests and behavior.
+
+Codex execution:
+1. Follow repository AGENTS.md and supabase/functions/sync-delivery-tracking/AGENTS.md. Verify clean working tree, fetch origin via SSH, verify main HEAD equals named base SHA; if different, STOP and report drift. Do not force apply or use --3way.
+2. Retrieve 139.patch from origin/chatgpt-patches using established Git blob workflow. Verify git hash-object 139.patch = 26c07bb85eee24831a9fb0f83174e485a0277266.
+3. Run git apply --check 139.patch, then git apply 139.patch and git diff --check. Review the exact two-file diff, no unrelated formatter churn.
+4. Run focused Deno tests for supabase/functions/sync-delivery-tracking/carriers/carrier-baseline_test.ts, and the adjacent normalize/storage regression tests. Execute applicable type/lint/build checks; state actual results and any unavailable tooling. Do not claim checks PASS unless run.
+5. Validate the existing per-order forced refresh path on TTN 723-3447567. After Edge Function deployment, manually press the delivery refresh icon on that order to correct stale "Получено"; confirm returned checked > 0, failed = 0, CRM normalized status no longer delivered if current carrier status is still courier transfer, and the tracking timestamp is cleared. If the carrier has truly delivered by then, retain the genuine latest status instead.
+6. Commit ONLY the two affected files, push main via SSH, and deploy ONLY the existing sync-delivery-tracking Edge Function. Observe CI/deploy and verify the live behavior. No DB migrations, schema changes, cron/security changes, other carriers, marketplace sync, or frontend changes.
+7. Report base SHA, patch blob SHA, commit SHA, test results, push status, Edge Function deploy status, and separate live verification status.
+
+Prepublication: patch hunks were independently checked against exact GitHub main source, and published blob content was verified byte-for-byte. Full Deno tests, application checks, production deployment, and live carrier verification were NOT run by ChatGPT; Codex must run them before claiming completion.
