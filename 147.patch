@@ -1,12 +1,15 @@
 diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
 --- a/supabase/functions/sync-prom-orders/index.ts
 +++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -357,6 +357,16 @@
+@@ -357,6 +357,23 @@
    )
  }
  
 +function phoneKey(value: unknown) {
-+  return text(value).replace(/\D/g, '')
++  const digits = text(value).replace(/\D/g, '')
++  if (digits.length === 12 && digits.startsWith('380')) return `0${digits.slice(3)}`
++  if (digits.length === 9) return `0${digits}`
++  return digits.length >= 10 ? digits : ''
 +}
 +
 +function samePhone(left: unknown, right: unknown) {
@@ -15,33 +18,93 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +  return Boolean(leftKey && rightKey && leftKey === rightKey)
 +}
 +
++function personNameKey(value: unknown) {
++  return text(value).trim().replace(/\s+/g, ' ').toLocaleLowerCase('uk-UA')
++}
++
  function promClientPhone(client: RecordValue) {
    return text(
      pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'),
-@@ -1245,23 +1255,30 @@
+@@ -478,6 +495,55 @@
+   return ''
+ }
+ 
++function resolvePromPhones(
++  order: RecordValue,
++  client: RecordValue,
++  existingOrder: RecordValue,
++  buyerName: string,
++  previousDelivery: RecordValue,
++  rawDelivery: RecordValue,
++  deliveryProvider: RecordValue,
++) {
++  const rawRecipientAddress = asRecord(rawDelivery.recipient_address)
++  const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
++  const currentRecipientName = deliveryRecipientName(
++    order,
++    rawDelivery,
++    deliveryProvider,
++    rawRecipientAddress,
++    providerRecipientAddress,
++  )
++  const previousRecipientName = text(previousDelivery.recipient)
++  const recipientName = currentRecipientName || previousRecipientName
++  const canPreserveRecipientPhone =
++    !currentRecipientName ||
++    !previousRecipientName ||
++    personNameKey(currentRecipientName) === personNameKey(previousRecipientName)
++  const addressRecipientPhone =
++    recipientPhone(rawRecipientAddress) || recipientPhone(providerRecipientAddress)
++  const resolvedRecipientPhone =
++    deliveryRecipientPhone(
++      order,
++      rawDelivery,
++      deliveryProvider,
++      rawRecipientAddress,
++      providerRecipientAddress,
++    ) ||
++    addressRecipientPhone ||
++    (canPreserveRecipientPhone ? text(previousDelivery.recipientPhone) : '')
++  const differentPeople =
++    Boolean(personNameKey(buyerName) && personNameKey(recipientName)) &&
++    personNameKey(buyerName) !== personNameKey(recipientName)
++  const buyerCandidate = (value: unknown) =>
++    differentPeople && samePhone(value, resolvedRecipientPhone) ? '' : text(value)
++  const buyerPhone =
++    buyerCandidate(promClientPhone(client)) ||
++    buyerCandidate(order.client_phone) ||
++    buyerCandidate(existingOrder.phone) ||
++    (resolvedRecipientPhone ? buyerCandidate(order.phone) : '')
++  return { buyerPhone, recipientName, recipientPhone: resolvedRecipientPhone }
++}
++
+ function sourceItems(order: RecordValue) {
+   const items = order.products ?? order.items
+   return Array.isArray(items) ? items.map(asRecord) : []
+@@ -1245,23 +1311,29 @@
        ? await promClientById(clientId, promToken, promClientCache)
        : null
      const orderCustomer = customerName(order)
 -    const orderPhone = text(order.phone) || text(order.client_phone)
      const orderEmail = text(order.email) || text(order.client_email)
-+    const previousDelivery = asRecord(existing?.delivery)
-+    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
-+    const deliveryProvider = asRecord(order.delivery_provider_data)
-+    const recipientPhone = deliveryRecipientPhone(order, rawDelivery, deliveryProvider)
-+    const orderClientPhone = text(order.client_phone)
-+    const orderPhone = text(order.phone)
      const buyerName =
        promClientName(promClient ?? {}) ||
        (clientId ? text(existingOrder.customer) : '') ||
        orderCustomer
-+    const orderBuyerPhone =
-+      orderClientPhone || (samePhone(orderPhone, recipientPhone) ? '' : orderPhone)
-+    const existingBuyerPhone = samePhone(existingOrder.phone, recipientPhone)
-+      ? ''
-+      : text(existingOrder.phone)
-     const buyerPhone =
+-    const buyerPhone =
 -      promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
-+      promClientPhone(promClient ?? {}) || orderBuyerPhone || existingBuyerPhone
++    const previousDelivery = asRecord(existing?.delivery)
++    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
++    const deliveryProvider = asRecord(order.delivery_provider_data)
++    const { buyerPhone, recipientName: resolvedRecipientName, recipientPhone } = resolvePromPhones(
++      order,
++      promClient ?? {},
++      existingOrder,
++      buyerName,
++      previousDelivery,
++      rawDelivery,
++      deliveryProvider,
++    )
      const buyerEmail =
        promClientEmail(promClient ?? {}) ||
        (clientId ? text(existingOrder.customer_email) : '') ||
@@ -54,14 +117,17 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
      const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
      const paymentData = asRecord(order.payment_data)
      const savedPayment = paymentDetails(previousDelivery, {
-@@ -1390,10 +1407,7 @@
+@@ -1388,12 +1460,8 @@
+       delivery: {
+         carrier: deliveryCarrier,
          ttn: trackingNumber,
-         recipient:
-           deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
+-        recipient:
+-          deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
 -        recipientPhone:
 -          deliveryRecipientPhone(order, rawDelivery, deliveryProvider) ||
 -          text(order.phone) ||
 -          text(order.client_phone),
++        recipient: resolvedRecipientName || customerName(order),
 +        recipientPhone,
          city: deliveryCity,
          address: deliveryAddress,
@@ -69,21 +135,28 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
-@@ -584,7 +584,7 @@
+@@ -584,7 +584,10 @@
          delivery: {
            ...order.delivery,
            recipient: order.delivery.recipient || order.customer,
 -          recipientPhone: order.delivery.recipientPhone || order.phone,
-+          recipientPhone: order.delivery.recipientPhone,
++          recipientPhone:
++            order.platform === 'Пром'
++              ? order.delivery.recipientPhone
++              : order.delivery.recipientPhone || order.phone,
          },
        }))
      : demoOrders,
-@@ -5968,7 +5968,7 @@
+@@ -5968,7 +5971,11 @@
                      <span
                        ><span class="text-slate-500">Телефон: </span
                        ><strong>{{
 -                        formatUkrainianPhone(order.phone || order.delivery.recipientPhone) || '—'
-+                        formatUkrainianPhone(order.phone) || '—'
++                        formatUkrainianPhone(
++                          order.platform === 'Пром'
++                            ? order.phone
++                            : order.phone || order.delivery.recipientPhone,
++                        ) || '—'
                        }}</strong></span
                      >
                      <span v-if="order.customerEmail"
