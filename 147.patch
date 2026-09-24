@@ -1,0 +1,89 @@
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -357,6 +357,16 @@
+   )
+ }
+ 
++function phoneKey(value: unknown) {
++  return text(value).replace(/\D/g, '')
++}
++
++function samePhone(left: unknown, right: unknown) {
++  const leftKey = phoneKey(left)
++  const rightKey = phoneKey(right)
++  return Boolean(leftKey && rightKey && leftKey === rightKey)
++}
++
+ function promClientPhone(client: RecordValue) {
+   return text(
+     pick(client, 'phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone'),
+@@ -1245,23 +1255,30 @@
+       ? await promClientById(clientId, promToken, promClientCache)
+       : null
+     const orderCustomer = customerName(order)
+-    const orderPhone = text(order.phone) || text(order.client_phone)
+     const orderEmail = text(order.email) || text(order.client_email)
++    const previousDelivery = asRecord(existing?.delivery)
++    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
++    const deliveryProvider = asRecord(order.delivery_provider_data)
++    const recipientPhone = deliveryRecipientPhone(order, rawDelivery, deliveryProvider)
++    const orderClientPhone = text(order.client_phone)
++    const orderPhone = text(order.phone)
+     const buyerName =
+       promClientName(promClient ?? {}) ||
+       (clientId ? text(existingOrder.customer) : '') ||
+       orderCustomer
++    const orderBuyerPhone =
++      orderClientPhone || (samePhone(orderPhone, recipientPhone) ? '' : orderPhone)
++    const existingBuyerPhone = samePhone(existingOrder.phone, recipientPhone)
++      ? ''
++      : text(existingOrder.phone)
+     const buyerPhone =
+-      promClientPhone(promClient ?? {}) || (clientId ? text(existingOrder.phone) : '') || orderPhone
++      promClientPhone(promClient ?? {}) || orderBuyerPhone || existingBuyerPhone
+     const buyerEmail =
+       promClientEmail(promClient ?? {}) ||
+       (clientId ? text(existingOrder.customer_email) : '') ||
+       orderEmail
+     // Массовая кнопка ищет только новые заказы. Старые обновляются только
+     // отдельной кнопкой в карточке конкретного заказа.
+-    const previousDelivery = asRecord(existing?.delivery)
+-    const rawDelivery = asRecord(pick(order, 'delivery', 'delivery_data'))
+-    const deliveryProvider = asRecord(order.delivery_provider_data)
+     const providerRecipientAddress = asRecord(deliveryProvider.recipient_address)
+     const paymentData = asRecord(order.payment_data)
+     const savedPayment = paymentDetails(previousDelivery, {
+@@ -1390,10 +1407,7 @@
+         ttn: trackingNumber,
+         recipient:
+           deliveryRecipientName(order, rawDelivery, deliveryProvider) || customerName(order),
+-        recipientPhone:
+-          deliveryRecipientPhone(order, rawDelivery, deliveryProvider) ||
+-          text(order.phone) ||
+-          text(order.client_phone),
++        recipientPhone,
+         city: deliveryCity,
+         address: deliveryAddress,
+         ttnHistory: ttnHistory.length ? ttnHistory : undefined,
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -584,7 +584,7 @@
+         delivery: {
+           ...order.delivery,
+           recipient: order.delivery.recipient || order.customer,
+-          recipientPhone: order.delivery.recipientPhone || order.phone,
++          recipientPhone: order.delivery.recipientPhone,
+         },
+       }))
+     : demoOrders,
+@@ -5968,7 +5968,7 @@
+                     <span
+                       ><span class="text-slate-500">Телефон: </span
+                       ><strong>{{
+-                        formatUkrainianPhone(order.phone || order.delivery.recipientPhone) || '—'
++                        formatUkrainianPhone(order.phone) || '—'
+                       }}</strong></span
+                     >
+                     <span v-if="order.customerEmail"
