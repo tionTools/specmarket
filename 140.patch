@@ -1,0 +1,41 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -606,8 +606,22 @@
+   return `${year}-${month}-${day}`
+ }
+ 
++function normalizeInputDate(value: string) {
++  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
++  if (!match) return value
++  const [, yearValue, monthValue, dayValue] = match
++  const year = Number(yearValue)
++  const month = Number(monthValue)
++  const day = Number(dayValue)
++  if (!year || month < 1 || month > 12 || day < 1) return value
++  const lastDay = new Date(year, month, 0).getDate()
++  if (day <= lastDay) return value
++  return `${yearValue}-${monthValue}-${String(lastDay).padStart(2, '0')}`
++}
++
+ function parseInputDate(value: string) {
+-  const [year, month, day] = value.split('-').map(Number)
++  const normalized = normalizeInputDate(value)
++  const [year, month, day] = normalized.split('-').map(Number)
+   if (!year || !month || !day) return null
+   return new Date(year, month - 1, day)
+ }
+@@ -639,6 +653,13 @@
+ orderListTo.value = inputDate(defaultOrderListDate)
+ orderListDate.value = inputDate(defaultOrderListDate)
+ 
++for (const customDate of [platformSummaryFrom, platformSummaryTo, orderListFrom, orderListTo]) {
++  watch(customDate, (value) => {
++    const normalized = normalizeInputDate(value)
++    if (normalized !== value) customDate.value = normalized
++  })
++}
++
+ const getOrderAmount = (order: Order) =>
+   order.products.reduce((sum, product) => sum + product.price * product.quantity, 0)
+ const getOrderPreviewImage = (order: Order) => order.products[0]?.imageUrl
