@@ -178,7 +178,7 @@ for (const [label, order, client, existing, name, wantedBuyer, wantedReceiver] o
 }
 assert.match(
   source,
-  /const \{ buyerPhone, recipientName: resolvedRecipientName, recipientPhone \} = resolvePromPhones\(/,
+  /const\s*\{\s*buyerPhone,\s*recipientName:\s*resolvedRecipientName,\s*recipientPhone,?\s*\}\s*=\s*resolvePromPhones\(/,
 )
 assert.match(
   source,

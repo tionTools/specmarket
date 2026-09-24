@@ -209,6 +209,8 @@ const isSyncingEpicentr = ref(false)
 const isSyncingProm = ref(false)
 const isSyncingKasta = ref(false)
 const isSyncingAllPlatforms = ref(false)
+const isDiagnosingPromPhones = ref(false)
+const promPhoneDiagnostic = ref('')
 const isSyncingDelivery = ref(false)
 const syncingDeliveryOrderId = ref<string | null>(null)
 const labelEmailOrderId = ref<Order['id'] | null>(null)
@@ -2613,6 +2615,28 @@ async function syncNewAllPlatforms() {
   }
 }
 
+async function diagnosePromPhones() {
+  if (!supabase || isGuest.value || isDiagnosingPromPhones.value) return
+  isDiagnosingPromPhones.value = true
+  const { data, error } = await supabase.functions.invoke<{
+    ok?: boolean
+    message?: string
+    diagnostics?: unknown
+  }>('sync-prom-orders', {
+    method: 'POST',
+    body: { diagnosePromPhones: true },
+  })
+  isDiagnosingPromPhones.value = false
+  if (error || !data?.ok || !data.diagnostics) {
+    showSyncError(
+      data?.message ?? error?.message ?? 'Не удалось выполнить диагностику телефонов Prom.',
+    )
+    return
+  }
+  promPhoneDiagnostic.value = JSON.stringify(data.diagnostics, null, 2)
+  showSyncMessage('Диагностика телефонов Prom готова. Скопируйте обезличенный результат ниже.')
+}
+
 async function syncFullAllPlatforms() {
   if (isMarketplaceSyncBusy.value) return
   if (
@@ -4892,6 +4916,15 @@ function orderDateTime(order: Order) {
             />
             {{ isSyncingDelivery ? 'Обновление…' : 'Доставки' }}
           </button>
+          <button
+            v-if="!isGuest"
+            class="whitespace-nowrap rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
+            :disabled="isDiagnosingPromPhones"
+            type="button"
+            @click="diagnosePromPhones"
+          >
+            {{ isDiagnosingPromPhones ? 'Диагностика…' : 'Диагностика телефонов Prom' }}
+          </button>
           <div class="relative shrink-0">
             <button
               v-if="!isGuest"
@@ -4954,6 +4987,10 @@ function orderDateTime(order: Order) {
       >
         {{ syncEpicentrMessage }}
       </p>
+      <pre
+        v-if="!isGuest && promPhoneDiagnostic"
+        class="mt-5 max-h-96 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-xs text-slate-800"
+        >{{ promPhoneDiagnostic }}</pre>
       <p
         v-if="promRegistryError"
         class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800"

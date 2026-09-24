@@ -384,6 +384,38 @@ function promClientEmail(client: RecordValue) {
   return text(pick(client, 'email', 'client_email', 'email_address', 'emailAddress'))
 }
 
+function maskedPhone(value: unknown) {
+  const digits = text(value).replace(/\D/g, '')
+  return digits.length >= 4 ? `***${digits.slice(-4)}` : ''
+}
+
+function phonePaths(value: unknown, path: string, depth = 0): { path: string; phone: string }[] {
+  if (depth > 6 || !value || typeof value !== 'object') return []
+  const found: { path: string; phone: string }[] = []
+  for (const [key, candidate] of Object.entries(value as RecordValue)) {
+    const nextPath = `${path}.${key}`
+    if (/(?:phone|mobile)/i.test(key)) {
+      const phone = maskedPhone(candidate)
+      if (phone) found.push({ path: nextPath, phone })
+    }
+    found.push(...phonePaths(candidate, nextPath, depth + 1))
+  }
+  return found
+}
+
+function promClientPhoneDiagnostic(client: RecordValue) {
+  const keys = ['phone', 'client_phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_phone']
+  const key = keys.find((candidate) => text(client[candidate]))
+  const phone = promClientPhone(client)
+  return {
+    path: key ? `client.${key}` : null,
+    phone: maskedPhone(phone) || null,
+    reason: phone
+      ? 'Найдено поддерживаемое верхнеуровневое поле клиента.'
+      : 'Поддерживаемые верхнеуровневые поля клиента отсутствуют или пусты.',
+  }
+}
+
 async function promClientById(
   clientId: string,
   promToken: string,
@@ -843,6 +875,76 @@ Deno.serve(async (request) => {
     completeExternalIds?: unknown
     dismissCompletionExternalIds?: unknown
     acceptExternalIds?: unknown
+    diagnosePromPhones?: unknown
+  }
+  if (body.diagnosePromPhones === true) {
+    if (isScheduledRequest)
+      return Response.json(
+        { ok: false, message: 'Диагностика доступна только пользователю CRM.' },
+        { status: 403, headers: corsHeaders },
+      )
+    const orderIds = ['425246401', '429545614', '429674532']
+    const diagnostics = await Promise.all(
+      orderIds.map(async (orderId) => {
+        try {
+          const orderResponse = await fetch(`https://my.prom.ua/api/v1/orders/${orderId}`, {
+            headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+            signal: AbortSignal.timeout(30_000),
+          })
+          if (!orderResponse.ok)
+            return { orderId, orderHttpStatus: orderResponse.status, clientIdPresent: false }
+          const orderPayload = asRecord(await orderResponse.json())
+          const order = asRecord(orderPayload.order ?? orderPayload)
+          const clientId = text(pick(order, 'client_id', 'clientId')).trim()
+          let clientHttpStatus: number | null = null
+          let client: RecordValue = {}
+          if (clientId) {
+            const clientResponse = await fetch(
+              `https://my.prom.ua/api/v1/clients/${encodeURIComponent(clientId)}`,
+              {
+                headers: { Authorization: `Bearer ${promToken}`, Accept: 'application/json' },
+                signal: AbortSignal.timeout(30_000),
+              },
+            )
+            clientHttpStatus = clientResponse.status
+            if (clientResponse.ok) {
+              const clientPayload = asRecord(await clientResponse.json())
+              client = asRecord(clientPayload.client ?? clientPayload.data ?? clientPayload)
+            }
+          }
+          return {
+            orderId,
+            orderHttpStatus: orderResponse.status,
+            clientHttpStatus,
+            clientIdPresent: Boolean(clientId),
+            orderPhonePaths: phonePaths(order, 'order'),
+            clientTopLevelKeys: Object.keys(client).sort(),
+            clientPhonePaths: phonePaths(client, 'client'),
+            promClientPhone: promClientPhoneDiagnostic(client),
+            buyerPhone: (() => {
+              const resolved = resolvePromPhones(
+                order,
+                client,
+                {},
+                promClientName(client) || customerName(order),
+                {},
+                asRecord(pick(order, 'delivery', 'delivery_data')),
+                asRecord(order.delivery_provider_data),
+              )
+              return {
+                phone: maskedPhone(resolved.buyerPhone) || null,
+                reason: resolved.buyerPhone
+                  ? 'Выбрано текущим порядком кандидатов синхронизации.'
+                  : 'Ни один допустимый кандидат покупателя не найден.',
+              }
+            })(),
+          }
+        } catch {
+          return { orderId, error: 'Сетевая ошибка при запросе к Prom.' }
+        }
+      }),
+    )
+    return Response.json({ ok: true, diagnostics }, { headers: corsHeaders })
   }
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || (body as RecordValue).scheduled === true) {
