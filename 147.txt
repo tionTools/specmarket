@@ -1,3 +1,35 @@
-Patch 147 — HOLD: NOT READY FOR APPLY/DEPLOY.
+Patch 147 — REVIEWED. Prom buyer vs recipient phone separation.
 
-Source review identified data-loss and fallback bugs in the originally published 147.patch: when Prom omits a separate recipient phone it clears an already-correct saved recipient; normalization misses +380 vs 0; changes to local cache also affect non-Prom orders. The live Prom JSON for order 429674532 has not been retrieved, so exact buyer source is not verified. Do not apply this version. Await a corrected, tested 147.patch and new 147.txt.
+Repo: tionTools/specmarket
+Base main SHA: 400383afacd4cb72bf9683e47c09f47abab5ffbb
+PATCH BLOB SHA: 6f19834c60745a539e515f43535b7bb5b7606e0c
+Paths changed by this patch:
+- supabase/functions/sync-prom-orders/index.ts
+- src/pages/HomeView.vue
+- src/features/orders/prom-phone-separation_test.mjs (permanent regression test using synthetic people/numbers)
+
+Original source blob SHAs:
+- Edge Function d00ac0e28b20c003b3188839ec7bd42fa6237cdc
+- HomeView 1e806aa434bb140f0a3d0df85adf6d3e54ccf66d
+
+Do NOT use an earlier local copy of 147.patch. Confirm this patch's git hash-object output matches PATCH BLOB SHA. If prior draft already applied, inspect/reconcile cleanly; never stack patches blindly.
+
+Changes:
+1. Separate Prom buyer and recipient phone resolution; order.phone or previous CRM.phone must not be reused as buyer when known to be the different recipient's phone.
+2. Read explicit recipient fields and nested recipient_address.phone; preserve the previously saved recipient number when the currently identified recipient has not changed and the Prom response omits the number.
+3. Support +380 vs national 0XXXXXXXXX comparisons. The same person may legitimately be buyer and recipient with the same phone.
+4. Do not overwrite a verified buyer number with recipient fallback. If no reliable buyer number exists, keep it empty rather than show the wrong person's number.
+5. Frontend avoids cross-role phone fallbacks ONLY for Prom. Other marketplaces retain prior behavior.
+6. Targeted existing-order sync fetches Prom /clients/{client_id} using the EXISTING protected server-side PROM_API_TOKEN. No new secrets exposed.
+
+Steps: read AGENTS.md + .agents/skills/frontend/SKILL.md. Verify base SHA and original blobs; apply with git apply --check, then git diff --check. Format ONLY the three changed files, inspect and eliminate formatter churn.
+Functional test: node src/features/orders/prom-phone-separation_test.mjs. It AST-extracts real helper declarations and checks 12 scenarios plus actual integration/UI source assertions. Keep test in commit. No production tokens or real PII required.
+Run pnpm type-check, scoped Oxlint/ESLint (Vue and test), pnpm build, git diff --check. For Edge Function run Deno check or the existing repository Edge validation if supported; report unavailable accurately.
+Confirm test still PASS after formatting. If an actual test fails, fix the concrete code defect minimally and re-run; do not invent additional requirements or create new patches.
+After PASS commit ONLY the three paths, SSH push main, deploy the changed sync-prom-orders Edge Function using existing authorized workflow, and verify GitHub Production Deploy. Frontend-only deploy is insufficient for this patch.
+
+LIVE VERIFICATION BOUNDARY:
+The exact Prom API payload for the user's order was inaccessible in our environment. These synthetic tests verify fallback safety, not that the actual buyer field is provided by Prom. After deploy, initiate targeted CRM sync for order 429674532 and compare its buyer and recipient phones against the Prom cabinet. If buyer phone remains missing or different, DO NOT claim the issue is resolved: capture only the actual relevant phone field paths/values from GET /orders/{id} and GET /clients/{client_id} using EXISTING authorized server context; do not share tokens, entire order JSON or other PII. Do not hardcode order-specific phone numbers in app code.
+No mass sync is required; no DB migration, permissions, RLS, unrelated order fields or infra changes.
+
+Final report: actual test results; commit SHA; Edge deploy result; Production Deploy link; and the outcome of the one real order sync (or the factual reason it was not possible). No intermediate permission ping-pong.
