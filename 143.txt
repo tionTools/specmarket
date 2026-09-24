@@ -1,0 +1,31 @@
+Patch 143 — restore left/right keyboard navigation between date segments
+
+Base main SHA: 68117baa6d9876bd08c6659d3377c0c5f3fdf0d6
+Base src/pages/HomeView.vue blob: 42dd31cbfbf8981101c88c71723233f5ad1eb389
+Patch file: 143.patch
+Patch Git blob SHA: 9cd04819f65d04f9eca614203002efbdb81cc1c8
+Branch: chatgpt-patches
+
+User request (minimal): in each of four custom-range date fields, restore intuitive native-style keyboard navigation. Focus selects day; ArrowRight selects month; another ArrowRight selects year; ArrowLeft selects previous segment. Typing replaces the selected digits immediately without manual deletion. Visible DD.MM.YYYY, calendar buttons, month-end correction, and existing ISO/report logic must not change.
+
+Implementation:
+- Only src/pages/HomeView.vue; one new handleCustomDateKeydown and its @keydown binding on four existing text fields.
+- Captures caret BEFORE any normalization. On incomplete day/month when arrow is pressed, uses existing blur finalization first, then selects adjacent segment.
+- Intercepts unmodified ArrowLeft/ArrowRight only; Ctrl/Alt/Meta/Shift combinations retain browser behavior. Does not modify date filtering, auth, or Supabase.
+
+Codex instructions:
+1. Read AGENTS.md and .agents/skills/frontend/SKILL.md. Confirm clean worktree and main SHA. If main moved, verify HomeView.vue base blob matches; stop if file differs. Never force apply.
+2. Obtain patch from chatgpt-patches and verify git hash-object = 9cd04819f65d04f9eca614203002efbdb81cc1c8. git apply --check, then apply. Inspect real diff and git diff --check; no unrelated files and no mass formatting.
+3. Scoped format HomeView.vue only; type-check, scoped Oxlint/ESLint, production build; report actual results.
+4. In isolated Vue/Chromium check the EXISTING real four inputs with DOM keyboard events; no coordinate-based CUA clicking, login, or elaborate new test harness. One representative full navigation interaction plus presence of bindings for all four fields is sufficient:
+   - start 23.09.2026; keyboard focus selects [0,2] day;
+   - press ArrowRight once: select [3,5] month (09);
+   - type 12 WITHOUT Delete/Backspace: visible 23.12.2026 and ISO 2026-12-23;
+   - ArrowRight selects [6,10] year, typing 2027 updates 23.12.2027 and ISO 2027-12-23;
+   - ArrowLeft selects month [3,5]. No extra mouse clicks;
+   - confirm the calendar icon still opens native picker, 31.09 clamps to 30.09, and no regression of previous behavior.
+   - if a scenario fails due to product behavior, fix only real blocker. Do not loop indefinitely on a temporary harness; distinguish unverified cases honestly.
+5. After required checks PASS, commit ONLY HomeView.vue, SSH push main and observe Production Deploy. No Supabase deploy. User tests production UI personally, no password requests.
+6. Report base/patch/commit SHAs, actual checks, push/deploy. Do not claim authorization E2E passed.
+
+Prepublication: published patch hunks were structurally checked against exact base HomeView.vue blob; four @keydown bindings confirmed. Five pure segment index cases checked. Full pnpm and Chromium tests were NOT run by ChatGPT: Codex must run them before deploy.
