@@ -1,0 +1,33 @@
+Patch 145 — explicit linked price refresh for ONE order item
+
+Repo: tionTools/specmarket
+Patch branch: chatgpt-patches
+Base main SHA: 0ab5224781048d0c4a48cd6f8dc5c113b7caf4d7
+Patch: 145.patch
+Patch Git blob SHA: b1d1625afba3cb7f3218e539598f93b3c0f038d5
+Original source blobs:
+- PricesView.vue: d028d7c765cd9d3bbb8ab1df503232eefa1029d5
+- PricesTable.vue: 45fd49efb81e0021da185db1215115975aaead5e
+
+Scope: Only src/pages/PricesView.vue and src/features/prices/PricesTable.vue. NO Prom phone changes, NO Supabase functions/migrations/permissions/infra, NO mass update of other orders.
+
+Behavior:
+1. Existing linked price row now has active "Обновить" button (same link action). Selecting a different row still says "Привязать".
+2. On click wait for in-flight price save, then re-read actual persisted crm_price_items.usd/cost_uah and refuse the action on read error or unsaved mismatch.
+3. Re-link selected catalog item to exact marketplace product as before; update ONLY the originating crm_order_items row (id checked against position and marketplace key).
+4. When cost_manual=false, refresh cost_usd and cost even if both already nonzero. UAH-only cost uses cost_uah; USD uses rate on order_date, NEVER current rate. No rate => no link/update of nonmanual USD-priced item, show error.
+5. When cost_manual=true, keep cost and cost_usd unchanged, while preserving existing link behavior. No implicit refresh on page load, catalog edit, ordinary order save, or marketplace sync.
+6. Other order rows and financial fields remain unchanged. No backfill.
+
+Codex:
+- Follow AGENTS.md and .agents/skills/frontend/SKILL.md.
+- Confirm clean worktree, exact base main SHA 0ab5224781048d0c4a48cd6f8dc5c113b7caf4d7; if branch moved, check BOTH original blob SHAs and stop on changed files (do not force).
+- Fetch 145.patch from chatgpt-patches and check git hash-object == b1d1625afba3cb7f3218e539598f93b3c0f038d5. git apply --check; apply; git diff --check.
+- Format ONLY the 2 touched Vue files. Inspect diff and remove formatter churn; do NOT run repository-wide formatting.
+- Run pnpm type-check, scoped oxlint/eslint on changed Vue files, pnpm build. Run existing relevant price/manual-cost tests if supported.
+- Verify concise scenarios without elaborate temp harness: existing nonmanual nonzero cost updates; UAH-only; USD with rate from order date; manual cost stays; only selected order item updates; missing USD rate blocks without partial relink; pending save must finish and be verified before link.
+- DO NOT create another patch as a routine response. Only fix a reproduced blocker minimally.
+- If checks PASS: commit only these 2 files, SSH push main, verify Production Deploy. Supabase deploy is not required.
+- Report commit SHA, tests (pass/fail/not run), push/deploy and remaining manual checks. Do not claim production data was tested.
+
+The separate Prom buyer-vs-recipient phone issue remains pending actual authorized API payload; it is not part of 145.patch.
