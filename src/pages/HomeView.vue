@@ -2604,10 +2604,16 @@ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
 async function syncNewAllPlatforms() {
   if (isMarketplaceSyncBusy.value) return
   isSyncingAllPlatforms.value = true
+  const syncResults: string[] = []
   try {
-    await syncEpicentrOrders()
-    await syncPromOrders()
-    await syncKastaOrders()
+    await syncEpicentrOrders(false, syncResults)
+    await syncPromOrders(false, syncResults)
+    await syncKastaOrders(false, syncResults)
+    if (syncResults.length) {
+      const summary = syncResults.join('\n')
+      if (syncResults.some((result) => result.includes(': ошибка — '))) showSyncError(summary)
+      else showSyncMessage(summary)
+    }
   } finally {
     isSyncingAllPlatforms.value = false
   }
