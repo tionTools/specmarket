@@ -261,7 +261,7 @@ new file mode 100644
 +  assert.ok(source.includes('if (deletedOrdersError)'), platform + ': fail closed on lookup error')
 +  assert.ok(source.includes('deletedSkipped'), platform + ': skipped count is reported')
 +}
-+assert.match(home, /order\.platform === 'Каста' \|\| order\.platform === 'Пром' \|\| order\.platform === 'Эпицентр'/)
++assert.match(home, /order\.platform === 'Каста'\s*\|\|\s*order\.platform === 'Пром'\s*\|\|\s*order\.platform === 'Эпицентр'/)
 +assert.match(home, /platform: order\.platform,\s*external_id: order\.externalId,/)
 +assert.match(home, /void bankBalancesCard\.value\?\.refreshDebt\(\)/)
 +console.log('Deleted marketplace order regression: Prom/Epicentr tombstones and debt refresh PASS')
