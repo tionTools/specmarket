@@ -140,7 +140,7 @@ diff --git a/src/features/banking/BankBalancesCard.vue b/src/features/banking/Ba
 +let journalChannel: RealtimeChannel | undefined
  
 +const syncIssue = computed(() =>
-+  !journalUnavailable.value && hasNovaPaySyncIssue(journal.value, props.caches.novapay.updatedAt, now.value),
++  hasNovaPaySyncIssue(journal.value, props.caches.novapay.updatedAt, now.value),
 +)
 +
 +async function loadNovaPayJournal() {
@@ -157,7 +157,7 @@ diff --git a/src/features/banking/BankBalancesCard.vue b/src/features/banking/Ba
  const completeBankTotal = computed(() => {
    const values = banks.map((bank) => props.caches[bank].balance)
    if (values.some((value) => value === null)) return null
-@@ -138,11 +160,35 @@
+@@ -138,11 +160,38 @@
    clearLegacyBankingHash()
    scrollToBankingBlock()
    void loadSupplierDebt()
@@ -190,6 +190,9 @@ diff --git a/src/features/banking/BankBalancesCard.vue b/src/features/banking/Ba
 +      NovaPay не обновляется. Последнее успешное обновление: {{ updatedAt(caches.novapay.updatedAt) }}.
 +      <RouterLink class="underline" to="/banking/novapay">Открыть журнал</RouterLink>
 +    </div>
++    <p v-if="journalUnavailable" class="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert">
++      Не удалось проверить журнал NovaPay. Открой выписку для диагностики.
++    </p>
      <section
        v-for="bank in banks"
        :key="bank"
