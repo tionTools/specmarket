@@ -1,15 +1,16 @@
 diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
 --- a/src/pages/PricesView.vue
 +++ b/src/pages/PricesView.vue
-@@ -77,6 +77,7 @@
+@@ -77,6 +77,8 @@
    currencyRateForDate(currencyRates.value, localDateKey(today.value), 0),
  )
  const rateError = ref('')
 +const catalogSaveError = ref('')
++const catalogLoadFailed = ref(false)
  const draggedItemId = ref<number | null>(null)
  const editingCell = ref<string | null>(null)
  const user = ref<User | null>(null)
-@@ -122,40 +123,60 @@
+@@ -122,40 +124,60 @@
  const isLinking = ref(false)
  
  const deletedItems = new WeakSet<PriceItem>()
@@ -87,7 +88,7 @@ diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
    }
  }
  
-@@ -170,12 +191,17 @@
+@@ -170,12 +192,17 @@
          saveRequested = false
          await persistCatalog()
        }
@@ -106,7 +107,7 @@ diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
    return savePromise
  }
  
-@@ -216,8 +242,13 @@
+@@ -216,8 +243,15 @@
  
  async function loadCatalog() {
    if (!supabase || !user.value) return
@@ -114,15 +115,17 @@ diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
 -  if (data?.length)
 +  const { data, error } = await supabase.from('crm_price_items').select('*').order('position')
 +  if (error || !data) {
++    catalogLoadFailed.value = true
 +    catalogSaveError.value = `Не удалось загрузить цены: ${error?.message ?? 'нет ответа'}`
 +    return
 +  }
++  catalogLoadFailed.value = false
 +  persistedCatalogSignatures.clear()
 +  if (data.length) {
      items.value = data.map((row) => ({
        id: row.legacy_id ?? Date.now(),
        remoteId: row.id,
-@@ -231,7 +262,12 @@
+@@ -231,7 +265,12 @@
        kastaTwo: row.kasta_recommended,
        kastaThree: row.kasta_sale,
      }))
@@ -136,7 +139,7 @@ diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
    await loadCurrencyRates()
    await loadCurrentPriceLink()
  }
-@@ -683,6 +719,7 @@
+@@ -683,6 +722,7 @@
        window.alert(`Не удалось удалить позицию: ${error.message}`)
        return
      }
@@ -144,18 +147,29 @@ diff --git a/src/pages/PricesView.vue b/src/pages/PricesView.vue
    }
  
    await save()
-@@ -829,6 +866,14 @@
+@@ -829,11 +869,21 @@
            </div>
          </div>
        </header>
+-
+-      <section
+-        v-if="!user"
+-        class="mt-7 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
 +      <p
 +        v-if="catalogSaveError"
 +        class="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"
 +        role="alert"
-+      >
+       >
 +        {{ catalogSaveError }}
-+        <button class="ml-2 underline" type="button" @click="save">Повторить сохранение</button>
++        <button class="ml-2 underline" type="button" @click="catalogLoadFailed ? loadCatalog() : save()">
++          {{ catalogLoadFailed ? 'Повторить загрузку' : 'Повторить сохранение' }}
++        </button>
 +      </p>
- 
-       <section
-         v-if="!user"
++
++      <section
++        v-if="!user"
++        class="mt-7 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
++      >
+         <h2 class="text-xl font-semibold">Вход в CRM</h2>
+         <p class="mt-2 text-sm text-slate-500">
+           Войди под общим аккаунтом, чтобы видеть общие цены на всех устройствах.
