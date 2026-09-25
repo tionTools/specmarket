@@ -1,0 +1,188 @@
+diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
+--- a/supabase/functions/sync-delivery-tracking/worker.ts
++++ b/supabase/functions/sync-delivery-tracking/worker.ts
+@@ -5,6 +5,7 @@
+ import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
+ import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
+ import { isFinal, record, text } from './normalize.ts'
++import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
+ import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
+ import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
+ 
+@@ -85,6 +86,16 @@
+   let checked = 0
+   let updated = 0
+   let failed = 0
++  const pendingSuccessStates: TrackingStateUpdate[] = []
++  const pendingErrorStates: TrackingStateUpdate[] = []
++  const upsertStates = async (updates: TrackingStateUpdate[]) => {
++    const { error } = await admin.from('crm_delivery_tracking_state').upsert(updates)
++    return { error }
++  }
++  async function flushTrackingStates() {
++    failed += await upsertTrackingStateBatches(pendingSuccessStates.splice(0), upsertStates)
++    failed += await upsertTrackingStateBatches(pendingErrorStates.splice(0), upsertStates)
++  }
+   const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
+   for (const row of orderRows) {
+     const delivery = record(row.delivery)
+@@ -104,20 +115,20 @@
+       const currentDelivery = record(currentRow?.delivery)
+       if (!sameShipment(delivery, currentDelivery)) continue
+       const changed = trackingChanged(currentDelivery, result)
+-      const state = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
+-      const { error: stateError } = await admin.from('crm_delivery_tracking_state').upsert(state)
+-      if (stateError) throw stateError
++      const state: TrackingStateUpdate = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
+       checked += 1
+-      if (!changed) continue
+-      const nextDelivery = mergeTrackingDelivery(
+-        currentDelivery,
+-        result,
+-        now.toISOString(),
+-        text(row.external_id) ? 'marketplace' : 'manual',
+-      )
+-      const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
+-      if (updateError) throw updateError
+-      updated += 1
++      if (changed) {
++        const nextDelivery = mergeTrackingDelivery(
++          currentDelivery,
++          result,
++          now.toISOString(),
++          text(row.external_id) ? 'marketplace' : 'manual',
++        )
++        const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
++        if (updateError) throw updateError
++        updated += 1
++      }
++      pendingSuccessStates.push(state)
+     } catch (error) {
+       failed += 1
+       console.error(`Tracking ${text(delivery.ttn)}:`, error)
+@@ -128,10 +139,12 @@
+       }
+       const currentDelivery = record(currentRow?.delivery)
+       if (!sameShipment(delivery, currentDelivery)) continue
+-      await admin.from('crm_delivery_tracking_state').upsert({
++      pendingErrorStates.push({
+         order_id: row.id, last_checked_at: now.toISOString(), last_error: error instanceof Error ? error.message : 'Ошибка tracking', provider: carrier || null, updated_at: now.toISOString(),
+       })
+     }
++    if (pendingSuccessStates.length + pendingErrorStates.length >= 25) await flushTrackingStates()
+   }
++  await flushTrackingStates()
+   return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
+ }
+diff --git a/supabase/functions/sync-delivery-tracking/state-batch.ts b/supabase/functions/sync-delivery-tracking/state-batch.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/state-batch.ts
+@@ -0,0 +1,31 @@
++export type TrackingStateUpdate = {
++  order_id: string
++  last_checked_at: string
++  last_error: string | null
++  provider: string | null
++  updated_at: string
++  details?: unknown
++}
++
++type WriteResult = { error: { message: string } | null }
++type WriteStates = (states: TrackingStateUpdate[]) => Promise<WriteResult>
++
++export async function upsertTrackingStateBatches(
++  states: TrackingStateUpdate[],
++  write: WriteStates,
++): Promise<number> {
++  let failed = 0
++  for (let start = 0; start < states.length; start += 25) {
++    const batch = states.slice(start, start + 25)
++    const { error } = await write(batch)
++    if (!error) continue
++    console.error('Не удалось пакетно сохранить состояние доставок:', error)
++    for (const state of batch) {
++      const { error: itemError } = await write([state])
++      if (!itemError) continue
++      failed += 1
++      console.error('Не удалось сохранить состояние доставки:', state.order_id, itemError)
++    }
++  }
++  return failed
++}
+diff --git a/supabase/functions/sync-delivery-tracking/state-batch_test.ts b/supabase/functions/sync-delivery-tracking/state-batch_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/state-batch_test.ts
+@@ -0,0 +1,45 @@
++import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
++
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) throw new Error(message)
++}
++
++function fixture(count: number): TrackingStateUpdate[] {
++  return Array.from({ length: count }, (_, index) => ({
++    order_id: String(index),
++    last_checked_at: '2026-09-25T10:00:00Z',
++    last_error: null,
++    provider: 'nova',
++    details: null,
++    updated_at: '2026-09-25T10:00:00Z',
++  }))
++}
++
++Deno.test('batching replaces individual state writes with groups of 25', async () => {
++  const sizes: number[] = []
++  const failed = await upsertTrackingStateBatches(fixture(61), async (states) => {
++    sizes.push(states.length)
++    return { error: null }
++  })
++  assert(failed === 0, 'unexpected state-write failure')
++  assert(sizes.join(',') === '25,25,11', 'state writes are not batched correctly')
++})
++
++Deno.test('a rejected batch falls back to individual writes without losing other rows', async () => {
++  const sizes: number[] = []
++  const failed = await upsertTrackingStateBatches(fixture(3), async (states) => {
++    sizes.push(states.length)
++    if (states.length > 1 || states[0]?.order_id === '1')
++      return { error: { message: 'test write failure' } }
++    return { error: null }
++  })
++  assert(sizes.join(',') === '3,1,1,1', 'batch fallback did not retry each row')
++  assert(failed === 1, 'only the failing row should be counted')
++})
++
++Deno.test('empty queue does not perform a database request', async () => {
++  const failed = await upsertTrackingStateBatches([], async () => {
++    throw new Error('unexpected request')
++  })
++  assert(failed === 0, 'empty queue failed')
++})
+diff --git a/supabase/migrations/20260925130000_marketplace_cron_five_minute_checks.sql b/supabase/migrations/20260925130000_marketplace_cron_five_minute_checks.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260925130000_marketplace_cron_five_minute_checks.sql
+@@ -0,0 +1,21 @@
++-- Keep the existing Kyiv-time due gate and staggered execution minutes, but avoid
++-- starting three no-op pg_cron jobs every minute. The due gate retains the
++-- five-minute daytime / hourly nighttime synchronization policy, including DST.
++select cron.unschedule(jobid)
++from cron.job
++where jobname in ('crm-sync-prom-poll', 'crm-sync-epicentr-poll', 'crm-sync-kasta-poll');
++
++select cron.schedule('crm-sync-prom-poll', '*/5 * * * *', $$
++  select case when public.crm_marketplace_sync_is_due('Пром')
++    then public.invoke_crm_marketplace_sync('sync-prom-orders', '{"scheduled":true}'::jsonb) end;
++$$);
++
++select cron.schedule('crm-sync-epicentr-poll', '1-59/5 * * * *', $$
++  select case when public.crm_marketplace_sync_is_due('Эпицентр')
++    then public.invoke_crm_marketplace_sync('sync-epicentr-orders', '{"scheduled":true}'::jsonb) end;
++$$);
++
++select cron.schedule('crm-sync-kasta-poll', '2-59/5 * * * *', $$
++  select case when public.crm_marketplace_sync_is_due('Каста')
++    then public.invoke_crm_marketplace_sync('sync-kasta-orders', '{"scheduled":true}'::jsonb) end;
++$$);
