@@ -1,0 +1,15 @@
+SpecMarket — Patch 157: напоминания о неотправленной PDF-бирке
+
+Base для подготовки: e25bd8382d6ca2cc600af2abbf96bc697c7446e2 (Patch 156 в main; production deploy 156 необходимо подтвердить отдельно).
+Файл патча: 157.patch. Изменяемый файл: src/pages/HomeView.vue.
+НЕ выполнять, пока не подтверждено завершение и production deploy Patch 156.
+
+Codex:
+1. git fetch origin main chatgpt-patches; проверить актуальный origin/main и его SHA. Если main ушёл вперёд, проверить конфликтующие изменения HomeView.vue; не применять слепо.
+2. Скачать 157.patch из ветки chatgpt-patches. git apply --check 157.patch; git apply 157.patch.
+3. Scoped format только HomeView.vue; проверить diff и убрать formatter churn. Не менять отправку PDF, cron, миграции или код Patch 156.
+4. Проверить: pnpm type-check, pnpm lint (или принятые проектом oxlint/eslint), pnpm build, git diff --check.
+5. Ручные сценарии: новая ТТН -> 5/10/15 мин; отправка PDF; замена ТТН; удаление; reload; Realtime; initial baseline; скрытая вкладка; переход из индикатора. Проверить, что письма не отправляются автоматически.
+6. Только после подтверждённого base SHA и завершения 156 — обычный commit/push/deploy 157 по правилам проекта; предоставить SHA, результат тестов и ссылку на production deploy.
+
+Архитектура: localStorage по user.id, запись по remoteId {ttn, startedAt, notified}; первоначальная загрузка создаёт baseline startedAt=0; Realtime и marketplace refresh пересверяют записи; 15-секундный локальный таймер без запросов Supabase. При возобновлении вкладки показывается только последний пропущенный порог, предыдущие помечаются пройденными. Ограничение: это локальное состояние одного браузера/профиля, не синхронизируется между устройствами.
