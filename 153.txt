@@ -1,0 +1,22 @@
+Patch 153 — show combined results for 'Новые заказы' instead of final Kasta-only message
+
+Repo: tionTools/specmarket
+Base main SHA: fd46296091728b012e4218d07739ac0d50cffddf
+Patch: origin/chatgpt-patches/153.patch
+Expected patch blob SHA: cae94a3b6c86b379e05afd973608527f306aad28
+
+Problem verified in src/pages/HomeView.vue: syncNewAllPlatforms() runs Epicentr → Prom → Kasta without result aggregation. Each sync*Orders() emits a separate message, so Kasta runs last and overwrites the other platforms' outcomes.
+
+Fix in patch:
+- Pass a shared syncResults array to the three existing sync functions (false = ordinary/new sync).
+- After all three finish, display one newline-separated summary with Epicentr, Prom, Kasta counts and individual errors.
+- If any platform returned ': ошибка — ', show persistent sync error instead of a short-lived success toast.
+- If no results were collected, do not wipe a previously shown sync error.
+- Preserve full-sync behavior, sync order, payloads, order updating, backend and scheduled synchronization. Frontend only: no Edge deploy or migrations.
+- Add focused regression test src/features/orders/sync-summary_test.mjs.
+
+Codex workflow: verify latest main/worktree and base SHA, git apply --check, apply 153.patch. Format only changed files and inspect diff; remove formatter churn. Run node src/features/orders/sync-summary_test.mjs, pnpm type-check, scoped Oxlint/ESLint on changed files, pnpm build and git diff --check. If tests or actual build expose a blocker, make only minimal correction and re-run. Commit only changed files, SSH push main, wait for actual GitHub Production Deploy success. No Edge Functions deployment and no database changes.
+
+Manual QA afterward: click 'Новые заказы'; expect one notice showing lines for Эпицентр, Prom, Каста (including zero when there are no new orders). Simulate one platform failure if possible and verify the other results still display and error persists. Full-sync continues to work unchanged. Do not claim this manual check was performed.
+
+Report briefly: checks, commit SHA, production deploy link and status. No intermediate messages.
