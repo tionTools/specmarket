@@ -1,0 +1,422 @@
+diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
+--- a/supabase/functions/sync-delivery-tracking/worker.ts
++++ b/supabase/functions/sync-delivery-tracking/worker.ts
+@@ -5,145 +5,185 @@
+ import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
+ import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
+ import { isFinal, record, text } from './normalize.ts'
+-import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
+-import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
+-import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
+-
+-const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
+-
+-type TrackingOrderRow = { id: string; external_id: unknown; delivery: unknown }
+-type TrackingStateRow = { order_id: string; last_checked_at: unknown }
+-
+-function currentKyiv() {
+-  const parts = new Intl.DateTimeFormat('en-GB', {
+-    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+-  }).formatToParts(new Date())
+-  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
+-  return { hour: value('hour'), minute: value('minute') }
+-}
+-
+-function intervalMinutes() {
+-  const { hour } = currentKyiv()
+-  if (hour < 7) return 0
+-  if (hour >= 9 && hour < 16) return 15
+-  return hour < 21 ? 30 : 60
+-}
+-
+-function hasActiveTracking(delivery: JsonRecord) {
+-  const normalizedStatus = text(delivery.trackingNormalizedStatus)
+-  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled'].includes(normalizedStatus)
+-}
+-
+-function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, now: number) {
+-  if (
+-    !minutes ||
+-    !text(delivery.ttn) ||
+-    (!hasActiveTracking(delivery) && (isFinal(text(delivery.trackingStatus)) || isFinal(text(delivery.status))))
+-  )
+-    return false
+-  const checked = Date.parse(text(lastCheckedAt))
+-  return !Number.isFinite(checked) || now - checked >= minutes * 60_000
+-}
+-
+-async function getTrackingStatus(delivery: JsonRecord, novaRedirectCircuit: NovaRedirectCircuit): Promise<TrackingResult> {
+-  const ttn = text(delivery.ttn)
+-  switch (carrierKind(delivery)) {
+-    case 'nova': return novaStatus(ttn, novaRedirectCircuit)
+-    case 'meest': return meestStatus(ttn)
+-    case 'rozetka': return rozetkaStatus(ttn)
+-    case 'ukrposhta': return ukrposhtaStatus(ttn)
+-    default: throw new Error('Неподдерживаемый перевозчик')
+-  }
+-}
+-
+-export async function runTrackingWorker(
+-  admin: SupabaseClient,
+-  forced: boolean,
+-  orderId?: string,
+-): Promise<WorkerResult> {
+-  const minutes = intervalMinutes()
+-  if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
+-
+-  const now = new Date()
+-  let ordersQuery = admin.from('crm_orders').select('id, external_id, delivery')
+-  if (orderId) {
+-    ordersQuery = ordersQuery.eq('id', orderId)
+-  } else {
+-    ordersQuery = ordersQuery
+-      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
+-      .not('delivery->>ttn', 'is', null)
+-  }
+-  const { data: rows, error } = await ordersQuery
+-  if (error) return { status: 500, body: { ok: false, message: error.message } }
+-  const orderRows = (rows ?? []) as TrackingOrderRow[]
+-  const ids = orderRows.map((row) => row.id)
+-  const { data: states, error: statesError } = ids.length
+-    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)
+-    : { data: [], error: null }
+-  if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
+-  const trackingStates = (states ?? []) as TrackingStateRow[]
+-  const stateByOrder = new Map(trackingStates.map((state) => [state.order_id, state]))
+-  let checked = 0
+-  let updated = 0
+-  let failed = 0
+-  const pendingSuccessStates: TrackingStateUpdate[] = []
+-  const pendingErrorStates: TrackingStateUpdate[] = []
+-  const upsertStates = async (updates: TrackingStateUpdate[]) => {
+-    const { error } = await admin.from('crm_delivery_tracking_state').upsert(updates)
+-    return { error }
+-  }
+-  async function flushTrackingStates() {
+-    failed += await upsertTrackingStateBatches(pendingSuccessStates.splice(0), upsertStates)
+-    failed += await upsertTrackingStateBatches(pendingErrorStates.splice(0), upsertStates)
+-  }
+-  const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
+-  for (const row of orderRows) {
+-    const delivery = record(row.delivery)
+-    const carrier: CarrierKind = carrierKind(delivery)
+-    const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
+-    if (
+-      !carrier ||
+-      (!orderId && !forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) ||
+-      (!orderId && forced && !trackable) ||
+-      (orderId && !text(delivery.ttn))
+-    )
+-      continue
+-    try {
+-      const result = await getTrackingStatus(delivery, novaRedirectCircuit)
+-      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
+-      if (currentError) throw currentError
+-      const currentDelivery = record(currentRow?.delivery)
+-      if (!sameShipment(delivery, currentDelivery)) continue
+-      const changed = trackingChanged(currentDelivery, result)
+-      const state: TrackingStateUpdate = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
+-      checked += 1
+-      if (changed) {
+-        const nextDelivery = mergeTrackingDelivery(
+-          currentDelivery,
+-          result,
+-          now.toISOString(),
+-          text(row.external_id) ? 'marketplace' : 'manual',
+-        )
+-        const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
+-        if (updateError) throw updateError
+-        updated += 1
+-      }
+-      pendingSuccessStates.push(state)
+-    } catch (error) {
+-      failed += 1
+-      console.error(`Tracking ${text(delivery.ttn)}:`, error)
+-      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
+-      if (currentError) {
+-        console.error(`Tracking ${text(delivery.ttn)}:`, currentError)
+-        continue
+-      }
+-      const currentDelivery = record(currentRow?.delivery)
+-      if (!sameShipment(delivery, currentDelivery)) continue
+-      pendingErrorStates.push({
+-        order_id: row.id, last_checked_at: now.toISOString(), last_error: error instanceof Error ? error.message : 'Ошибка tracking', provider: carrier || null, updated_at: now.toISOString(),
+-      })
+-    }
+-    if (pendingSuccessStates.length + pendingErrorStates.length >= 25) await flushTrackingStates()
++import { readCurrentDeliveries } from './current-deliveries.ts'
++import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
++import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
++import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
++
++const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
++
++type TrackingOrderRow = { id: string; external_id: unknown; delivery: unknown }
++type TrackingStateRow = { order_id: string; last_checked_at: unknown }
++
++function currentKyiv() {
++  const parts = new Intl.DateTimeFormat('en-GB', {
++    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
++  }).formatToParts(new Date())
++  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
++  return { hour: value('hour'), minute: value('minute') }
++}
++
++function intervalMinutes() {
++  const { hour } = currentKyiv()
++  if (hour < 7) return 0
++  if (hour >= 9 && hour < 16) return 15
++  return hour < 21 ? 30 : 60
++}
++
++function hasActiveTracking(delivery: JsonRecord) {
++  const normalizedStatus = text(delivery.trackingNormalizedStatus)
++  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled'].includes(normalizedStatus)
++}
++
++function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, now: number) {
++  if (
++    !minutes ||
++    !text(delivery.ttn) ||
++    (!hasActiveTracking(delivery) && (isFinal(text(delivery.trackingStatus)) || isFinal(text(delivery.status))))
++  )
++    return false
++  const checked = Date.parse(text(lastCheckedAt))
++  return !Number.isFinite(checked) || now - checked >= minutes * 60_000
++}
++
++async function getTrackingStatus(delivery: JsonRecord, novaRedirectCircuit: NovaRedirectCircuit): Promise<TrackingResult> {
++  const ttn = text(delivery.ttn)
++  switch (carrierKind(delivery)) {
++    case 'nova': return novaStatus(ttn, novaRedirectCircuit)
++    case 'meest': return meestStatus(ttn)
++    case 'rozetka': return rozetkaStatus(ttn)
++    case 'ukrposhta': return ukrposhtaStatus(ttn)
++    default: throw new Error('Неподдерживаемый перевозчик')
++  }
++}
++
++export async function runTrackingWorker(
++  admin: SupabaseClient,
++  forced: boolean,
++  orderId?: string,
++): Promise<WorkerResult> {
++  const minutes = intervalMinutes()
++  if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
++
++  const now = new Date()
++  let ordersQuery = admin.from('crm_orders').select('id, external_id, delivery')
++  if (orderId) {
++    ordersQuery = ordersQuery.eq('id', orderId)
++  } else {
++    ordersQuery = ordersQuery
++      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
++      .not('delivery->>ttn', 'is', null)
++  }
++  const { data: rows, error } = await ordersQuery
++  if (error) return { status: 500, body: { ok: false, message: error.message } }
++  const orderRows = (rows ?? []) as TrackingOrderRow[]
++  const ids = orderRows.map((row) => row.id)
++  const { data: states, error: statesError } = ids.length
++    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)
++    : { data: [], error: null }
++  if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
++  const trackingStates = (states ?? []) as TrackingStateRow[]
++  const stateByOrder = new Map(trackingStates.map((state) => [state.order_id, state]))
++  let checked = 0
++  let updated = 0
++  let failed = 0
++  const pendingSuccessStates: TrackingStateUpdate[] = []
++  const pendingErrorStates: TrackingStateUpdate[] = []
++  const upsertStates = async (updates: TrackingStateUpdate[]) => {
++    const { error } = await admin.from('crm_delivery_tracking_state').upsert(updates)
++    return { error }
++  }
++  async function flushTrackingStates() {
++    failed += await upsertTrackingStateBatches(pendingSuccessStates.splice(0), upsertStates)
++    failed += await upsertTrackingStateBatches(pendingErrorStates.splice(0), upsertStates)
++  }
++  const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
++  const eligibleRows: Array<{ row: TrackingOrderRow; delivery: JsonRecord; carrier: CarrierKind }> = []
++  for (const row of orderRows) {
++    const delivery = record(row.delivery)
++    const carrier: CarrierKind = carrierKind(delivery)
++    const trackable = Boolean(text(delivery.ttn)) && (hasActiveTracking(delivery) || (!isFinal(text(delivery.trackingStatus)) && !isFinal(text(delivery.status))))
++    if (
++      !carrier ||
++      (!orderId && !forced && !isDue(delivery, stateByOrder.get(row.id)?.last_checked_at, minutes, now.getTime())) ||
++      (!orderId && forced && !trackable) ||
++      (orderId && !text(delivery.ttn))
++    )
++      continue
++    eligibleRows.push({ row, delivery, carrier })
++  }
++
++  // Fetch live carrier results first, then re-read current delivery data once per batch.
++  // The comparison below prevents a stale tracking result from applying to a replaced TTN.
++  for (let start = 0; start < eligibleRows.length; start += 25) {
++    const batch = eligibleRows.slice(start, start + 25)
++    const results: Array<{ result?: TrackingResult; error?: unknown }> = []
++    for (const { delivery } of batch) {
++      try {
++        results.push({ result: await getTrackingStatus(delivery, novaRedirectCircuit) })
++      } catch (error) {
++        results.push({ error })
++      }
++    }
++    const current = await readCurrentDeliveries(
++      batch.map(({ row }) => row.id),
++      async (ids) => {
++        const { data, error } = await admin.from('crm_orders').select('id, delivery').in('id', ids)
++        return { data: data as Array<{ id: string; delivery: unknown }> | null, error }
++      },
++    )
++    for (const [index, { row, delivery, carrier }] of batch.entries()) {
++      const lookupError = current.errors.get(row.id)
++      if (lookupError) {
++        failed += 1
++        console.error(`Tracking ${text(delivery.ttn)}: не удалось прочитать актуальную доставку:`, lookupError)
++        continue
++      }
++      if (!current.deliveries.has(row.id)) continue
++      const currentDelivery = record(current.deliveries.get(row.id))
++      if (!sameShipment(delivery, currentDelivery)) continue
++      const outcome = results[index]!
++      if (outcome.error !== undefined) {
++        failed += 1
++        console.error(`Tracking ${text(delivery.ttn)}:`, outcome.error)
++        pendingErrorStates.push({
++          order_id: row.id, last_checked_at: now.toISOString(),
++          last_error: outcome.error instanceof Error ? outcome.error.message : 'Ошибка tracking',
++          provider: carrier || null, updated_at: now.toISOString(),
++        })
++        continue
++      }
++      const result = outcome.result!
++      try {
++        const changed = trackingChanged(currentDelivery, result)
++        const state: TrackingStateUpdate = {
++          order_id: row.id, last_checked_at: now.toISOString(), last_error: null,
++          provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString(),
++        }
++        checked += 1
++        if (changed) {
++          const nextDelivery = mergeTrackingDelivery(
++            currentDelivery,
++            result,
++            now.toISOString(),
++            text(row.external_id) ? 'marketplace' : 'manual',
++          )
++          const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
++          if (updateError) throw updateError
++          updated += 1
++        }
++        pendingSuccessStates.push(state)
++      } catch (error) {
++        failed += 1
++        console.error(`Tracking ${text(delivery.ttn)}:`, error)
++        pendingErrorStates.push({
++          order_id: row.id, last_checked_at: now.toISOString(),
++          last_error: error instanceof Error ? error.message : 'Ошибка tracking',
++          provider: carrier || null, updated_at: now.toISOString(),
++        })
++      }
++    }
++    await flushTrackingStates()
+   }
+   await flushTrackingStates()
+   return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
+diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries.ts b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
+@@ -1,1 +1,35 @@
+-
++export type CurrentDeliveryRow = { id: string; delivery: unknown }
++type ReadResult = { data: CurrentDeliveryRow[] | null; error: { message: string } | null }
++type ReadBatch = (ids: string[]) => Promise<ReadResult>
++
++export async function readCurrentDeliveries(ids: string[], read: ReadBatch) {
++  const deliveries = new Map<string, unknown>()
++  const errors = new Map<string, string>()
++  for (let start = 0; start < ids.length; start += 25) {
++    const batch = ids.slice(start, start + 25)
++    let result: ReadResult
++    try {
++      result = await read(batch)
++    } catch (error) {
++      result = { data: null, error: { message: String(error) } }
++    }
++    if (!result.error) {
++      for (const row of result.data ?? []) deliveries.set(row.id, row.delivery)
++      continue
++    }
++    console.error('Не удалось пакетно прочитать актуальные доставки:', result.error)
++    for (const id of batch) {
++      try {
++        const item = await read([id])
++        if (item.error) {
++          errors.set(id, item.error.message)
++        } else {
++          for (const row of item.data ?? []) deliveries.set(row.id, row.delivery)
++        }
++      } catch (error) {
++        errors.set(id, String(error))
++      }
++    }
++  }
++  return { deliveries, errors }
++}
+diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
+--- /dev/null
++++ b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
+@@ -1,1 +1,49 @@
+-
++import { readCurrentDeliveries } from './current-deliveries.ts'
++
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) throw new Error(message)
++}
++
++Deno.test('current deliveries are read in batches of 25', async () => {
++  const sizes: number[] = []
++  const ids = Array.from({ length: 61 }, (_, i) => String(i))
++  const current = await readCurrentDeliveries(ids, async (batch) => {
++    sizes.push(batch.length)
++    return { data: batch.map((id) => ({ id, delivery: { ttn: id } })), error: null }
++  })
++  assert(sizes.join(',') === '25,25,11', 'unexpected request count')
++  assert(current.deliveries.size === 61 && current.errors.size === 0, 'missing delivery rows')
++})
++
++Deno.test('batch failure falls back to individual reads without losing valid rows', async () => {
++  const sizes: number[] = []
++  const current = await readCurrentDeliveries(['1', '2', '3'], async (ids) => {
++    sizes.push(ids.length)
++    if (ids.length > 1) return { data: null, error: { message: 'batch error' } }
++    if (ids[0] === '2') return { data: null, error: { message: 'row error' } }
++    return { data: [{ id: ids[0]!, delivery: { ttn: ids[0] } }], error: null }
++  })
++  assert(sizes.join(',') === '3,1,1,1', 'missing per-order fallback')
++  assert(current.deliveries.size === 2, 'lost successful rows')
++  assert(current.errors.get('2') === 'row error', 'missing failure')
++})
++
++Deno.test('missing or deleted order is not treated as an error or fabricated', async () => {
++  const current = await readCurrentDeliveries(['missing'], async () => ({ data: [], error: null }))
++  assert(!current.deliveries.has('missing'), 'fabricated order')
++  assert(current.errors.size === 0, 'missing order is not a query error')
++})
++
++Deno.test('empty queue does not hit the database', async () => {
++  const current = await readCurrentDeliveries([], async () => {
++    throw new Error('unexpected query')
++  })
++  assert(current.deliveries.size === 0, 'unexpected delivery')
++})
++
++Deno.test('thrown batch and single-read errors are captured', async () => {
++  const current = await readCurrentDeliveries(['1'], async () => {
++    throw new Error('network down')
++  })
++  assert(current.errors.get('1')?.includes('network down'), 'network error was dropped')
++})
