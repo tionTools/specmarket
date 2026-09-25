@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -158,6 +159,14 @@ fun OrdersApp(
 ) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    DisposableEffect(vm, context) {
+        val monitor = NetworkRecoveryMonitor(context) {
+            scope.launch { vm.networkRestored() }
+        }
+        onDispose { monitor.close() }
+    }
     NotificationPermissionGate(vm)
     var settings by rememberSaveable { mutableStateOf(false) }
     var confirmationId by remember { mutableStateOf<String?>(null) }
@@ -475,7 +484,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                         Column {
                             Text("Заказы", fontWeight = FontWeight.Bold)
                             Text(
-                                if (vm.realtimeConnected) "Онлайн" else "Офлайн · сохранённые данные",
+                                connectionStatusLabel(vm.realtimeConnected, vm.lastRefreshSucceeded),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (vm.realtimeConnected)
                                     MaterialTheme.colorScheme.primary
@@ -496,6 +505,9 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                             contentDescription = if (searchOpen) "Закрыть поиск" else "Поиск",
                         )
                     }
+                    IconButton(onClick = { vm.retryConnection() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Переподключиться и обновить")
+                    }
                     TextButton(onSettings) { Text("Настройки") }
                 },
             )
@@ -504,7 +516,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = vm.loading,
-            onRefresh = { vm.refresh() },
+            onRefresh = { vm.retryConnection() },
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             LazyColumn(
@@ -688,9 +700,9 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
 
         val recipient = order.recipientName()
         val recipientPhone = order.recipientPhone()
-        val rawPhone = recipientPhone.takeUnless { it == "—" }.orEmpty()
-        val originalCustomer = order.customer.display()
-        val originalPhone = order.phone.display()
+        val buyerName = order.customer.display()
+        val buyerPhone = order.buyerPhone()
+        val rawBuyerPhone = order.phone.orEmpty().trim()
         val shipments = order.shipments()
 
         LazyColumn(
@@ -699,6 +711,56 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item { DetailsHeader(order) }
+
+            item {
+                SectionCard("Покупатель") {
+                    Text(
+                        buyerName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (buyerPhone != "—") {
+                        SelectionContainer {
+                            Text(
+                                buyerPhone,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                    if (normalizeCustomerPhone(rawBuyerPhone) != null) {
+                        FilledTonalButton(
+                            onClick = { openDialer(context, rawBuyerPhone) },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                        ) {
+                            Text("Позвонить покупателю · $buyerPhone", fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = { openViber(context, rawBuyerPhone) },
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF7360F2),
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
+                            Button(
+                                onClick = { openTelegram(context, rawBuyerPhone) },
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF229ED9),
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Telegram", fontWeight = FontWeight.SemiBold) }
+                        }
+                    }
+                }
+            }
 
             item {
                 SectionCard("Получатель") {
@@ -716,35 +778,6 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
-                        }
-                    }
-                    if (normalizeCustomerPhone(rawPhone) != null) {
-                        FilledTonalButton(
-                            onClick = { openDialer(context, rawPhone) },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) {
-                            Text("Позвонить $recipientPhone", fontWeight = FontWeight.SemiBold)
-                        }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(
-                                onClick = { openViber(context, rawPhone) },
-                                modifier = Modifier.weight(1f).height(46.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7360F2),
-                                    contentColor = Color.White,
-                                ),
-                            ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
-                            Button(
-                                onClick = { openTelegram(context, rawPhone) },
-                                modifier = Modifier.weight(1f).height(46.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF229ED9),
-                                    contentColor = Color.White,
-                                ),
-                            ) { Text("Telegram", fontWeight = FontWeight.SemiBold) }
                         }
                     }
                 }
@@ -811,15 +844,6 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
             if (extraExpanded) {
                 item {
                     SectionCard("Дополнительно") {
-                        if (originalCustomer != recipient || originalPhone != recipientPhone) {
-                            DetailField(
-                                "Клиент",
-                                listOf(originalCustomer, originalPhone)
-                                    .filter { it != "—" }
-                                    .joinToString(" · ")
-                                    .ifBlank { "—" },
-                            )
-                        }
                         DetailField("Плательщик доставки", order.deliveryField("payer"))
                         DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
                     }

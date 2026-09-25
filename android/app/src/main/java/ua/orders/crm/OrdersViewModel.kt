@@ -17,6 +17,9 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     private val requests = Mutex()
     private val pendingNotificationIds = linkedSetOf<String>()
     private var realtimeJob: Job? = null
+    private var realtimeGeneration = 0L
+    private var refreshJob: Job? = null
+    private var refreshGeneration = 0L
     private var pushRegistrationJob: Job? = null
     private var visible = false
     private var ordersBeforeDetail: List<Order> = emptyList()
@@ -28,6 +31,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var loading by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null); private set
     var realtimeConnected by mutableStateOf(false); private set
+    var lastRefreshSucceeded by mutableStateOf(false); private set
     var selectedId by mutableStateOf<String?>(null); private set
     var detail by mutableStateOf<Order?>(null); private set
     var acceptingId by mutableStateOf<String?>(null); private set
@@ -82,10 +86,19 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     fun foreground(active: Boolean) {
         visible = active
         if (active && email != null) {
-            startRealtime(forceRestart = true)
-            refresh()
+            retryConnection()
             syncPushRegistration()
         }
+    }
+
+    fun networkRestored() {
+        if (visible && email != null) retryConnection()
+    }
+
+    fun retryConnection() {
+        if (email == null) return
+        startRealtime(forceRestart = true)
+        refresh(force = true)
     }
 
     private fun syncPushRegistration(enabledOverride: Boolean? = null) {
@@ -111,41 +124,51 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun startRealtime(forceRestart: Boolean = false) {
-        if (email == null) return
+        val account = email ?: return
         val previousJob = realtimeJob
         if (!forceRestart && previousJob?.isActive == true) return
+        val generation = ++realtimeGeneration
         if (forceRestart) {
             realtimeConnected = false
             previousJob?.cancel()
         }
         realtimeJob = viewModelScope.launch {
-            previousJob?.join()
-            while (isActive && email != null) {
+            // Old channel cleanup must not prevent a new connection indefinitely.
+            withTimeoutOrNull(7_000) { previousJob?.join() }
+            while (isActive && email == account && generation == realtimeGeneration) {
                 try {
                     repository.watch(onConnection = { connected ->
-                        val reconnect = connected && !realtimeConnected
-                        realtimeConnected = connected
-                        if (reconnect) refresh()
+                        if (email == account && generation == realtimeGeneration) {
+                            val reconnect = connected && !realtimeConnected
+                            realtimeConnected = connected
+                            if (reconnect) refresh()
+                        }
                     }) { change ->
-                        requests.withLock {
-                            val account = email ?: return@withLock
-                            if (change.operation.equals("DELETE", ignoreCase = true)) {
-                                orders = orders.filterNot { it.id == change.order_id }
-                                pendingNotificationIds.remove(change.order_id)
-                                if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
-                            } else {
-                                val order = repository.order(change.order_id)
-                                if (order != null) {
-                                    val known = orders.any { it.id == order.id }
-                                    merge(order)
-                                    if (!known) notifyOrQueue(order)
+                        withTimeout(25_000) {
+                            requests.withLock {
+                                if (email != account || generation != realtimeGeneration) return@withLock
+                                if (change.operation.equals("DELETE", ignoreCase = true)) {
+                                    orders = orders.filterNot { it.id == change.order_id }
+                                    pendingNotificationIds.remove(change.order_id)
+                                    if (selectedId == change.order_id) { detail = null; message = "Заказ удалён." }
+                                } else {
+                                    val order = repository.order(change.order_id)
+                                    if (order != null) {
+                                        val known = orders.any { it.id == order.id }
+                                        merge(order)
+                                        if (!known) notifyOrQueue(order)
+                                    }
                                 }
+                                persistCache(account)
                             }
-                            persistCache(account)
                         }
                     }
+                } catch (_: TimeoutCancellationException) {
+                    if (generation == realtimeGeneration) realtimeConnected = false
                 } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { realtimeConnected = false }
+                catch (_: Exception) {
+                    if (generation == realtimeGeneration) realtimeConnected = false
+                }
                 delay(5_000)
             }
         }
@@ -210,6 +233,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun clearOrders() {
+        ++refreshGeneration
+        refreshJob?.cancel()
+        refreshJob = null
+        loading = false
+        lastRefreshSucceeded = false
+        ++realtimeGeneration
         orders = emptyList()
         ordersBeforeDetail = emptyList()
         selectedId = null
@@ -228,50 +257,69 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         cache.save(currentAccount, orders, pendingNotificationIds)
     }
 
-    fun refresh() {
-        if (email == null || loading) return
+    fun refresh(force: Boolean = false) {
         val account = email ?: return
+        if (loading && !force) return
+        val generation = ++refreshGeneration
+        refreshJob?.cancel()
         loading = true
-        viewModelScope.launch {
+        refreshJob = viewModelScope.launch {
             try {
-                requests.withLock {
-                    if (orders.isEmpty()) {
-                        cache.load(account)?.let { cached ->
-                            if (cached.orders.isNotEmpty()) {
-                                orders = sortOrdersForDisplay(cached.orders)
-                                pendingNotificationIds.clear()
-                                pendingNotificationIds.addAll(cached.pendingNotificationIds)
-                                initialLoadComplete = true
+                withTimeout(30_000) {
+                    requests.withLock {
+                        if (orders.isEmpty()) {
+                            cache.load(account)?.let { cached ->
+                                if (cached.orders.isNotEmpty()) {
+                                    orders = sortOrdersForDisplay(cached.orders)
+                                    pendingNotificationIds.clear()
+                                    pendingNotificationIds.addAll(cached.pendingNotificationIds)
+                                    initialLoadComplete = true
+                                }
                             }
                         }
+                        val baselineComplete = initialLoadComplete
+                        val knownIds = orders.mapTo(hashSetOf()) { it.id }
+                        val cursor = latestOrderUpdatedAt(orders)
+                        val fetched = if (cursor == null) {
+                            val first = repository.orders()
+                            if (!baselineComplete && first.isEmpty()) {
+                                delay(750)
+                                repository.orders()
+                            } else first
+                        } else {
+                            repository.ordersChangedSince(cursor)
+                        }
+                        if (email != account || generation != refreshGeneration) return@withLock
+                        val discovered = if (baselineComplete) fetched.filter { it.id !in knownIds } else emptyList()
+                        orders = mergeOrders(orders, fetched)
+                        initialLoadComplete = true
+                        for (order in discovered) notifyOrQueue(order)
+                        selectedId?.let { id ->
+                            val updated = repository.order(id)
+                            if (email == account && selectedId == id && updated != null) merge(updated)
+                        }
+                        flushPendingNotificationsLocked()
+                        persistCache(account)
                     }
-                    val baselineComplete = initialLoadComplete
-                    val knownIds = orders.mapTo(hashSetOf()) { it.id }
-                    val cursor = latestOrderUpdatedAt(orders)
-                    val fetched = if (cursor == null) {
-                        val first = repository.orders()
-                        if (!baselineComplete && first.isEmpty()) {
-                            delay(750)
-                            repository.orders()
-                        } else first
-                    } else {
-                        repository.ordersChangedSince(cursor)
-                    }
-                    if (email != account) return@withLock
-                    val discovered = if (baselineComplete) fetched.filter { it.id !in knownIds } else emptyList()
-                    orders = mergeOrders(orders, fetched)
-                    initialLoadComplete = true
-                    for (order in discovered) notifyOrQueue(order)
-                    selectedId?.let { id ->
-                        val updated = repository.order(id)
-                        if (email == account && selectedId == id && updated != null) merge(updated)
-                    }
-                    flushPendingNotificationsLocked()
-                    persistCache(account)
+                }
+                if (generation == refreshGeneration && email == account) lastRefreshSucceeded = true
+            } catch (_: TimeoutCancellationException) {
+                if (generation == refreshGeneration) {
+                    lastRefreshSucceeded = false
+                    message = "Соединение не ответило за 30 секунд. Нажмите «Обновить» для повторного подключения."
                 }
             } catch (cancel: CancellationException) { throw cancel }
-            catch (_: Exception) { message = "Не удалось обновить заказы. Показаны сохранённые данные." }
-            finally { loading = false }
+            catch (_: Exception) {
+                if (generation == refreshGeneration) {
+                    lastRefreshSucceeded = false
+                    message = "Не удалось обновить заказы. Показаны сохранённые данные."
+                }
+            } finally {
+                if (generation == refreshGeneration) {
+                    loading = false
+                    refreshJob = null
+                }
+            }
         }
     }
 

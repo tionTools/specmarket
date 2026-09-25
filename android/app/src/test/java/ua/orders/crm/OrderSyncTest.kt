@@ -66,6 +66,33 @@ class OrderSyncTest {
         assertEquals("—", formatCustomerPhoneForDisplay(null))
     }
 
+    @Test fun prom_buyer_and_recipient_phones_are_independent_for_calls() {
+        val order = Order(
+            "prom",
+            customer = "Покупатель",
+            phone = "0631234567",
+            platform = "Пром",
+            delivery = buildJsonObject {
+                put("recipient", "Получатель")
+                put("recipientPhone", "0501112233")
+            },
+        )
+        assertEquals("+38 063 123 45 67", order.buyerPhone())
+        assertEquals("+38 050 111 22 33", order.recipientPhone())
+        assertEquals("—", order.copy(phone = null).buyerPhone())
+        assertEquals("—", order.copy(delivery = buildJsonObject { put("recipient", "Другой") }).recipientPhone())
+        assertEquals("+38 063 123 45 67", order.copy(platform = "Каста", delivery = null).recipientPhone())
+    }
+
+    @Test fun connection_status_does_not_mistake_rest_success_for_offline() {
+        assertEquals("Онлайн", connectionStatusLabel(true, false))
+        assertEquals(
+            "CRM доступна · live-подключение восстанавливается",
+            connectionStatusLabel(false, true),
+        )
+        assertEquals("Офлайн · сохранённые данные", connectionStatusLabel(false, false))
+    }
+
     @Test fun preferred_recipient_uses_delivery_recipient_with_customer_fallback() {
         val deliveryRecipient = Order(
             "recipient",

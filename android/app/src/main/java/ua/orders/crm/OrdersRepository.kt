@@ -107,17 +107,39 @@ class OrdersRepository {
         }).bodyAsText())
     }
 
-    suspend fun watch(onConnection: (Boolean) -> Unit, onChange: suspend (OrderChange) -> Unit): Nothing = coroutineScope {
+    suspend fun watch(onConnection: (Boolean) -> Unit, onChange: suspend (OrderChange) -> Unit): Unit = coroutineScope {
         val channel = client.channel("crm:orders") { isPrivate = true }
         val events = channel.broadcastFlow<OrderChange>("order_changed")
+        val disconnected = CompletableDeferred<Unit>()
+        var wasSubscribed = false
+        val statusJob = launch {
+            channel.status.collect { status ->
+                val connected = status == RealtimeChannel.Status.SUBSCRIBED
+                onConnection(connected)
+                if (connected) wasSubscribed = true
+                else if (wasSubscribed) disconnected.complete(Unit)
+            }
+        }
+        val eventsJob = launch {
+            try {
+                events.collect { onChange(it) }
+            } catch (cancel: CancellationException) {
+                if (cancel is TimeoutCancellationException) disconnected.complete(Unit)
+                else throw cancel
+            } catch (_: Exception) {
+                disconnected.complete(Unit)
+            }
+        }
         try {
-            launch { channel.status.collect { onConnection(it == RealtimeChannel.Status.SUBSCRIBED) } }
-            launch { events.collect { onChange(it) } }
-            channel.subscribe(blockUntilSubscribed = true)
-            awaitCancellation()
+            withTimeout(25_000) { channel.subscribe(blockUntilSubscribed = true) }
+            disconnected.await()
         } finally {
+            statusJob.cancel()
+            eventsJob.cancel()
             onConnection(false)
-            withContext(NonCancellable) { client.realtime.removeChannel(channel) }
+            withContext(NonCancellable) {
+                withTimeoutOrNull(5_000) { client.realtime.removeChannel(channel) }
+            }
         }
     }
 }

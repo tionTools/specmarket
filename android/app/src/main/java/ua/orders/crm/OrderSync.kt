@@ -1,5 +1,11 @@
 package ua.orders.crm
 
+fun connectionStatusLabel(realtimeConnected: Boolean, lastRefreshSucceeded: Boolean): String = when {
+    realtimeConnected -> "Онлайн"
+    lastRefreshSucceeded -> "CRM доступна · live-подключение восстанавливается"
+    else -> "Офлайн · сохранённые данные"
+}
+
 fun mergeOrders(current: List<Order>, changed: List<Order>): List<Order> {
     if (changed.isEmpty()) return current
     val merged = LinkedHashMap<String, Order>(current.size + changed.size)

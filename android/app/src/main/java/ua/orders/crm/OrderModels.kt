@@ -232,9 +232,13 @@ fun Order.shipments(): List<JsonObject> = (((delivery as? JsonObject)?.get("ship
 fun Order.recipientName(): String =
     deliveryValue("recipient").trim().ifBlank { customer.orEmpty().trim() }.display()
 
+fun Order.buyerPhone(): String = formatCustomerPhoneForDisplay(phone)
+
 fun Order.recipientPhone(): String =
     formatCustomerPhoneForDisplay(
-        deliveryValue("recipientPhone").trim().ifBlank { phone.orEmpty().trim() },
+        deliveryValue("recipientPhone").trim().ifBlank {
+            if (normalizedStatus(platform) == "пром") "" else phone.orEmpty().trim()
+        },
     )
 
 private val returnSignalRegex = Regex(
