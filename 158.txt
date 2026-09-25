@@ -1,0 +1,25 @@
+SpecMarket — Patch 158: сократить реальные Data API обращения при проверке доставок
+
+Base main SHA: e837fe4b694f36b2ec44c20855212ea5775c35a4 (после Android Patch 159).
+Патч: https://github.com/tionTools/specmarket/blob/chatgpt-patches/158.patch
+SHA blob патча: cf55e53735d578f7c98bfd2cf39b0947c52dbf1a
+
+Суть (строго по текущему коду):
+- Ранее sync-delivery-tracking делал отдельный SELECT crm_orders.delivery для каждой проверенной ТТН после ответа перевозчика и повторный SELECT в catch.
+- Теперь ответы перевозчиков собираются группами по 25, актуальные delivery для этих заказов читаются одним SELECT crm_orders(id,delivery).in(id, ids) на группу. Перед обновлением ОБЯЗАТЕЛЬНО сохраняется sameShipment(original, current). Не изменять это условие.
+- Если пакетное чтение падает, выполняется fallback по одному заказу. Если текущее состояние отсутствует или изменилась ТТН/перевозчик — результат API не записывать.
+- Существующее пакетное сохранение crm_delivery_tracking_state по 25 сохранено. Для изменившихся доставок UPDATE crm_orders остаётся по одному; не заменять его слепым массовым upsert, который затрёт другие поля/параллельные изменения.
+- Дневные/ночные интервалы, механика marketplace cron, API площадок, Android, напоминания 157 не меняются. SQL-миграций нет. Это первый измеримый шаг глубокой оптимизации, не обещать заранее процент общего снижения.
+- Добавлены изолированные Deno-тесты пакетного чтения, fallback, пропавшего заказа, пустой очереди и thrown error.
+
+Codex:
+1. git fetch origin main chatgpt-patches; проверить SHA актуального main, рабочее дерево, реальный diff. Не перетирать параллельные изменения. Если main ушёл вперёд, проверить пересечения; не применять вслепую.
+2. Скачать 158.patch (GitHub raw или git show origin/chatgpt-patches:158.patch > 158.patch). git apply --check 158.patch; git apply 158.patch. Если patch не проходит — ОСТАНОВИТЬСЯ, прислать точную ошибку; не восстанавливать его «примерно».
+3. Scoped formatting только трёх файлов патча. Проверить и убрать formatter churn. Не форматировать остальное.
+4. Запустить все существующие Deno тесты sync-delivery-tracking + current-deliveries_test.ts, Deno check функции, pnpm type-check, scoped oxlint/eslint, pnpm build, git diff --check (если инструменты доступны). Провести самостоятельный код-ревью: сохранность sameShipment; отсутствие записи состояния при смене ТТН; результат перевозчика не применяется к удалённому заказу; падение batch SELECT -> per-ID retry; отсутствие SQL новых прав; при ошибке UPDATE записывается last_error, не success.
+5. Проверить совместимость Supabase PostgREST с .in('id', ids) и типы результатов TypeScript/Deno. Если реальный blocker — сделать минимальную точечную правку и явно описать отклонение от патча, затем повторить тесты. Не менять логику синхронизации маркетплейсов.
+6. Commit, SSH push main, deploy только sync-delivery-tracking Edge Function + production workflow по правилам. Проверить status deploy; прислать commit SHA, изменённые файлы, тесты, Edge deploy и GitHub Actions.
+7. После выкладки проверить вручную одну действующую ТТН и смену ТТН; сравнить число API логов сопоставимых периодов до/после (отдельно crm_orders и crm_delivery_tracking_state). Не объявлять полную экономию в процентах без замера.
+8. Отдельно отметить: ранее вручную выполненная SQL-миграция 156 могла остаться НЕ зарегистрирована в supabase_migrations history. Здесь SQL-миграций нет; не делать supabase db push вслепую и не повторять вручную уже выполненную миграцию.
+
+Отчёт: SHA, список файлов, Deno тесты и check, type-check/lint/build, deployment Edge, production Actions, фактические проверки и любые ограничения.
