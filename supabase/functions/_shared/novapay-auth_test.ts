@@ -414,6 +414,56 @@ Deno.test('rejects rotated credentials with unknown JWT expiry before saving', a
     throw new Error('invalid rotated credentials reached persistence')
 })
 
+Deno.test('NovaPay auth diagnostics classify failures without logging raw credential data', async () => {
+  const logs: string[] = []
+  const originalError = console.error
+  console.error = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '))
+  }
+  try {
+    const admin = {
+      rpc: async (name: string) => {
+        if (
+          name === 'acquire_novapay_rotation_lock_owned' ||
+          name === 'release_novapay_rotation_lock'
+        )
+          return { data: true }
+        if (name === 'get_novapay_auth_state')
+          return { data: { refresh_token: 'old', public_certificate: 'old' } }
+        if (name === 'begin_novapay_auth_rotation') return { data: null }
+        throw new Error(name)
+      },
+    }
+    for (const failure of [
+      new NovaPayTransportError('AbortError'),
+      new NovaPayTransportError('PRIVATE_CREDENTIAL_VALUE'),
+    ]) {
+      await getValidNovaPayJwt({
+        admin,
+        authenticate: async () => {
+          throw failure
+        },
+      })
+        .then(() => {
+          throw new Error('ambiguous response accepted')
+        })
+        .catch((error) => {
+          if (error.code !== 'NOVAPAY_AUTH_UNCERTAIN') throw error
+        })
+    }
+  } finally {
+    console.error = originalError
+  }
+  if (
+    logs.length !== 2 ||
+    !logs[0].includes('reason=timeout; recovery_guard=retained') ||
+    !logs[1].includes('reason=transport_failure; recovery_guard=retained') ||
+    logs.some((line) => line.includes('PRIVATE_CREDENTIAL_VALUE'))
+  ) {
+    throw new Error('NovaPay auth diagnostics lost the failure category or leaked raw data')
+  }
+})
+
 for (const failure of [
   new NovaPayTransportError('lost response after token consumption'),
   Object.assign(new Error('unreadable response'), { code: 'NOVAPAY_SOAP_PARSE_ERROR' }),

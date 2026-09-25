@@ -107,6 +107,24 @@ function ambiguousAuthenticationError(error: unknown) {
   return code === 'NOVAPAY_SOAP_PARSE_ERROR' || code === 'NOVAPAY_SOAP_RESULT_MISSING'
 }
 
+function authExchangeFailureReason(error: unknown): string {
+  if (error instanceof NovaPayTransportError) {
+    if (error.message === 'AbortError') return 'timeout'
+    if (/^http_[45][0-9]{2}$/.test(error.message)) return error.message
+    return 'transport_failure'
+  }
+  const code =
+    error && typeof error === 'object' ? text((error as { code?: unknown }).code) : ''
+  if (
+    code === 'NOVAPAY_SOAP_PARSE_ERROR' ||
+    code === 'NOVAPAY_SOAP_RESULT_MISSING' ||
+    code === 'NOVAPAY_SOAP_FAULT' ||
+    code === 'NOVAPAY_API_ERROR'
+  )
+    return code
+  return 'unexpected_error'
+}
+
 async function authenticateOnce(
   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>,
   state: { refreshToken: string; publicCertificate: string },
@@ -114,6 +132,11 @@ async function authenticateOnce(
   try {
     return await authenticate(state)
   } catch (error) {
+    // A single-use refresh credential may be consumed even if its response is lost.
+    // Never log raw provider errors: they may contain credentials or response payloads.
+    console.error(
+      `NovaPay JWT rotation failed: reason=${authExchangeFailureReason(error)}; recovery_guard=retained.`,
+    )
     if (!ambiguousAuthenticationError(error)) throw error
     throw new NovaPayAuthError(
       502,
