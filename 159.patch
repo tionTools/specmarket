@@ -1,0 +1,33 @@
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -548,9 +548,9 @@
+ 
+ @Composable
+ private fun OrderCard(order: Order, onClick: () -> Unit) {
+     val newOrder = isNewOrderVisual(order)
+-    val recipient = order.recipientName()
+-    val recipientPhone = order.recipientPhone()
++    val buyerName = order.customer.display()
++    val buyerPhone = order.buyerPhone()
+     Card(
+         onClick = onClick,
+         modifier = Modifier.fillMaxWidth(),
+@@ -570,14 +570,14 @@
+             }
+ 
+             Text(
+-                recipient,
++                buyerName,
+                 style = MaterialTheme.typography.titleMedium,
+                 fontWeight = FontWeight.Bold,
+                 color = MaterialTheme.colorScheme.onSurface,
+             )
+-            if (recipientPhone != "—") {
++            if (buyerPhone != "—") {
+                 Text(
+-                    recipientPhone,
++                    buyerPhone,
+                     style = MaterialTheme.typography.bodyLarge,
+                     fontWeight = FontWeight.SemiBold,
+                     color = MaterialTheme.colorScheme.onSurface,
