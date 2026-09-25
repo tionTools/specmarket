@@ -735,7 +735,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             onClick = { openDialer(context, rawBuyerPhone) },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                         ) {
-                            Text("Позвонить покупателю · $buyerPhone", fontWeight = FontWeight.SemiBold)
+                            Text("Позвонить $buyerPhone", fontWeight = FontWeight.SemiBold)
                         }
                         Row(
                             Modifier.fillMaxWidth(),
