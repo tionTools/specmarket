@@ -1,15 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useNow } from '@vueuse/core'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { currencyRateForDate, localDateKey, type CurrencyRateRow } from '@/features/prices/currencyRates'
 import { supabase } from '@/lib/supabase'
 import { consumeBankingReturn } from './navigation'
+import { hasNovaPaySyncIssue, type NovaPayJournalRow } from './novapayJournal'
 import type { BankName, BankState } from './types'
 
 const props = defineProps<{ caches: BankState; totalBalance: number | null }>()
 
 const banks = ['monobank', 'novapay'] as const
 const supplierDebt = ref<number | null>(null)
+const journal = ref<NovaPayJournalRow[]>([])
+const journalUnavailable = ref(false)
+const now = useNow({ interval: 60_000 })
+let journalChannel: RealtimeChannel | undefined
+
+const syncIssue = computed(() =>
+  hasNovaPaySyncIssue(journal.value, props.caches.novapay.updatedAt, now.value),
+)
+
+async function loadNovaPayJournal() {
+  if (!supabase) return
+  const { data, error } = await supabase
+    .from('crm_novapay_sync_log')
+    .select('id,started_at,finished_at,source,status,stage,code,reason,request_ref')
+    .order('started_at', { ascending: false })
+    .limit(100)
+  journalUnavailable.value = Boolean(error)
+  if (!error) journal.value = (data ?? []) as NovaPayJournalRow[]
+}
 
 const completeBankTotal = computed(() => {
   const values = banks.map((bank) => props.caches[bank].balance)
@@ -138,11 +160,38 @@ onMounted(() => {
   clearLegacyBankingHash()
   scrollToBankingBlock()
   void loadSupplierDebt()
+  void loadNovaPayJournal()
+  if (supabase) {
+    journalChannel = supabase
+      .channel('crm:novapay-sync-journal')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'crm_novapay_sync_log' },
+        () => void loadNovaPayJournal(),
+      )
+      .subscribe()
+  }
+})
+
+onUnmounted(() => {
+  if (supabase && journalChannel) void supabase.removeChannel(journalChannel)
+  journalChannel = undefined
 })
 </script>
 
 <template>
   <div id="banking" class="mt-3 flex flex-wrap items-stretch gap-3 sm:-mt-[42px] sm:ml-44">
+    <div
+      v-if="syncIssue"
+      class="w-full rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"
+      role="alert"
+    >
+      NovaPay не обновляется. Последнее успешное обновление: {{ updatedAt(caches.novapay.updatedAt) }}.
+      <RouterLink class="underline" to="/banking/novapay">Открыть журнал</RouterLink>
+    </div>
+    <p v-if="journalUnavailable" class="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert">
+      Не удалось проверить журнал NovaPay. Открой выписку для диагностики.
+    </p>
     <section
       v-for="bank in banks"
       :key="bank"

@@ -5,6 +5,7 @@ import {
   NovaPayAuthError,
   NovaPayTransportError,
 } from '../_shared/novapay-auth.ts'
+import { recordNovaPayBalanceFailure } from '../_shared/novapay-sync-journal.ts'
 
 const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
 const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
@@ -349,6 +350,7 @@ Deno.serve(async (request) => {
       { headers: corsHeaders },
     )
   } catch (error) {
+    await recordNovaPayBalanceFailure(admin, error)
     if (error instanceof NovaPayAuthError) {
       return errorResponse(new HttpError(error.status, error.code, error.message))
     }

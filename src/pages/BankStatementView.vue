@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useClipboard, useNow } from '@vueuse/core'
 import { ArrowLeft, RefreshCw } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { requestBankingReturn } from '@/features/banking/navigation'
+import {
+  isInterruptedNovaPayRun,
+  type NovaPayJournalRow,
+} from '@/features/banking/novapayJournal'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
 import { supabase } from '@/lib/supabase'
 
@@ -20,6 +25,38 @@ const snapshot = ref<BankSnapshot | null>(null)
 const isLoading = ref(true)
 const isRefreshing = ref(false)
 const error = ref('')
+const journal = ref<NovaPayJournalRow[]>([])
+const journalError = ref('')
+const copyStatus = ref('')
+const now = useNow({ interval: 60_000 })
+const { copy } = useClipboard()
+
+async function loadNovaPayJournal() {
+  if (!supabase || bank.value !== 'novapay') return
+  const { data, error: loadError } = await supabase
+    .from('crm_novapay_sync_log')
+    .select('id,started_at,finished_at,source,status,stage,code,reason,request_ref')
+    .order('started_at', { ascending: false })
+    .limit(100)
+  journalError.value = loadError ? 'Не удалось загрузить журнал NovaPay.' : ''
+  if (!loadError) journal.value = (data ?? []) as NovaPayJournalRow[]
+}
+
+async function handleCopyJournal() {
+  await loadNovaPayJournal()
+  if (journalError.value) return
+  try {
+    await copy(JSON.stringify({
+      source: 'SpecMarket NovaPay sync journal',
+      exported_at: new Date().toISOString(),
+      last_success_at: snapshot.value?.updatedAt ?? null,
+      events: journal.value,
+    }, null, 2))
+    copyStatus.value = 'Журнал скопирован.'
+  } catch {
+    copyStatus.value = 'Не удалось скопировать журнал.'
+  }
+}
 
 const bank = computed<BankName | null>(() => {
   const value = Array.isArray(route.params.bank) ? route.params.bank[0] : route.params.bank
@@ -180,6 +217,7 @@ async function load(refresh: boolean) {
   } finally {
     isLoading.value = false
     isRefreshing.value = false
+    if (refresh && bank.value === 'novapay') await loadNovaPayJournal()
   }
 }
 
@@ -195,6 +233,7 @@ async function initialize() {
     return
   }
   await load(false)
+  await loadNovaPayJournal()
 }
 
 function goBackToBanking() {
@@ -253,6 +292,38 @@ onMounted(() => {
       >
         {{ error }}
       </p>
+
+      <section
+        v-if="bank === 'novapay'"
+        class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-lg font-bold text-slate-950">Журнал ошибок NovaPay</h2>
+          <div class="flex flex-wrap gap-2">
+            <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
+            <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
+          </div>
+        </div>
+        <p v-if="journalError" class="mt-3 text-sm text-rose-700" role="alert">{{ journalError }}</p>
+        <p v-if="copyStatus" class="mt-3 text-sm text-slate-600">{{ copyStatus }}</p>
+        <p class="mt-2 text-xs text-slate-500">Только ошибки и незавершённые запуски; успешные синхронизации не накапливаются.</p>
+        <p v-if="!journal.length" class="mt-3 text-sm text-slate-500">Ошибок пока нет.</p>
+        <div v-else class="mt-3 overflow-x-auto">
+          <table class="w-full min-w-[750px] text-left text-xs">
+            <thead><tr class="border-b border-slate-200 text-slate-500"><th class="py-2">Начало</th><th>Источник</th><th>Этап</th><th>Результат</th><th>Код / причина</th><th>Запрос</th></tr></thead>
+            <tbody>
+              <tr v-for="entry in journal" :key="entry.id" class="border-b border-slate-100">
+                <td class="py-2">{{ dateTime(entry.started_at) }}</td>
+                <td>{{ entry.source }}</td>
+                <td>{{ entry.stage }}</td>
+                <td>{{ entry.status === 'failed' ? 'Ошибка' : isInterruptedNovaPayRun(entry, now) ? 'Прерван' : 'Выполняется' }}</td>
+                <td>{{ entry.code ?? '—' }} / {{ entry.reason ?? '—' }}</td>
+                <td class="font-mono">{{ entry.request_ref ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 px-5 py-4">

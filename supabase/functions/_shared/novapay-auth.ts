@@ -15,6 +15,7 @@ export class NovaPayAuthError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public reason?: string,
   ) {
     super(message)
     this.name = 'NovaPayAuthError'
@@ -142,6 +143,7 @@ async function authenticateOnce(
       502,
       'NOVAPAY_AUTH_UNCERTAIN',
       'NovaPay may have rotated credentials, but its response was unavailable. Authorization was not retried; verify authorization state before trying again.',
+      authExchangeFailureReason(error),
     )
   }
 }
