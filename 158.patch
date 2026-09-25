@@ -327,6 +327,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
    await flushTrackingStates()
    return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
 diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries.ts b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
+new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
 @@ -0,0 +1,35 @@
@@ -366,6 +367,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries.ts b/s
 +  return { deliveries, errors }
 +}
 diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
+new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
 @@ -0,0 +1,49 @@
