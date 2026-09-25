@@ -1,0 +1,13 @@
+Patch 150 — Android: shorten buyer call button label
+
+Base main SHA: 1fe0c40a3a73a0114bd2c6090c6b5cf7fa92f741
+Patch: origin/chatgpt-patches/150.patch
+Expected patch blob SHA: 92577cca6fc4d956c18216f0e8e36ce4f8db2ce9
+
+Change exactly:
+- Text("Позвонить покупателю · $buyerPhone") -> Text("Позвонить $buyerPhone").
+- Keep phone action calling rawBuyerPhone (BUYER), not recipient.
+- Bump Android versionCode to 17 and versionName to 0.17 so the updated signed APK is identifiable.
+- No other UI/network/CRM/backend changes.
+
+Codex: verify main and worktree; apply patch with git apply --check; run Android unit tests, lint and signed assembleRelease; inspect diff and git diff --check; commit only touched Android files and SSH push main; wait for Android APK GitHub Actions success and android-latest signed release upload. If local SDK unavailable, use workflow to verify. Report commit SHA, tests, workflow and direct APK link. Do not claim finished before publishing the APK. No intermediate messages.
