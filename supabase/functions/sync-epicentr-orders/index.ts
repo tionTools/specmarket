@@ -10,6 +10,7 @@ import {
 } from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   epicentrConfirmationStatus,
   epicentrOrderStatus,
@@ -529,10 +530,21 @@ Deno.serve(async (request) => {
     orders = payload.items ?? []
   }
   const listOrders = orders
-  const hashes = new Map(await Promise.all(listOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
   const externalIds = listOrders.map((order) => order.id).filter(Boolean)
-  const { data: states, error: statesError } = externalIds.length
-    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', externalIds)
+  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
+    ? await admin.from('crm_deleted_marketplace_orders').select('external_id').eq('platform', 'Эпицентр').in('external_id', externalIds)
+    : { data: [], error: null }
+  if (deletedOrdersError)
+    return Response.json({ ok: false, message: `Не удалось проверить удалённые заказы Эпицентра: ${deletedOrdersError.message}` }, { status: 500, headers: corsHeaders })
+  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => String(row.external_id)))
+  const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
+    listOrders,
+    deletedExternalIds,
+    (order) => order.id,
+  )
+  const hashes = new Map(await Promise.all(importableOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
+  const { data: states, error: statesError } = importableOrders.length
+    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', importableOrders.map((order) => order.id))
     : { data: [] }
   if (statesError) return Response.json({ ok: false, message: statesError.message }, { status: 500, headers: corsHeaders })
   const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
@@ -540,13 +552,13 @@ Deno.serve(async (request) => {
   const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
   const terminalStatusCodes = new Set(['finished', 'completed', 'closed', 'canceled', 'returned', 'canceled_by_seller'])
   const final = (order: EpicentrOrder) => terminalStatusCodes.has(String(order.statusCode).toLowerCase())
-  orders = listOrders.filter((order) => {
+  orders = importableOrders.filter((order) => {
     if (requestedExternalId || fullSync) return true
     const state = stateByExternalId.get(order.id)
     return !state || state.source_hash !== hashes.get(order.id) || (!final(order) && Date.now() - Date.parse(state.synced_at) >= ttlMs)
   })
-  const skippedUnchanged = listOrders.length - orders.length
-  if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
+  const skippedUnchanged = importableOrders.length - orders.length
+  if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, deletedSkipped, changedOrderIds: [] }, { headers: corsHeaders })
   const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', orders.map((order) => order.id))
   if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
@@ -882,5 +894,5 @@ Deno.serve(async (request) => {
     if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
 
-  return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
+  return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
 })

@@ -3761,18 +3761,24 @@ function toggleInternalCommentEdit(order: Order) {
 
 async function deleteOrder(order: Order) {
   if (isGuest.value || deletingOrderId.value !== null) return
-  if (!window.confirm(`Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`)) return
+  const preventReimport =
+    Boolean(order.externalId) &&
+    (order.platform === 'Каста' || order.platform === 'Пром' || order.platform === 'Эпицентр')
+  const confirmation = preventReimport
+    ? `Удалить заказ № ${order.id} из CRM вместе со всеми позициями? Заказ на площадке останется без изменений, повторный импорт в CRM будет заблокирован.`
+    : `Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`
+  if (!window.confirm(confirmation)) return
   deletingOrderId.value = order.id
   await persistenceQueue
-  if (order.platform === 'Каста' && order.externalId) {
+  if (preventReimport && order.externalId) {
     if (!supabase) {
-      window.alert('Не удалось сохранить запрет повторного импорта Kasta-заказа.')
+      window.alert('Не удалось сохранить запрет повторного импорта заказа.')
       deletingOrderId.value = null
       return
     }
     const { error: tombstoneError } = await supabase.from('crm_deleted_marketplace_orders').upsert(
       {
-        platform: 'Каста',
+        platform: order.platform,
         external_id: order.externalId,
         order_label: order.displayNumber ?? String(order.id),
       },
@@ -3780,7 +3786,7 @@ async function deleteOrder(order: Order) {
     )
     if (tombstoneError) {
       window.alert(
-        `Не удалось сохранить запрет повторного импорта Kasta-заказа: ${tombstoneError.message}`,
+        `Не удалось сохранить запрет повторного импорта заказа: ${tombstoneError.message}`,
       )
       deletingOrderId.value = null
       return
@@ -3804,6 +3810,7 @@ async function deleteOrder(order: Order) {
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   expandedOrderId.value = null
   deletingOrderId.value = null
+  void bankBalancesCard.value?.refreshDebt()
 }
 
 function platformClass(platform: Platform) {

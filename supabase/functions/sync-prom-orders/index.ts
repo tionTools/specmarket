@@ -22,6 +22,7 @@ import {
 } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
+import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   acceptPromOrders,
   normalizePromExternalIds,
@@ -1208,13 +1209,36 @@ Deno.serve(async (request) => {
     : Array.isArray(payload.orders)
       ? payload.orders.map(asRecord)
       : []
+  const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
+  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
+    ? await admin
+        .from('crm_deleted_marketplace_orders')
+        .select('external_id')
+        .eq('platform', 'Пром')
+        .in('external_id', externalIds)
+    : { data: [], error: null }
+  if (deletedOrdersError)
+    return Response.json(
+      {
+        ok: false,
+        message: `Не удалось проверить удалённые Prom-заказы: ${deletedOrdersError.message}`,
+      },
+      { status: 500, headers: corsHeaders },
+    )
+  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => text(row.external_id)))
+  const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
+    orders,
+    deletedExternalIds,
+    (order) => `prom:${text(order.id)}`,
+  )
   const hashes = new Map<string, string>(
     await Promise.all(
-      orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const),
+      importableOrders.map(
+        async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const,
+      ),
     ),
   )
-  const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
-  const { data: syncRows, error: syncStateError } = externalIds.length
+  const { data: syncRows, error: syncStateError } = hashes.size
     ? await admin
         .from('crm_marketplace_order_sync_state')
         .select('external_id, source_hash, order_id')
@@ -1227,14 +1251,14 @@ Deno.serve(async (request) => {
       { status: 500, headers: corsHeaders },
     )
   const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
-  const candidates = orders.filter(
+  const candidates = importableOrders.filter(
     (order) =>
       requestedExternalId ||
       fullSync ||
       stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
         hashes.get(`prom:${text(order.id)}`),
   )
-  const skippedUnchanged = orders.length - candidates.length
+  const skippedUnchanged = importableOrders.length - candidates.length
   if (!candidates.length)
     return Response.json(
       {
@@ -1244,6 +1268,7 @@ Deno.serve(async (request) => {
         updated: 0,
         skipped: skippedUnchanged,
         skippedUnchanged,
+        deletedSkipped,
         changedOrderIds: [],
       },
       { headers: corsHeaders },
@@ -1770,6 +1795,7 @@ Deno.serve(async (request) => {
       updated,
       skipped,
       skippedUnchanged: skipped,
+      deletedSkipped,
       changedOrderIds: [...new Set(changedOrderIds)],
     },
     { headers: corsHeaders },
