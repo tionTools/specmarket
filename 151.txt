@@ -1,0 +1,21 @@
+Patch 151 — verified Prom buyer and recipient may legitimately have the SAME phone
+
+Base main: 68167f3ed64d892bc5c5c8d3c305e5d97d380d84
+Patch: origin/chatgpt-patches/151.patch
+Expected blob SHA: 0087424c5216d37e670fd0dbd27299460e1273a8
+
+Evidence: Prom screenshot for order 429709718 shows buyer Адамов Святослав and recipient Адамов Ігор, both with +380 95 399 13 33; CRM buyer phone is blank and recipient phone is correct. Existing code filters out order.client.phone when names differ and phone equals recipient. This is a logic mistake: a direct buyer field is authoritative, even if two people share one number.
+
+Fix:
+- Trust explicit buyer sources order.client.phone and order.client_phone even if the recipient shares the same number.
+- Preserve existing safeguards on ambiguous sources (historical CRM phone, order.phone) so they cannot populate buyer from recipient by mistake.
+- Leave recipient phone resolution and unrelated platforms untouched.
+- Update the now-obsolete regression assertion and add distinct-names/same-phone scenarios; total actual-helper cases must be 20/20.
+- No user personal details, actual phone numbers, temporary diagnostics or credentials in code/tests.
+- Only two files in patch: supabase/functions/sync-prom-orders/index.ts and src/features/orders/prom-phone-separation_test.mjs.
+
+Codex: verify current main/worktree and patch blob, git apply --check then apply; format only changed files, inspect real diff and remove formatter churn. Run node src/features/orders/prom-phone-separation_test.mjs (expect 20/20), pnpm type-check, scoped Oxlint/ESLint, pnpm build where required, git diff --check and available Edge checks. Commit only the two relevant files, SSH push main, explicitly deploy Edge Function sync-prom-orders to Supabase project rtkhgldaswsclkorlyxx. Do not claim frontend Production Deploy is required if frontend unchanged. If main has moved, inspect/rebase carefully; never apply blindly.
+
+After Edge deploy the user will press 'Синхронизировать заказ' for 429709718 in an authenticated CRM session and confirm that buyer and recipient each show +380 95 399 13 33. Also spot-check 429545614 keeps different phones in their correct fields. Codex should not claim this manual CRM check was performed.
+
+Final report: checks, commit SHA, Edge deploy success/failure, scope. No intermediate messages.
