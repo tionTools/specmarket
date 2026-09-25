@@ -1,0 +1,31 @@
+Patch 155 — refresh supplier debt immediately after order changes
+
+Repository: tionTools/specmarket
+Base main SHA: 61bbf4eba92b825a40cadaf7c0923abe6787aeb7
+Patch: origin/chatgpt-patches/155.patch
+Expected blob SHA: f8d8f1f179d058cd014d7958d07eb599c4646ce0
+
+Problem:
+Supplier debt is calculated from current cost totals for orders that have a non-empty TTN. When a new order/TTN is saved, the database total changes immediately, but the BankBalancesCard keeps showing its old supplierDebt value until page reload. Accepted returns and order deletion already call refreshDebt() explicitly.
+
+Fix:
+- After save-crm-orders succeeds in persistOrdersNow(), refresh BankBalancesCard supplier debt.
+- After refreshRemoteOrders() applies marketplace/realtime changes, refresh supplier debt.
+- Existing behavior for accepted returns and order deletion remains unchanged.
+- Do NOT change debt accounting rules: an order without TTN must still not enter current cost totals; a replacement TTN must not add cost twice; accepted returns reduce remaining cost.
+- Frontend only: no schema, migration or Edge Function changes.
+
+Codex workflow:
+1. Verify main/worktree and expected patch blob. git apply --check, then apply.
+2. Format only src/pages/HomeView.vue and inspect the real diff. Remove formatter churn; no unrelated refactors.
+3. Run pnpm type-check, scoped Oxlint/ESLint for HomeView, pnpm build, git diff --check. Also inspect that existing refreshDebt calls after accepted return and delete remain present.
+4. Commit only src/pages/HomeView.vue, SSH push main, wait for actual Production Deploy success. No Edge Functions deploy.
+5. Final brief report: checks, commit SHA, Production Deploy link/status. Do not claim manual browser test unless actually performed.
+
+Manual acceptance after deploy:
+- Note current supplier debt.
+- Create/save a new order WITH a TTN and non-zero cost. The supplier-debt figure should update automatically without browser reload.
+- Create/save an order WITHOUT a TTN: supplier debt should not increase.
+- Edit an existing order to add or remove TTN: supplier debt should update automatically.
+- Accept a return: supplier debt should still decrease immediately.
+- Marketplace/realtime order update that changes TTN/cost should refresh the figure as well.
