@@ -2413,6 +2413,7 @@ async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value
     )
     if (order) order.remoteId = saved.remoteId
   }
+  void bankBalancesCard.value?.refreshDebt()
 }
 
 async function signIn() {
@@ -3116,6 +3117,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
     applyPromRegistryPreview,
   )
   sortOrders()
+  void bankBalancesCard.value?.refreshDebt()
   return refreshedAllRequestedOrders
 }
 
