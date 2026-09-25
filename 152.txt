@@ -1,0 +1,37 @@
+Patch 152 — Permanent CRM deletion for Prom and Epicentr, matching existing Kasta tombstones
+
+Repository: tionTools/specmarket
+Base main SHA: 7d0d5e71ab9784210908157fa5dbce9c298e0f0e
+Patch file: origin/chatgpt-patches/152.patch
+Expected blob SHA: 9d999c849a2332d3c1a501fc7338916f6c163a84
+Supabase project ref: rtkhgldaswsclkorlyxx
+
+User goal:
+When a marketplace order is deleted from CRM, it must stay unchanged in the marketplace but must NEVER reappear in CRM from normal, full, scheduled, or targeted order sync. Extend Kasta's existing crm_deleted_marketplace_orders mechanism to Prom and Epicentr. On CRM delete, remove the order and its items and refresh supplier debt after successful deletion; do not record a fictitious received return just because a label was created and then deleted. Do not change creation/deletion of TTNs, delivery tracking, cancellation status, shipment history, or legitimate replacement TTNs of other orders.
+
+Patch scope (exactly 5 files):
+- src/pages/HomeView.vue: on delete, upsert tombstone for Kasta, Prom, Epicentr using real platform/external_id; explain that marketplace is unaffected and reimport blocked; preserve existing failure behavior; refresh bank supplier debt after deletion.
+- supabase/functions/sync-prom-orders/index.ts: query Prom tombstones (external_id formatted as prom:<id>), fail closed on lookup errors, exclude before hash/candidate selection so targeted/full/normal/cron cannot import deleted IDs; report deletedSkipped.
+- supabase/functions/sync-epicentr-orders/index.ts: same with raw Epicentr external_id (no prefix), filter before candidate selection; report deletedSkipped.
+- supabase/functions/_shared/deleted-marketplace-orders.ts: shared pure filter.
+- src/features/orders/deleted-marketplace-orders_test.mjs: regression scenarios and call-site guards.
+
+The tombstone table, policies and access already exist; no new table/migration/GRANT change. Do not change Kasta backend; preserve its current behavior. Do not change unrelated marketplace logic.
+
+Execution:
+1. Verify current main/worktree and patch SHA, then git apply --check and apply. Do not apply twice or discard unrelated user changes.
+2. Format ONLY changed files. Inspect actual diff and remove formatter churn; real blocker fixes should be minimal and re-tested. Verify deleted order IDs are rejected on full, normal, targeted, cron paths and marketplace API state remains unchanged. Check Supabase SELECT/UPSERT access/RLS and data types against current schema.
+3. Run: node src/features/orders/deleted-marketplace-orders_test.mjs; node src/features/orders/prom-phone-separation_test.mjs; pnpm type-check; scoped Oxlint/ESLint for touched JS/TS/Vue; pnpm build; git diff --check; available Deno/Edge checks. If any check fails, fix actual blocker, do not claim PASS prematurely.
+4. Commit only the 5 relevant files, SSH push main. Wait for Production Deploy success. EXPLICITLY deploy BOTH Edge Functions (frontend deploy alone is insufficient):
+   pnpm exec supabase functions deploy sync-prom-orders --project-ref rtkhgldaswsclkorlyxx
+   pnpm exec supabase functions deploy sync-epicentr-orders --project-ref rtkhgldaswsclkorlyxx
+   Use existing authorized deployment; never expose or request tokens in chat.
+5. Final brief report only: actual test/check results, commit SHA, GitHub Production Deploy link, success/failure of BOTH Edge deploys. Do not claim manual CRM delete test is already done.
+
+Manual acceptance AFTER deployments (performed by user, not Codex):
+- Delete canceled Prom order 429708334 using trash in CRM; verify it disappears and does not reimport after full and regular sync. Prom itself remains canceled. Its cancelled/deleted TTN is not recreated by this change.
+- Check supplier debt refresh after deletion. It should no longer include that order's eligible remaining cost; compare to prior balance, taking accounting checkpoint into consideration. Do not promise a fixed change without actual figures.
+- On a safe Epicentr test order (only user's chosen order), verify the same permanent block. Other orders with canceled-and-recreated TTNs should continue to refresh normally.
+- No 'Принять возврат' for an order that was never physically shipped.
+
+If any blocker makes publication unsafe, stop and report the exact failed step; do not invent a successful deploy or commit.
