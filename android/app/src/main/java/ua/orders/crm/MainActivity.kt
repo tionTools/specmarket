@@ -549,8 +549,8 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
     val newOrder = isNewOrderVisual(order)
-    val recipient = order.recipientName()
-    val recipientPhone = order.recipientPhone()
+    val buyerName = order.customer.display()
+    val buyerPhone = order.buyerPhone()
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -570,14 +570,14 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
             }
 
             Text(
-                recipient,
+                buyerName,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            if (recipientPhone != "—") {
+            if (buyerPhone != "—") {
                 Text(
-                    recipientPhone,
+                    buyerPhone,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
