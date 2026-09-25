@@ -1483,6 +1483,27 @@ const ordersForPlatformSummary = computed(() => {
     return date !== null && date >= from && date <= to
   })
 })
+const previousPlatformSummaryRange = computed(() => {
+  const { from, to } = platformSummaryRange.value
+  if (platformSummaryPeriod.value === 'month') {
+    return {
+      from: new Date(from.getFullYear(), from.getMonth() - 1, 1),
+      to: new Date(from.getFullYear(), from.getMonth(), 0),
+    }
+  }
+  return { from: shiftDateByMonths(from, -1), to: shiftDateByMonths(to, -1) }
+})
+const previousPlatformSummaryRangeLabel = computed(
+  () =>
+    `${formatShortDate(previousPlatformSummaryRange.value.from)}–${formatShortDate(previousPlatformSummaryRange.value.to)}`,
+)
+const ordersForPreviousPlatformSummary = computed(() => {
+  const { from, to } = previousPlatformSummaryRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
 const orderListRange = computed(() => {
   const today = startOfLocalDay(new Date())
   if (orderListPeriod.value === 'day') {
@@ -1955,21 +1976,29 @@ const summary = computed(() => {
   }
 })
 
+function platformOrderMetrics(platformOrders: Order[]) {
+  return {
+    count: platformOrders.length,
+    turnover: platformOrders.reduce((sum, order) => sum + getNetOrderAmount(order), 0),
+    planned: platformOrders.reduce((sum, order) => sum + getPlannedProfit(order), 0),
+    actual: platformOrders
+      .filter(hasActualFinancialResult)
+      .reduce((sum, order) => sum + getActualProfit(order), 0),
+  }
+}
+
 const platformSummary = computed(() =>
-  platformOptions.map((platform) => {
-    const platformOrders = ordersForPlatformSummary.value.filter(
-      (order) => orderBusinessPlatform(order) === platform,
-    )
-    return {
-      platform,
-      count: platformOrders.length,
-      turnover: platformOrders.reduce((sum, order) => sum + getNetOrderAmount(order), 0),
-      planned: platformOrders.reduce((sum, order) => sum + getPlannedProfit(order), 0),
-      actual: platformOrders
-        .filter(hasActualFinancialResult)
-        .reduce((sum, order) => sum + getActualProfit(order), 0),
-    }
-  }),
+  platformOptions.map((platform) => ({
+    platform,
+    ...platformOrderMetrics(
+      ordersForPlatformSummary.value.filter((order) => orderBusinessPlatform(order) === platform),
+    ),
+    previous: platformOrderMetrics(
+      ordersForPreviousPlatformSummary.value.filter(
+        (order) => orderBusinessPlatform(order) === platform,
+      ),
+    ),
+  })),
 )
 
 function createProduct(): OrderProduct {
@@ -5356,6 +5385,24 @@ function orderDateTime(order: Order) {
             </div>
             <div class="flex min-w-20 justify-end font-bold">
               <PlatformLogo :platform="item.platform" />
+            </div>
+            <div
+              v-if="isComparingPreviousPeriod"
+              class="col-span-full -mx-3 -mb-2 border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[11px] leading-4 text-indigo-700"
+            >
+              <p class="mb-1 font-semibold">{{ previousPlatformSummaryRangeLabel }}</p>
+              <p class="flex justify-between gap-2">
+                <span>Заказы:</span><b>{{ item.previous.count }}</b>
+              </p>
+              <p class="flex justify-between gap-2">
+                <span>Оборот:</span><b>{{ formatMoney(item.previous.turnover) }}</b>
+              </p>
+              <p class="flex justify-between gap-2">
+                <span>План:</span><b>{{ formatMoney(item.previous.planned) }}</b>
+              </p>
+              <p class="flex justify-between gap-2">
+                <span>Факт:</span><b>{{ formatMoney(item.previous.actual) }}</b>
+              </p>
             </div>
           </article>
         </div>
