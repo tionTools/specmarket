@@ -1,0 +1,79 @@
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -537,9 +537,11 @@
+   const buyerCandidate = (value: unknown) =>
+     differentPeople && samePhone(value, resolvedRecipientPhone) ? '' : text(value)
+   const buyerPhone =
+-    buyerCandidate(promClientPhone(asRecord(order.client))) ||
++    // These fields explicitly belong to the buyer, even when two people share a number.
++    promClientPhone(asRecord(order.client)) ||
+     buyerCandidate(promClientPhone(client)) ||
+-    buyerCandidate(order.client_phone) ||
++    text(order.client_phone) ||
++    // Historical and ambiguous fields can contain the recipient's phone.
+     buyerCandidate(existingOrder.phone) ||
+     (resolvedRecipientPhone ? buyerCandidate(order.phone) : '')
+   return { buyerPhone, recipientName, recipientPhone: resolvedRecipientPhone }
+diff --git a/src/features/orders/prom-phone-separation_test.mjs b/src/features/orders/prom-phone-separation_test.mjs
+--- a/src/features/orders/prom-phone-separation_test.mjs
++++ b/src/features/orders/prom-phone-separation_test.mjs
+@@ -91,7 +91,7 @@
+     receiver,
+   ],
+   [
+-    'order.client.phone equal to another recipient does not override valid old buyer',
++    'verified order.client.phone overrides outdated CRM value even when recipient shares phone',
+     {
+       client: { phone: receiver },
+       recipient_name: receiverName,
+@@ -101,10 +101,42 @@
+     {},
+     { phone: buyer, delivery: { recipient: receiverName, recipientPhone: receiver } },
+     buyerName,
+-    buyer,
+     receiver,
++    receiver,
+   ],
+   [
++    'different buyer and recipient names may legitimately share order.client.phone',
++    {
++      client: { phone: receiver },
++      recipient_name: receiverName,
++      delivery_recipient: { phone: receiver },
++      phone: receiver,
++    },
++    { phones: [receiver] },
++    {},
++    buyerName,
++    receiver,
++    receiver,
++  ],
++  [
++    'explicit buyer client_phone may match another recipient phone',
++    { client_phone: receiver, recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
++    {},
++    {},
++    buyerName,
++    receiver,
++    receiver,
++  ],
++  [
++    'recipient-only order.phone is still rejected when different people share a number',
++    { recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
++    {},
++    {},
++    buyerName,
++    '',
++    receiver,
++  ],
++  [
+     'same-person buyer and recipient may share nested order.client.phone',
+     { client: { phone: buyer }, recipient_name: buyerName, recipient_phone: buyer, phone: buyer },
+     {},
+@@ -256,4 +288,4 @@
+   home,
+   /order\.platform === 'Пром'\s*\? order\.delivery\.recipientPhone\s*:\s*order\.delivery\.recipientPhone \|\| order\.phone/,
+ )
+-console.log('Prom phone regression: 17 actual-helper cases plus UI role checks PASS')
++console.log('Prom phone regression: 20 actual-helper cases plus UI role checks PASS')
