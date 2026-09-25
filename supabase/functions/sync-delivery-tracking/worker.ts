@@ -5,6 +5,7 @@ import { novaStatus, type NovaRedirectCircuit } from './carriers/nova-poshta.ts'
 import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
 import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
 import { isFinal, record, text } from './normalize.ts'
+import { readCurrentDeliveries } from './current-deliveries.ts'
 import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
@@ -97,6 +98,7 @@ export async function runTrackingWorker(
     failed += await upsertTrackingStateBatches(pendingErrorStates.splice(0), upsertStates)
   }
   const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
+  const eligibleRows: Array<{ row: TrackingOrderRow; delivery: JsonRecord; carrier: CarrierKind }> = []
   for (const row of orderRows) {
     const delivery = record(row.delivery)
     const carrier: CarrierKind = carrierKind(delivery)
@@ -108,42 +110,80 @@ export async function runTrackingWorker(
       (orderId && !text(delivery.ttn))
     )
       continue
-    try {
-      const result = await getTrackingStatus(delivery, novaRedirectCircuit)
-      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
-      if (currentError) throw currentError
-      const currentDelivery = record(currentRow?.delivery)
-      if (!sameShipment(delivery, currentDelivery)) continue
-      const changed = trackingChanged(currentDelivery, result)
-      const state: TrackingStateUpdate = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
-      checked += 1
-      if (changed) {
-        const nextDelivery = mergeTrackingDelivery(
-          currentDelivery,
-          result,
-          now.toISOString(),
-          text(row.external_id) ? 'marketplace' : 'manual',
-        )
-        const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
-        if (updateError) throw updateError
-        updated += 1
+    eligibleRows.push({ row, delivery, carrier })
+  }
+
+  // Fetch live carrier results first, then re-read current delivery data once per batch.
+  // The comparison below prevents a stale tracking result from applying to a replaced TTN.
+  for (let start = 0; start < eligibleRows.length; start += 25) {
+    const batch = eligibleRows.slice(start, start + 25)
+    const results: Array<{ result?: TrackingResult; error?: unknown }> = []
+    for (const { delivery } of batch) {
+      try {
+        results.push({ result: await getTrackingStatus(delivery, novaRedirectCircuit) })
+      } catch (error) {
+        results.push({ error })
       }
-      pendingSuccessStates.push(state)
-    } catch (error) {
-      failed += 1
-      console.error(`Tracking ${text(delivery.ttn)}:`, error)
-      const { data: currentRow, error: currentError } = await admin.from('crm_orders').select('delivery').eq('id', row.id).maybeSingle()
-      if (currentError) {
-        console.error(`Tracking ${text(delivery.ttn)}:`, currentError)
+    }
+    const current = await readCurrentDeliveries(
+      batch.map(({ row }) => row.id),
+      async (ids) => {
+        const { data, error } = await admin.from('crm_orders').select('id, delivery').in('id', ids)
+        return { data: data as Array<{ id: string; delivery: unknown }> | null, error }
+      },
+    )
+    for (const [index, { row, delivery, carrier }] of batch.entries()) {
+      const lookupError = current.errors.get(row.id)
+      if (lookupError) {
+        failed += 1
+        console.error(`Tracking ${text(delivery.ttn)}: не удалось прочитать актуальную доставку:`, lookupError)
         continue
       }
-      const currentDelivery = record(currentRow?.delivery)
+      if (!current.deliveries.has(row.id)) continue
+      const currentDelivery = record(current.deliveries.get(row.id))
       if (!sameShipment(delivery, currentDelivery)) continue
-      pendingErrorStates.push({
-        order_id: row.id, last_checked_at: now.toISOString(), last_error: error instanceof Error ? error.message : 'Ошибка tracking', provider: carrier || null, updated_at: now.toISOString(),
-      })
+      const outcome = results[index]!
+      if (outcome.error !== undefined) {
+        failed += 1
+        console.error(`Tracking ${text(delivery.ttn)}:`, outcome.error)
+        pendingErrorStates.push({
+          order_id: row.id, last_checked_at: now.toISOString(),
+          last_error: outcome.error instanceof Error ? outcome.error.message : 'Ошибка tracking',
+          provider: carrier || null, updated_at: now.toISOString(),
+        })
+        continue
+      }
+      const result = outcome.result!
+      try {
+        const changed = trackingChanged(currentDelivery, result)
+        const state: TrackingStateUpdate = {
+          order_id: row.id, last_checked_at: now.toISOString(), last_error: null,
+          provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString(),
+        }
+        checked += 1
+        if (changed) {
+          const nextDelivery = mergeTrackingDelivery(
+            currentDelivery,
+            result,
+            now.toISOString(),
+            text(row.external_id) ? 'marketplace' : 'manual',
+          )
+          const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
+          if (updateError) throw updateError
+          updated += 1
+        }
+        pendingSuccessStates.push(state)
+      } catch (error) {
+        failed += 1
+        console.error(`Tracking ${text(delivery.ttn)}:`, error)
+        pendingErrorStates.push({
+          order_id: row.id, last_checked_at: now.toISOString(),
+          last_error: error instanceof Error ? error.message : 'Ошибка tracking',
+          provider: carrier || null, updated_at: now.toISOString(),
+        })
+      }
     }
-    if (pendingSuccessStates.length + pendingErrorStates.length >= 25) await flushTrackingStates()
+    await flushTrackingStates()
   }
   await flushTrackingStates()
   return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
