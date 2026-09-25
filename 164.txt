@@ -1,0 +1,13 @@
+SpecMarket — Patch 164: журнал NovaPay непосредственно в CRM
+
+Base main: 14b2a674370d6359708cba43a0dd6751c83f524c; Patch 163 должен оставаться применён. Архив: chatgpt-patches/164.patch и 164.txt.
+
+Итог: в public.crm_novapay_sync_log записываются начатые синхронизации, ошибки и прерванные запуски. Обычный успех удаляет запись; время успешного обновления уже хранится в bank_account_cache. При авторизации request_ref сохраняется до обращения к NovaPay; ошибка получает безопасный code/reason/stage. Дополнительно фиксируются ошибки ручного novapay-balance. Токены, JWT, сертификаты, сырые SOAP и финансовые данные в журнал не попадут. На главной красное предупреждение о последнем отказе/прерывании или просроченном обновлении; на странице выписки — журнал и кнопка копирования JSON. Защитный флаг, алгоритм одноразовой авторизации, cron и locks не менять.
+
+Codex:
+1. fetch origin main chatgpt-patches, проверить base и чистое дерево; git apply --check 164.patch && git apply 164.patch. Сначала прочитать AGENTS.md и .agents/skills/frontend/SKILL.md.
+2. Критическое ревью перед выпуском: проверь типы Deno helper SupabaseClient и VueUse, обработку ошибок записи журнала без срыва основной синхронизации; сохранение request_ref при upsert; завершение только после успешной записи выписки; отсутствие секретов в тексте ошибки, журнале и копируемом JSON; ложные тревоги ночного расписания. Если есть blocker, исправить минимально и обновить patch до публикации, убрать formatter churn.
+3. SQL: явные GRANT + RLS, authenticated только SELECT и не guest, anon нет, service_role минимальные DML; Realtime publication. Выполнить supabase db reset и проверку Data API (если доступно), затем отдельно применить миграцию production перед деплоем функций.
+4. Проверки: Deno check на novapay-data, novapay-balance и helper; Deno tests включая 19 auth тестов, pnpm type-check, scoped oxlint/eslint, pnpm build, git diff --check. Не заявлять PASS без выполнения.
+5. Приёмка: запуск success не оставляет рядов running, сбой сохраняет failed с конкретной категорией, аварийный shutdown показывает running «Прерван» спустя 12 мин, новая успешная синхронизация снимает красный статус, история отказов сохраняется, копирование журнала работает, user guest не читает таблицу, auth/rotation логика осталась прежней. Ошибку тестировать моками, не расходуя настоящий одноразовый refresh token.
+6. Git commit, SSH push, deployment обеих функций и GHA Production Deploy по правилам. Отчёт с SHA, списком файлов, результатом SQL migration и проверок. Если local SQL reset упирается в старые migrations — показать причину, не делать неконтролируемый migration repair.
