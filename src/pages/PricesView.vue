@@ -77,6 +77,8 @@ const usdRate = computed(() =>
   currencyRateForDate(currencyRates.value, localDateKey(today.value), 0),
 )
 const rateError = ref('')
+const catalogSaveError = ref('')
+const catalogLoadFailed = ref(false)
 const draggedItemId = ref<number | null>(null)
 const editingCell = ref<string | null>(null)
 const user = ref<User | null>(null)
@@ -122,40 +124,64 @@ const linkError = ref('')
 const isLinking = ref(false)
 
 const deletedItems = new WeakSet<PriceItem>()
+const persistedCatalogSignatures = new Map<string, string>()
 let savePromise: Promise<void> | null = null
 let saveRequested = false
+
+function catalogPayload(item: PriceItem, position: number) {
+  return {
+    legacy_id: item.id,
+    position,
+    kind: item.kind ?? 'item',
+    name: item.name,
+    usd: item.usd,
+    cost_uah: item.costUah,
+    prom: item.prom,
+    epic: item.epic,
+    kasta_regular: item.kastaOne,
+    kasta_recommended: item.kastaTwo,
+    kasta_sale: item.kastaThree,
+  }
+}
 
 async function persistCatalog() {
   if (!supabase || !user.value) return
   const snapshot = [...items.value]
   for (const [position, item] of snapshot.entries()) {
-    const payload = {
-      legacy_id: item.id,
-      position,
-      kind: item.kind ?? 'item',
-      name: item.name,
-      usd: item.usd,
-      cost_uah: item.costUah,
-      prom: item.prom,
-      epic: item.epic,
-      kasta_regular: item.kastaOne,
-      kasta_recommended: item.kastaTwo,
-      kasta_sale: item.kastaThree,
-    }
+    if (deletedItems.has(item)) continue
+    const payload = catalogPayload(item, position)
+    const signature = JSON.stringify(payload)
     if (item.remoteId) {
-      await supabase.from('crm_price_items').update(payload).eq('id', item.remoteId)
+      if (persistedCatalogSignatures.get(item.remoteId) === signature) continue
+      const { error } = await supabase
+        .from('crm_price_items')
+        .update(payload)
+        .eq('id', item.remoteId)
+      if (error) throw new Error(`Не удалось сохранить «${item.name}»: ${error.message}`)
+      persistedCatalogSignatures.set(item.remoteId, signature)
       continue
     }
 
-    const { data } = await supabase.from('crm_price_items').insert(payload).select('id').single()
-    if (!data) continue
+    const { data, error } = await supabase
+      .from('crm_price_items')
+      .insert(payload)
+      .select('id')
+      .single()
+    if (error || !data)
+      throw new Error(`Не удалось добавить «${item.name}»: ${error?.message ?? 'нет ответа'}`)
 
     if (deletedItems.has(item) || !items.value.includes(item)) {
-      await supabase.from('crm_price_items').delete().eq('id', data.id)
+      const { error: deleteError } = await supabase
+        .from('crm_price_items')
+        .delete()
+        .eq('id', data.id)
+      if (deleteError)
+        throw new Error(`Не удалось удалить отменённую позицию: ${deleteError.message}`)
       continue
     }
 
     item.remoteId = data.id
+    persistedCatalogSignatures.set(data.id, signature)
   }
 }
 
@@ -170,12 +196,17 @@ function save() {
         saveRequested = false
         await persistCatalog()
       }
+      catalogSaveError.value = ''
+    } catch (error) {
+      catalogSaveError.value = error instanceof Error ? error.message : String(error)
+      throw error
     } finally {
       savePromise = null
       if (saveRequested) void save()
     }
   })()
-
+  // Most edit handlers do not await save(); still surface failures without unhandled rejections.
+  void savePromise.catch(() => {})
   return savePromise
 }
 
@@ -216,8 +247,15 @@ async function signIn() {
 
 async function loadCatalog() {
   if (!supabase || !user.value) return
-  const { data } = await supabase.from('crm_price_items').select('*').order('position')
-  if (data?.length)
+  const { data, error } = await supabase.from('crm_price_items').select('*').order('position')
+  if (error || !data) {
+    catalogLoadFailed.value = true
+    catalogSaveError.value = `Не удалось загрузить цены: ${error?.message ?? 'нет ответа'}`
+    return
+  }
+  catalogLoadFailed.value = false
+  persistedCatalogSignatures.clear()
+  if (data.length) {
     items.value = data.map((row) => ({
       id: row.legacy_id ?? Date.now(),
       remoteId: row.id,
@@ -231,7 +269,15 @@ async function loadCatalog() {
       kastaTwo: row.kasta_recommended,
       kastaThree: row.kasta_sale,
     }))
-  else await save()
+    items.value.forEach((item, position) => {
+      if (item.remoteId)
+        persistedCatalogSignatures.set(
+          item.remoteId,
+          JSON.stringify(catalogPayload(item, position)),
+        )
+    })
+    catalogSaveError.value = ''
+  } else await save()
   await loadCurrencyRates()
   await loadCurrentPriceLink()
 }
@@ -683,6 +729,7 @@ async function deleteItem(itemId: number) {
       window.alert(`Не удалось удалить позицию: ${error.message}`)
       return
     }
+    persistedCatalogSignatures.delete(removed.remoteId)
   }
 
   await save()
@@ -829,6 +876,20 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
           </div>
         </div>
       </header>
+      <p
+        v-if="catalogSaveError"
+        class="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"
+        role="alert"
+      >
+        {{ catalogSaveError }}
+        <button
+          class="ml-2 underline"
+          type="button"
+          @click="catalogLoadFailed ? loadCatalog() : save()"
+        >
+          {{ catalogLoadFailed ? 'Повторить загрузку' : 'Повторить сохранение' }}
+        </button>
+      </p>
 
       <section
         v-if="!user"
