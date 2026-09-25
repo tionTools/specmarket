@@ -1,0 +1,19 @@
+Patch 159 — Android: контакты покупателя в общем списке заказов
+
+Репозиторий: tionTools/specmarket.
+Base main SHA при подготовке: 3c4450b81255b957963264726679eabdf06b8663.
+Патч: chatgpt-patches/159.patch, blob SHA: 226e690884cda248a1bff3a772406fc2bd36ef93.
+Только файл android/app/src/main/java/ua/orders/crm/MainActivity.kt.
+
+Причина подтверждена в коде: OrderCard в общем списке использует order.recipientName() и order.recipientPhone(), поэтому показывает получателя доставки вместо покупателя. При этом Android Order уже содержит отдельные верхнеуровневые customer и phone, а экран деталей уже показывает их в секции «Покупатель».
+
+Что меняется: в OrderCard использовать order.customer.display() и order.buyerPhone(). Не подменять отсутствующие данные покупателя получателем. Экран деталей («Покупатель» и «Получатель»), поиск по обоим контактам, серверный импорт, поля БД, Realtime, cron, другие функции CRM не менять. Если отдельно обнаружится, что сам источник customer/phone некорректен для конкретной площадки — описать пример и вынести в отдельную задачу, не смешивать с этим UI-исправлением.
+
+Codex:
+1. git fetch origin main chatgpt-patches; проверить актуальный main, чистоту/состав рабочего дерева и реальный diff. Не затронуть параллельный Patch 158 (глубокая оптимизация Supabase).
+2. Скачать 159.patch. git apply --check 159.patch, затем применить. Если main изменился и есть конфликт, не применять вслепую, проверить конкретный Android-файл и минимально перенести изменение. Никаких массовых форматирований.
+3. Проверить, что изменились только пять строк в OrderCard, а в подробностях покупатель и получатель остались отдельно; имена и номера обоих доступны поиску.
+4. Проверить scenario на тестовых данных: customer/phone отличаются от delivery.recipient/recipientPhone — в общем списке должны быть именно customer/phone, в деталях оба контакта. Проверить отсутствие телефона, формат телефона, Prom и другие платформы. Не запускать лишних запросов Supabase.
+5. Выполнить Android workflow проекта: scripts/android-check.ps1 (Start и Status до завершения), локальные тесты/Android build; git diff --check. При недоступности Android build сообщить причину, не объявлять PASS.
+6. После успешных проверок — commit только целевых правок, SSH push main, GitHub Actions signed APK. Дать пользователю SHA, ссылку на успешный Android Actions run и APK artifact. Обычный frontend production deploy, если стартует, не заменяет Android APK.
+7. Не менять и не разворачивать Supabase Edge Functions и SQL migration — этот патч только Android UI.
