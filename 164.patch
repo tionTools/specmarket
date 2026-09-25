@@ -1,0 +1,477 @@
+diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_shared/novapay-auth.ts
+--- a/supabase/functions/_shared/novapay-auth.ts
++++ b/supabase/functions/_shared/novapay-auth.ts
+@@ -15,6 +15,7 @@
+     public status: number,
+     public code: string,
+     message: string,
++    public reason?: string,
+   ) {
+     super(message)
+     this.name = 'NovaPayAuthError'
+@@ -142,6 +143,7 @@
+       502,
+       'NOVAPAY_AUTH_UNCERTAIN',
+       'NovaPay may have rotated credentials, but its response was unavailable. Authorization was not retried; verify authorization state before trying again.',
++      authExchangeFailureReason(error),
+     )
+   }
+ }
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -7,6 +7,12 @@
+ } from '../_shared/novapay-auth.ts'
+ import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
+ import {
++  startNovaPaySyncAttempt,
++  markNovaPaySyncAttempt,
++  completeNovaPaySyncAttempt,
++  failNovaPaySyncAttempt,
++} from '../_shared/novapay-sync-journal.ts'
++import {
+   assignRunningBalances,
+   copyKnownBalancesByProviderAlias,
+ } from '../_shared/novapay-running-balance.ts'
+@@ -843,6 +849,8 @@
+ 
+   const syncOwner = crypto.randomUUID()
+   let syncLockAcquired = false
++  let syncStage = 'starting'
++  let syncRequestRef = ''
+ 
+   try {
+     const { data: lockAcquired, error: lockError } = await admin.rpc(
+@@ -869,15 +877,20 @@
+       throw new HttpError(409, 'NOVAPAY_SYNC_BUSY', 'Another NovaPay refresh is already running.')
+     }
+     syncLockAcquired = true
++    await startNovaPaySyncAttempt(admin, syncOwner, isScheduledRequest ? 'scheduled' : 'manual')
++    syncStage = 'authorization'
+ 
+     // A second request may have completed between the initial cache read and lock acquisition.
+     previousCache = await readCache(admin)
+ 
+     const jwt = await getValidNovaPayJwt({
+       admin,
+-      authenticate: ({ refreshToken, publicCertificate }) => {
++      authenticate: async ({ refreshToken, publicCertificate }) => {
+         const authRequestRef = requestRef()
++        syncRequestRef = authRequestRef
+         console.info(`NovaPay auth request_ref: ${authRequestRef}`)
++        syncStage = 'auth_request'
++        await markNovaPaySyncAttempt(admin, syncOwner, 'auth_request', authRequestRef)
+         return soapCall('UserAuthenticationJWT', {
+           request_ref: authRequestRef,
+           refresh_token: refreshToken,
+@@ -886,6 +899,8 @@
+         })
+       },
+     })
++    syncStage = 'data_sync'
++    await markNovaPaySyncAttempt(admin, syncOwner, 'data_sync')
+ 
+     const clientsResult = await soapCall(
+       'GetClientsList',
+@@ -1161,6 +1176,8 @@
+       `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} eventKnown=${updatedEventKnownCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
+     )
+ 
++    await completeNovaPaySyncAttempt(admin, syncOwner)
++
+     if (compact)
+       return Response.json({
+         ok: true,
+@@ -1184,6 +1201,12 @@
+       { headers: corsHeaders },
+     )
+   } catch (error) {
++    if (syncLockAcquired) {
++      await failNovaPaySyncAttempt(
++        admin, syncOwner, isScheduledRequest ? 'scheduled' : 'manual',
++        syncStage, error, syncRequestRef,
++      )
++    }
+     if (error instanceof NovaPayAuthError) {
+       return errorResponse(new HttpError(error.status, error.code, error.message))
+     }
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -5,6 +5,7 @@
+   NovaPayAuthError,
+   NovaPayTransportError,
+ } from '../_shared/novapay-auth.ts'
++import { recordNovaPayBalanceFailure } from '../_shared/novapay-sync-journal.ts'
+ 
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+ const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
+@@ -349,6 +350,7 @@
+       { headers: corsHeaders },
+     )
+   } catch (error) {
++    await recordNovaPayBalanceFailure(admin, error)
+     if (error instanceof NovaPayAuthError) {
+       return errorResponse(new HttpError(error.status, error.code, error.message))
+     }
+diff --git a/src/features/banking/BankBalancesCard.vue b/src/features/banking/BankBalancesCard.vue
+--- a/src/features/banking/BankBalancesCard.vue
++++ b/src/features/banking/BankBalancesCard.vue
+@@ -1,16 +1,38 @@
+ <script setup lang="ts">
+-import { computed, onMounted, ref } from 'vue'
++import { computed, onMounted, onUnmounted, ref } from 'vue'
++import { useNow } from '@vueuse/core'
++import type { RealtimeChannel } from '@supabase/supabase-js'
+ 
+ import { currencyRateForDate, localDateKey, type CurrencyRateRow } from '@/features/prices/currencyRates'
+ import { supabase } from '@/lib/supabase'
+ import { consumeBankingReturn } from './navigation'
++import { hasNovaPaySyncIssue, type NovaPayJournalRow } from './novapayJournal'
+ import type { BankName, BankState } from './types'
+ 
+ const props = defineProps<{ caches: BankState; totalBalance: number | null }>()
+ 
+ const banks = ['monobank', 'novapay'] as const
+ const supplierDebt = ref<number | null>(null)
++const journal = ref<NovaPayJournalRow[]>([])
++const journalUnavailable = ref(false)
++const now = useNow({ interval: 60_000 })
++let journalChannel: RealtimeChannel | undefined
+ 
++const syncIssue = computed(() =>
++  !journalUnavailable.value && hasNovaPaySyncIssue(journal.value, props.caches.novapay.updatedAt, now.value),
++)
++
++async function loadNovaPayJournal() {
++  if (!supabase) return
++  const { data, error } = await supabase
++    .from('crm_novapay_sync_log')
++    .select('id,started_at,finished_at,source,status,stage,code,reason,request_ref')
++    .order('started_at', { ascending: false })
++    .limit(100)
++  journalUnavailable.value = Boolean(error)
++  if (!error) journal.value = (data ?? []) as NovaPayJournalRow[]
++}
++
+ const completeBankTotal = computed(() => {
+   const values = banks.map((bank) => props.caches[bank].balance)
+   if (values.some((value) => value === null)) return null
+@@ -138,11 +160,35 @@
+   clearLegacyBankingHash()
+   scrollToBankingBlock()
+   void loadSupplierDebt()
++  void loadNovaPayJournal()
++  if (supabase) {
++    journalChannel = supabase
++      .channel('crm:novapay-sync-journal')
++      .on(
++        'postgres_changes',
++        { event: '*', schema: 'public', table: 'crm_novapay_sync_log' },
++        () => void loadNovaPayJournal(),
++      )
++      .subscribe()
++  }
+ })
++
++onUnmounted(() => {
++  if (supabase && journalChannel) void supabase.removeChannel(journalChannel)
++  journalChannel = undefined
++})
+ </script>
+ 
+ <template>
+   <div id="banking" class="mt-3 flex flex-wrap items-stretch gap-3 sm:-mt-[42px] sm:ml-44">
++    <div
++      v-if="syncIssue"
++      class="w-full rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"
++      role="alert"
++    >
++      NovaPay не обновляется. Последнее успешное обновление: {{ updatedAt(caches.novapay.updatedAt) }}.
++      <RouterLink class="underline" to="/banking/novapay">Открыть журнал</RouterLink>
++    </div>
+     <section
+       v-for="bank in banks"
+       :key="bank"
+diff --git a/src/pages/BankStatementView.vue b/src/pages/BankStatementView.vue
+--- a/src/pages/BankStatementView.vue
++++ b/src/pages/BankStatementView.vue
+@@ -1,9 +1,14 @@
+ <script setup lang="ts">
+ import { computed, onMounted, ref } from 'vue'
++import { useClipboard, useNow } from '@vueuse/core'
+ import { ArrowLeft, RefreshCw } from '@lucide/vue'
+ import { useRoute, useRouter } from 'vue-router'
+ 
+ import { requestBankingReturn } from '@/features/banking/navigation'
++import {
++  isInterruptedNovaPayRun,
++  type NovaPayJournalRow,
++} from '@/features/banking/novapayJournal'
+ import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
+ import { supabase } from '@/lib/supabase'
+ 
+@@ -20,7 +25,39 @@
+ const isLoading = ref(true)
+ const isRefreshing = ref(false)
+ const error = ref('')
++const journal = ref<NovaPayJournalRow[]>([])
++const journalError = ref('')
++const copyStatus = ref('')
++const now = useNow({ interval: 60_000 })
++const { copy } = useClipboard()
+ 
++async function loadNovaPayJournal() {
++  if (!supabase || bank.value !== 'novapay') return
++  const { data, error: loadError } = await supabase
++    .from('crm_novapay_sync_log')
++    .select('id,started_at,finished_at,source,status,stage,code,reason,request_ref')
++    .order('started_at', { ascending: false })
++    .limit(100)
++  journalError.value = loadError ? 'Не удалось загрузить журнал NovaPay.' : ''
++  if (!loadError) journal.value = (data ?? []) as NovaPayJournalRow[]
++}
++
++async function handleCopyJournal() {
++  await loadNovaPayJournal()
++  if (journalError.value) return
++  try {
++    await copy(JSON.stringify({
++      source: 'SpecMarket NovaPay sync journal',
++      exported_at: new Date().toISOString(),
++      last_success_at: snapshot.value?.updatedAt ?? null,
++      events: journal.value,
++    }, null, 2))
++    copyStatus.value = 'Журнал скопирован.'
++  } catch {
++    copyStatus.value = 'Не удалось скопировать журнал.'
++  }
++}
++
+ const bank = computed<BankName | null>(() => {
+   const value = Array.isArray(route.params.bank) ? route.params.bank[0] : route.params.bank
+   return value === 'monobank' || value === 'novapay' ? value : null
+@@ -180,6 +217,7 @@
+   } finally {
+     isLoading.value = false
+     isRefreshing.value = false
++    if (refresh && bank.value === 'novapay') await loadNovaPayJournal()
+   }
+ }
+ 
+@@ -195,6 +233,7 @@
+     return
+   }
+   await load(false)
++  await loadNovaPayJournal()
+ }
+ 
+ function goBackToBanking() {
+@@ -254,6 +293,38 @@
+         {{ error }}
+       </p>
+ 
++      <section
++        v-if="bank === 'novapay'"
++        class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
++      >
++        <div class="flex flex-wrap items-center justify-between gap-3">
++          <h2 class="text-lg font-bold text-slate-950">Журнал ошибок NovaPay</h2>
++          <div class="flex flex-wrap gap-2">
++            <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
++            <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
++          </div>
++        </div>
++        <p v-if="journalError" class="mt-3 text-sm text-rose-700" role="alert">{{ journalError }}</p>
++        <p v-if="copyStatus" class="mt-3 text-sm text-slate-600">{{ copyStatus }}</p>
++        <p class="mt-2 text-xs text-slate-500">Только ошибки и незавершённые запуски; успешные синхронизации не накапливаются.</p>
++        <p v-if="!journal.length" class="mt-3 text-sm text-slate-500">Ошибок пока нет.</p>
++        <div v-else class="mt-3 overflow-x-auto">
++          <table class="w-full min-w-[750px] text-left text-xs">
++            <thead><tr class="border-b border-slate-200 text-slate-500"><th class="py-2">Начало</th><th>Источник</th><th>Этап</th><th>Результат</th><th>Код / причина</th><th>Запрос</th></tr></thead>
++            <tbody>
++              <tr v-for="entry in journal" :key="entry.id" class="border-b border-slate-100">
++                <td class="py-2">{{ dateTime(entry.started_at) }}</td>
++                <td>{{ entry.source }}</td>
++                <td>{{ entry.stage }}</td>
++                <td>{{ entry.status === 'failed' ? 'Ошибка' : isInterruptedNovaPayRun(entry, now) ? 'Прерван' : 'Выполняется' }}</td>
++                <td>{{ entry.code ?? '—' }} / {{ entry.reason ?? '—' }}</td>
++                <td class="font-mono">{{ entry.request_ref ?? '—' }}</td>
++              </tr>
++            </tbody>
++          </table>
++        </div>
++      </section>
++
+       <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+         <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 px-5 py-4">
+           <div>
+diff --git a/supabase/migrations/20260925190000_novapay_sync_journal.sql b/supabase/migrations/20260925190000_novapay_sync_journal.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260925190000_novapay_sync_journal.sql
+@@ -0,0 +1,38 @@
++create table public.crm_novapay_sync_log (
++  id uuid primary key,
++  started_at timestamptz not null default now(),
++  finished_at timestamptz,
++  source text not null check (source in ('scheduled', 'manual', 'balance')),
++  status text not null check (status in ('running', 'failed')),
++  stage text not null check (stage in ('starting', 'authorization', 'auth_request', 'data_sync')),
++  code text check (code is null or code ~ '^[A-Z][A-Z0-9_]{1,63}$'),
++  reason text check (reason is null or reason ~ '^[a-zA-Z0-9_]{1,64}$'),
++  request_ref text check (request_ref is null or request_ref ~ '^REQ-[A-F0-9]{12}$')
++);
++
++create index crm_novapay_sync_log_started_at_idx
++  on public.crm_novapay_sync_log (started_at desc);
++
++alter table public.crm_novapay_sync_log enable row level security;
++revoke all on table public.crm_novapay_sync_log from public, anon, authenticated, service_role;
++grant select on table public.crm_novapay_sync_log to authenticated;
++grant select, insert, update, delete on table public.crm_novapay_sync_log to service_role;
++
++create policy crm_novapay_sync_log_read_authenticated
++on public.crm_novapay_sync_log
++for select to authenticated
++using (lower(coalesce(auth.jwt() ->> 'email', '')) <> 'guest@gmail.com');
++
++do $$
++begin
++  if not exists (
++    select 1 from pg_publication_tables
++    where pubname = 'supabase_realtime'
++      and schemaname = 'public' and tablename = 'crm_novapay_sync_log'
++  ) then
++    alter publication supabase_realtime add table public.crm_novapay_sync_log;
++  end if;
++end;
++$$;
++
++notify pgrst, 'reload schema';
+diff --git a/supabase/functions/_shared/novapay-sync-journal.ts b/supabase/functions/_shared/novapay-sync-journal.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-sync-journal.ts
+@@ -0,0 +1,78 @@
++import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
++import { NovaPayAuthError, NovaPayTransportError } from './novapay-auth.ts'
++
++type Source = 'scheduled' | 'manual' | 'balance'
++type Stage = 'starting' | 'authorization' | 'auth_request' | 'data_sync'
++
++function codeFor(error: unknown) {
++  const raw = error && typeof error === 'object' && 'code' in error ? error.code : null
++  return typeof raw === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(raw)
++    ? raw
++    : 'NOVAPAY_INTERNAL_ERROR'
++}
++
++function reasonFor(error: unknown) {
++  if (error instanceof NovaPayAuthError && error.reason && /^[a-zA-Z0-9_]{1,64}$/.test(error.reason))
++    return error.reason
++  if (error instanceof NovaPayTransportError) {
++    if (error.message === 'AbortError') return 'timeout'
++    if (/^http_[45][0-9]{2}$/.test(error.message)) return error.message
++    return 'transport_failure'
++  }
++  return 'not_classified'
++}
++
++async function safeWrite(operation: string, run: () => PromiseLike<{ error: unknown }>) {
++  try {
++    const { error } = await run()
++    if (error) console.error(`NovaPay sync journal ${operation} failed.`)
++  } catch {
++    console.error(`NovaPay sync journal ${operation} failed.`)
++  }
++}
++
++export async function startNovaPaySyncAttempt(
++  admin: SupabaseClient,
++  id: string,
++  source: Exclude<Source, 'balance'>,
++) {
++  await safeWrite('start', () => admin.from('crm_novapay_sync_log').insert({
++    id, source, status: 'running', stage: 'starting',
++  }))
++}
++
++export async function markNovaPaySyncAttempt(
++  admin: SupabaseClient,
++  id: string,
++  stage: Stage,
++  requestRef?: string,
++) {
++  const changes: { stage: Stage; request_ref?: string } = { stage }
++  if (requestRef) changes.request_ref = requestRef
++  await safeWrite('progress', () =>
++    admin.from('crm_novapay_sync_log').update(changes).eq('id', id))
++}
++
++export async function completeNovaPaySyncAttempt(admin: SupabaseClient, id: string) {
++  // Successful refreshes are already recorded in bank_account_cache.updated_at.
++  await safeWrite('success', () => admin.from('crm_novapay_sync_log').delete().eq('id', id))
++}
++
++export async function failNovaPaySyncAttempt(
++  admin: SupabaseClient,
++  id: string,
++  source: Source,
++  stage: Stage,
++  error: unknown,
++  requestRef?: string,
++) {
++  await safeWrite('failure', () => admin.from('crm_novapay_sync_log').upsert({
++    id, source, status: 'failed', stage, finished_at: new Date().toISOString(),
++    code: codeFor(error), reason: reasonFor(error),
++    ...(requestRef ? { request_ref: requestRef } : {}),
++  }))
++}
++
++export async function recordNovaPayBalanceFailure(admin: SupabaseClient, error: unknown) {
++  await failNovaPaySyncAttempt(admin, crypto.randomUUID(), 'balance', 'authorization', error)
++}
+diff --git a/src/features/banking/novapayJournal.ts b/src/features/banking/novapayJournal.ts
+new file mode 100644
+--- /dev/null
++++ b/src/features/banking/novapayJournal.ts
+@@ -0,0 +1,38 @@
++export type NovaPayJournalRow = {
++  id: string
++  started_at: string
++  finished_at: string | null
++  source: 'scheduled' | 'manual' | 'balance'
++  status: 'running' | 'failed'
++  stage: string
++  code: string | null
++  reason: string | null
++  request_ref: string | null
++}
++
++export function isInterruptedNovaPayRun(row: NovaPayJournalRow, now: Date) {
++  return row.status === 'running' && now.getTime() - Date.parse(row.started_at) > 12 * 60_000
++}
++
++export function hasNovaPaySyncIssue(
++  logs: NovaPayJournalRow[],
++  lastSuccessAt: string | null,
++  now: Date,
++) {
++  const successMs = lastSuccessAt ? Date.parse(lastSuccessAt) : Number.NaN
++  const latestFailure = logs.some((entry) => {
++    if (entry.source === 'balance') return false
++    if (entry.status !== 'failed' && !isInterruptedNovaPayRun(entry, now)) return false
++    const occurredMs = Date.parse(entry.finished_at ?? entry.started_at)
++    return !Number.isFinite(successMs) || occurredMs > successMs
++  })
++  if (latestFailure) return true
++  if (!Number.isFinite(successMs)) return false
++  const hour = Number(
++    new Intl.DateTimeFormat('en-GB', {
++      hour: '2-digit', hourCycle: 'h23', timeZone: 'Europe/Kyiv',
++    }).format(now),
++  )
++  const delay = hour >= 1 && hour < 7 ? 130 : 70
++  return now.getTime() - successMs > delay * 60_000
++}
