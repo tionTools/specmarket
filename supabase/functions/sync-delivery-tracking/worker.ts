@@ -5,6 +5,7 @@ import { novaStatus, type NovaRedirectCircuit } from './carriers/nova-poshta.ts'
 import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
 import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
 import { isFinal, record, text } from './normalize.ts'
+import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
@@ -85,6 +86,16 @@ export async function runTrackingWorker(
   let checked = 0
   let updated = 0
   let failed = 0
+  const pendingSuccessStates: TrackingStateUpdate[] = []
+  const pendingErrorStates: TrackingStateUpdate[] = []
+  const upsertStates = async (updates: TrackingStateUpdate[]) => {
+    const { error } = await admin.from('crm_delivery_tracking_state').upsert(updates)
+    return { error }
+  }
+  async function flushTrackingStates() {
+    failed += await upsertTrackingStateBatches(pendingSuccessStates.splice(0), upsertStates)
+    failed += await upsertTrackingStateBatches(pendingErrorStates.splice(0), upsertStates)
+  }
   const novaRedirectCircuit: NovaRedirectCircuit = { failed: false }
   for (const row of orderRows) {
     const delivery = record(row.delivery)
@@ -104,20 +115,20 @@ export async function runTrackingWorker(
       const currentDelivery = record(currentRow?.delivery)
       if (!sameShipment(delivery, currentDelivery)) continue
       const changed = trackingChanged(currentDelivery, result)
-      const state = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
-      const { error: stateError } = await admin.from('crm_delivery_tracking_state').upsert(state)
-      if (stateError) throw stateError
+      const state: TrackingStateUpdate = { order_id: row.id, last_checked_at: now.toISOString(), last_error: null, provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString() }
       checked += 1
-      if (!changed) continue
-      const nextDelivery = mergeTrackingDelivery(
-        currentDelivery,
-        result,
-        now.toISOString(),
-        text(row.external_id) ? 'marketplace' : 'manual',
-      )
-      const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
-      if (updateError) throw updateError
-      updated += 1
+      if (changed) {
+        const nextDelivery = mergeTrackingDelivery(
+          currentDelivery,
+          result,
+          now.toISOString(),
+          text(row.external_id) ? 'marketplace' : 'manual',
+        )
+        const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
+        if (updateError) throw updateError
+        updated += 1
+      }
+      pendingSuccessStates.push(state)
     } catch (error) {
       failed += 1
       console.error(`Tracking ${text(delivery.ttn)}:`, error)
@@ -128,10 +139,12 @@ export async function runTrackingWorker(
       }
       const currentDelivery = record(currentRow?.delivery)
       if (!sameShipment(delivery, currentDelivery)) continue
-      await admin.from('crm_delivery_tracking_state').upsert({
+      pendingErrorStates.push({
         order_id: row.id, last_checked_at: now.toISOString(), last_error: error instanceof Error ? error.message : 'Ошибка tracking', provider: carrier || null, updated_at: now.toISOString(),
       })
     }
+    if (pendingSuccessStates.length + pendingErrorStates.length >= 25) await flushTrackingStates()
   }
+  await flushTrackingStates()
   return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
 }
