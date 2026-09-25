@@ -537,9 +537,11 @@ function resolvePromPhones(
   const buyerCandidate = (value: unknown) =>
     differentPeople && samePhone(value, resolvedRecipientPhone) ? '' : text(value)
   const buyerPhone =
-    buyerCandidate(promClientPhone(asRecord(order.client))) ||
+    // These fields explicitly belong to the buyer, even when two people share a number.
+    promClientPhone(asRecord(order.client)) ||
     buyerCandidate(promClientPhone(client)) ||
-    buyerCandidate(order.client_phone) ||
+    text(order.client_phone) ||
+    // Historical and ambiguous fields can contain the recipient's phone.
     buyerCandidate(existingOrder.phone) ||
     (resolvedRecipientPhone ? buyerCandidate(order.phone) : '')
   return { buyerPhone, recipientName, recipientPhone: resolvedRecipientPhone }

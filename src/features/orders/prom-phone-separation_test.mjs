@@ -91,7 +91,7 @@ const cases = [
     receiver,
   ],
   [
-    'order.client.phone equal to another recipient does not override valid old buyer',
+    'verified order.client.phone overrides outdated CRM value even when recipient shares phone',
     {
       client: { phone: receiver },
       recipient_name: receiverName,
@@ -101,7 +101,44 @@ const cases = [
     {},
     { phone: buyer, delivery: { recipient: receiverName, recipientPhone: receiver } },
     buyerName,
-    buyer,
+    receiver,
+    receiver,
+  ],
+  [
+    'different buyer and recipient names may legitimately share order.client.phone',
+    {
+      client: { phone: receiver },
+      recipient_name: receiverName,
+      delivery_recipient: { phone: receiver },
+      phone: receiver,
+    },
+    { phones: [receiver] },
+    {},
+    buyerName,
+    receiver,
+    receiver,
+  ],
+  [
+    'explicit buyer client_phone may match another recipient phone',
+    {
+      client_phone: receiver,
+      recipient_name: receiverName,
+      recipient_phone: receiver,
+      phone: receiver,
+    },
+    {},
+    {},
+    buyerName,
+    receiver,
+    receiver,
+  ],
+  [
+    'recipient-only order.phone is still rejected when different people share a number',
+    { recipient_name: receiverName, recipient_phone: receiver, phone: receiver },
+    {},
+    {},
+    buyerName,
+    '',
     receiver,
   ],
   [
@@ -256,4 +293,4 @@ assert.match(
   home,
   /order\.platform === 'Пром'\s*\? order\.delivery\.recipientPhone\s*:\s*order\.delivery\.recipientPhone \|\| order\.phone/,
 )
-console.log('Prom phone regression: 17 actual-helper cases plus UI role checks PASS')
+console.log('Prom phone regression: 20 actual-helper cases plus UI role checks PASS')
