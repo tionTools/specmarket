@@ -1,0 +1,25 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -2409,10 +2409,11 @@
+   for (const saved of data.saved as Array<{ orderNumber: number; remoteId: string }>) {
+     const order = orders.value.find(
+       (item) =>
+         item.remoteId === saved.remoteId || (item.orderNumber ?? item.id) === saved.orderNumber,
+     )
+     if (order) order.remoteId = saved.remoteId
+   }
++  void bankBalancesCard.value?.refreshDebt()
+ }
+ 
+ async function signIn() {
+@@ -3115,8 +3116,9 @@
+     promRegistryEntries.value,
+     applyPromRegistryPreview,
+   )
+   sortOrders()
++  void bankBalancesCard.value?.refreshDebt()
+   return refreshedAllRequestedOrders
+ }
+ 
+ function notifyNewOrder(order: Order) {
