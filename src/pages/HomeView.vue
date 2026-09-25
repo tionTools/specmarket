@@ -3328,6 +3328,52 @@ function openNewOrderDialog() {
   orderDialog.value?.showModal()
 }
 
+function openRepeatOrderDialog(source: Order) {
+  if (isGuest.value) return
+  const draft = createOrderDraft()
+  orderDraft.value = {
+    ...draft,
+    customer: source.customer,
+    phone: source.phone,
+    customerEmail: source.customerEmail,
+    products: source.products.length
+      ? source.products.map((product) => ({
+          id: crypto.randomUUID(),
+          name: product.name,
+          size: product.size,
+          imageUrl: product.imageUrl,
+          quantity: product.quantity,
+          price: product.price,
+          cost: product.cost,
+          costUsd: product.costUsd,
+          costManual: product.costManual,
+          priceItemId: product.priceItemId,
+        }))
+      : draft.products,
+    delivery: {
+      ...draft.delivery,
+      carrier: source.delivery.carrier,
+      recipient: source.delivery.recipient,
+      recipientPhone: source.delivery.recipientPhone,
+      city: source.delivery.city,
+      address: source.delivery.address,
+    },
+  }
+  repriceOrderDraft()
+  editingManualOrderId.value = null
+  orderDraftError.value = ''
+  window.sessionStorage.setItem(
+    manualOrderPriceDraftStorageKey,
+    JSON.stringify({
+      draft: cloneOrder(orderDraft.value),
+      editingId: null,
+      productId: '',
+    } satisfies ManualOrderPriceDraftState),
+  )
+  window.sessionStorage.removeItem(manualOrderPriceSelectionStorageKey)
+  orderDialog.value?.showModal()
+}
+
 function openEditOrderDialog(order: Order) {
   if (isGuest.value || order.externalId) return
   editingManualOrderId.value = order.remoteId ?? order.id
@@ -6071,6 +6117,15 @@ function orderDateTime(order: Order) {
                     {{
                       isOrderFullyReturned(order) ? 'Изменить принятый возврат' : 'Принять возврат'
                     }}
+                  </button>
+                  <button
+                    v-if="!isGuest"
+                    class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                    type="button"
+                    title="Создать новый заказ Р/С на основе этого заказа"
+                    @click="openRepeatOrderDialog(order)"
+                  >
+                    Повторить заказ
                   </button>
                   <button
                     v-if="!isGuest && !order.externalId"
