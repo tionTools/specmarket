@@ -2,7 +2,9 @@ SpecMarket — Patch 158: сократить реальные Data API обра�
 
 Base main SHA: e837fe4b694f36b2ec44c20855212ea5775c35a4 (после Android Patch 159).
 Патч: https://github.com/tionTools/specmarket/blob/chatgpt-patches/158.patch
-SHA blob патча: cf55e53735d578f7c98bfd2cf39b0947c52dbf1a
+SHA blob патча: 7825e6044155fe7103dd7ba5c9dc1620c2939d0c
+
+Важно: 158.patch обновлён после ошибки git apply --check на Windows: у двух новых файлов добавлен заголовок new file mode 100644. Обязательно скачать 158.patch ЗАНОВО; не использовать локально сохранённую старую копию. Рабочее дерево пользователя осталось чистым, ручных переносов изменений не было.
 
 Суть (строго по текущему коду):
 - Ранее sync-delivery-tracking делал отдельный SELECT crm_orders.delivery для каждой проверенной ТТН после ответа перевозчика и повторный SELECT в catch.
