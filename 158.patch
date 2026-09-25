@@ -329,7 +329,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
 diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries.ts b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/current-deliveries.ts
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +export type CurrentDeliveryRow = { id: string; delivery: unknown }
 +type ReadResult = { data: CurrentDeliveryRow[] | null; error: { message: string } | null }
 +type ReadBatch = (ids: string[]) => Promise<ReadResult>
@@ -368,7 +368,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries.ts b/s
 diff --git a/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/current-deliveries_test.ts
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +import { readCurrentDeliveries } from './current-deliveries.ts'
 +
 +function assert(condition: unknown, message: string): asserts condition {
