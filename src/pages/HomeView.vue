@@ -6103,6 +6103,16 @@ function orderDateTime(order: Order) {
                     {{ returnSignalLabel(order) }} · возврат ожидает принятия
                   </span>
                   <button
+                    v-if="!isGuest"
+                    class="grid size-8 shrink-0 place-items-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-900"
+                    type="button"
+                    title="Повторить заказ"
+                    aria-label="Повторить заказ"
+                    @click.stop="openRepeatOrderDialog(order)"
+                  >
+                    <Copy class="size-4" aria-hidden="true" />
+                  </button>
+                  <button
                     v-if="!isGuest && hasPhysicalShipmentMovement(order)"
                     :disabled="isSavingReturn"
                     class="rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
@@ -6117,15 +6127,6 @@ function orderDateTime(order: Order) {
                     {{
                       isOrderFullyReturned(order) ? 'Изменить принятый возврат' : 'Принять возврат'
                     }}
-                  </button>
-                  <button
-                    v-if="!isGuest"
-                    class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-                    type="button"
-                    title="Создать новый заказ Р/С на основе этого заказа"
-                    @click="openRepeatOrderDialog(order)"
-                  >
-                    Повторить заказ
                   </button>
                   <button
                     v-if="!isGuest && !order.externalId"
