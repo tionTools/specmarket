@@ -99,6 +99,7 @@ const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
 const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
+const labelReminderStorageKey = 'specmarket-crm-label-reminders-v1'
 const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
 const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
 const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
@@ -2888,6 +2889,7 @@ function removeRemoteOrder(remoteId: string | undefined) {
   if (!remoteId) return
   orders.value = orders.value.filter((order) => order.remoteId !== remoteId)
   unregisterRemoteOrder(remoteId)
+  reconcileLabelReminders()
 }
 
 function scheduleReconciliation(delay = 750, force = false) {
@@ -2928,6 +2930,7 @@ async function restartAutomaticOrdersRefresh() {
 
 function handleOrdersVisibilityChange() {
   if (documentVisibility.value !== 'visible') return
+  checkLabelReminderThresholds()
   void reconcileRemoteOrders(true)
   bankingMonitor.handleVisibilityChange()
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
@@ -3117,6 +3120,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
     applyPromRegistryPreview,
   )
   sortOrders()
+  reconcileLabelReminders()
   void bankBalancesCard.value?.refreshDebt()
   return refreshedAllRequestedOrders
 }
@@ -3229,6 +3233,8 @@ onMounted(async () => {
   watch(isOnline, handleBrowserOnline)
   document.addEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   await loadRemoteOrders()
+  initializeLabelReminders()
+  labelReminderInterval = window.setInterval(checkLabelReminderThresholds, 15_000)
   startAutomaticOrdersRefresh()
   await bankingMonitor.start()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
@@ -3266,6 +3272,7 @@ onScopeDispose(() => {
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
+  if (labelReminderInterval) window.clearInterval(labelReminderInterval)
   document.removeEventListener('pointerdown', dismissNewOrderToastsOnPointerDown, true)
   if (supabase && ordersRealtimeChannel) void supabase.removeChannel(ordersRealtimeChannel)
   bankingMonitor.stop()
@@ -4403,6 +4410,161 @@ function labelSentForCurrentTtn(order: Order) {
   )
 }
 
+type LabelReminderState = { ttn: string; startedAt: number; notified: number }
+const labelReminderThresholds = [5, 10, 15] as const
+const labelReminderStates = ref<Record<string, LabelReminderState>>({})
+const labelReminderToasts = ref<Array<{ id: number; remoteId: string; text: string }>>([])
+const labelReminderNow = ref(Date.now())
+let nextLabelReminderToastId = 0
+let labelReminderInterval: ReturnType<typeof window.setInterval> | undefined
+let labelReminderInitialized = false
+let labelReminderStoreKey = ''
+
+function persistLabelReminders() {
+  if (!labelReminderInitialized || !labelReminderStoreKey) return
+  try {
+    window.localStorage.setItem(labelReminderStoreKey, JSON.stringify(labelReminderStates.value))
+  } catch (error) {
+    console.error('Не удалось сохранить напоминания о бирках:', error)
+  }
+}
+
+function initializeLabelReminders() {
+  labelReminderStoreKey = `${labelReminderStorageKey}:${user.value?.id ?? 'local'}`
+  let stored: unknown = null
+  try {
+    stored = JSON.parse(window.localStorage.getItem(labelReminderStoreKey) ?? 'null')
+  } catch {
+    stored = null
+  }
+  const isFirstLoad = !stored || typeof stored !== 'object' || Array.isArray(stored)
+  const restored: Record<string, LabelReminderState> = {}
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [remoteId, raw] of Object.entries(stored)) {
+      if (!raw || typeof raw !== 'object') continue
+      const item = raw as Partial<LabelReminderState>
+      if (
+        typeof item.ttn !== 'string' ||
+        typeof item.startedAt !== 'number' ||
+        !Number.isFinite(item.startedAt) ||
+        typeof item.notified !== 'number'
+      )
+        continue
+      restored[remoteId] = {
+        ttn: item.ttn,
+        startedAt: Math.max(0, item.startedAt),
+        notified: Math.min(3, Math.max(0, Math.floor(item.notified))),
+      }
+    }
+  }
+  // First visit: remember existing TTNs without starting old timers.
+  if (isFirstLoad) {
+    for (const order of orders.value) {
+      if (!order.remoteId) continue
+      restored[order.remoteId] = { ttn: labelTtnKey(order.delivery.ttn), startedAt: 0, notified: 0 }
+    }
+  }
+  labelReminderStates.value = restored
+  labelReminderInitialized = true
+  reconcileLabelReminders()
+}
+
+function reconcileLabelReminders() {
+  if (!labelReminderInitialized) return
+  const next = { ...labelReminderStates.value }
+  const currentIds = new Set<string>()
+  const now = Date.now()
+  for (const order of orders.value) {
+    if (!order.remoteId) continue
+    currentIds.add(order.remoteId)
+    const ttn = labelTtnKey(order.delivery.ttn)
+    const previous = next[order.remoteId]
+    if (!previous || previous.ttn !== ttn) {
+      next[order.remoteId] = {
+        ttn,
+        startedAt: ttn && canSendOrderLabel(order) && !labelSentForCurrentTtn(order) ? now : 0,
+        notified: 0,
+      }
+      labelReminderToasts.value = labelReminderToasts.value.filter(
+        (toast) => toast.remoteId !== order.remoteId,
+      )
+    } else if (!canSendOrderLabel(order) || labelSentForCurrentTtn(order)) {
+      next[order.remoteId] = { ttn, startedAt: 0, notified: 0 }
+      labelReminderToasts.value = labelReminderToasts.value.filter(
+        (toast) => toast.remoteId !== order.remoteId,
+      )
+    }
+  }
+  for (const remoteId of Object.keys(next)) {
+    if (!currentIds.has(remoteId)) delete next[remoteId]
+  }
+  labelReminderStates.value = next
+  persistLabelReminders()
+  checkLabelReminderThresholds()
+}
+
+function checkLabelReminderThresholds() {
+  if (!labelReminderInitialized) return
+  const now = Date.now()
+  labelReminderNow.value = now
+  if (documentVisibility.value !== 'visible') return
+  let changed = false
+  for (const order of orders.value) {
+    if (!order.remoteId || !canSendOrderLabel(order) || labelSentForCurrentTtn(order)) continue
+    const state = labelReminderStates.value[order.remoteId]
+    if (!state?.startedAt || state.ttn !== labelTtnKey(order.delivery.ttn)) continue
+    const due = labelReminderThresholds.filter(
+      (minutes) => now - state.startedAt >= minutes * 60_000,
+    ).length
+    if (due <= state.notified) continue
+    // After sleep/reload show one current reminder, not a burst of old toasts.
+    state.notified = due
+    changed = true
+    labelReminderToasts.value = labelReminderToasts.value.filter(
+      (toast) => toast.remoteId !== order.remoteId,
+    )
+    labelReminderToasts.value.push({
+      id: ++nextLabelReminderToastId,
+      remoteId: order.remoteId,
+      text: `Бирка не отправлена · ${orderBusinessPlatform(order)} · №${order.displayNumber ?? order.id} · ${labelReminderThresholds[due - 1]} мин`,
+    })
+    playToastSound()
+  }
+  if (changed) persistLabelReminders()
+}
+
+const overdueLabelOrders = computed(() =>
+  orders.value.filter((order) => {
+    if (!order.remoteId || !canSendOrderLabel(order) || labelSentForCurrentTtn(order)) return false
+    const state = labelReminderStates.value[order.remoteId]
+    return Boolean(
+      state?.startedAt &&
+      state.ttn === labelTtnKey(order.delivery.ttn) &&
+      labelReminderNow.value - state.startedAt >= 15 * 60_000,
+    )
+  }),
+)
+
+async function navigateToLabelOrder(remoteId: string) {
+  const order = orders.value.find((item) => item.remoteId === remoteId)
+  if (!order) return
+  labelReminderToasts.value = labelReminderToasts.value.filter(
+    (toast) => toast.remoteId !== remoteId,
+  )
+  platformFilter.value = 'all'
+  isShowingNotInExcel.value = false
+  isShowingUnpaidOnly.value = false
+  isShowingCancellations.value = false
+  isShowingReturns.value = false
+  searchQuery.value = String(order.displayNumber ?? order.id)
+  orderListPeriod.value = 'custom'
+  orderListFrom.value = order.date
+  orderListTo.value = order.date
+  expandedOrderId.value = order.id
+  await nextTick()
+  document.getElementById(`order-${order.id}`)?.scrollIntoView({ block: 'center' })
+}
+
 function formatLabelEmailSentAt(value?: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -4590,6 +4752,7 @@ async function sendOrderLabelEmail(file: File) {
   order.delivery.labelEmailSentAt = String(data.sentAt)
   order.delivery.labelEmailSentTtn = String(data.ttn)
   order.delivery.labelEmailMessageId = data.messageId ? String(data.messageId) : undefined
+  reconcileLabelReminders()
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
   clearLabelEmailInlineError(order.id)
   isSendingLabelEmail.value = false
@@ -4838,6 +5001,22 @@ function orderDateTime(order: Order) {
         {{ toast.text }}
       </p>
     </div>
+    <div
+      v-if="labelReminderToasts.length"
+      class="fixed top-20 right-4 z-[90] flex max-w-sm flex-col gap-2"
+      role="status"
+      aria-live="polite"
+    >
+      <button
+        v-for="toast in labelReminderToasts"
+        :key="toast.id"
+        type="button"
+        class="rounded-xl border border-amber-400 bg-amber-100 px-4 py-3 text-left text-sm font-semibold text-amber-950 shadow-lg"
+        @click="navigateToLabelOrder(toast.remoteId)"
+      >
+        {{ toast.text }} · Открыть заказ
+      </button>
+    </div>
     <RouterLink
       class="fixed right-0 top-1/2 z-[80] flex -translate-y-1/2 cursor-pointer flex-col items-center gap-0.5 rounded-l-xl border border-emerald-300 bg-white px-2 py-3 text-sm font-bold leading-none text-emerald-800 shadow-lg transition hover:bg-emerald-50"
       :to="{
@@ -4882,6 +5061,24 @@ function orderDateTime(order: Order) {
               aria-hidden="true"
             ></span>
             {{ ordersRealtimeSubscribed ? 'Онлайн' : 'Нет обновления' }}
+          </div>
+        </div>
+        <div
+          v-if="overdueLabelOrders.length"
+          class="max-w-sm rounded-xl border-2 border-amber-500 bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm"
+          role="status"
+        >
+          <p>Не отправлены бирки: {{ overdueLabelOrders.length }}</p>
+          <div class="mt-1 flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+            <button
+              v-for="order in overdueLabelOrders"
+              :key="order.remoteId"
+              type="button"
+              class="rounded-md bg-white px-2 py-1 underline hover:bg-amber-50"
+              @click="navigateToLabelOrder(order.remoteId!)"
+            >
+              №{{ order.displayNumber ?? order.id }}
+            </button>
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 xl:flex-nowrap">
@@ -6681,6 +6878,11 @@ function orderDateTime(order: Order) {
                               : 'Отправить бирку'
                         }}
                       </button>
+                      <span
+                        v-if="overdueLabelOrders.some((item) => item.remoteId === order.remoteId)"
+                        class="text-[11px] font-bold text-amber-800"
+                        >Бирка просрочена</span
+                      >
                       <span
                         v-if="labelSentForCurrentTtn(order)"
                         class="text-[11px] font-semibold text-emerald-700"
