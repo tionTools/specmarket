@@ -1,0 +1,16 @@
+SpecMarket — Patch 163: безопасная диагностика следующего сбоя NovaPay JWT rotation
+
+Base main при подготовке: 91f1d738f611672cd960392f53cbb8d00bf899c1.
+Архив: 163.patch и 163.txt в ветке chatgpt-patches.
+Изменяются ТОЛЬКО supabase/functions/_shared/novapay-auth.ts и novapay-auth_test.ts. Без миграций, изменения токенов, lock lease, частоты cron или поведения повторной авторизации.
+
+Причина: 25.09.2026 в 04:00 по Киеву request_ref=REQ-8D79D0296F09, execution_id=b7324e06-ed4e-4d8a-bbaf-b155265a1a17. В Edge logs есть rotation started + request_ref, но нет response received/state saved. В коде authenticateOnce скрывает исходный вид ошибки за NOVAPAY_AUTH_UNCERTAIN, а errorResponse возвращает ответ без диагностической записи. Нельзя утверждать, что это точно timeout или ошибка NovaPay; следующий сбой нужно классифицировать безопасно.
+
+Что добавлено: до перехвата ошибки выводится фиксированная безопасная категория: timeout (AbortError), http_4xx/5xx, transport_failure, NOVAPAY_SOAP_PARSE_ERROR, NOVAPAY_SOAP_RESULT_MISSING, NOVAPAY_SOAP_FAULT, NOVAPAY_API_ERROR или unexpected_error; recovery_guard=retained. Сырые сообщения ошибок, значения refresh_token, certificate, JWT или ответы SOAP не логировать. Запрос авторизации остаётся однократным; persistent guard при неопределённом результате остаётся включён. Тест предотвращает утечку произвольного текста ошибки в диагностический лог.
+
+Codex:
+1. git fetch origin main chatgpt-patches, сверить base main, чистое рабочее дерево и реальный diff. При расхождении основного auth-файла остановиться и согласовать изменения.
+2. git apply --check 163.patch && git apply 163.patch; форматировать только два изменённых файла и убрать formatter churn до публикации/commit.
+3. Запустить deno test supabase/functions/_shared/novapay-auth_test.ts и deno check supabase/functions/_shared/novapay-auth.ts, pnpm type-check, scoped lint изменённых файлов, pnpm build и git diff --check. Зафиксировать PASS/FAIL, не скрывать недоступность Deno.
+4. Без дополнительных изменений auth/rotation и без ручного reset или изменения Vault. Commit, SSH push в main, deploy обеих зависимых функций novapay-data и novapay-balance, проверить GHA Production Deploy.
+5. Ручная приёмка: одно обновление выписки, затем минимум два плановых JWT renewal с проверкой последовательности started → response received → state saved и отсутствия NP002. Не говорить, что корневая причина устранена: этот patch диагностический. Если повторится, искать «NovaPay JWT rotation failed» и request_ref в логах для конкретной технической причины.
