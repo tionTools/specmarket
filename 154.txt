@@ -1,0 +1,21 @@
+Patch 154 — the existing "Сравнить" checkbox also compares each marketplace card
+
+Repository: tionTools/specmarket
+Base main SHA: 5516fd3b672aa0283270928ab19c79d0f2577847
+Patch: origin/chatgpt-patches/154.patch
+Expected blob SHA: 57d3622a3a979f07f74cb053f2966bdd036ad1ed
+
+User intent: On the CRM dashboard, the existing comparison checkbox already displays the previous month's figures below the overall KPI cards. When enabled, it should ALSO add the equivalent previous-period strip within each card under "По площадкам" (Prom, Epicentr, Kasta, Р/С, Сайт). No second checkbox. Preserve present-period values.
+
+Patch contents (two files):
+- src/pages/HomeView.vue: derive separate prior-period range from the OWN "По площадкам" date selector, without tying its period to the order-list selector. For the whole-month mode compare against the FULL previous calendar month (including its last day); for week/decade/last30/custom use the same one-month date shift as the existing comparison. Compute previous count, turnover, planned and realized profit with the exact same metrics and reporting orders as current period, separately per platform. Display a modest indigo comparison footer/date and four previous metrics in each platform card only when isComparingPreviousPeriod is true. Unchecking hides comparison; platform data and period selector remain unchanged.
+- src/features/orders/platform-summary-compare_test.mjs: exercise actual HomeView date/metric declarations via TypeScript AST, including a 31-day previous month, custom dates, platform separation, realized-profit filter and checkbox wiring.
+
+Codex steps:
+1. Inspect current main, worktree, patch blob; git apply --check, then apply. If main moved, reconcile against actual current source instead of applying blindly. Do not discard unrelated changes.
+2. Format only the two changed files, inspect diff to avoid formatter churn. Do not mass-reformat HomeView. Check layout at normal desktop and narrower widths; the five cards should retain logos and current values with a comparison strip below.
+3. Run node src/features/orders/platform-summary-compare_test.mjs, pnpm type-check, scoped Oxlint/ESLint, pnpm build and git diff --check. Fix minimal actual blocker and rerun; no false PASS claims.
+4. Commit only relevant files, SSH push main, wait for GitHub Production Deploy result. Frontend-only: no Supabase Edge deploy, migrations, schema or other functionality changes.
+5. Report commit SHA, actual checks, production deploy status/link. Do not claim manual browser QA unless performed.
+
+Manual acceptance (user): select "Месяц" under "По площадкам", check "Сравнить" below. Each platform card should display its own prior month dates and four historical metrics, with current numbers and logos unchanged. Uncheck to hide; change the platform summary period to verify historical range updates independently from the order-list period.
