@@ -1,0 +1,26 @@
+diff --git a/android/app/src/main/java/ua/orders/crm/MainActivity.kt b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+--- a/android/app/src/main/java/ua/orders/crm/MainActivity.kt
++++ b/android/app/src/main/java/ua/orders/crm/MainActivity.kt
+@@ -735,7 +735,7 @@
+                             onClick = { openDialer(context, rawBuyerPhone) },
+                             modifier = Modifier.fillMaxWidth().height(48.dp),
+                         ) {
+-                            Text("Позвонить покупателю · $buyerPhone", fontWeight = FontWeight.SemiBold)
++                            Text("Позвонить $buyerPhone", fontWeight = FontWeight.SemiBold)
+                         }
+                         Row(
+                             Modifier.fillMaxWidth(),
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -19,8 +19,8 @@
+         applicationId = "ua.orders.crm"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 16
+-        versionName = "0.16"
++        versionCode = 17
++        versionName = "0.17"
+     }
+     signingConfigs {
+         create("release") {
