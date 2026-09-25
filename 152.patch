@@ -1,0 +1,267 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -3761,18 +3761,24 @@
+ 
+ async function deleteOrder(order: Order) {
+   if (isGuest.value || deletingOrderId.value !== null) return
+-  if (!window.confirm(`Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`)) return
++  const preventReimport =
++    Boolean(order.externalId) &&
++    (order.platform === 'Каста' || order.platform === 'Пром' || order.platform === 'Эпицентр')
++  const confirmation = preventReimport
++    ? `Удалить заказ № ${order.id} из CRM вместе со всеми позициями? Заказ на площадке останется без изменений, повторный импорт в CRM будет заблокирован.`
++    : `Удалить заказ № ${order.id} из CRM вместе со всеми позициями?`
++  if (!window.confirm(confirmation)) return
+   deletingOrderId.value = order.id
+   await persistenceQueue
+-  if (order.platform === 'Каста' && order.externalId) {
++  if (preventReimport && order.externalId) {
+     if (!supabase) {
+-      window.alert('Не удалось сохранить запрет повторного импорта Kasta-заказа.')
++      window.alert('Не удалось сохранить запрет повторного импорта заказа.')
+       deletingOrderId.value = null
+       return
+     }
+     const { error: tombstoneError } = await supabase.from('crm_deleted_marketplace_orders').upsert(
+       {
+-        platform: 'Каста',
++        platform: order.platform,
+         external_id: order.externalId,
+         order_label: order.displayNumber ?? String(order.id),
+       },
+@@ -3780,7 +3786,7 @@
+     )
+     if (tombstoneError) {
+       window.alert(
+-        `Не удалось сохранить запрет повторного импорта Kasta-заказа: ${tombstoneError.message}`,
++        `Не удалось сохранить запрет повторного импорта заказа: ${tombstoneError.message}`,
+       )
+       deletingOrderId.value = null
+       return
+@@ -3804,6 +3810,7 @@
+   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+   expandedOrderId.value = null
+   deletingOrderId.value = null
++  void bankBalancesCard.value?.refreshDebt()
+ }
+ 
+ function platformClass(platform: Platform) {
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -22,6 +22,7 @@
+ } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
+ import { resolvePromShipping } from '../_shared/prom-delivery.ts'
++import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
+ import {
+   acceptPromOrders,
+   normalizePromExternalIds,
+@@ -1208,13 +1209,31 @@
+     : Array.isArray(payload.orders)
+       ? payload.orders.map(asRecord)
+       : []
++  const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
++  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
++    ? await admin
++        .from('crm_deleted_marketplace_orders')
++        .select('external_id')
++        .eq('platform', 'Пром')
++        .in('external_id', externalIds)
++    : { data: [], error: null }
++  if (deletedOrdersError)
++    return Response.json(
++      { ok: false, message: `Не удалось проверить удалённые Prom-заказы: ${deletedOrdersError.message}` },
++      { status: 500, headers: corsHeaders },
++    )
++  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => text(row.external_id)))
++  const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
++    orders,
++    deletedExternalIds,
++    (order) => `prom:${text(order.id)}`,
++  )
+   const hashes = new Map<string, string>(
+     await Promise.all(
+-      orders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const),
++      importableOrders.map(async (order) => [`prom:${text(order.id)}`, await sourceHash(order)] as const),
+     ),
+   )
+-  const externalIds = [...hashes.keys()].filter((id) => id !== 'prom:')
+-  const { data: syncRows, error: syncStateError } = externalIds.length
++  const { data: syncRows, error: syncStateError } = hashes.size
+     ? await admin
+         .from('crm_marketplace_order_sync_state')
+         .select('external_id, source_hash, order_id')
+@@ -1227,14 +1246,14 @@
+       { status: 500, headers: corsHeaders },
+     )
+   const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
+-  const candidates = orders.filter(
++  const candidates = importableOrders.filter(
+     (order) =>
+       requestedExternalId ||
+       fullSync ||
+       stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
+         hashes.get(`prom:${text(order.id)}`),
+   )
+-  const skippedUnchanged = orders.length - candidates.length
++  const skippedUnchanged = importableOrders.length - candidates.length
+   if (!candidates.length)
+     return Response.json(
+       {
+@@ -1244,6 +1263,7 @@
+         updated: 0,
+         skipped: skippedUnchanged,
+         skippedUnchanged,
++        deletedSkipped,
+         changedOrderIds: [],
+       },
+       { headers: corsHeaders },
+@@ -1770,6 +1790,7 @@
+       updated,
+       skipped,
+       skippedUnchanged: skipped,
++      deletedSkipped,
+       changedOrderIds: [...new Set(changedOrderIds)],
+     },
+     { headers: corsHeaders },
+diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+--- a/supabase/functions/sync-epicentr-orders/index.ts
++++ b/supabase/functions/sync-epicentr-orders/index.ts
+@@ -10,6 +10,7 @@
+ } from '../_shared/marketplace-family.ts'
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
++import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
+ import {
+   epicentrConfirmationStatus,
+   epicentrOrderStatus,
+@@ -529,10 +530,21 @@
+     orders = payload.items ?? []
+   }
+   const listOrders = orders
+-  const hashes = new Map(await Promise.all(listOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
+   const externalIds = listOrders.map((order) => order.id).filter(Boolean)
+-  const { data: states, error: statesError } = externalIds.length
+-    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', externalIds)
++  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
++    ? await admin.from('crm_deleted_marketplace_orders').select('external_id').eq('platform', 'Эпицентр').in('external_id', externalIds)
++    : { data: [], error: null }
++  if (deletedOrdersError)
++    return Response.json({ ok: false, message: `Не удалось проверить удалённые заказы Эпицентра: ${deletedOrdersError.message}` }, { status: 500, headers: corsHeaders })
++  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => String(row.external_id)))
++  const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
++    listOrders,
++    deletedExternalIds,
++    (order) => order.id,
++  )
++  const hashes = new Map(await Promise.all(importableOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
++  const { data: states, error: statesError } = importableOrders.length
++    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', importableOrders.map((order) => order.id))
+     : { data: [] }
+   if (statesError) return Response.json({ ok: false, message: statesError.message }, { status: 500, headers: corsHeaders })
+   const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
+@@ -540,13 +552,13 @@
+   const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
+   const terminalStatusCodes = new Set(['finished', 'completed', 'closed', 'canceled', 'returned', 'canceled_by_seller'])
+   const final = (order: EpicentrOrder) => terminalStatusCodes.has(String(order.statusCode).toLowerCase())
+-  orders = listOrders.filter((order) => {
++  orders = importableOrders.filter((order) => {
+     if (requestedExternalId || fullSync) return true
+     const state = stateByExternalId.get(order.id)
+     return !state || state.source_hash !== hashes.get(order.id) || (!final(order) && Date.now() - Date.parse(state.synced_at) >= ttlMs)
+   })
+-  const skippedUnchanged = listOrders.length - orders.length
+-  if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, changedOrderIds: [] }, { headers: corsHeaders })
++  const skippedUnchanged = importableOrders.length - orders.length
++  if (!orders.length) return Response.json({ ok: true, received: listOrders.length, created: 0, updated: 0, skipped: skippedUnchanged, skippedUnchanged, deletedSkipped, changedOrderIds: [] }, { headers: corsHeaders })
+   const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', orders.map((order) => order.id))
+   if (existingError) return Response.json({ ok: false, message: existingError.message }, { status: 500, headers: corsHeaders })
+   const existingByExternalId = new Map((existingRows ?? []).map((row) => [row.external_id, row]))
+@@ -882,5 +894,5 @@
+     if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
+   }
+ 
+-  return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
++  return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
+ })
+diff --git a/supabase/functions/_shared/deleted-marketplace-orders.ts b/supabase/functions/_shared/deleted-marketplace-orders.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/deleted-marketplace-orders.ts
+@@ -0,0 +1,9 @@
++/** Exclude tombstoned marketplace orders before incremental and forced imports. */
++export function excludeDeletedMarketplaceOrders<T>(
++  orders: T[],
++  deletedExternalIds: ReadonlySet<string>,
++  externalId: (order: T) => string,
++): { orders: T[]; deletedSkipped: number } {
++  const importableOrders = orders.filter((order) => !deletedExternalIds.has(externalId(order)))
++  return { orders: importableOrders, deletedSkipped: orders.length - importableOrders.length }
++}
+diff --git a/src/features/orders/deleted-marketplace-orders_test.mjs b/src/features/orders/deleted-marketplace-orders_test.mjs
+new file mode 100644
+--- /dev/null
++++ b/src/features/orders/deleted-marketplace-orders_test.mjs
+@@ -0,0 +1,60 @@
++import assert from 'node:assert/strict'
++import { readFileSync } from 'node:fs'
++import { runInNewContext } from 'node:vm'
++import ts from 'typescript'
++
++const helperSource = readFileSync(
++  new URL('../../../supabase/functions/_shared/deleted-marketplace-orders.ts', import.meta.url),
++  'utf8',
++)
++const prom = readFileSync(
++  new URL('../../../supabase/functions/sync-prom-orders/index.ts', import.meta.url),
++  'utf8',
++)
++const epicentr = readFileSync(
++  new URL('../../../supabase/functions/sync-epicentr-orders/index.ts', import.meta.url),
++  'utf8',
++)
++const home = readFileSync(new URL('../../pages/HomeView.vue', import.meta.url), 'utf8')
++const context = { exports: {} }
++runInNewContext(
++  ts.transpile(helperSource, {
++    target: ts.ScriptTarget.ES2022,
++    module: ts.ModuleKind.CommonJS,
++  }),
++  context,
++)
++const exclude = context.exports.excludeDeletedMarketplaceOrders
++assert.equal(typeof exclude, 'function')
++
++const promOrders = [{ id: '101' }, { id: '202' }]
++const removedProm = new Set(['prom:101'])
++for (const mode of ['incremental', 'full', 'single']) {
++  const result = exclude(promOrders, removedProm, (order) => `prom:${order.id}`)
++  assert.deepEqual(Array.from(result.orders, (order) => order.id), ['202'], mode)
++  assert.equal(result.deletedSkipped, 1, mode)
++}
++const epicentrOrders = [{ id: '123456' }, { id: '654321' }]
++const result = exclude(epicentrOrders, new Set(['123456', 'prom:654321']), (order) => order.id)
++assert.deepEqual(Array.from(result.orders, (order) => order.id), ['654321'])
++assert.equal(result.deletedSkipped, 1)
++assert.equal(exclude(epicentrOrders, new Set(), (order) => order.id).deletedSkipped, 0)
++
++for (const [source, platform, filter, candidateMarker] of [
++  [prom, 'Пром', '(order) => `prom:${text(order.id)}`', 'const candidates = importableOrders.filter('],
++  [epicentr, 'Эпицентр', '(order) => order.id', 'orders = importableOrders.filter('],
++]) {
++  const tableLookup = source.indexOf(".from('crm_deleted_marketplace_orders')")
++  const filtering = source.indexOf('excludeDeletedMarketplaceOrders(')
++  const candidateSelection = source.indexOf(candidateMarker)
++  assert.ok(tableLookup >= 0, platform + ': lookup deleted IDs')
++  assert.ok(source.includes(`.eq('platform', '${platform}')`), platform + ': platform-scoped lookup')
++  assert.ok(source.includes(filter), platform + ': correct external ID format')
++  assert.ok(filtering > tableLookup && candidateSelection > filtering, platform + ': tombstone before candidates')
++  assert.ok(source.includes('if (deletedOrdersError)'), platform + ': fail closed on lookup error')
++  assert.ok(source.includes('deletedSkipped'), platform + ': skipped count is reported')
++}
++assert.match(home, /order\.platform === 'Каста' \|\| order\.platform === 'Пром' \|\| order\.platform === 'Эпицентр'/)
++assert.match(home, /platform: order\.platform,\s*external_id: order\.externalId,/)
++assert.match(home, /void bankBalancesCard\.value\?\.refreshDebt\(\)/)
++console.log('Deleted marketplace order regression: Prom/Epicentr tombstones and debt refresh PASS')
