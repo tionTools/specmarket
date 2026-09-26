@@ -1,0 +1,146 @@
+diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+--- a/supabase/functions/sync-kasta-orders/index.ts
++++ b/supabase/functions/sync-kasta-orders/index.ts
+@@ -366,14 +366,12 @@
+       )
+       if (product) {
+         const royalty = royaltyPercent(product.royalty)
+-        console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, page, productKeys: Object.keys(product), royalty } }))
+         cache.set(cacheKey, royalty)
+         return royalty || undefined
+       }
+       cursor = text(payload.cursor)
+       if (!cursor || barcode) break
+     }
+-    console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, found: false } }))
+     return undefined
+   } catch {
+     return undefined
+@@ -638,18 +636,6 @@
+         const directRoyalty = royaltyPercent(item.royalty)
+         const needsCatalogRoyalty = targetOrderId || previous === undefined
+         const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
+-        if (targetOrderId) {
+-          console.log(JSON.stringify({ kastaOrderItem: {
+-            orderId: kastaId,
+-            supplierCode,
+-            barcode: itemBarcode(item),
+-            paidPrice: number(item.paid_price),
+-            newPrice: number(item.new_price),
+-            bonus: itemBonus(item),
+-            directRoyalty,
+-            apiRoyalty,
+-          } }))
+-        }
+         const apiItemSnapshot = {
+           order_id: orderId,
+           position,
+diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_shared/novapay-auth.ts
+--- a/supabase/functions/_shared/novapay-auth.ts
++++ b/supabase/functions/_shared/novapay-auth.ts
+@@ -37,15 +37,11 @@
+     .slice(0, AUTH_FINGERPRINT_HEX_LENGTH)
+ }
+ 
+-async function logCredentialFingerprints(
+-  stage: string,
+-  state: { refreshToken: string; publicCertificate: string },
+-) {
++async function credentialFingerprints(state: { refreshToken: string; publicCertificate: string }) {
+   const [refresh, certificate] = await Promise.all([
+     credentialFingerprint(state.refreshToken),
+     credentialFingerprint(state.publicCertificate),
+   ])
+-  console.info(`NovaPay auth fingerprint ${stage}: refresh=${refresh} certificate=${certificate}`)
+   return { refresh, certificate }
+ }
+ 
+@@ -223,8 +219,6 @@
+       refreshToken: text(data.refresh_token),
+       publicCertificate: text(data.public_certificate),
+     }
+-    console.info('NovaPay JWT rotation started.')
+-    await logCredentialFingerprints('input', authState)
+     // Arm durably before sending a single-use credential. Only an atomic save or manual recovery clears it.
+     try {
+       const { error: beginError } = await admin.rpc('begin_novapay_auth_rotation', {
+@@ -242,7 +236,6 @@
+       string,
+       unknown
+     > | null
+-    console.info('NovaPay JWT rotation response received.')
+     const nextJwt = text(result?.jwt)
+     const refreshToken = text(result?.refresh_token)
+     const publicCertificate = text(result?.public_certificate)
+@@ -261,7 +254,7 @@
+       )
+     }
+ 
+-    const responseFingerprints = await logCredentialFingerprints('response', {
++    const responseFingerprints = await credentialFingerprints({
+       refreshToken,
+       publicCertificate,
+     })
+@@ -273,7 +266,6 @@
+       new_jwt: nextJwt,
+       new_jwt_expires_at: String(Math.floor(jwtExpiresAt / 1000)),
+     })
+-    console.info('NovaPay JWT rotation state saved.')
+ 
+     try {
+       const { data: storedState, error: storedStateError } =
+@@ -281,13 +273,16 @@
+       if (storedStateError || !storedState || typeof storedState !== 'object') {
+         console.warn('NovaPay auth fingerprint stored read failed.')
+       } else {
+-        const storedFingerprints = await logCredentialFingerprints('stored', {
++        const storedFingerprints = await credentialFingerprints({
+           refreshToken: text(storedState.refresh_token),
+           publicCertificate: text(storedState.public_certificate),
+         })
+-        console.info(
+-          `NovaPay auth fingerprint stored matches response: ${storedFingerprints.refresh === responseFingerprints.refresh && storedFingerprints.certificate === responseFingerprints.certificate}`,
+-        )
++        if (
++          storedFingerprints.refresh !== responseFingerprints.refresh ||
++          storedFingerprints.certificate !== responseFingerprints.certificate
++        ) {
++          console.error('NovaPay stored credentials do not match the authentication response.')
++        }
+       }
+     } catch {
+       console.warn('NovaPay auth fingerprint stored read failed.')
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -154,11 +154,6 @@
+     )
+   }
+ 
+-  if (method === 'UserAuthenticationJWT') {
+-    const responseRef = text(result.response_ref)
+-    console.info(`NovaPay auth response_ref: ${responseRef || 'missing'}`)
+-  }
+-
+   const logicalError = apiError(result, method)
+   if (logicalError) throw logicalError
+   return result
+@@ -888,7 +883,6 @@
+       authenticate: async ({ refreshToken, publicCertificate }) => {
+         const authRequestRef = requestRef()
+         syncRequestRef = authRequestRef
+-        console.info(`NovaPay auth request_ref: ${authRequestRef}`)
+         syncStage = 'auth_request'
+         await markNovaPaySyncAttempt(admin, syncOwner, 'auth_request', authRequestRef)
+         return soapCall('UserAuthenticationJWT', {
+@@ -1172,10 +1166,6 @@
+             },
+           }
+         : undefined
+-    console.info(
+-      `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} eventKnown=${updatedEventKnownCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
+-    )
+-
+     await completeNovaPaySyncAttempt(admin, syncOwner)
+ 
+     if (compact)
