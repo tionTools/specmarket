@@ -19,7 +19,11 @@ ORDER BY name;
 SELECT rolname, rolconfig
 FROM pg_roles
 WHERE rolname IN ('postgres','anon','authenticated','service_role');
-SELECT datname, datconfig FROM pg_database WHERE datname = 'postgres';
+SELECT d.datname, COALESCE(r.rolname, '(all roles)') AS role_name, s.setconfig
+FROM pg_db_role_setting AS s
+JOIN pg_database AS d ON d.oid = s.setdatabase
+LEFT JOIN pg_roles AS r ON r.oid = s.setrole
+WHERE d.datname = 'postgres';
 SELECT jobid, jobname, schedule, active FROM cron.job ORDER BY jobid;
 Save before-values in deployment report; do not export secrets, SQL text or customer records.
 5. Conditional setting decisions, NOT blindly apply: keep log_statement=ddl if already default (DDL audit is useful); if all/mod, propose ddl. Keep log_min_messages=warning and log_min_duration_statement at a threshold that retains slow queries; if changed to debug/notice or 0, propose reducing verbosity. Keep log_checkpoints at its platform default: sparse checkpoint lines are NOT our main driver. Keep error logging, auth audit, PostgreSQL warnings. Never turn off log_min_error_statement, pgAudit or other security requirements.
