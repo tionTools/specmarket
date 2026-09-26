@@ -154,11 +154,6 @@ async function soapCallOnce(method, params) {
     )
   }
 
-  if (method === 'UserAuthenticationJWT') {
-    const responseRef = text(result.response_ref)
-    console.info(`NovaPay auth response_ref: ${responseRef || 'missing'}`)
-  }
-
   const logicalError = apiError(result, method)
   if (logicalError) throw logicalError
   return result
@@ -888,7 +883,6 @@ Deno.serve(async (request) => {
       authenticate: async ({ refreshToken, publicCertificate }) => {
         const authRequestRef = requestRef()
         syncRequestRef = authRequestRef
-        console.info(`NovaPay auth request_ref: ${authRequestRef}`)
         syncStage = 'auth_request'
         await markNovaPaySyncAttempt(admin, syncOwner, 'auth_request', authRequestRef)
         return soapCall('UserAuthenticationJWT', {
@@ -1172,10 +1166,6 @@ Deno.serve(async (request) => {
             },
           }
         : undefined
-    console.info(
-      `NovaPay payments diagnostics: statement ${dateFrom}..${dateTo} documents=${statementDocuments.length} conducted=${statementConductedDocuments.length} incoming=${statementIncomingDocuments.length} timed=${timedCount} eventKnown=${eventKnownCount} providerId=${providerIdentifiedCount} fallbackId=${fallbackIdentityCount}; updated ${updatedDateFrom}..${dateTo} documents=${updatedDocuments.length} conducted=${updatedConductedDocuments.length} incoming=${updatedIncomingDocuments.length} timed=${updatedTimedCount} eventKnown=${updatedEventKnownCount} providerId=${updatedProviderIdentifiedCount} fallbackId=${updatedFallbackIdentityCount}`,
-    )
-
     await completeNovaPaySyncAttempt(admin, syncOwner)
 
     if (compact)

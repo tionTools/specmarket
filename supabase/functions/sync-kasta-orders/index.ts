@@ -220,11 +220,6 @@ function itemImage(item: RecordValue) {
   return images[0] ?? text(pick(item, 'image', 'image_url', 'picture', 'photo'))
 }
 
-function itemBonus(item: RecordValue) {
-  const bonuses = Array.isArray(item.bonuses) ? item.bonuses.map(asRecord) : []
-  return bonuses.reduce((total, bonus) => total + number(bonus.amount), 0)
-}
-
 function itemPrice(item: RecordValue) {
   return number(pick(item, 'new_price', 'paid_price', 'price'))
 }
@@ -366,14 +361,12 @@ async function kastaRoyaltyForItem(token: string, item: RecordValue, cache: Map<
       )
       if (product) {
         const royalty = royaltyPercent(product.royalty)
-        console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, page, productKeys: Object.keys(product), royalty } }))
         cache.set(cacheKey, royalty)
         return royalty || undefined
       }
       cursor = text(payload.cursor)
       if (!cursor || barcode) break
     }
-    console.log(JSON.stringify({ kastaRoyaltyLookup: { barcode, supplierCode, size, found: false } }))
     return undefined
   } catch {
     return undefined
@@ -638,18 +631,6 @@ Deno.serve(async (request) => {
         const directRoyalty = royaltyPercent(item.royalty)
         const needsCatalogRoyalty = targetOrderId || previous === undefined
         const apiRoyalty = directRoyalty || (needsCatalogRoyalty ? await kastaRoyaltyForItem(kastaToken, item, royaltyCache) : undefined)
-        if (targetOrderId) {
-          console.log(JSON.stringify({ kastaOrderItem: {
-            orderId: kastaId,
-            supplierCode,
-            barcode: itemBarcode(item),
-            paidPrice: number(item.paid_price),
-            newPrice: number(item.new_price),
-            bonus: itemBonus(item),
-            directRoyalty,
-            apiRoyalty,
-          } }))
-        }
         const apiItemSnapshot = {
           order_id: orderId,
           position,

@@ -37,15 +37,11 @@ async function credentialFingerprint(value: string) {
     .slice(0, AUTH_FINGERPRINT_HEX_LENGTH)
 }
 
-async function logCredentialFingerprints(
-  stage: string,
-  state: { refreshToken: string; publicCertificate: string },
-) {
+async function credentialFingerprints(state: { refreshToken: string; publicCertificate: string }) {
   const [refresh, certificate] = await Promise.all([
     credentialFingerprint(state.refreshToken),
     credentialFingerprint(state.publicCertificate),
   ])
-  console.info(`NovaPay auth fingerprint ${stage}: refresh=${refresh} certificate=${certificate}`)
   return { refresh, certificate }
 }
 
@@ -223,8 +219,6 @@ export async function getValidNovaPayJwt({
       refreshToken: text(data.refresh_token),
       publicCertificate: text(data.public_certificate),
     }
-    console.info('NovaPay JWT rotation started.')
-    await logCredentialFingerprints('input', authState)
     // Arm durably before sending a single-use credential. Only an atomic save or manual recovery clears it.
     try {
       const { error: beginError } = await admin.rpc('begin_novapay_auth_rotation', {
@@ -242,7 +236,6 @@ export async function getValidNovaPayJwt({
       string,
       unknown
     > | null
-    console.info('NovaPay JWT rotation response received.')
     const nextJwt = text(result?.jwt)
     const refreshToken = text(result?.refresh_token)
     const publicCertificate = text(result?.public_certificate)
@@ -261,7 +254,7 @@ export async function getValidNovaPayJwt({
       )
     }
 
-    const responseFingerprints = await logCredentialFingerprints('response', {
+    const responseFingerprints = await credentialFingerprints({
       refreshToken,
       publicCertificate,
     })
@@ -273,7 +266,6 @@ export async function getValidNovaPayJwt({
       new_jwt: nextJwt,
       new_jwt_expires_at: String(Math.floor(jwtExpiresAt / 1000)),
     })
-    console.info('NovaPay JWT rotation state saved.')
 
     try {
       const { data: storedState, error: storedStateError } =
@@ -281,13 +273,16 @@ export async function getValidNovaPayJwt({
       if (storedStateError || !storedState || typeof storedState !== 'object') {
         console.warn('NovaPay auth fingerprint stored read failed.')
       } else {
-        const storedFingerprints = await logCredentialFingerprints('stored', {
+        const storedFingerprints = await credentialFingerprints({
           refreshToken: text(storedState.refresh_token),
           publicCertificate: text(storedState.public_certificate),
         })
-        console.info(
-          `NovaPay auth fingerprint stored matches response: ${storedFingerprints.refresh === responseFingerprints.refresh && storedFingerprints.certificate === responseFingerprints.certificate}`,
-        )
+        if (
+          storedFingerprints.refresh !== responseFingerprints.refresh ||
+          storedFingerprints.certificate !== responseFingerprints.certificate
+        ) {
+          console.error('NovaPay stored credentials do not match the authentication response.')
+        }
       }
     } catch {
       console.warn('NovaPay auth fingerprint stored read failed.')
