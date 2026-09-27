@@ -732,7 +732,7 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
                             "${order.orderDate.display()} · ${order.orderTime.display()}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
