@@ -52,7 +52,7 @@ class OrdersRepository {
         client.auth.signInWith(Email) { this.email = email.trim(); this.password = password }
     }
     suspend fun signOut() = client.auth.signOut()
-    private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url)")
+    private val columns = Columns.raw("id,external_id,order_number,order_label,order_date,order_time,customer,phone,platform,status,shipping,delivery,updated_at,crm_order_items(position,product_name,size,quantity,price,image_url,royalty_percent,royalty_amount)")
 
     suspend fun setPushDevice(deviceId: String, token: String?, enabled: Boolean) {
         check(client.auth.sessionStatus.first { it !is SessionStatus.Initializing } is SessionStatus.Authenticated)
