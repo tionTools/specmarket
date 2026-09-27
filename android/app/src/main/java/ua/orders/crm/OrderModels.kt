@@ -305,7 +305,7 @@ fun Order.cardDelivery(): OrderCardDelivery {
         plannedSignal.containsMatchIn(rawStatus) ||
         plannedSignal.containsMatchIn(rawTrackingStatus)
     val stage = deliveryStatusInfo().let { info ->
-        listOf(info.stage, info.current).map(String::trim).filter(String::isNotBlank)
+        listOf(info.stage, info.current).map { it.trim() }.filter { it.isNotBlank() }
             .distinct().joinToString(" · ")
     }
     val translatedStage = if (normalizedStatus(stage) in plannedStates) "Создано онлайн" else stage
