@@ -665,18 +665,13 @@ private fun OrdersScreen(
 }
 
 @Composable
-private fun OrderProductDetails(
-    product: OrderItem?,
-    moreProducts: Int,
-    buyerName: String,
-    buyerPhone: String,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun OrderProductDetails(product: OrderItem?, moreProducts: Int) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
             product?.productName.display(),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 3,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
         product?.size?.takeIf { it.isNotBlank() }?.let { size ->
@@ -684,85 +679,28 @@ private fun OrderProductDetails(
                 "Размер: $size",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (moreProducts > 0) {
             Surface(shape = RoundedCornerShape(999.dp), color = Color(0xFFF1F5F9)) {
                 Text(
                     "Ещё $moreProducts ${extraProductsLabel(moreProducts)}",
-                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF475569),
+                    maxLines = 1,
                 )
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Icon(
-                Icons.Filled.Person,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    buyerName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (buyerPhone != "—") {
-                    Text(
-                        buyerPhone,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         }
     }
 }
 
 @Composable
-private fun OrderCardAmounts(order: Order, product: OrderItem?, modifier: Modifier = Modifier) {
-    Column(
-        modifier,
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(1.dp),
-    ) {
-        Text(
-            money(order.total()),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        if (product != null) {
-            Text(
-                "${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            "Роялти ${money(order.royalty())}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun OrderCard(order: Order, onClick: () -> Unit) {
-    val buyerName = order.customer.display()
-    val buyerPhone = order.buyerPhone()
-    val products = order.items.sortedBy { it.position }
-    val product = products.firstOrNull()
-    val moreProducts = (products.size - 1).coerceAtLeast(0)
+internal fun OrderCard(order: Order, onClick: () -> Unit) {
+    val product = order.items.minByOrNull { it.position ?: Int.MAX_VALUE }
+    val moreProducts = (order.items.size - 1).coerceAtLeast(0)
     val shipment = order.cardDelivery()
     val ttnBackground = if (shipment.created) Color(0xFFEAF8F2) else Color(0xFFFFF3E2)
     val ttnForeground = if (shipment.created) Color(0xFF087B58) else Color(0xFFB86300)
@@ -775,109 +713,143 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
                         "№ ${order.number()}",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        "${order.orderDate.display()} · ${order.orderTime.display()}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PlatformLogo(order.platform)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${order.orderDate.display()} · ${order.orderTime.display()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.widthIn(max = 138.dp)) { StatusLabel(order, compact = true) }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                PlatformLogo(order.platform)
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                Box(Modifier.widthIn(max = 112.dp)) { StatusLabel(order, compact = true) }
                 Icon(
                     Icons.Filled.ChevronRight,
                     contentDescription = "Открыть заказ",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(16.dp),
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                if (maxWidth >= 460.dp) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        ProductThumbnail(product?.imageUrl, size = 72.dp)
-                        Spacer(Modifier.width(9.dp))
-                        Column(Modifier.weight(1f)) {
-                            OrderProductDetails(product, moreProducts, buyerName, buyerPhone)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        OrderCardAmounts(order, product, Modifier.widthIn(min = 126.dp, max = 152.dp))
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                            ProductThumbnail(product?.imageUrl, size = 72.dp)
-                            Spacer(Modifier.width(9.dp))
-                            Column(Modifier.weight(1f)) {
-                                OrderProductDetails(product, moreProducts, buyerName, buyerPhone)
-                            }
-                        }
-                        OrderCardAmounts(order, product, Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                ProductThumbnail(product?.imageUrl, size = 72.dp)
+                Spacer(Modifier.width(9.dp))
+                Column(Modifier.weight(1f)) { OrderProductDetails(product, moreProducts) }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Filled.Person,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(
+                        order.customer.display(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val buyerPhone = order.buyerPhone()
+                    if (buyerPhone != "—") {
+                        Text(
+                            buyerPhone,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    product?.let {
+                        "${amount(it.quantity)} × ${it.price?.let { price -> money(BigDecimal.valueOf(price)) } ?: "—"}"
+                    } ?: "Нет позиций",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    money(order.total()),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                "Роялти ${money(order.royalty())}",
+                modifier = Modifier.align(Alignment.End),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = ttnBackground,
                 contentColor = ttnForeground,
             ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.LocalShipping,
-                            contentDescription = null,
-                            tint = ttnForeground,
-                            modifier = Modifier.size(22.dp),
-                        )
-                        Spacer(Modifier.width(7.dp))
+                    Icon(
+                        Icons.Filled.LocalShipping,
+                        contentDescription = null,
+                        tint = ttnForeground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             shipment.title,
-                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = ttnForeground,
                             maxLines = 1,
-                        )
-                    }
-                    val ttnLine = listOf(shipment.ttn, shipment.carrier)
-                        .filter(String::isNotBlank).joinToString(" · ")
-                    if (ttnLine.isNotBlank()) {
-                        Text(
-                            ttnLine,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF475569),
-                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    if (shipment.status.isNotBlank() && shipment.status != shipment.title) {
-                        Text(
-                            shipment.status,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ttnForeground,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        val ttnLine = listOf(shipment.ttn, shipment.carrier)
+                            .filter(String::isNotBlank).joinToString(" · ")
+                        if (ttnLine.isNotBlank()) {
+                            Text(
+                                ttnLine,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF475569),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (shipment.status.isNotBlank() && shipment.status != shipment.title) {
+                            Text(
+                                shipment.status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ttnForeground,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
