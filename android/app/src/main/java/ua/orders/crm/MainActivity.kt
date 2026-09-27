@@ -180,6 +180,10 @@ fun OrdersApp(
     NotificationPermissionGate(vm)
     var settings by rememberSaveable { mutableStateOf(false) }
     val ordersListState = rememberLazyListState()
+    var returnAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
+    var returnAnchorIndex by rememberSaveable { mutableIntStateOf(0) }
+    var returnAnchorOffset by rememberSaveable { mutableIntStateOf(0) }
+    var restoringFromDetail by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
@@ -188,7 +192,14 @@ fun OrdersApp(
     LaunchedEffect(vm.message) {
         vm.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
     }
-    LaunchedEffect(vm.email) { if (vm.email == null) { settings = false; confirmationId = null } }
+    LaunchedEffect(vm.email) {
+        if (vm.email == null) {
+            settings = false
+            confirmationId = null
+            returnAnchorId = null
+            restoringFromDetail = false
+        }
+    }
     LaunchedEffect(openOrderId, vm.email, vm.initializing) {
         if (openOrderId != null && vm.email != null && !vm.initializing) {
             settings = false
@@ -198,7 +209,10 @@ fun OrdersApp(
         }
     }
     BackHandler(settings || vm.selectedId != null) {
-        if (settings) settings = false else vm.closeDetail()
+        if (settings) settings = false else {
+            restoringFromDetail = true
+            vm.closeDetail()
+        }
     }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -209,7 +223,11 @@ fun OrdersApp(
                 vm.initializing -> Initializing()
                 vm.email == null -> Login(vm)
                 settings -> Settings(vm, onBack = { settings = false })
-                vm.selectedId != null -> Details(vm, onAccept = { confirmationId = it.id })
+                vm.selectedId != null -> Details(
+                    vm,
+                    onBack = { restoringFromDetail = true; vm.closeDetail() },
+                    onAccept = { confirmationId = it.id },
+                )
                 else -> OrdersScreen(
                     vm = vm,
                     onSettings = { settings = true },
@@ -220,6 +238,16 @@ fun OrdersApp(
                     onSearchOpenChange = { searchOpen = it },
                     onSearchQueryChange = { searchQuery = it },
                     onFilterChange = { filterName = it.name },
+                    restoreAnchorId = returnAnchorId.takeIf { restoringFromDetail },
+                    restoreAnchorIndex = returnAnchorIndex,
+                    restoreAnchorOffset = returnAnchorOffset,
+                    onAnchorRestored = { restoringFromDetail = false; returnAnchorId = null },
+                    onOrderOpen = { id, topId, index, offset ->
+                        returnAnchorId = topId
+                        returnAnchorIndex = index
+                        returnAnchorOffset = offset
+                        vm.open(id)
+                    },
                 )
             }
         }
@@ -532,10 +560,22 @@ private fun OrdersScreen(
     onSearchOpenChange: (Boolean) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onFilterChange: (OrderListFilter) -> Unit,
+    restoreAnchorId: String?,
+    restoreAnchorIndex: Int,
+    restoreAnchorOffset: Int,
+    onAnchorRestored: () -> Unit,
+    onOrderOpen: (String, String?, Int, Int) -> Unit,
 ) {
     val orders = remember(vm.orders) { vm.orders.filter(::isOrderVisibleInMainList) }
     val visibleOrders = remember(orders, searchQuery, filter) {
         orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
+    }
+    LaunchedEffect(restoreAnchorId, visibleOrders) {
+        if (restoreAnchorId == null || visibleOrders.isEmpty()) return@LaunchedEffect
+        val byId = visibleOrders.indexOfFirst { it.id == restoreAnchorId }
+        val index = if (byId >= 0) byId else restoreAnchorIndex.coerceIn(0, visibleOrders.lastIndex)
+        listState.scrollToItem(index, restoreAnchorOffset)
+        onAnchorRestored()
     }
 
     Scaffold(
@@ -612,7 +652,11 @@ private fun OrdersScreen(
                         }
                     }
                     items(visibleOrders, key = { it.id }) { order ->
-                        OrderCard(order) { vm.open(order.id) }
+                        OrderCard(order) {
+                            val index = listState.firstVisibleItemIndex
+                            val topId = visibleOrders.getOrNull(index)?.id
+                            onOrderOpen(order.id, topId, index, listState.firstVisibleItemScrollOffset)
+                        }
                     }
                 }
             }
@@ -890,7 +934,7 @@ private fun DetailsHeader(order: Order) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
+private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -901,7 +945,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("№ " + (order?.number() ?: "—"), fontWeight = FontWeight.Bold) },
-                navigationIcon = { TextButton({ vm.closeDetail() }) { Text("Назад") } },
+                navigationIcon = { TextButton(onBack) { Text("Назад") } },
                 actions = {
                     order?.let {
                         Text(
