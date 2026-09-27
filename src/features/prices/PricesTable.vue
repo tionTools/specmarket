@@ -13,12 +13,14 @@ import {
 } from '@tanstack/vue-table'
 
 import type { PriceItem } from './priceCatalog'
+import type { MarketplaceEnabled, MarketplacePlatform } from '@/features/marketplaces/syncSettings'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 
 const props = defineProps<{
   items: PriceItem[]
+  marketplaceEnabled: MarketplaceEnabled
   usdRate: number
   editingCell: string | null
   guest: boolean
@@ -84,7 +86,7 @@ function priceCell(
   }
 }
 
-const columns = [
+const allColumns = [
   {
     accessorKey: 'name',
     header: 'Название',
@@ -221,6 +223,21 @@ const columns = [
     },
   },
 ] satisfies ColumnDef<typeof features, PriceItem>[]
+
+const columnPlatforms: Record<string, MarketplacePlatform> = {
+  prom: 'Пром',
+  epic: 'Эпицентр',
+  kastaOne: 'Каста',
+  kastaTwo: 'Каста',
+  kastaThree: 'Каста',
+}
+const columns = computed(() =>
+  allColumns.filter((column) => {
+    const columnId = 'accessorKey' in column ? column.accessorKey : column.id
+    const platform = columnPlatforms[String(columnId)]
+    return !platform || props.marketplaceEnabled[platform]
+  }),
+)
 
 const data = computed(() => props.items)
 const table = useTable({

@@ -21,6 +21,12 @@ import {
   marketplaceReplacementHistory,
 } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import {
+  loadMarketplaceSyncAccess,
+  marketplacePausedResponse,
+  marketplaceSettingsUnavailableResponse,
+  shouldSkipAutomaticMarketplaceSync,
+} from '../_shared/marketplace-sync-settings.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
@@ -822,9 +828,13 @@ Deno.serve(async (request) => {
   }
 
   const admin = createClient(url, serviceKey)
-  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
-  const isScheduledRequest =
-    typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
+  let syncAccess
+  try {
+    syncAccess = await loadMarketplaceSyncAccess(admin, 'Пром')
+  } catch {
+    return marketplaceSettingsUnavailableResponse(corsHeaders)
+  }
+  const isScheduledRequest = authorization === `Bearer ${syncAccess.secret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const {
     data: { user },
@@ -839,6 +849,8 @@ Deno.serve(async (request) => {
       { ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' },
       { status: 403, headers: corsHeaders },
     )
+
+  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
 
   const body = (await request.json().catch(() => ({}))) as {
     externalId?: unknown

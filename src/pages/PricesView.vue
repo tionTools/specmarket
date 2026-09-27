@@ -13,6 +13,11 @@ import {
 } from '@/features/prices/currencyRates'
 import PricesTable from '@/features/prices/PricesTable.vue'
 import { supabase } from '@/lib/supabase'
+import {
+  defaultMarketplaceEnabled,
+  marketplaceEnabledFromRows,
+  marketplacePlatforms,
+} from '@/features/marketplaces/syncSettings'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
@@ -88,6 +93,12 @@ const authError = ref('')
 const isLoading = ref(false)
 const showPassword = ref(false)
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+const marketplaceEnabled = ref(defaultMarketplaceEnabled())
+const isMarketplaceSettingsLoaded = ref(false)
+const marketplaceSettingsError = ref('')
+const pausedMarketplaces = computed(() =>
+  marketplacePlatforms.filter((platform) => !marketplaceEnabled.value[platform]),
+)
 
 type LinkPlatform = 'Пром' | 'Эпицентр' | 'Каста'
 const queryText = (value: unknown) => (typeof value === 'string' ? value : '')
@@ -229,6 +240,22 @@ async function loadCurrencyRates() {
   rateError.value = currencyRates.value.length ? '' : 'История курса USD пуста. Добавьте курс.'
 }
 
+async function loadMarketplaceSettings() {
+  if (!supabase) return
+  marketplaceSettingsError.value = ''
+  try {
+    const { data, error } = await supabase
+      .from('crm_marketplace_settings')
+      .select('platform, enabled')
+    if (error) throw error
+    marketplaceEnabled.value = marketplaceEnabledFromRows(data ?? [])
+  } catch (failure) {
+    marketplaceSettingsError.value = `Не удалось загрузить настройки маркетплейсов: ${failure instanceof Error ? failure.message : String(failure)}`
+  } finally {
+    isMarketplaceSettingsLoaded.value = true
+  }
+}
+
 async function signIn() {
   if (!supabase) return
   authError.value = ''
@@ -241,7 +268,7 @@ async function signIn() {
   if (error) authError.value = error.message
   else {
     user.value = data.user
-    await loadCatalog()
+    await Promise.all([loadCatalog(), loadMarketplaceSettings()])
   }
 }
 
@@ -651,7 +678,7 @@ onMounted(async () => {
   }
   const { data } = await supabase.auth.getSession()
   user.value = data.session?.user ?? null
-  if (user.value) await loadCatalog()
+  if (user.value) await Promise.all([loadCatalog(), loadMarketplaceSettings()])
   await nextTick()
   window.scrollTo({ top: 0, left: 0 })
 })
@@ -891,6 +918,13 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </button>
       </p>
 
+      <p v-if="marketplaceSettingsError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+        {{ marketplaceSettingsError }}
+        <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">Повторить</button>
+      </p>
+      <p v-if="pausedMarketplaces.length" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения сохранены; ручная синхронизация доступна.
+      </p>
       <section
         v-if="!user"
         class="mt-7 max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
@@ -993,7 +1027,10 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             Ручная себестоимость сохранится.</span
           >
         </div>
+        <p v-if="!isMarketplaceSettingsLoaded" class="px-4 py-6 text-sm text-slate-500">Загрузка настроек маркетплейсов…</p>
         <PricesTable
+          v-else
+          :marketplace-enabled="marketplaceEnabled"
           :items="items"
           :usd-rate="usdRate"
           :editing-cell="editingCell"

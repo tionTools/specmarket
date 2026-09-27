@@ -11,6 +11,12 @@ import {
   type Appearance,
 } from '@/lib/appearance'
 import { supabase } from '@/lib/supabase'
+import {
+  defaultMarketplaceEnabled,
+  marketplaceEnabledFromRows,
+  marketplacePlatforms,
+  type MarketplacePlatform,
+} from '@/features/marketplaces/syncSettings'
 
 const defaultLabelRecipientEmail = 'prozaxist.ocean@gmail.com'
 const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
@@ -28,6 +34,11 @@ const appearance = ref<Appearance>(
 )
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+const marketplaceEnabled = ref(defaultMarketplaceEnabled())
+const isMarketplaceLoading = ref(true)
+const savingMarketplace = ref<MarketplacePlatform | null>(null)
+const marketplaceMessage = ref('')
+const marketplaceError = ref('')
 
 function handleSystemTheme() {
   if (appearance.value === 'system') applyAppearance(appearance.value)
@@ -98,6 +109,49 @@ async function saveBankRecipientEmail() {
   bankEmailMessage.value = 'Email для банковских приходов сохранён.'
 }
 
+async function loadMarketplaceSettings() {
+  if (!supabase) return
+  isMarketplaceLoading.value = true
+  marketplaceError.value = ''
+  try {
+    const { data, error } = await supabase
+      .from('crm_marketplace_settings')
+      .select('platform, enabled')
+    if (error) throw error
+    marketplaceEnabled.value = marketplaceEnabledFromRows(data ?? [])
+  } catch (failure) {
+    marketplaceError.value = `Не удалось загрузить настройки: ${failure instanceof Error ? failure.message : String(failure)}`
+  } finally {
+    isMarketplaceLoading.value = false
+  }
+}
+
+async function handleMarketplaceToggle(event: Event) {
+  const input = event.target as HTMLInputElement
+  const platform = marketplacePlatforms.find((candidate) => candidate === input.value)
+  if (!platform || !supabase || isGuest.value || !user.value || savingMarketplace.value) return
+  const enabled = input.checked
+  input.checked = marketplaceEnabled.value[platform]
+  savingMarketplace.value = platform
+  marketplaceMessage.value = ''
+  marketplaceError.value = ''
+  try {
+    const { data, error } = await supabase
+      .from('crm_marketplace_settings')
+      .update({ enabled, updated_at: new Date().toISOString() })
+      .eq('platform', platform)
+      .select('enabled')
+      .single()
+    if (error || !data) throw error ?? new Error('Нет ответа')
+    marketplaceEnabled.value = { ...marketplaceEnabled.value, [platform]: data.enabled === true }
+    marketplaceMessage.value = `${platform}: ${data.enabled ? 'автообновление включено' : 'автообновление приостановлено'}.`
+  } catch (failure) {
+    marketplaceError.value = `Не удалось изменить «${platform}»: ${failure instanceof Error ? failure.message : String(failure)}`
+  } finally {
+    savingMarketplace.value = null
+  }
+}
+
 onMounted(async () => {
   systemTheme.addEventListener('change', handleSystemTheme)
   if (!supabase) return
@@ -109,6 +163,7 @@ onMounted(async () => {
     return
   }
   user.value = session.user
+  await loadMarketplaceSettings()
   labelRecipientEmail.value =
     String(session.user.user_metadata?.labelRecipientEmail ?? '').trim() ||
     defaultLabelRecipientEmail
@@ -200,6 +255,40 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
         <p v-if="isGuest" class="mt-2 text-sm text-sky-700">
           Гостевой режим: общие настройки доступны только для просмотра.
         </p>
+      </section>
+
+      <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="text-lg font-semibold">Маркетплейсы</h2>
+        <p class="mt-1 text-sm text-slate-500">
+          Пауза останавливает только автоматическую синхронизацию площадки и скрывает её колонки в «Ценах».
+          Ручное обновление, в том числе отдельного заказа, остаётся доступным. Старые заказы и цены сохраняются.
+        </p>
+        <p v-if="isMarketplaceLoading" class="mt-4 text-sm text-slate-500">Загрузка настроек…</p>
+        <div v-else class="mt-4 space-y-3">
+          <label
+            v-for="platform in marketplacePlatforms"
+            :key="platform"
+            class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium"
+          >
+            <span>{{ platform }} · {{ marketplaceEnabled[platform] ? 'Автообновление включено' : 'Автообновление на паузе' }}</span>
+            <input
+              :checked="marketplaceEnabled[platform]"
+              :value="platform"
+              :disabled="isGuest || Boolean(savingMarketplace) || Boolean(marketplaceError && !marketplaceMessage)"
+              class="size-5 accent-emerald-700"
+              type="checkbox"
+              @change="handleMarketplaceToggle"
+            />
+          </label>
+        </div>
+        <p v-if="marketplaceMessage" class="mt-3 text-sm text-emerald-800" role="status">{{ marketplaceMessage }}</p>
+        <p v-if="marketplaceError" class="mt-3 text-sm text-rose-700" role="alert">{{ marketplaceError }}</p>
+        <button
+          v-if="marketplaceError && !isMarketplaceLoading"
+          class="mt-2 text-sm font-semibold text-emerald-700 underline"
+          type="button"
+          @click="loadMarketplaceSettings"
+        >Повторить загрузку</button>
       </section>
 
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
