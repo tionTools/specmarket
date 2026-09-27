@@ -56,3 +56,11 @@ When a request exceeds the repository's capabilities:
 5. Ask for confirmation only if proceeding requires broader scope, a new dependency, external state, cost, or sensitive data.
 
 Example: if asked to connect the site directly to a database, explain that database credentials would be exposed to every visitor and that a server-side API is required. Do not implement the direct connection.
+
+## Production logging policy
+
+- Do not add routine `console.log`, `console.info`, `console.debug`, progress messages, retry warnings, or dumps of successful requests/responses in production Edge Functions.
+- Return actionable errors to the CRM UI; scheduled jobs that cannot display an error may emit one concise `console.error` for an unresolved failure, not one per order/TTN/retry. Use stable error codes or aggregate counts; never print request bodies, credentials, tokens, buyer data, IBANs, or TTNs.
+- Keep operational state that directly drives CRM behavior (for example, `crm_delivery_tracking_state.last_error` and NovaPay's browser-visible sync failure journal). These are not optional debug traces and must not be deleted under a logging cleanup.
+- Do not change working sync schedules, marketplace API actions, or database replication to reduce Supabase Logs Ingest. Hosted Supabase automatically records API and function invocations; application `console` suppression cannot turn those platform events off.
+- The smallest possible Postgres logging settings are documented in `scripts/supabase-minimal-logging.md`. Apply those project-level settings separately with authorized Supabase access; do not silently overwrite unrelated Postgres configuration.

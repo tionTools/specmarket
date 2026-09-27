@@ -754,7 +754,6 @@ function errorResponse(error) {
       { status: error.status, headers: corsHeaders },
     )
   }
-  console.error('NovaPay data request failed with an unexpected error.')
   return Response.json(
     { ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay request failed.' },
     {
@@ -1134,12 +1133,6 @@ Deno.serve(async (request) => {
       (receipt) =>
         receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt)),
     ).length
-
-    if (fallbackIdentityCount > 0 || updatedFallbackIdentityCount > 0) {
-      console.warn(
-        `NovaPay conducted payments without ID/UETR: statement=${fallbackIdentityCount} updated=${updatedFallbackIdentityCount}`,
-      )
-    }
 
     const diagnostics =
       statementDocuments.length > 0 || updatedDocuments.length > 0

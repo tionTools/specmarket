@@ -53,7 +53,6 @@ function errorResponse(error) {
     }, { status: error.status, headers: corsHeaders })
   }
 
-  console.error('Monobank data request failed with an unexpected error.')
   return Response.json({ ok: false, code: 'MONOBANK_INTERNAL_ERROR', message: 'Monobank request failed.' }, {
     status: 500,
     headers: corsHeaders,

@@ -17,7 +17,6 @@ export async function readCurrentDeliveries(ids: string[], read: ReadBatch) {
       for (const row of result.data ?? []) deliveries.set(row.id, row.delivery);
       continue;
     }
-    console.error("Не удалось пакетно прочитать актуальные доставки:", result.error);
     for (const id of batch) {
       try {
         const item = await read([id]);

@@ -184,7 +184,6 @@ function errorResponse(error) {
       { status: error.status, headers: corsHeaders },
     )
   }
-  console.error('NovaPay balance failed with an unexpected error.')
   return Response.json(
     { ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay balance request failed.' },
     {

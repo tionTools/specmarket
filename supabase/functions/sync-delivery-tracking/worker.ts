@@ -136,7 +136,6 @@ export async function runTrackingWorker(
       const lookupError = current.errors.get(row.id)
       if (lookupError) {
         failed += 1
-        console.error(`Tracking ${text(delivery.ttn)}: не удалось прочитать актуальную доставку:`, lookupError)
         continue
       }
       if (!current.deliveries.has(row.id)) continue
@@ -145,7 +144,6 @@ export async function runTrackingWorker(
       const outcome = results[index]!
       if (outcome.error !== undefined) {
         failed += 1
-        console.error(`Tracking ${text(delivery.ttn)}:`, outcome.error)
         pendingErrorStates.push({
           order_id: row.id, last_checked_at: now.toISOString(),
           last_error: outcome.error instanceof Error ? outcome.error.message : 'Ошибка tracking',
@@ -175,7 +173,6 @@ export async function runTrackingWorker(
         pendingSuccessStates.push(state)
       } catch (error) {
         failed += 1
-        console.error(`Tracking ${text(delivery.ttn)}:`, error)
         pendingErrorStates.push({
           order_id: row.id, last_checked_at: now.toISOString(),
           last_error: error instanceof Error ? error.message : 'Ошибка tracking',
@@ -186,5 +183,6 @@ export async function runTrackingWorker(
     await flushTrackingStates()
   }
   await flushTrackingStates()
+  if (failed > 0) console.error(`Delivery tracking failed: ${failed} operations; see tracking state and invocation result.`)
   return { body: { ok: true, ...(forced ? { forced: true } : { intervalMinutes: minutes }), checked, updated, failed } }
 }
