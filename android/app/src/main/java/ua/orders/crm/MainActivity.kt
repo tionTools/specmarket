@@ -769,48 +769,42 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 }
             }
 
-            item {
-                SectionCard("Получатель") {
-                    Text(
-                        recipient,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (recipientPhone != "—") {
-                        SelectionContainer {
-                            Text(
-                                recipientPhone,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
+            if (recipient != buyerName || (recipientPhone != "—" && recipientPhone != buyerPhone)) {
+                item {
+                    SectionCard("Получатель") {
+                        Text(recipient, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (recipientPhone != "—") DetailField("Телефон", recipientPhone)
                     }
                 }
             }
 
-            item {
-                Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
             items(order.items.sortedBy { it.position }) { product ->
                 Card(
                     Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(
-                            product.productName.display(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Размер ${product.size.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                "${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
-                                fontWeight = FontWeight.Medium,
-                            )
+                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ProductThumbnail(product.imageUrl)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(product.productName.display(), style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            if (!product.size.isNullOrBlank()) {
+                                Text("Размер: " + product.size, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(amount(product.quantity) + " × " +
+                                    (product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (product.quantity != null && product.price != null)
+                                        money(BigDecimal.valueOf(product.quantity) * BigDecimal.valueOf(product.price))
+                                    else "—",
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                     }
                 }
