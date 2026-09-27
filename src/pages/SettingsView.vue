@@ -113,10 +113,10 @@ async function loadMarketplaceSettings() {
   if (!supabase) return
   isMarketplaceLoading.value = true
   marketplaceError.value = ''
-  const { data, error } = await supabase
-    .from('crm_marketplace_settings')
-    .select('platform, enabled')
   try {
+    const { data, error } = await supabase
+      .from('crm_marketplace_settings')
+      .select('platform, enabled')
     if (error) throw error
     marketplaceEnabled.value = marketplaceEnabledFromRows(data ?? [])
   } catch (failure) {
