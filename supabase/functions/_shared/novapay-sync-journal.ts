@@ -31,33 +31,6 @@ async function safeWrite(operation: string, run: () => PromiseLike<{ error: unkn
   }
 }
 
-export async function startNovaPaySyncAttempt(
-  admin: SupabaseClient,
-  id: string,
-  source: Exclude<Source, 'balance'>,
-) {
-  await safeWrite('start', () => admin.from('crm_novapay_sync_log').insert({
-    id, source, status: 'running', stage: 'starting',
-  }))
-}
-
-export async function markNovaPaySyncAttempt(
-  admin: SupabaseClient,
-  id: string,
-  stage: Stage,
-  requestRef?: string,
-) {
-  const changes: { stage: Stage; request_ref?: string } = { stage }
-  if (requestRef) changes.request_ref = requestRef
-  await safeWrite('progress', () =>
-    admin.from('crm_novapay_sync_log').update(changes).eq('id', id))
-}
-
-export async function completeNovaPaySyncAttempt(admin: SupabaseClient, id: string) {
-  // Successful refreshes are already recorded in bank_account_cache.updated_at.
-  await safeWrite('success', () => admin.from('crm_novapay_sync_log').delete().eq('id', id))
-}
-
 export async function failNovaPaySyncAttempt(
   admin: SupabaseClient,
   id: string,

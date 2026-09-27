@@ -39,7 +39,7 @@ alter role postgres set log_duration to 'off';
 
 Role-level settings take effect for *new* sessions. Do not change `log_min_messages`, `log_min_error_statement`, Postgres crash/error events or security/audit settings blindly. Do not enable `cron.log_run=false` using unsupported CLI parameters: that setting controls the separate cron run-history table, not the hosted Logs Ingest stream.
 
-After applying, only verify the settings themselves (`pg_settings`/`pg_roles`) and that existing scheduled functions still execute. No recurring daily Logs Explorer review is required. The NovaPay failure journal is retained because the CRM displays those failures; successful entries are already deleted.
+After applying, only verify the settings themselves (`pg_settings`/`pg_roles`) and that existing scheduled functions still execute. No recurring daily Logs Explorer review is required. The NovaPay journal is failure-only: no routine start/progress/success DB writes. Its retained failure records let the browser show scheduled-job errors that were not visible while the browser was closed. Successful sync timestamps are already in the bank account cache.
 
 References:
 - https://supabase.com/docs/guides/platform/manage-your-usage/logs-ingest
