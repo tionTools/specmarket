@@ -436,7 +436,7 @@ private data class StatusColors(val background: Color, val foreground: Color)
 
 @Composable
 private fun StatusLabel(order: Order, compact: Boolean = false) {
-    if (isNewOrderVisual(order)) {
+    if (order.matchesListFilter(OrderListFilter.NEW)) {
         Surface(
             shape = RoundedCornerShape(999.dp),
             color = Color(0xFFE879F9),
@@ -635,9 +635,9 @@ private fun OrderProductDetails(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        if (!product?.size.isNullOrBlank()) {
+        product?.size?.takeIf { it.isNotBlank() }?.let { size ->
             Text(
-                "Размер: ${product.size}",
+                "Размер: $size",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
