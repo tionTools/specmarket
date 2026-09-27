@@ -25,6 +25,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
+  shouldSkipAutomaticMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
@@ -849,7 +850,7 @@ Deno.serve(async (request) => {
       { status: 403, headers: corsHeaders },
     )
 
-  if (!syncAccess.enabled) return marketplacePausedResponse('Пром', isScheduledRequest, corsHeaders)
+  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
 
   const body = (await request.json().catch(() => ({}))) as {
     externalId?: unknown

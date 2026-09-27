@@ -7,6 +7,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
+  shouldSkipAutomaticMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import {
   kastaPhysicalMovement,
@@ -399,7 +400,7 @@ Deno.serve(async (request) => {
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-  if (!syncAccess.enabled) return marketplacePausedResponse('Каста', isScheduledRequest, corsHeaders)
+  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
 
 
   const body = await request.json().catch(() => ({})) as {

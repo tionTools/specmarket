@@ -923,7 +923,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">Повторить</button>
       </p>
       <p v-if="pausedMarketplaces.length" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        На паузе: {{ pausedMarketplaces.join(', ') }}. Их колонки цен скрыты; значения сохранены.
+        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения сохранены; ручная синхронизация доступна.
       </p>
       <section
         v-if="!user"

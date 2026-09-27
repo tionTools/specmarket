@@ -144,7 +144,7 @@ async function handleMarketplaceToggle(event: Event) {
       .single()
     if (error || !data) throw error ?? new Error('Нет ответа')
     marketplaceEnabled.value = { ...marketplaceEnabled.value, [platform]: data.enabled === true }
-    marketplaceMessage.value = `${platform}: ${data.enabled ? 'синхронизация включена' : 'синхронизация приостановлена'}.`
+    marketplaceMessage.value = `${platform}: ${data.enabled ? 'автообновление включено' : 'автообновление приостановлено'}.`
   } catch (failure) {
     marketplaceError.value = `Не удалось изменить «${platform}»: ${failure instanceof Error ? failure.message : String(failure)}`
   } finally {
@@ -260,8 +260,8 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="text-lg font-semibold">Маркетплейсы</h2>
         <p class="mt-1 text-sm text-slate-500">
-          Пауза останавливает импорт заказов площадки и скрывает её колонки в «Ценах».
-          Существующие заказы, себестоимость и цены сохраняются. Товары с площадки не снимаются.
+          Пауза останавливает только автоматическую синхронизацию площадки и скрывает её колонки в «Ценах».
+          Ручное обновление, в том числе отдельного заказа, остаётся доступным. Старые заказы и цены сохраняются.
         </p>
         <p v-if="isMarketplaceLoading" class="mt-4 text-sm text-slate-500">Загрузка настроек…</p>
         <div v-else class="mt-4 space-y-3">
@@ -270,7 +270,7 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
             :key="platform"
             class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium"
           >
-            <span>{{ platform }} · {{ marketplaceEnabled[platform] ? 'Обновлять' : 'Пауза' }}</span>
+            <span>{{ platform }} · {{ marketplaceEnabled[platform] ? 'Автообновление включено' : 'Автообновление на паузе' }}</span>
             <input
               :checked="marketplaceEnabled[platform]"
               :value="platform"

@@ -18,17 +18,14 @@ export async function loadMarketplaceSyncAccess(
   return { secret: access.secret, enabled: access.enabled }
 }
 
-export function marketplacePausedResponse(
-  platform: string,
-  scheduled: boolean,
-  headers: Record<string, string>,
-): Response {
-  if (scheduled) {
-    return Response.json({ ok: true, skipped: 'paused', received: 0, created: 0, updated: 0, changedOrderIds: [] }, { headers })
-  }
+export function shouldSkipAutomaticMarketplaceSync(isScheduledRequest: boolean, enabled: boolean): boolean {
+  return isScheduledRequest && !enabled
+}
+
+export function marketplacePausedResponse(headers: Record<string, string>): Response {
   return Response.json(
-    { ok: false, code: 'MARKETPLACE_PAUSED', message: `Синхронизация «${platform}» приостановлена в настройках CRM.` },
-    { status: 409, headers },
+    { ok: true, skipped: 'paused', received: 0, created: 0, updated: 0, changedOrderIds: [] },
+    { headers },
   )
 }
 
