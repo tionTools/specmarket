@@ -40,8 +40,8 @@ enum class StatusTone { BLUE, GREEN, ORANGE, RED }
 enum class OrderListFilter(val title: String) {
     ALL("Все"),
     NEW("Новые"),
-    WORK("В работе"),
-    SENT("Отправленные"),
+    WORK("Принятые"),
+    SENT("С ТТН"),
 }
 enum class AcceptRoute(val function: String) {
     PROM("sync-prom-orders"),
@@ -260,11 +260,70 @@ fun Order.royalty(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
         ?: if (normalizedStatus(platform) in setOf("каста", "kasta")) itemTotal * BigDecimal("0.22") else BigDecimal.ZERO
     sum + itemRoyalty
 }
-fun Order.matchesListFilter(filter: OrderListFilter): Boolean = when (filter) {
-    OrderListFilter.ALL -> true
-    OrderListFilter.NEW -> isNewOrderVisual(this)
-    OrderListFilter.SENT -> deliveryValue("ttn").trim().isNotEmpty()
-    OrderListFilter.WORK -> !isNewOrderVisual(this) && deliveryValue("ttn").trim().isEmpty()
+fun Order.isAwaitingAcceptance(): Boolean =
+    isNewStatus(status) || (normalizedStatus(platform) == "пром" && normalizedStatus(status) == "paid")
+
+private val acceptedStatuses = setOf(
+    "принято", "прийнято", "прийнят", "received", "accepted", "confirmed",
+    "підтверджено", "подтверждено", "підтверджено продавцем", "подтверждено продавцом",
+    "confirmed_by_seller", "confirmed_by_merchant", "confirmedbysupplier",
+    "packed", "в работе", "в роботі",
+)
+
+fun Order.matchesListFilter(filter: OrderListFilter): Boolean {
+    val hasTtn = deliveryValue("ttn").isNotBlank()
+    return when (filter) {
+        OrderListFilter.ALL -> true
+        OrderListFilter.NEW -> !hasTtn && isAwaitingAcceptance()
+        OrderListFilter.WORK -> !hasTtn && !isAwaitingAcceptance() &&
+            normalizedStatus(status) in acceptedStatuses && !hasReturnSignal()
+        OrderListFilter.SENT -> hasTtn
+    }
+}
+
+data class OrderCardDelivery(
+    val title: String,
+    val ttn: String,
+    val carrier: String,
+    val status: String,
+    val created: Boolean,
+)
+
+fun Order.cardDelivery(): OrderCardDelivery {
+    val ttn = deliveryValue("ttn").trim()
+    val carrier = deliveryValue("carrier").trim()
+    val rawStatus = deliveryValue("status").trim()
+    val tracking = deliveryValue("trackingNormalizedStatus").trim()
+    val rawTrackingStatus = deliveryValue("trackingStatus").trim()
+    val plannedStates = setOf("initial", "created", "registered", "planned", "scheduled", "pending")
+    val plannedSignal = Regex(
+        "заплан|запланов|створено онлайн|создано онлайн",
+        RegexOption.IGNORE_CASE,
+    )
+    val planned = normalizedStatus(rawStatus) in plannedStates ||
+        normalizedStatus(tracking) in plannedStates ||
+        plannedSignal.containsMatchIn(rawStatus) ||
+        plannedSignal.containsMatchIn(rawTrackingStatus)
+    val stage = deliveryStatusInfo().let { info ->
+        listOf(info.stage, info.current).map { it.trim() }.filter { it.isNotBlank() }
+            .distinct().joinToString(" · ")
+    }
+    val translatedStage = when (normalizedStatus(stage)) {
+        "initial", "planned", "scheduled", "pending" -> "Запланировано"
+        "created", "registered" -> "Создано онлайн"
+        else -> stage
+    }
+    return OrderCardDelivery(
+        title = when {
+            ttn.isNotBlank() -> "ТТН создана"
+            planned -> "ТТН запланирована"
+            else -> "ТТН не создана"
+        },
+        ttn = ttn,
+        carrier = carrier,
+        status = translatedStage,
+        created = ttn.isNotBlank(),
+    )
 }
 fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
 fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
