@@ -135,19 +135,21 @@ async function handleMarketplaceToggle(event: Event) {
   savingMarketplace.value = platform
   marketplaceMessage.value = ''
   marketplaceError.value = ''
-  const { data, error } = await supabase
-    .from('crm_marketplace_settings')
-    .update({ enabled, updated_at: new Date().toISOString() })
-    .eq('platform', platform)
-    .select('enabled')
-    .single()
-  savingMarketplace.value = null
-  if (error || !data) {
-    marketplaceError.value = `Не удалось изменить «${platform}»: ${error?.message ?? 'нет ответа'}`
-    return
+  try {
+    const { data, error } = await supabase
+      .from('crm_marketplace_settings')
+      .update({ enabled, updated_at: new Date().toISOString() })
+      .eq('platform', platform)
+      .select('enabled')
+      .single()
+    if (error || !data) throw error ?? new Error('Нет ответа')
+    marketplaceEnabled.value = { ...marketplaceEnabled.value, [platform]: data.enabled === true }
+    marketplaceMessage.value = `${platform}: ${data.enabled ? 'синхронизация включена' : 'синхронизация приостановлена'}.`
+  } catch (failure) {
+    marketplaceError.value = `Не удалось изменить «${platform}»: ${failure instanceof Error ? failure.message : String(failure)}`
+  } finally {
+    savingMarketplace.value = null
   }
-  marketplaceEnabled.value = { ...marketplaceEnabled.value, [platform]: data.enabled === true }
-  marketplaceMessage.value = `${platform}: ${data.enabled ? 'синхронизация включена' : 'синхронизация приостановлена'}.`
 }
 
 onMounted(async () => {
