@@ -671,7 +671,7 @@ private fun OrderProductDetails(
     buyerName: String,
     buyerPhone: String,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             product?.productName.display(),
             style = MaterialTheme.typography.titleMedium,
@@ -690,7 +690,7 @@ private fun OrderProductDetails(
             Surface(shape = RoundedCornerShape(999.dp), color = Color(0xFFF1F5F9)) {
                 Text(
                     "Ещё $moreProducts ${extraProductsLabel(moreProducts)}",
-                    Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = Color(0xFF475569),
                 )
@@ -730,11 +730,11 @@ private fun OrderCardAmounts(order: Order, product: OrderItem?, modifier: Modifi
     Column(
         modifier,
         horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         Text(
             money(order.total()),
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -774,7 +774,10 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        Column(
+            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
@@ -801,26 +804,26 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
                     Icons.Filled.ChevronRight,
                     contentDescription = "Открыть заказ",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(18.dp),
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 if (maxWidth >= 460.dp) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        ProductThumbnail(product?.imageUrl, size = 76.dp)
-                        Spacer(Modifier.width(11.dp))
+                        ProductThumbnail(product?.imageUrl, size = 72.dp)
+                        Spacer(Modifier.width(9.dp))
                         Column(Modifier.weight(1f)) {
                             OrderProductDetails(product, moreProducts, buyerName, buyerPhone)
                         }
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(8.dp))
                         OrderCardAmounts(order, product, Modifier.widthIn(min = 126.dp, max = 152.dp))
                     }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                            ProductThumbnail(product?.imageUrl, size = 76.dp)
-                            Spacer(Modifier.width(11.dp))
+                            ProductThumbnail(product?.imageUrl, size = 72.dp)
+                            Spacer(Modifier.width(9.dp))
                             Column(Modifier.weight(1f)) {
                                 OrderProductDetails(product, moreProducts, buyerName, buyerPhone)
                             }
@@ -836,24 +839,24 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
                 contentColor = ttnForeground,
             ) {
                 Column(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Filled.LocalShipping,
                             contentDescription = null,
                             tint = ttnForeground,
-                            modifier = Modifier.size(26.dp),
+                            modifier = Modifier.size(22.dp),
                         )
-                        Spacer(Modifier.width(9.dp))
+                        Spacer(Modifier.width(7.dp))
                         Text(
                             shipment.title,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = ttnForeground,
-                            maxLines = 2,
+                            maxLines = 1,
                         )
                     }
                     val ttnLine = listOf(shipment.ttn, shipment.carrier)
@@ -872,7 +875,7 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
                             shipment.status,
                             style = MaterialTheme.typography.bodySmall,
                             color = ttnForeground,
-                            maxLines = 3,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
