@@ -14,14 +14,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -172,6 +179,10 @@ fun OrdersApp(
     }
     NotificationPermissionGate(vm)
     var settings by rememberSaveable { mutableStateOf(false) }
+    val ordersListState = rememberLazyListState()
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
     var confirmationId by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
@@ -199,7 +210,17 @@ fun OrdersApp(
                 vm.email == null -> Login(vm)
                 settings -> Settings(vm, onBack = { settings = false })
                 vm.selectedId != null -> Details(vm, onAccept = { confirmationId = it.id })
-                else -> OrdersScreen(vm, onSettings = { settings = true })
+                else -> OrdersScreen(
+                    vm = vm,
+                    onSettings = { settings = true },
+                    listState = ordersListState,
+                    searchOpen = searchOpen,
+                    searchQuery = searchQuery,
+                    filter = OrderListFilter.entries.find { it.name == filterName } ?: OrderListFilter.ALL,
+                    onSearchOpenChange = { searchOpen = it },
+                    onSearchQueryChange = { searchQuery = it },
+                    onFilterChange = { filterName = it.name },
+                )
             }
         }
     }
@@ -451,24 +472,70 @@ private fun StatusLabel(order: Order, compact: Boolean = false) {
     }
 }
 
-private fun compactDeliveryLine(order: Order): String {
-    val status = order.deliveryStatusInfo()
-    return listOf(
-        order.deliveryValue("carrier").trim(),
-        status.stage.trim(),
-        status.current.trim(),
-    ).filter(String::isNotBlank).distinct().joinToString(" · ")
+private fun extraProductsLabel(count: Int): String = when {
+    count % 100 in 11..14 -> "товаров"
+    count % 10 == 1 -> "товар"
+    count % 10 in 2..4 -> "товара"
+    else -> "товаров"
+}
+
+@Composable
+private fun OrderFilters(
+    orders: List<Order>,
+    selected: OrderListFilter,
+    onSelected: (OrderListFilter) -> Unit,
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(OrderListFilter.entries) { filter ->
+            val active = filter == selected
+            Surface(
+                modifier = Modifier.clickable { onSelected(filter) },
+                shape = RoundedCornerShape(18.dp),
+                color = if (active) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.surface,
+                contentColor = if (active) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
+            ) {
+                Row(
+                    Modifier.padding(start = 14.dp, end = 9.dp, top = 9.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(filter.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (active) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Text(
+                            orders.count { it.matchesListFilter(filter) }.toString(),
+                            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
-    var searchOpen by rememberSaveable { mutableStateOf(false) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-    val visibleOrders = remember(vm.orders, searchQuery) {
-        vm.orders
-            .filter(::isOrderVisibleInMainList)
-            .filter { it.matchesOrderSearch(searchQuery) }
+private fun OrdersScreen(
+    vm: OrdersViewModel,
+    onSettings: () -> Unit,
+    listState: LazyListState,
+    searchOpen: Boolean,
+    searchQuery: String,
+    filter: OrderListFilter,
+    onSearchOpenChange: (Boolean) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onFilterChange: (OrderListFilter) -> Unit,
+) {
+    val orders = remember(vm.orders) { vm.orders.filter(::isOrderVisibleInMainList) }
+    val visibleOrders = remember(orders, searchQuery, filter) {
+        orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
     }
 
     Scaffold(
@@ -478,7 +545,7 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                     if (searchOpen) {
                         TextField(
                             value = searchQuery,
-                            onValueChange = { searchQuery = it },
+                            onValueChange = onSearchQueryChange,
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             placeholder = { Text("Поиск") },
@@ -499,9 +566,9 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
                 actions = {
                     IconButton(onClick = {
                         if (searchOpen) {
-                            searchQuery = ""
-                            searchOpen = false
-                        } else searchOpen = true
+                            onSearchQueryChange("")
+                            onSearchOpenChange(false)
+                        } else onSearchOpenChange(true)
                     }) {
                         Icon(
                             if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
@@ -517,32 +584,36 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = vm.loading,
-            onRefresh = { vm.retryConnection() },
-            modifier = Modifier.fillMaxSize().padding(padding),
-        ) {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            OrderFilters(orders, filter, onFilterChange)
+            PullToRefreshBox(
+                isRefreshing = vm.loading,
+                onRefresh = { vm.retryConnection() },
+                modifier = Modifier.weight(1f),
             ) {
-                if (visibleOrders.isEmpty()) {
-                    item {
-                        Text(
-                            when {
-                                searchQuery.isNotBlank() -> "Ничего не найдено."
-                                vm.orders.isEmpty() && (vm.loading || !vm.initialLoadComplete) -> "Загрузка…"
-                                vm.orders.isEmpty() -> "Сохранённых заказов пока нет."
-                                else -> "Активных заказов нет."
-                            },
-                            Modifier.padding(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
+                ) {
+                    if (visibleOrders.isEmpty()) {
+                        item {
+                            Text(
+                                when {
+                                    searchQuery.isNotBlank() -> "Ничего не найдено."
+                                    vm.orders.isEmpty() && (vm.loading || !vm.initialLoadComplete) -> "Загрузка…"
+                                    vm.orders.isEmpty() -> "Сохранённых заказов пока нет."
+                                    else -> "Активных заказов нет."
+                                },
+                                Modifier.padding(24.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                }
-                items(visibleOrders, key = { it.id }) { order ->
-                    OrderCard(order) { vm.open(order.id) }
+                    items(visibleOrders, key = { it.id }) { order ->
+                        OrderCard(order) { vm.open(order.id) }
+                    }
                 }
             }
         }
@@ -551,74 +622,137 @@ private fun OrdersScreen(vm: OrdersViewModel, onSettings: () -> Unit) {
 
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
-    val newOrder = isNewOrderVisual(order)
     val buyerName = order.customer.display()
     val buyerPhone = order.buyerPhone()
+    val products = order.items.sortedBy { it.position }
+    val product = products.firstOrNull()
+    val moreProducts = (products.size - 1).coerceAtLeast(0)
+    val ttn = order.deliveryValue("ttn").trim()
+    val carrier = order.deliveryValue("carrier").trim()
+    val deliveryStatus = order.deliveryStatusInfo().stage.trim()
+    val ttnCreated = ttn.isNotBlank()
+    val ttnBackground = if (ttnCreated) Color(0xFFEAF8F2) else Color(0xFFFFF3E2)
+    val ttnForeground = if (ttnCreated) Color(0xFF00875A) else Color(0xFFE67E00)
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (newOrder) 2.dp else 1.dp),
-        border = if (newOrder) BorderStroke(1.dp, Color(0xFFD946EF)) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    PlatformLogo(order.platform)
-                    Spacer(Modifier.width(8.dp))
-                    StatusLabel(order, compact = true)
+                Column(Modifier.weight(1f)) {
+                    Text("№ ${order.number()}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${order.orderDate.display()} · ${order.orderTime.display()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text(money(order.total()), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            }
-
-            Text(
-                buyerName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            if (buyerPhone != "—") {
-                Text(
-                    buyerPhone,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-
-            Text(
-                order.items.sortedBy { it.position }.joinToString("\n") {
-                    "${it.productName.display()} · ${it.size.display()} × ${amount(it.quantity)}"
-                }.ifBlank { "—" },
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            val deliveryLine = compactDeliveryLine(order)
-            if (deliveryLine.isNotBlank()) {
-                Text(
-                    deliveryLine,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                VerticalDivider(Modifier.height(42.dp).padding(horizontal = 7.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Surface(shape = RoundedCornerShape(9.dp), color = Color(0xFFF1F5F9)) {
+                        Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) { PlatformLogo(order.platform) }
+                    }
+                    Text(order.platform.display(), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.widthIn(max = 112.dp)) { StatusLabel(order, compact = true) }
+                Icon(Icons.Filled.ChevronRight, "Открыть заказ", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    "${order.orderDate.display()} · ${order.orderTime.display()}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "№${order.number()}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                ProductThumbnail(product?.imageUrl, size = 88.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(
+                        product?.productName.display(),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (moreProducts > 0) {
+                        Surface(shape = RoundedCornerShape(999.dp), color = Color(0xFFF1F5F9)) {
+                            Text(
+                                "Ещё $moreProducts ${extraProductsLabel(moreProducts)}",
+                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Filled.Person, "Покупатель", tint = MaterialTheme.colorScheme.onSurface)
+                        Column(Modifier.weight(1f)) {
+                            Text(buyerName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (buyerPhone != "—") Text(
+                                buyerPhone,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(money(order.total()), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(
+                        "${amount(product?.quantity)} × ${product?.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "Роялти ${money(order.royalty())}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Surface(shape = RoundedCornerShape(16.dp), color = ttnBackground, contentColor = ttnForeground) {
+                Row(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Filled.LocalShipping, "ТТН", tint = ttnForeground, modifier = Modifier.size(32.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            if (ttnCreated) "ТТН создана" else "ТТН запланирована",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            if (ttnCreated) listOf(ttn, carrier).filter(String::isNotBlank).joinToString(" · ")
+                            else "Отправим в течение 1–2 дней",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (deliveryStatus.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (ttnCreated) Color(0xFFD1FAE5) else Color(0xFFFFE1B0),
+                            contentColor = ttnForeground,
+                        ) {
+                            Text(
+                                deliveryStatus,
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    Icon(Icons.Filled.ChevronRight, "Детали ТТН", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

@@ -19,8 +19,8 @@ android {
         applicationId = "ua.orders.crm"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.18"
+        versionCode = 19
+        versionName = "0.19"
     }
     signingConfigs {
         create("release") {
@@ -50,6 +50,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
     implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")

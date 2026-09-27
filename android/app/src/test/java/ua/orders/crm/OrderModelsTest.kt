@@ -203,6 +203,24 @@ class OrderModelsTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(Order("empty").total()))
     }
 
+    @Test fun list_filters_and_royalty_use_existing_order_data() {
+        val newOrder = order("Принято")
+        val sentOrder = order("Принято").copy(delivery = delivery("ttn" to "20450000000000"))
+        val workOrder = order("Завершено", "Сайт")
+        assertTrue(newOrder.matchesListFilter(OrderListFilter.NEW))
+        assertTrue(sentOrder.matchesListFilter(OrderListFilter.SENT))
+        assertTrue(workOrder.matchesListFilter(OrderListFilter.WORK))
+        assertEquals(
+            0,
+            BigDecimal("36.75").compareTo(
+                Order("royalty", items = listOf(
+                    OrderItem(price = 100.0, quantity = 1.0, royaltyAmount = 12.5),
+                    OrderItem(price = 242.5, quantity = 1.0, royaltyPercent = 10.0),
+                )).royalty(),
+            ),
+        )
+    }
+
     @Test fun epicentr_cash_on_delivery_shows_method_and_status() {
         for (method in listOf("Pay on Delivery", "pay_on_delivery", "pay-on-delivery")) {
             val order = order("Новий", "Эпицентр").copy(

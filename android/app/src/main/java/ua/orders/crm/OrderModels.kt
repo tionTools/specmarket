@@ -14,6 +14,8 @@ data class OrderItem(
     val quantity: Double? = null,
     val price: Double? = null,
     @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("royalty_percent") val royaltyPercent: Double? = null,
+    @SerialName("royalty_amount") val royaltyAmount: Double? = null,
 )
 
 @Serializable
@@ -35,6 +37,12 @@ data class Order(
 )
 
 enum class StatusTone { BLUE, GREEN, ORANGE, RED }
+enum class OrderListFilter(val title: String) {
+    ALL("Все"),
+    NEW("Новые"),
+    WORK("В работе"),
+    SENT("Отправленные"),
+}
 enum class AcceptRoute(val function: String) {
     PROM("sync-prom-orders"),
     EPICENTR("sync-epicentr-orders"),
@@ -244,6 +252,19 @@ fun acceptUnavailableReason(order: Order, email: String?): String? {
 
 fun Order.total(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
     sum + BigDecimal.valueOf(item.price ?: 0.0) * BigDecimal.valueOf(item.quantity ?: 0.0)
+}
+fun Order.royalty(): BigDecimal = items.fold(BigDecimal.ZERO) { sum, item ->
+    val itemTotal = BigDecimal.valueOf(item.price ?: 0.0) * BigDecimal.valueOf(item.quantity ?: 0.0)
+    val itemRoyalty = item.royaltyAmount?.let(BigDecimal::valueOf)
+        ?: item.royaltyPercent?.let { itemTotal * BigDecimal.valueOf(it).movePointLeft(2) }
+        ?: if (normalizedStatus(platform) in setOf("каста", "kasta")) itemTotal * BigDecimal("0.22") else BigDecimal.ZERO
+    sum + itemRoyalty
+}
+fun Order.matchesListFilter(filter: OrderListFilter): Boolean = when (filter) {
+    OrderListFilter.ALL -> true
+    OrderListFilter.NEW -> isNewOrderVisual(this)
+    OrderListFilter.SENT -> deliveryValue("ttn").trim().isNotEmpty()
+    OrderListFilter.WORK -> !isNewOrderVisual(this) && deliveryValue("ttn").trim().isEmpty()
 }
 fun String?.display() = this?.takeIf { it.isNotBlank() } ?: "—"
 fun Order.number() = orderLabel?.takeIf { it.isNotBlank() } ?: orderNumber?.toString() ?: "—"
