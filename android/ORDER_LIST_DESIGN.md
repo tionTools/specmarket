@@ -36,12 +36,19 @@ It also restricted long delivery checkpoints to one line.
 
 ### Review gate (before merge, before version bump, before APK publication)
 
-On a real phone or emulator capture screenshots at 320, 360 and 393 dp widths,
-font scale 1.0 and 1.3, with (a) long product title and phone,
-(b) one item and 3+ items, (c) created TTN with a long checkpoint,
-(d) no TTN, (e) returned/delivered status. Compare against the approved
-visual reference in the chat, including visual proportions and color; attach
-the screenshots to the PR for human review. Check no empty half-card region,
+The PR-only workflow `.github/workflows/android-ui-review.yml` boots a genuine
+Android emulator and captures the **real production OrderCard composable**
+using a debug-only Activity with clearly labeled synthetic order data. It
+uploads screenshots at 320, 360 and 393 dp widths, font scales 1.0 and 1.3,
+for long title/checkpoint, multiple items, and no-TTN scenarios. These are
+real emulator captures, not generated design mockups. The debug-only fixture
+is not present in the release APK and does not connect to the CRM.
+
+Review the resulting GitHub Actions artifact against the approved visual
+reference in the chat, including proportions and color. Also test actual
+phone data after release; synthetic UI fixtures cannot verify remote photos
+or every real marketplace status. The PR must not be merged on the basis of
+a green Gradle check alone. Check no empty half-card region,
 no narrow vertically broken text, and no unreadable clipping of required
 content. Also verify return to the same list position after details.
 
