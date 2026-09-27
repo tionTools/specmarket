@@ -236,7 +236,7 @@ class OrderModelsTest {
             delivery = delivery("status" to "planned", "carrier" to "Новая почта"),
         ).cardDelivery()
         assertEquals("ТТН запланирована", planned.title)
-        assertEquals("Создано онлайн", planned.status)
+        assertEquals("Запланировано", planned.status)
         assertEquals("Новая почта", planned.carrier)
         val created = order("Принято").copy(
             delivery = delivery(
