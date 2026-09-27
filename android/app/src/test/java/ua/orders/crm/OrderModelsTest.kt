@@ -203,6 +203,37 @@ class OrderModelsTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(Order("empty").total()))
     }
 
+    @Test fun epicentr_cash_on_delivery_shows_method_and_status() {
+        for (method in listOf("Pay on Delivery", "pay_on_delivery", "pay-on-delivery")) {
+            val order = order("Новий", "Эпицентр").copy(
+                delivery = delivery("paymentMethod" to method, "paymentStatus" to "none"),
+            )
+            assertEquals("Наложенный платёж", order.paymentDisplay().method)
+            assertEquals("Наложенный платёж", order.paymentDisplay().status)
+            assertEquals("Наложенный платёж", order.paymentDisplay().badge)
+        }
+    }
+
+    @Test fun epicentr_payment_status_is_not_inferred_from_payment_method() {
+        val base = order("Новий", "Эпицентр").copy(
+            delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to "paid"),
+        )
+        assertEquals("Оплачено", base.paymentDisplay().status)
+        assertEquals("Оплачено", base.paymentDisplay().badge)
+        assertEquals("Наложенный платёж", base.copy(
+            delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to ""),
+        ).paymentDisplay().status)
+        assertEquals("Не оплачено", base.copy(
+            delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to "unpaid"),
+        ).paymentDisplay().status)
+        assertEquals("", base.copy(
+            delivery = delivery("paymentMethod" to "Card", "paymentStatus" to "none"),
+        ).paymentDisplay().badge)
+        assertEquals("none", order("Новий", "Пром").copy(
+            delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to "none"),
+        ).paymentDisplay().status)
+    }
+
     @Test fun nullable_and_unknown_delivery_json_remains_readable() {
         val json = Json { ignoreUnknownKeys = true }
         val parsed = json.decodeFromString<Order>("""{"id":"1","customer":null,"status":null,"delivery":{"ttn":123,"city":null,"unknown":{"future":true}},"future":true,"crm_order_items":[{"product_name":null,"size":null,"price":null,"quantity":null}]}""")

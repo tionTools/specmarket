@@ -625,11 +625,11 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailField(label: String, value: String) {
+private fun DetailField(label: String, value: String, bold: Boolean = false) {
     Column(Modifier.padding(vertical = 2.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectionContainer {
-            Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = if (bold) FontWeight.Bold else null, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -654,20 +654,16 @@ private fun DetailsHeader(order: Order) {
                 }
             }
             StatusLabel(order, compact = true)
-            val rawPayment = normalizedStatus(order.deliveryValue("paymentStatus"))
-            if (rawPayment.isNotBlank()) {
-                val paid = rawPayment in setOf("paid", "оплачено", "сплачено")
+            val payment = order.paymentDisplay()
+            if (payment.badge.isNotBlank()) {
+                val paid = payment.status == "Оплачено"
                 Surface(
                     shape = RoundedCornerShape(999.dp),
                     color = if (paid) Color(0xFFDCFCE7) else Color(0xFFFFEDD5),
                     contentColor = if (paid) Color(0xFF166534) else Color(0xFF9A3412),
                 ) {
                     Text(
-                        if (paid) "Оплачено" else when (rawPayment) {
-                            "unpaid", "not_paid" -> "Не оплачено"
-                            "pending", "waiting" -> "Ожидает оплаты"
-                            else -> order.deliveryValue("paymentStatus")
-                        },
+                        payment.badge,
                         Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -733,13 +729,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
         val buyerPhone = order.buyerPhone()
         val rawBuyerPhone = order.phone.orEmpty().trim()
         val shipments = order.shipments()
-        val paymentStatus = order.deliveryValue("paymentStatus").trim()
-        val paymentLabel = when (normalizedStatus(paymentStatus)) {
-            "paid", "оплачено", "сплачено" -> "Оплачено"
-            "unpaid", "not_paid" -> "Не оплачено"
-            "pending", "waiting" -> "Ожидает оплаты"
-            else -> paymentStatus
-        }
+        val payment = order.paymentDisplay()
 
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
@@ -867,7 +857,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     if (ttn.isNotBlank()) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn) }
+                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn, bold = true) }
                             TextButton(onClick = {
                                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(ttn))
                                 Toast.makeText(context, "ТТН скопирована", Toast.LENGTH_SHORT).show()
@@ -884,14 +874,14 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 }
             }
 
-            if (order.deliveryValue("paymentMethod").isNotBlank() || paymentStatus.isNotBlank() ||
+            if (payment.method.isNotBlank() || payment.status.isNotBlank() ||
                 order.deliveryValue("paymentAmount").isNotBlank()) {
                 item {
                     SectionCard("Оплата") {
-                        val method = order.deliveryValue("paymentMethod").trim()
+                        val method = payment.method
                         val paidAmount = order.deliveryValue("paymentAmount").trim()
                         if (method.isNotBlank()) DetailField("Способ", method)
-                        if (paymentLabel.isNotBlank()) DetailField("Статус", paymentLabel)
+                        if (payment.status.isNotBlank()) DetailField("Статус", payment.status)
                         if (paidAmount.isNotBlank()) DetailField("Сумма", paidAmount)
                     }
                 }
@@ -950,7 +940,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         ) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                DetailField("ТТН", shipment.field("ttn"))
+                                DetailField("ТТН", shipment.field("ttn"), bold = true)
                                 DetailField("Перевозчик", shipment.field("carrier"))
                                 val destination = listOf(shipment.field("city"), shipment.field("address"))
                                     .filter { it != "—" }
