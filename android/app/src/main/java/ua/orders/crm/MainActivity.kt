@@ -625,11 +625,11 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailField(label: String, value: String) {
+private fun DetailField(label: String, value: String, bold: Boolean = false) {
     Column(Modifier.padding(vertical = 2.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectionContainer {
-            Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = if (bold) FontWeight.Bold else null, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -867,7 +867,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     if (ttn.isNotBlank()) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn) }
+                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn, bold = true) }
                             TextButton(onClick = {
                                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(ttn))
                                 Toast.makeText(context, "ТТН скопирована", Toast.LENGTH_SHORT).show()
@@ -950,7 +950,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         ) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                DetailField("ТТН", shipment.field("ttn"))
+                                DetailField("ТТН", shipment.field("ttn"), bold = true)
                                 DetailField("Перевозчик", shipment.field("carrier"))
                                 val destination = listOf(shipment.field("city"), shipment.field("address"))
                                     .filter { it != "—" }
