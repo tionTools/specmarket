@@ -326,7 +326,7 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item {
@@ -661,7 +661,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Заказ", fontWeight = FontWeight.SemiBold) },
+                title = { Text("№ " + (order?.number() ?: "—"), fontWeight = FontWeight.Bold) },
                 navigationIcon = { TextButton({ vm.closeDetail() }) { Text("Назад") } },
                 actions = {
                     order?.let {
@@ -704,9 +704,16 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
         val buyerPhone = order.buyerPhone()
         val rawBuyerPhone = order.phone.orEmpty().trim()
         val shipments = order.shipments()
+        val paymentStatus = order.deliveryValue("paymentStatus").trim()
+        val paymentLabel = when (normalizedStatus(paymentStatus)) {
+            "paid", "оплачено", "сплачено" -> "Оплачено"
+            "unpaid", "not_paid" -> "Не оплачено"
+            "pending", "waiting" -> "Ожидает оплаты"
+            else -> paymentStatus
+        }
 
         LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
@@ -716,7 +723,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 SectionCard("Покупатель") {
                     Text(
                         buyerName,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -733,7 +740,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     if (normalizeCustomerPhone(rawBuyerPhone) != null) {
                         FilledTonalButton(
                             onClick = { openDialer(context, rawBuyerPhone) },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
                         ) {
                             Text("Позвонить $buyerPhone", fontWeight = FontWeight.SemiBold)
                         }
@@ -743,7 +750,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                         ) {
                             Button(
                                 onClick = { openViber(context, rawBuyerPhone) },
-                                modifier = Modifier.weight(1f).height(46.dp),
+                                modifier = Modifier.weight(1f).height(42.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF7360F2),
                                     contentColor = Color.White,
@@ -751,7 +758,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
                             Button(
                                 onClick = { openTelegram(context, rawBuyerPhone) },
-                                modifier = Modifier.weight(1f).height(46.dp),
+                                modifier = Modifier.weight(1f).height(42.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF229ED9),
                                     contentColor = Color.White,
