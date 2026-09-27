@@ -203,13 +203,13 @@ class OrderModelsTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(Order("empty").total()))
     }
 
-    @Test fun epicentr_cash_on_delivery_has_human_label_without_unsupported_payment_status() {
+    @Test fun epicentr_cash_on_delivery_shows_method_and_status() {
         for (method in listOf("Pay on Delivery", "pay_on_delivery", "pay-on-delivery")) {
             val order = order("Новий", "Эпицентр").copy(
                 delivery = delivery("paymentMethod" to method, "paymentStatus" to "none"),
             )
             assertEquals("Наложенный платёж", order.paymentDisplay().method)
-            assertEquals("", order.paymentDisplay().status)
+            assertEquals("Наложенный платёж", order.paymentDisplay().status)
             assertEquals("Наложенный платёж", order.paymentDisplay().badge)
         }
     }
@@ -220,6 +220,9 @@ class OrderModelsTest {
         )
         assertEquals("Оплачено", base.paymentDisplay().status)
         assertEquals("Оплачено", base.paymentDisplay().badge)
+        assertEquals("Наложенный платёж", base.copy(
+            delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to ""),
+        ).paymentDisplay().status)
         assertEquals("Не оплачено", base.copy(
             delivery = delivery("paymentMethod" to "Pay on Delivery", "paymentStatus" to "unpaid"),
         ).paymentDisplay().status)
