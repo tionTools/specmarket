@@ -203,13 +203,62 @@ class OrderModelsTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(Order("empty").total()))
     }
 
+    @Test fun list_filters_distinguish_awaiting_acceptance_from_accepted_without_ttn() {
+        val newProm = order("new")
+        val paidProm = order("paid")
+        val acceptedProm = order("Прийнято")
+        val acceptedEpicentr = order("confirmed_by_seller", "Эпицентр")
+        val acceptedKasta = order("ConfirmedBySupplier", "Каста")
+        val sent = acceptedProm.copy(delivery = delivery("ttn" to "20450000000000"))
+        val unrecognized = order("Неизвестный статус")
+        for (candidate in listOf(newProm, paidProm)) {
+            assertTrue(candidate.matchesListFilter(OrderListFilter.NEW))
+            assertFalse(candidate.matchesListFilter(OrderListFilter.WORK))
+        }
+        for (candidate in listOf(acceptedProm, acceptedEpicentr, acceptedKasta)) {
+            assertFalse(candidate.matchesListFilter(OrderListFilter.NEW))
+            assertTrue(candidate.matchesListFilter(OrderListFilter.WORK))
+        }
+        assertTrue(sent.matchesListFilter(OrderListFilter.SENT))
+        assertFalse(sent.matchesListFilter(OrderListFilter.NEW))
+        assertFalse(sent.matchesListFilter(OrderListFilter.WORK))
+        assertFalse(unrecognized.matchesListFilter(OrderListFilter.NEW))
+        assertFalse(unrecognized.matchesListFilter(OrderListFilter.WORK))
+        assertTrue(unrecognized.matchesListFilter(OrderListFilter.ALL))
+    }
+
+    @Test fun order_card_delivery_does_not_invent_planning_without_evidence() {
+        val absent = order("Принято").cardDelivery()
+        assertEquals("ТТН не создана", absent.title)
+        assertFalse(absent.created)
+        assertEquals("", absent.ttn)
+        val planned = order("Принято").copy(
+            delivery = delivery("status" to "planned", "carrier" to "Новая почта"),
+        ).cardDelivery()
+        assertEquals("ТТН запланирована", planned.title)
+        assertEquals("Создано онлайн", planned.status)
+        assertEquals("Новая почта", planned.carrier)
+        val created = order("Принято").copy(
+            delivery = delivery(
+                "ttn" to "20450000000000",
+                "carrier" to "Новая почта",
+                "trackingStatus" to "Створено онлайн. Очікує приймання",
+            ),
+        ).cardDelivery()
+        assertEquals("ТТН создана", created.title)
+        assertTrue(created.created)
+        assertEquals("20450000000000", created.ttn)
+        assertEquals("Створено онлайн. Очікує приймання", created.status)
+    }
+
     @Test fun list_filters_and_royalty_use_existing_order_data() {
         val newOrder = order("Принято")
         val sentOrder = order("Принято").copy(delivery = delivery("ttn" to "20450000000000"))
         val workOrder = order("Завершено", "Сайт")
-        assertTrue(newOrder.matchesListFilter(OrderListFilter.NEW))
+        assertFalse(newOrder.matchesListFilter(OrderListFilter.NEW))
+        assertTrue(newOrder.matchesListFilter(OrderListFilter.WORK))
         assertTrue(sentOrder.matchesListFilter(OrderListFilter.SENT))
-        assertTrue(workOrder.matchesListFilter(OrderListFilter.WORK))
+        assertFalse(workOrder.matchesListFilter(OrderListFilter.WORK))
         assertEquals(
             0,
             BigDecimal("36.75").compareTo(
