@@ -326,7 +326,7 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item {
@@ -401,8 +401,8 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             content()
         }
     }
@@ -634,19 +634,44 @@ private fun DetailField(label: String, value: String) {
 @Composable
 private fun DetailsHeader(order: Order) {
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PlatformLogo(order.platform)
-            Spacer(Modifier.width(10.dp))
-            StatusLabel(order, compact = true)
-        }
         Text(
-            "№${order.number()} · ${order.orderDate.display()} · ${order.orderTime.display()}",
-            style = MaterialTheme.typography.bodyMedium,
+            listOf(order.orderDate.orEmpty(), order.orderTime.orEmpty())
+                .filter(String::isNotBlank).joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface) {
+                Box(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
+                    PlatformLogo(order.platform)
+                }
+            }
+            StatusLabel(order, compact = true)
+            val rawPayment = normalizedStatus(order.deliveryValue("paymentStatus"))
+            if (rawPayment.isNotBlank()) {
+                val paid = rawPayment in setOf("paid", "оплачено", "сплачено")
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (paid) Color(0xFFDCFCE7) else Color(0xFFFFEDD5),
+                    contentColor = if (paid) Color(0xFF166534) else Color(0xFF9A3412),
+                ) {
+                    Text(
+                        if (paid) "Оплачено" else when (rawPayment) {
+                            "unpaid", "not_paid" -> "Не оплачено"
+                            "pending", "waiting" -> "Ожидает оплаты"
+                            else -> order.deliveryValue("paymentStatus")
+                        },
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -655,13 +680,15 @@ private fun DetailsHeader(order: Order) {
 private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var extraExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Заказ", fontWeight = FontWeight.SemiBold) },
+                title = { Text("№ " + (order?.number() ?: "—"), fontWeight = FontWeight.Bold) },
                 navigationIcon = { TextButton({ vm.closeDetail() }) { Text("Назад") } },
                 actions = {
                     order?.let {
@@ -704,9 +731,16 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
         val buyerPhone = order.buyerPhone()
         val rawBuyerPhone = order.phone.orEmpty().trim()
         val shipments = order.shipments()
+        val paymentStatus = order.deliveryValue("paymentStatus").trim()
+        val paymentLabel = when (normalizedStatus(paymentStatus)) {
+            "paid", "оплачено", "сплачено" -> "Оплачено"
+            "unpaid", "not_paid" -> "Не оплачено"
+            "pending", "waiting" -> "Ожидает оплаты"
+            else -> paymentStatus
+        }
 
         LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
@@ -716,7 +750,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                 SectionCard("Покупатель") {
                     Text(
                         buyerName,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -731,79 +765,84 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                         }
                     }
                     if (normalizeCustomerPhone(rawBuyerPhone) != null) {
-                        FilledTonalButton(
-                            onClick = { openDialer(context, rawBuyerPhone) },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) {
-                            Text("Позвонить $buyerPhone", fontWeight = FontWeight.SemiBold)
-                        }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(
-                                onClick = { openViber(context, rawBuyerPhone) },
-                                modifier = Modifier.weight(1f).height(46.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7360F2),
-                                    contentColor = Color.White,
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            FilledTonalButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    openDialer(context, rawBuyerPhone)
+                                },
+                                modifier = Modifier.weight(1.12f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6),
                                 ),
-                            ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
+                            ) { Text("Позвонить", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
                             Button(
-                                onClick = { openTelegram(context, rawBuyerPhone) },
+                                onClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    openViber(context, rawBuyerPhone)
+                                },
                                 modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF229ED9),
-                                    contentColor = Color.White,
+                                    containerColor = Color(0xFF7360F2), contentColor = Color.White,
                                 ),
-                            ) { Text("Telegram", fontWeight = FontWeight.SemiBold) }
+                            ) { Text("Viber", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                            Button(
+                                onClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    openTelegram(context, rawBuyerPhone)
+                                },
+                                modifier = Modifier.weight(1.12f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF229ED9), contentColor = Color.White,
+                                ),
+                            ) { Text("Telegram", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
                         }
                     }
                 }
             }
 
-            item {
-                SectionCard("Получатель") {
-                    Text(
-                        recipient,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (recipientPhone != "—") {
-                        SelectionContainer {
-                            Text(
-                                recipientPhone,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
+            if (recipient != buyerName || (recipientPhone != "—" && recipientPhone != buyerPhone)) {
+                item {
+                    SectionCard("Получатель") {
+                        Text(recipient, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (recipientPhone != "—") DetailField("Телефон", recipientPhone)
                     }
                 }
             }
 
-            item {
-                Text("Товары", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
             items(order.items.sortedBy { it.position }) { product ->
                 Card(
                     Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(
-                            product.productName.display(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Размер ${product.size.display()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                "${amount(product.quantity)} × ${product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"}",
-                                fontWeight = FontWeight.Medium,
-                            )
+                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ProductThumbnail(product.imageUrl)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(product.productName.display(), style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            if (!product.size.isNullOrBlank()) {
+                                Text("Размер: " + product.size, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(amount(product.quantity) + " × " +
+                                    (product.price?.let { money(BigDecimal.valueOf(it)) } ?: "—"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (product.quantity != null && product.price != null)
+                                        money(BigDecimal.valueOf(product.quantity) * BigDecimal.valueOf(product.price))
+                                    else "—",
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                     }
                 }
@@ -811,25 +850,75 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
 
             item {
                 SectionCard("Доставка") {
-                    val carrier = order.deliveryField("carrier")
-                    val city = order.deliveryField("city")
-                    val address = order.deliveryField("address")
-                    val ttn = order.deliveryField("ttn")
+                    val carrier = order.deliveryValue("carrier").trim()
+                    val city = order.deliveryValue("city").trim()
+                    val address = order.deliveryValue("address").trim()
+                    val ttn = order.deliveryValue("ttn").trim()
                     val deliveryStatus = order.deliveryStatusInfo()
-                    DetailField("Перевозчик", carrier)
-                    val destination = listOf(city, address).filter { it != "—" }.joinToString(" · ")
-                    if (destination.isNotBlank()) DetailField("Куда", destination)
-                    if (ttn != "—") DetailField("ТТН", ttn)
-                    if (deliveryStatus.stage.isNotBlank()) DetailField("Статус", deliveryStatus.stage)
-                    if (deliveryStatus.current.isNotBlank()) DetailField("Сейчас", deliveryStatus.current)
+                    if (carrier.isNotBlank()) Text(carrier, fontWeight = FontWeight.Bold)
+                    val destination = when {
+                        address.isBlank() -> city
+                        city.isBlank() || address.contains(city, ignoreCase = true) -> address
+                        else -> city + " · " + address
+                    }
+                    if (destination.isNotBlank()) Text(destination, style = MaterialTheme.typography.bodyMedium)
+                    if (ttn.isNotBlank()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn) }
+                            TextButton(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(ttn))
+                                Toast.makeText(context, "ТТН скопирована", Toast.LENGTH_SHORT).show()
+                            }) { Text("Копировать") }
+                        }
+                    }
+                    if (deliveryStatus.stage.isNotBlank()) {
+                        Text(deliveryStatus.stage, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (deliveryStatus.current.isNotBlank() && deliveryStatus.current != deliveryStatus.stage) {
+                        Text(deliveryStatus.current, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            if (order.deliveryValue("paymentMethod").isNotBlank() || paymentStatus.isNotBlank() ||
+                order.deliveryValue("paymentAmount").isNotBlank()) {
+                item {
+                    SectionCard("Оплата") {
+                        val method = order.deliveryValue("paymentMethod").trim()
+                        val paidAmount = order.deliveryValue("paymentAmount").trim()
+                        if (method.isNotBlank()) DetailField("Способ", method)
+                        if (paymentLabel.isNotBlank()) DetailField("Статус", paymentLabel)
+                        if (paidAmount.isNotBlank()) DetailField("Сумма", paidAmount)
+                    }
                 }
             }
 
             item {
-                SectionCard("Оплата") {
-                    DetailField("Способ", order.deliveryField("paymentMethod"))
-                    DetailField("Статус", order.deliveryField("paymentStatus"))
-                    DetailField("Сумма", order.deliveryField("paymentAmount"))
+                Card(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Товары", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(money(order.total()))
+                        }
+                        if (order.shipping != null) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Расход продавца на доставку",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(money(BigDecimal.valueOf(order.shipping)))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Стоимость товаров", fontWeight = FontWeight.Bold)
+                            Text(money(order.total()), style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
