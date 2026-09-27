@@ -35,7 +35,7 @@ private object ProductImages {
         cached(url)?.let { return it }
         val address = runCatching { URL(url) }.getOrNull() ?: return null
         if (address.protocol != "https") return null
-        val connection = (address.openConnection() as? HttpURLConnection) ?: return null
+        val connection = runCatching { address.openConnection() as? HttpURLConnection }.getOrNull() ?: return null
         connection.connectTimeout = 5000
         connection.readTimeout = 5000
         return try {
