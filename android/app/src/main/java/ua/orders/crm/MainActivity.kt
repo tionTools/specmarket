@@ -698,7 +698,7 @@ private fun OrderProductDetails(product: OrderItem?, moreProducts: Int) {
 }
 
 @Composable
-private fun OrderCard(order: Order, onClick: () -> Unit) {
+internal fun OrderCard(order: Order, onClick: () -> Unit) {
     val product = order.items.minByOrNull { it.position ?: Int.MAX_VALUE }
     val moreProducts = (order.items.size - 1).coerceAtLeast(0)
     val shipment = order.cardDelivery()
