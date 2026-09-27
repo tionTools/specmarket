@@ -115,8 +115,11 @@ private fun PlatformLogo(platform: String?) {
 }
 
 private fun openDialer(context: Context, phone: String) {
-    val value = phone.trim()
-    if (value.isBlank()) return
+    val value = normalizeCustomerPhone(phone)
+    if (value == null) {
+        Toast.makeText(context, "Некорректный номер телефона.", Toast.LENGTH_SHORT).show()
+        return
+    }
     context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", value, null)))
 }
 
@@ -682,7 +685,6 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     val context = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    var extraExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
 
     Scaffold(
@@ -906,10 +908,19 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             Text(money(order.total()))
                         }
                         if (order.shipping != null) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Расход продавца на доставку",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(money(BigDecimal.valueOf(order.shipping)))
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                                Text(
+                                    "Расход продавца на доставку",
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    money(BigDecimal.valueOf(order.shipping)),
+                                    softWrap = false,
+                                )
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -918,23 +929,6 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                             Text(money(order.total()), style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold)
                         }
-                    }
-                }
-            }
-
-            item {
-                OutlinedButton(
-                    onClick = { extraExpanded = !extraExpanded },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (extraExpanded) "Скрыть дополнительную информацию" else "Дополнительная информация")
-                }
-            }
-            if (extraExpanded) {
-                item {
-                    SectionCard("Дополнительно") {
-                        DetailField("Плательщик доставки", order.deliveryField("payer"))
-                        DetailField("Расход продавца", order.shipping?.let { money(BigDecimal.valueOf(it)) } ?: "—")
                     }
                 }
             }

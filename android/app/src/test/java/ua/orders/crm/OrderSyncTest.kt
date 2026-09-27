@@ -49,7 +49,11 @@ class OrderSyncTest {
         assertFalse(shouldNotifyNewOrder(order.copy(platform = "Сайт")))
     }
 
-    @Test fun customer_phone_is_normalized_for_viber_and_telegram() {
+    @Test fun customer_phone_is_normalized_for_dialer_and_messengers() {
+        assertEquals("+380630107031", normalizeCustomerPhone("380630107031"))
+        assertEquals("+380630107031", normalizeCustomerPhone("0630107031"))
+        assertEquals("+380630107031", normalizeCustomerPhone("+380630107031"))
+        assertEquals("+380630107031", normalizeCustomerPhone("+38 063 010 70 31"))
         assertEquals("+380675551122", normalizeCustomerPhone("067 555 11 22"))
         assertEquals("+380675551122", normalizeCustomerPhone("380675551122"))
         assertEquals("+380675551122", normalizeCustomerPhone("+38 (067) 555-11-22"))
