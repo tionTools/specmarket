@@ -4,6 +4,11 @@ import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderIt
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 import {
+  loadMarketplaceSyncAccess,
+  marketplacePausedResponse,
+  marketplaceSettingsUnavailableResponse,
+} from '../_shared/marketplace-sync-settings.ts'
+import {
   kastaPhysicalMovement,
   preserveKastaPhysicalReturnQuantity,
   resolveKastaPersistedItemSnapshot,
@@ -383,12 +388,19 @@ Deno.serve(async (request) => {
   if (!url || !anonKey || !serviceKey || !kastaToken || !authorization) return Response.json({ ok: false, message: 'Не хватает настроек Касты.' }, { status: 500, headers: corsHeaders })
 
   const admin = createClient(url, serviceKey)
-  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
-  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
+  let syncAccess
+  try {
+    syncAccess = await loadMarketplaceSyncAccess(admin, 'Каста')
+  } catch {
+    return marketplaceSettingsUnavailableResponse(corsHeaders)
+  }
+  const isScheduledRequest = authorization === `Bearer ${syncAccess.secret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
+  if (!syncAccess.enabled) return marketplacePausedResponse('Каста', isScheduledRequest, corsHeaders)
+
 
   const body = await request.json().catch(() => ({})) as {
     full?: unknown
@@ -413,16 +425,14 @@ Deno.serve(async (request) => {
     )
   }
 
-  let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
-  let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
-  try {
-    ;[priceCostSnapshots, usdRateSchedule] = await Promise.all([
-      loadPlatformPriceCostSnapshots(admin, 'Каста'),
-      loadUsdRateSchedule(admin),
-    ])
-  } catch (error) {
-    return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Kasta: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
-  }
+  let referenceDataPromise: Promise<{
+    priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+    usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
+  }> | undefined
+  const getReferenceData = () => referenceDataPromise ??= Promise.all([
+    loadPlatformPriceCostSnapshots(admin, 'Каста'),
+    loadUsdRateSchedule(admin),
+  ]).then(([priceCostSnapshots, usdRateSchedule]) => ({ priceCostSnapshots, usdRateSchedule }))
 
   const fullSync = body.full === true
   const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
@@ -463,9 +473,19 @@ Deno.serve(async (request) => {
       : { data: [], error: null }
     if (syncStateError) return Response.json({ ok: false, message: syncStateError.message }, { status: 500, headers: corsHeaders })
     const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
-    const candidates = orders.filter((order) => targetOrderId || fullSync || stateByExternalId.get(`kasta:${text(order.id)}`)?.source_hash !== hashes.get(`kasta:${text(order.id)}`))
-    skippedUnchanged += orders.length - candidates.length
+    const activeOrders = orders.filter((order) => !deletedExternalIds.has(`kasta:${text(order.id)}`))
+    deletedSkipped += orders.length - activeOrders.length
+    const candidates = activeOrders.filter((order) => targetOrderId || fullSync || stateByExternalId.get(`kasta:${text(order.id)}`)?.source_hash !== hashes.get(`kasta:${text(order.id)}`))
+    skippedUnchanged += activeOrders.length - candidates.length
     if (!candidates.length) return null
+
+    let priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
+    let usdRateSchedule: Awaited<ReturnType<typeof loadUsdRateSchedule>>
+    try {
+      ;({ priceCostSnapshots, usdRateSchedule } = await getReferenceData())
+    } catch (error) {
+      return Response.json({ ok: false, message: `Не удалось загрузить привязки себестоимости Kasta: ${error instanceof Error ? error.message : String(error)}` }, { status: 500, headers: corsHeaders })
+    }
 
     const candidateExternalIds = candidates.map((order) => `kasta:${text(order.id)}`)
     const { data: existingRows, error: existingError } = await admin.from('crm_orders').select('*').in('external_id', candidateExternalIds)
@@ -483,7 +503,6 @@ Deno.serve(async (request) => {
       const kastaId = text(order.id)
       if (!kastaId) continue
       const externalId = `kasta:${kastaId}`
-      if (deletedExternalIds.has(externalId)) { deletedSkipped += 1; continue }
       const existing = existingByExternalId.get(externalId)
       const client = asRecord(order.client)
       const address = asRecord(order.shipping_address)

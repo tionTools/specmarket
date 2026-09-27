@@ -10,6 +10,11 @@ import {
 } from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import {
+  loadMarketplaceSyncAccess,
+  marketplacePausedResponse,
+  marketplaceSettingsUnavailableResponse,
+} from '../_shared/marketplace-sync-settings.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   epicentrConfirmationStatus,
@@ -331,14 +336,21 @@ Deno.serve(async (request) => {
   }
 
   const admin = createClient(url, serviceKey)
-  const { data: cronSecret } = await admin.rpc('get_crm_sync_cron_secret')
-  const isScheduledRequest = typeof cronSecret === 'string' && authorization === `Bearer ${cronSecret}`
+  let syncAccess
+  try {
+    syncAccess = await loadMarketplaceSyncAccess(admin, 'Эпицентр')
+  } catch {
+    return marketplaceSettingsUnavailableResponse(corsHeaders)
+  }
+  const isScheduledRequest = authorization === `Bearer ${syncAccess.secret}`
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
+  if (!syncAccess.enabled) return marketplacePausedResponse('Эпицентр', isScheduledRequest, corsHeaders)
+
 
   const body = await request.json().catch(() => ({})) as {
     externalId?: unknown
