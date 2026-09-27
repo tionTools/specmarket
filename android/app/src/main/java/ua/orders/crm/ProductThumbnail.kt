@@ -60,7 +60,8 @@ private object ProductImages {
         var total = files.sumOf { it.length() }
         for (image in files) {
             if (total + temporary.length() <= DISK_LIMIT) break
-            if (image.delete()) total -= image.length()
+            val size = image.length()
+            if (image.delete()) total -= size
         }
         if (!temporary.renameTo(target)) temporary.delete()
     }
