@@ -294,12 +294,20 @@ fun Order.cardDelivery(): OrderCardDelivery {
     val carrier = deliveryValue("carrier").trim()
     val rawStatus = deliveryValue("status").trim()
     val tracking = deliveryValue("trackingNormalizedStatus").trim()
+    val rawTrackingStatus = deliveryValue("trackingStatus").trim()
     val plannedStates = setOf("initial", "created", "registered", "planned", "scheduled", "pending")
+    val plannedSignal = Regex(
+        "заплан|запланов|створено онлайн|создано онлайн",
+        RegexOption.IGNORE_CASE,
+    )
     val planned = normalizedStatus(rawStatus) in plannedStates ||
         normalizedStatus(tracking) in plannedStates ||
-        Regex("заплан|запланов|створено онлайн|создано онлайн", RegexOption.IGNORE_CASE)
-            .containsMatchIn(rawStatus)
-    val stage = deliveryStatusInfo().let { it.current.ifBlank { it.stage } }.trim()
+        plannedSignal.containsMatchIn(rawStatus) ||
+        plannedSignal.containsMatchIn(rawTrackingStatus)
+    val stage = deliveryStatusInfo().let { info ->
+        listOf(info.stage, info.current).map(String::trim).filter(String::isNotBlank)
+            .distinct().joinToString(" · ")
+    }
     val translatedStage = if (normalizedStatus(stage) in plannedStates) "Создано онлайн" else stage
     return OrderCardDelivery(
         title = when {
