@@ -72,7 +72,7 @@ fun Order.deliveryValue(key: String): String =
     ((delivery as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
 
 data class PaymentDisplay(val method: String, val status: String) {
-    val badge: String get() = status.ifBlank { if (method == "Наложенный платёж") method else "" }
+    val badge: String get() = status
 }
 
 fun Order.paymentDisplay(): PaymentDisplay {
@@ -81,7 +81,9 @@ fun Order.paymentDisplay(): PaymentDisplay {
     val epicentr = normalizedStatus(platform) in setOf("эпицентр", "епіцентр")
     val method = if (epicentr && normalizedStatus(rawMethod).replace(Regex("[\\s_-]+"), "") == "payondelivery")
         "Наложенный платёж" else rawMethod
-    val status = if (epicentr && normalizedStatus(rawStatus) in setOf("none", "null")) ""
+    val status = if (epicentr && normalizedStatus(rawStatus) in setOf("", "none", "null")) {
+        if (method == "Наложенный платёж") "Наложенный платёж" else ""
+    }
         else when (normalizedStatus(rawStatus)) {
             "paid", "оплачено", "сплачено" -> "Оплачено"
             "unpaid", "not_paid" -> "Не оплачено"
