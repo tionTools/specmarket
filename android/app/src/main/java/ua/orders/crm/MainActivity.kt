@@ -401,8 +401,8 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             content()
         }
     }
@@ -655,6 +655,8 @@ private fun DetailsHeader(order: Order) {
 private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var extraExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
 
@@ -739,17 +741,18 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                     }
                     if (normalizeCustomerPhone(rawBuyerPhone) != null) {
                         FilledTonalButton(
-                            onClick = { openDialer(context, rawBuyerPhone) },
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6)),
+                            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); openDialer(context, rawBuyerPhone) },
                             modifier = Modifier.fillMaxWidth().height(42.dp),
                         ) {
-                            Text("Позвонить $buyerPhone", fontWeight = FontWeight.SemiBold)
+                            Text("Позвонить", fontWeight = FontWeight.SemiBold)
                         }
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Button(
-                                onClick = { openViber(context, rawBuyerPhone) },
+                                onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); openViber(context, rawBuyerPhone) },
                                 modifier = Modifier.weight(1f).height(42.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF7360F2),
@@ -757,7 +760,7 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
                                 ),
                             ) { Text("Viber", fontWeight = FontWeight.SemiBold) }
                             Button(
-                                onClick = { openTelegram(context, rawBuyerPhone) },
+                                onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); openTelegram(context, rawBuyerPhone) },
                                 modifier = Modifier.weight(1f).height(42.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF229ED9),
@@ -812,25 +815,75 @@ private fun Details(vm: OrdersViewModel, onAccept: (Order) -> Unit) {
 
             item {
                 SectionCard("Доставка") {
-                    val carrier = order.deliveryField("carrier")
-                    val city = order.deliveryField("city")
-                    val address = order.deliveryField("address")
-                    val ttn = order.deliveryField("ttn")
+                    val carrier = order.deliveryValue("carrier").trim()
+                    val city = order.deliveryValue("city").trim()
+                    val address = order.deliveryValue("address").trim()
+                    val ttn = order.deliveryValue("ttn").trim()
                     val deliveryStatus = order.deliveryStatusInfo()
-                    DetailField("Перевозчик", carrier)
-                    val destination = listOf(city, address).filter { it != "—" }.joinToString(" · ")
-                    if (destination.isNotBlank()) DetailField("Куда", destination)
-                    if (ttn != "—") DetailField("ТТН", ttn)
-                    if (deliveryStatus.stage.isNotBlank()) DetailField("Статус", deliveryStatus.stage)
-                    if (deliveryStatus.current.isNotBlank()) DetailField("Сейчас", deliveryStatus.current)
+                    if (carrier.isNotBlank()) Text(carrier, fontWeight = FontWeight.Bold)
+                    val destination = when {
+                        address.isBlank() -> city
+                        city.isBlank() || address.contains(city, ignoreCase = true) -> address
+                        else -> city + " · " + address
+                    }
+                    if (destination.isNotBlank()) Text(destination, style = MaterialTheme.typography.bodyMedium)
+                    if (ttn.isNotBlank()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) { DetailField("ТТН", ttn) }
+                            TextButton(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(ttn))
+                                Toast.makeText(context, "ТТН скопирована", Toast.LENGTH_SHORT).show()
+                            }) { Text("Копировать") }
+                        }
+                    }
+                    if (deliveryStatus.stage.isNotBlank()) {
+                        Text(deliveryStatus.stage, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (deliveryStatus.current.isNotBlank() && deliveryStatus.current != deliveryStatus.stage) {
+                        Text(deliveryStatus.current, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            if (order.deliveryValue("paymentMethod").isNotBlank() || paymentStatus.isNotBlank() ||
+                order.deliveryValue("paymentAmount").isNotBlank()) {
+                item {
+                    SectionCard("Оплата") {
+                        val method = order.deliveryValue("paymentMethod").trim()
+                        val paidAmount = order.deliveryValue("paymentAmount").trim()
+                        if (method.isNotBlank()) DetailField("Способ", method)
+                        if (paymentLabel.isNotBlank()) DetailField("Статус", paymentLabel)
+                        if (paidAmount.isNotBlank()) DetailField("Сумма", paidAmount)
+                    }
                 }
             }
 
             item {
-                SectionCard("Оплата") {
-                    DetailField("Способ", order.deliveryField("paymentMethod"))
-                    DetailField("Статус", order.deliveryField("paymentStatus"))
-                    DetailField("Сумма", order.deliveryField("paymentAmount"))
+                Card(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Товары", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(money(order.total()))
+                        }
+                        if (order.shipping != null) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Расход продавца на доставку",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(money(BigDecimal.valueOf(order.shipping)))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Стоимость товаров", fontWeight = FontWeight.Bold)
+                            Text(money(order.total()), style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
