@@ -634,19 +634,44 @@ private fun DetailField(label: String, value: String) {
 @Composable
 private fun DetailsHeader(order: Order) {
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PlatformLogo(order.platform)
-            Spacer(Modifier.width(10.dp))
-            StatusLabel(order, compact = true)
-        }
         Text(
-            "№${order.number()} · ${order.orderDate.display()} · ${order.orderTime.display()}",
-            style = MaterialTheme.typography.bodyMedium,
+            listOf(order.orderDate.orEmpty(), order.orderTime.orEmpty())
+                .filter(String::isNotBlank).joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface) {
+                Box(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
+                    PlatformLogo(order.platform)
+                }
+            }
+            StatusLabel(order, compact = true)
+            val rawPayment = normalizedStatus(order.deliveryValue("paymentStatus"))
+            if (rawPayment.isNotBlank()) {
+                val paid = rawPayment in setOf("paid", "оплачено", "сплачено")
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (paid) Color(0xFFDCFCE7) else Color(0xFFFFEDD5),
+                    contentColor = if (paid) Color(0xFF166534) else Color(0xFF9A3412),
+                ) {
+                    Text(
+                        if (paid) "Оплачено" else when (rawPayment) {
+                            "unpaid", "not_paid" -> "Не оплачено"
+                            "pending", "waiting" -> "Ожидает оплаты"
+                            else -> order.deliveryValue("paymentStatus")
+                        },
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
