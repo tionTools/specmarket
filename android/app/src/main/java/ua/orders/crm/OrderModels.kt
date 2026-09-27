@@ -308,7 +308,11 @@ fun Order.cardDelivery(): OrderCardDelivery {
         listOf(info.stage, info.current).map { it.trim() }.filter { it.isNotBlank() }
             .distinct().joinToString(" · ")
     }
-    val translatedStage = if (normalizedStatus(stage) in plannedStates) "Создано онлайн" else stage
+    val translatedStage = when (normalizedStatus(stage)) {
+        "initial", "planned", "scheduled", "pending" -> "Запланировано"
+        "created", "registered" -> "Создано онлайн"
+        else -> stage
+    }
     return OrderCardDelivery(
         title = when {
             ttn.isNotBlank() -> "ТТН создана"
