@@ -6,12 +6,7 @@ import {
   NovaPayTransportError,
 } from '../_shared/novapay-auth.ts'
 import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
-import {
-  startNovaPaySyncAttempt,
-  markNovaPaySyncAttempt,
-  completeNovaPaySyncAttempt,
-  failNovaPaySyncAttempt,
-} from '../_shared/novapay-sync-journal.ts'
+import { failNovaPaySyncAttempt } from '../_shared/novapay-sync-journal.ts'
 import {
   assignRunningBalances,
   copyKnownBalancesByProviderAlias,
@@ -754,7 +749,6 @@ function errorResponse(error) {
       { status: error.status, headers: corsHeaders },
     )
   }
-  console.error('NovaPay data request failed with an unexpected error.')
   return Response.json(
     { ok: false, code: 'NOVAPAY_INTERNAL_ERROR', message: 'NovaPay request failed.' },
     {
@@ -872,7 +866,6 @@ Deno.serve(async (request) => {
       throw new HttpError(409, 'NOVAPAY_SYNC_BUSY', 'Another NovaPay refresh is already running.')
     }
     syncLockAcquired = true
-    await startNovaPaySyncAttempt(admin, syncOwner, isScheduledRequest ? 'scheduled' : 'manual')
     syncStage = 'authorization'
 
     // A second request may have completed between the initial cache read and lock acquisition.
@@ -884,7 +877,6 @@ Deno.serve(async (request) => {
         const authRequestRef = requestRef()
         syncRequestRef = authRequestRef
         syncStage = 'auth_request'
-        await markNovaPaySyncAttempt(admin, syncOwner, 'auth_request', authRequestRef)
         return soapCall('UserAuthenticationJWT', {
           request_ref: authRequestRef,
           refresh_token: refreshToken,
@@ -894,7 +886,6 @@ Deno.serve(async (request) => {
       },
     })
     syncStage = 'data_sync'
-    await markNovaPaySyncAttempt(admin, syncOwner, 'data_sync')
 
     const clientsResult = await soapCall(
       'GetClientsList',
@@ -1135,12 +1126,6 @@ Deno.serve(async (request) => {
         receiptProviderAliases(receipt).length === 0 && Boolean(receiptStableSignature(receipt)),
     ).length
 
-    if (fallbackIdentityCount > 0 || updatedFallbackIdentityCount > 0) {
-      console.warn(
-        `NovaPay conducted payments without ID/UETR: statement=${fallbackIdentityCount} updated=${updatedFallbackIdentityCount}`,
-      )
-    }
-
     const diagnostics =
       statementDocuments.length > 0 || updatedDocuments.length > 0
         ? {
@@ -1166,7 +1151,6 @@ Deno.serve(async (request) => {
             },
           }
         : undefined
-    await completeNovaPaySyncAttempt(admin, syncOwner)
 
     if (compact)
       return Response.json({

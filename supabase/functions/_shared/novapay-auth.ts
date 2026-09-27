@@ -163,7 +163,6 @@ async function saveRotatedAuthState(admin: NovaPayAdmin, state: Record<string, s
     }
     if (!failed) return
     if (attempt + 1 < AUTH_STATE_SAVE_ATTEMPTS) {
-      console.warn('NovaPay auth state save failed; retrying once.')
       await sleep(AUTH_STATE_SAVE_RETRY_MS)
     }
   }
@@ -271,7 +270,7 @@ export async function getValidNovaPayJwt({
       const { data: storedState, error: storedStateError } =
         await admin.rpc('get_novapay_auth_state')
       if (storedStateError || !storedState || typeof storedState !== 'object') {
-        console.warn('NovaPay auth fingerprint stored read failed.')
+        console.error('NovaPay credential state verification failed.')
       } else {
         const storedFingerprints = await credentialFingerprints({
           refreshToken: text(storedState.refresh_token),
@@ -285,7 +284,7 @@ export async function getValidNovaPayJwt({
         }
       }
     } catch {
-      console.warn('NovaPay auth fingerprint stored read failed.')
+      console.error('NovaPay credential state verification failed.')
     }
 
     return nextJwt

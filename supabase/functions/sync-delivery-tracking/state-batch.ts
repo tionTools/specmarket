@@ -19,12 +19,10 @@ export async function upsertTrackingStateBatches(
     const batch = states.slice(start, start + 25);
     const { error } = await write(batch);
     if (!error) continue;
-    console.error("Не удалось пакетно сохранить состояние доставок:", error);
     for (const state of batch) {
       const { error: itemError } = await write([state]);
       if (!itemError) continue;
       failed += 1;
-      console.error("Не удалось сохранить состояние доставки:", state.order_id, itemError);
     }
   }
   return failed;
