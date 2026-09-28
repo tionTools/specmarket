@@ -89,6 +89,7 @@ import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import { reapplyRegistryPreview } from '@/features/orders/registry-preview'
 import { currencyRateForDate, type CurrencyRateRow } from '@/features/prices/currencyRates'
+import { savePriceLinkNavigationIntent } from '@/features/prices/priceLinkNavigation'
 import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 import BankBalancesCard from '@/features/banking/BankBalancesCard.vue'
 import { useBankingMonitor } from '@/features/banking/useBankingMonitor'
@@ -2112,26 +2113,30 @@ async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
 
 async function openProductPriceLink(order: Order, product: OrderProduct) {
   if (isGuest.value || !canLinkProductPrice(order, product)) return
+  const remoteId = order.remoteId
+  const position = product.position
+  if (!remoteId || position === undefined) return
+
   let linkProductKey = product.marketplaceProductKey ?? ''
   if (!linkProductKey || !isFamilyPriceLinkKey(order.platform, linkProductKey)) {
     linkProductKey = await refreshPriceLinkProductKey(order, product)
     if (!linkProductKey || !isFamilyPriceLinkKey(order.platform, linkProductKey)) return
   }
-  await router.push({
-    path: '/prices',
-    query: {
-      linkMode: '1',
-      linkPlatform: order.platform,
-      linkProductKey,
-      linkOrderRemoteId: order.remoteId,
-      linkPosition: String(product.position),
-      linkTitle: product.name,
-      ...(product.size ? { linkSize: product.size } : {}),
-      returnOrder: String(order.id),
-      ...(searchQuery.value ? { returnSearch: searchQuery.value } : {}),
-      ...(isPromRegistryDraft.value ? { returnRegistry: '1' } : {}),
-    },
-  })
+
+  const query = {
+    linkMode: '1' as const,
+    linkPlatform: order.platform as 'Пром' | 'Эпицентр' | 'Каста',
+    linkProductKey,
+    linkOrderRemoteId: remoteId,
+    linkPosition: String(position),
+    linkTitle: product.name,
+    ...(product.size ? { linkSize: product.size } : {}),
+    returnOrder: String(order.id),
+    ...(searchQuery.value ? { returnSearch: searchQuery.value } : {}),
+    ...(isPromRegistryDraft.value ? { returnRegistry: '1' as const } : {}),
+  }
+  savePriceLinkNavigationIntent(query)
+  await router.push({ path: '/prices', query })
 }
 
 function updateDraftUsdCost(product: OrderProduct, event: Event) {
