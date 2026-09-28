@@ -56,3 +56,28 @@ $$;
 
 revoke all on function public.get_crm_current_cost_totals() from public, anon;
 grant execute on function public.get_crm_current_cost_totals() to authenticated;
+
+
+-- Existing cancelled Prom orders may already have the new Prom payload hash saved
+-- while the old CRM TTN was preserved by the previous fallback. Force one retry
+-- without changing the order data directly; the next Prom sync will re-read the
+-- marketplace payload and clear the stale active TTN through normal sync logic.
+update public.crm_marketplace_order_sync_state as sync_state
+set
+  source_hash = 'force-resync:prom-cancelled-ttn:' || sync_state.source_hash,
+  synced_at = now()
+from public.crm_orders as orders
+where sync_state.order_id = orders.id
+  and sync_state.platform = 'Пром'
+  and orders.platform = 'Пром'
+  and nullif(btrim(coalesce(orders.delivery ->> 'ttn', '')), '') is not null
+  and lower(coalesce(orders.status, '')) ~ '(скас|отмен|cancel)'
+  and nullif(btrim(coalesce(orders.delivery ->> 'printedAt', '')), '') is null
+  and lower(btrim(coalesce(orders.delivery ->> 'trackingNormalizedStatus', ''))) not in (
+    'accepted',
+    'in_transit',
+    'ready_for_pickup',
+    'delivered',
+    'returning',
+    'returned'
+  );
