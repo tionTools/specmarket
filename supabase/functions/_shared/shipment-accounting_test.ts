@@ -84,3 +84,23 @@ Deno.test('paid shipment is never included in unpaid shipment amount', () => {
   const paid = order({ trackingNormalizedStatus: 'returning' })
   assert(!includeInUnpaidShipment(paid, paid.status, true))
 })
+
+
+Deno.test('deleted carrier TTN does not become shipment movement even after label printing', () => {
+  const deleted = order({
+    printedAt: '2026-09-28',
+    trackingNormalizedStatus: 'deleted',
+  })
+  assert(!hasPhysicalShipmentMovement(deleted))
+  assert(!includeInUnpaidShipment(deleted, deleted.status, false))
+  assert(!includeInTurnoverReport(deleted, deleted.status))
+  assert(getOrderLifecycleState(deleted, deleted.status) === 'cancelled_before_shipment')
+})
+
+Deno.test('deleted carrier TTN does not cancel an otherwise active marketplace order', () => {
+  const active = order({ trackingNormalizedStatus: 'deleted' })
+  active.status = 'Принято'
+  assert(getOrderLifecycleState(active, active.status) === 'active')
+  assert(!includeInUnpaidShipment(active, active.status, false))
+  assert(!includeInTurnoverReport(active, active.status))
+})
