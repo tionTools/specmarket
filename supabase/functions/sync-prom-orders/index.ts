@@ -1537,10 +1537,18 @@ Deno.serve(async (request) => {
       !existing ||
       !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
     if (orderId && orderChanged) {
-      const { error } = await admin.from('crm_orders').update(data).eq('id', orderId)
-      if (error)
+      const { data: snapshotApplied, error } = await admin.rpc(
+        'apply_crm_marketplace_order_snapshot',
+        { p_order_id: orderId, p_data: data },
+      )
+      if (error || snapshotApplied !== true)
         return Response.json(
-          { ok: false, message: error.message },
+          {
+            ok: false,
+            message:
+              error?.message ??
+              'Не удалось обновить заказ Prom без изменения финансов платёжного реестра.',
+          },
           { status: 500, headers: corsHeaders },
         )
       updated += 1

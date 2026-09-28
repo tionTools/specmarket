@@ -597,8 +597,20 @@ Deno.serve(async (request) => {
       let orderId = existing?.id
       const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
       if (orderId && orderChanged) {
-        const { error } = await admin.from('crm_orders').update(data).eq('id', orderId)
-        if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
+        const { data: snapshotApplied, error } = await admin.rpc(
+          'apply_crm_marketplace_order_snapshot',
+          { p_order_id: orderId, p_data: data },
+        )
+        if (error || snapshotApplied !== true)
+          return Response.json(
+            {
+              ok: false,
+              message:
+                error?.message ??
+                'Не удалось обновить заказ Каста без изменения финансов платёжного реестра.',
+            },
+            { status: 500, headers: corsHeaders },
+          )
         updated += 1
         changedOrderIds.add(orderId)
       } else if (!orderId) {
