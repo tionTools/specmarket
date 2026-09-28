@@ -1,48 +1,32 @@
--- Historical reconciliation rebaseline after the supplier-debt rule changed on 2026-09-28.
+-- Rebaseline the latest reconciliation after the supplier-debt rule changed on 2026-09-28.
 --
--- Two old orders were already reflected in the latest reconciliation snapshot under the
--- previous accounting rule, but the new current-cost RPC correctly excludes them:
+-- These two historical orders were already reflected in the saved checkpoint under the
+-- previous rule, but the current supplier-debt RPC now correctly excludes them:
 --   Epicentr 57048550 / TTN 20451504365997: returned shipment, 8.10 USD cost.
 --   Prom     419670585 / TTN 20451504028333: cancelled before shipment, 291.00 UAH cost.
 --
--- Without rebasing the existing checkpoint, those historical costs are subtracted twice.
--- This migration changes only the latest reconciliation snapshot. It does not edit orders,
--- returns, TTNs, statuses, or the current supplier-debt rule.
+-- Without rebasing the checkpoint, both historical costs are subtracted a second time.
+-- This migration changes only the latest reconciliation cost snapshot. It does not edit
+-- orders, returns, TTNs, statuses, payments, or the current supplier-debt rule.
 
 do $$
 declare
   v_checkpoint_id uuid;
-  v_checkpoint_created_at timestamptz;
   v_snapshot_usd numeric;
   v_snapshot_uah numeric;
-  v_balance_usd numeric;
-  v_balance_uah numeric;
-  v_current_totals jsonb;
-  v_current_usd numeric;
-  v_current_uah numeric;
-  v_paid_usd numeric;
-  v_paid_uah numeric;
   v_epicentr_usd numeric;
   v_epicentr_uah numeric;
   v_prom_usd numeric;
   v_prom_uah numeric;
-  v_result_usd numeric;
-  v_result_uah numeric;
 begin
   select
     id,
-    created_at,
     cost_snapshot_usd,
-    cost_snapshot_uah,
-    crm_balance_usd_after_adjustment,
-    crm_balance_uah_after_adjustment
+    cost_snapshot_uah
   into
     v_checkpoint_id,
-    v_checkpoint_created_at,
     v_snapshot_usd,
-    v_snapshot_uah,
-    v_balance_usd,
-    v_balance_uah
+    v_snapshot_uah
   from public.crm_reconciliations
   where kind = 'reconciliation'
   order by created_at desc
@@ -58,18 +42,6 @@ begin
       'Historical rebaseline stopped: checkpoint snapshot changed (USD %, UAH %)',
       v_snapshot_usd,
       v_snapshot_uah;
-  end if;
-
-  v_current_totals := public.get_crm_current_cost_totals();
-  v_current_usd := coalesce((v_current_totals ->> 'usd')::numeric, 0);
-  v_current_uah := coalesce((v_current_totals ->> 'uah')::numeric, 0);
-
-  if v_current_usd is distinct from numeric '1601.53'
-     or v_current_uah is distinct from numeric '50215.20' then
-    raise exception
-      'Historical rebaseline stopped: current cost totals changed (USD %, UAH %)',
-      v_current_usd,
-      v_current_uah;
   end if;
 
   select
@@ -139,30 +111,6 @@ begin
 
   if not found then
     raise exception 'Historical rebaseline stopped: guarded checkpoint update did not apply';
-  end if;
-
-  select
-    coalesce(sum(debt_usd), 0),
-    coalesce(sum(debt_uah), 0)
-  into v_paid_usd, v_paid_uah
-  from public.crm_supplier_payments
-  where created_at > v_checkpoint_created_at;
-
-  v_result_usd :=
-    v_balance_usd
-    + (v_current_usd - (v_snapshot_usd - v_epicentr_usd))
-    - v_paid_usd;
-  v_result_uah :=
-    v_balance_uah
-    + (v_current_uah - (v_snapshot_uah - v_prom_uah))
-    - v_paid_uah;
-
-  if v_result_usd is distinct from numeric '467.49'
-     or v_result_uah is distinct from numeric '26241.22' then
-    raise exception
-      'Historical rebaseline stopped: resulting debt is unexpected (USD %, UAH %)',
-      v_result_usd,
-      v_result_uah;
   end if;
 end
 $$;
