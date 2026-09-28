@@ -1363,10 +1363,20 @@ watch(promRegistryFiles, (files) => {
 })
 
 async function confirmPromRegistryDistribution() {
-  if (isGuest.value || !isPromRegistryDraft.value || isApplyingPromRegistry.value) return
+  if (
+    !supabase ||
+    isGuest.value ||
+    !isPromRegistryDraft.value ||
+    isApplyingPromRegistry.value
+  )
+    return
   const matchedOrders = promRegistryOrders.value
   if (!matchedOrders.length) {
     promRegistryError.value = 'В CRM не найдены заказы из этого реестра.'
+    return
+  }
+  if (matchedOrders.some((order) => !order.remoteId)) {
+    promRegistryError.value = 'Не у всех заказов реестра есть ID в общей CRM.'
     return
   }
   if (
@@ -1376,32 +1386,32 @@ async function confirmPromRegistryDistribution() {
   )
     return
   isApplyingPromRegistry.value = true
-  const previousOperationIds = new Map<string | number, string[] | undefined>()
   try {
-    for (const order of matchedOrders) {
-      const pendingOperationIds = promRegistryPendingOperationIds.get(order.id)
-      if (!pendingOperationIds?.length) continue
-      previousOperationIds.set(order.id, order.delivery.rozetkaPayOperationIds)
-      order.delivery.rozetkaPayOperationIds = [
-        ...new Set([...(order.delivery.rozetkaPayOperationIds ?? []), ...pendingOperationIds]),
-      ]
+    const updates = matchedOrders.map((order) => ({
+      orderId: order.remoteId!,
+      paymentAmount: order.paymentAmount ?? 0,
+      acquiring: order.acquiring,
+      acquiringPercent: order.acquiringPercent ?? null,
+      operationIds: promRegistryPendingOperationIds.get(order.id) ?? [],
+    }))
+    const { data: updatedCount, error } = await supabase.rpc('apply_crm_registry_financials', {
+      p_updates: updates,
+    })
+    if (error) throw error
+    if (Number(updatedCount) !== matchedOrders.length) {
+      throw new Error('Не все заказы реестра были обновлены.')
     }
+
+    const remoteIds = matchedOrders.map((order) => order.remoteId!)
     isPromRegistryDraft.value = false
-    await persistOrdersNow(matchedOrders)
     promRegistryOriginalFinancials.clear()
     promRegistryNewFields.value = new Set()
     promRegistryMismatchedFields.value = new Set()
     promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
     clearPromRegistry()
+    await refreshRemoteOrders(remoteIds)
     showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
-    isPromRegistryDraft.value = true
-    for (const order of matchedOrders) {
-      if (!previousOperationIds.has(order.id)) continue
-      const previousIds = previousOperationIds.get(order.id)
-      if (previousIds?.length) order.delivery.rozetkaPayOperationIds = previousIds
-      else delete order.delivery.rozetkaPayOperationIds
-    }
     promRegistryError.value =
       error instanceof Error ? error.message : 'Не удалось сохранить разнесение.'
   } finally {
