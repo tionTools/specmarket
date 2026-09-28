@@ -32,7 +32,7 @@ function intervalMinutes() {
 
 function hasActiveTracking(delivery: JsonRecord) {
   const normalizedStatus = text(delivery.trackingNormalizedStatus)
-  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled'].includes(normalizedStatus)
+  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled', 'deleted'].includes(normalizedStatus)
 }
 
 function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, now: number) {
@@ -71,7 +71,7 @@ export async function runTrackingWorker(
     ordersQuery = ordersQuery.eq('id', orderId)
   } else {
     ordersQuery = ordersQuery
-      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled))`)
+      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled,deleted))`)
       .not('delivery->>ttn', 'is', null)
   }
   const { data: rows, error } = await ordersQuery
