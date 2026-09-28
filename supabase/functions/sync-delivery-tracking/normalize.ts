@@ -9,13 +9,14 @@ export function text(value: unknown) {
 }
 
 export function isFinal(status: string) {
-  return /(отримано|получено|доставлено|вручено|завершено|повернено|возвращено|скасовано|отменено|відмінен|cancel|return|received|delivered)/i.test(status)
+  return /(отримано|получено|доставлено|вручено|завершено|повернено|возвращено|скасовано|отменено|відмінен|видален|удален|deleted|cancel|return|received|delivered)/i.test(status)
 }
 
 export function readableStatus(source: string, code = ''): TrackingResult {
   const value = source.trim()
   const normalized = `${value} ${code}`.toLowerCase()
   if (/відмова від (?:одержання|отримання)/.test(normalized)) return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
+  if (/видален|удален|deleted/.test(normalized)) return { status: value || 'Удалено', final: true, normalizedStatus: 'deleted' }
   if (/return|повернен|41010|31200/.test(normalized)) return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
   if (/cancel|скасован|відмінен|10600|10602|102|103/.test(normalized)) return { status: 'Отменено', final: true, normalizedStatus: 'cancelled' }
   if (/receivedwarehouse|received|отриман|получен|вручено|доставлено|41000|\b9\b|\b10\b|\b11\b/.test(normalized)) return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
