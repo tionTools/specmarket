@@ -16,6 +16,8 @@ const text = (value: unknown) =>
   typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
 
 export function hasPhysicalShipmentMovement(delivery: PhysicalShipmentDelivery) {
+  const normalizedStatus = text(delivery.trackingNormalizedStatus).toLowerCase()
+  if (normalizedStatus === 'deleted') return false
   if (text(delivery.printedAt)) return true
-  return physicalCarrierStatuses.has(text(delivery.trackingNormalizedStatus).toLowerCase())
+  return physicalCarrierStatuses.has(normalizedStatus)
 }

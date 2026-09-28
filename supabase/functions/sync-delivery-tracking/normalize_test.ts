@@ -21,3 +21,16 @@ Deno.test('ordinary cancellation remains cancelled', () => {
   assert(result.normalizedStatus === 'cancelled', 'ordinary cancellation became a return')
   assert(result.final === true, 'ordinary cancellation must stay final')
 })
+
+
+Deno.test('carrier Видалено status is a deleted TTN, not an order cancellation', () => {
+  const result = readableStatus('Видалено')
+  assert(result.normalizedStatus === 'deleted', 'deleted TTN was not classified separately')
+  assert(result.status === 'Видалено', 'carrier status text must be preserved')
+  assert(result.final === true, 'deleted TTN must stop carrier polling')
+})
+
+Deno.test('carrier Удалено status is also a deleted TTN', () => {
+  const result = readableStatus('Удалено')
+  assert(result.normalizedStatus === 'deleted', 'Russian deleted TTN wording was not recognized')
+})

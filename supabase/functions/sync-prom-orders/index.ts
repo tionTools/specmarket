@@ -27,7 +27,7 @@ import {
   marketplaceSettingsUnavailableResponse,
   shouldSkipAutomaticMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
-import { resolvePromShipping, resolvePromTrackingNumber } from '../_shared/prom-delivery.ts'
+import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   acceptPromOrders,
@@ -1403,11 +1403,7 @@ Deno.serve(async (request) => {
       ) ||
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
       findDeliveryTracking(order)
-    const trackingNumber = resolvePromTrackingNumber({
-      orderStatus: rawOrderStatus,
-      marketplaceTrackingNumber,
-      previousTrackingNumber: text(previousDelivery.ttn),
-    })
+    const trackingNumber = marketplaceTrackingNumber || text(previousDelivery.ttn)
     const deliveryCarrier =
       readable(pick(order, 'delivery_option', 'delivery_service')) ||
       readable(pick(rawDelivery, 'service', 'provider', 'option')) ||

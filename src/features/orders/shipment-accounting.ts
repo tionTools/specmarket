@@ -52,12 +52,21 @@ export function isReturnLifecycleState(state: OrderLifecycleState) {
 }
 
 export function includeInTurnoverReport(order: Order, status: string) {
-  if (!order.delivery.ttn.trim()) return false
+  if (
+    !order.delivery.ttn.trim() ||
+    order.delivery.trackingNormalizedStatus?.trim().toLowerCase() === 'deleted'
+  )
+    return false
   return getOrderLifecycleState(order, status) !== 'cancelled_before_shipment'
 }
 
 export function includeInUnpaidShipment(order: Order, status: string, paid: boolean) {
-  if (!order.delivery.ttn.trim() || paid) return false
+  if (
+    !order.delivery.ttn.trim() ||
+    paid ||
+    order.delivery.trackingNormalizedStatus?.trim().toLowerCase() === 'deleted'
+  )
+    return false
   const state = getOrderLifecycleState(order, status)
   if (state === 'cancelled_before_shipment' || state === 'return_completed') return false
   return order.products.some((product) => getRemainingQuantity(product) > 0)
