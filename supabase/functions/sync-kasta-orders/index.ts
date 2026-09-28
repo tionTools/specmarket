@@ -597,24 +597,17 @@ Deno.serve(async (request) => {
       let orderId = existing?.id
       const orderChanged = !existing || !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
       if (orderId && orderChanged) {
-        const marketplaceData = Object.fromEntries(
-          Object.entries(data).filter(
-            ([key]) => !['delivery', 'acquiring', 'acquiring_percent'].includes(key),
-          ),
+        const { data: snapshotApplied, error } = await admin.rpc(
+          'apply_crm_marketplace_order_snapshot',
+          { p_order_id: orderId, p_data: data },
         )
-        const { error } = await admin.from('crm_orders').update(marketplaceData).eq('id', orderId)
-        if (error) return Response.json({ ok: false, message: error.message }, { status: 500, headers: corsHeaders })
-        const { data: deliveryMerged, error: deliveryError } = await admin.rpc(
-          'merge_crm_order_marketplace_delivery',
-          { p_order_id: orderId, p_delivery: data.delivery },
-        )
-        if (deliveryError || deliveryMerged !== true)
+        if (error || snapshotApplied !== true)
           return Response.json(
             {
               ok: false,
               message:
-                deliveryError?.message ??
-                'Не удалось сохранить доставку заказа Каста без изменения оплаты.',
+                error?.message ??
+                'Не удалось обновить заказ Каста без изменения финансов платёжного реестра.',
             },
             { status: 500, headers: corsHeaders },
           )
