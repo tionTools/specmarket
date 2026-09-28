@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useNow } from '@vueuse/core'
 import type { User } from '@supabase/supabase-js'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Link2, Plus } from '@lucide/vue'
 
 import { excelPriceCatalog, type PriceItem } from '@/features/prices/priceCatalog'
@@ -18,6 +18,10 @@ import {
   marketplaceEnabledFromRows,
   marketplacePlatforms,
 } from '@/features/marketplaces/syncSettings'
+import {
+  clearPriceLinkNavigationIntent,
+  loadPriceLinkNavigationIntent,
+} from '@/features/prices/priceLinkNavigation'
 
 type PriceField = 'usd' | 'costUah' | 'prom' | 'epic' | 'kastaOne' | 'kastaTwo' | 'kastaThree'
 const sourceGroupIds = new Set([19, 31, 53, 57, 60, 64, 78, 97, 126, 148, 153, 168, 172, 178])
@@ -133,6 +137,17 @@ const linkedPriceCostUah = computed(() => {
 })
 const linkError = ref('')
 const isLinking = ref(false)
+
+async function restorePendingPriceLinkNavigation() {
+  if (linkMode.value || manualSelectMode.value) return
+  const pendingQuery = loadPriceLinkNavigationIntent()
+  if (!pendingQuery) return
+  await router.replace({ path: '/prices', query: pendingQuery })
+}
+
+onBeforeRouteLeave(() => {
+  clearPriceLinkNavigationIntent()
+})
 
 const deletedItems = new WeakSet<PriceItem>()
 const persistedCatalogSignatures = new Map<string, string>()
@@ -667,11 +682,13 @@ async function linkPriceItem(item: PriceItem) {
   linkedPriceItemId.value = item.remoteId
 
   isLinking.value = false
+  clearPriceLinkNavigationIntent()
   await router.push({ path: '/', query: returnQuery() })
 }
 
 onMounted(async () => {
   window.scrollTo({ top: 0, left: 0 })
+  await restorePendingPriceLinkNavigation()
   if (!supabase) {
     authError.value = 'Нет настроек Supabase в опубликованной версии сайта.'
     return
