@@ -1,4 +1,4 @@
-import { resolvePromShipping } from './prom-delivery.ts'
+import { resolvePromShipping, resolvePromTrackingNumber } from './prom-delivery.ts'
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
@@ -107,4 +107,41 @@ const novaBelowMinimum = resolvePromShipping({
 assert(
   novaBelowMinimum.shipping === 0 && novaBelowMinimum.shippingSource === 'none',
   'Prom Nova Poshta promo must not charge seller below the 200 UAH promotion minimum',
+)
+
+
+assert(
+  resolvePromTrackingNumber({
+    orderStatus: 'canceled',
+    marketplaceTrackingNumber: '',
+    previousTrackingNumber: '20400000000000',
+  }) === '',
+  'Cancelled Prom order must drop a TTN that Prom no longer returns',
+)
+
+assert(
+  resolvePromTrackingNumber({
+    orderStatus: 'Скасовано',
+    marketplaceTrackingNumber: '',
+    previousTrackingNumber: '20400000000000',
+  }) === '',
+  'Localized cancelled Prom order must drop a stale TTN',
+)
+
+assert(
+  resolvePromTrackingNumber({
+    orderStatus: 'received',
+    marketplaceTrackingNumber: '',
+    previousTrackingNumber: '20400000000000',
+  }) === '20400000000000',
+  'Active Prom order must preserve the previous TTN when the API response omits it',
+)
+
+assert(
+  resolvePromTrackingNumber({
+    orderStatus: 'canceled',
+    marketplaceTrackingNumber: '20400000000001',
+    previousTrackingNumber: '20400000000000',
+  }) === '20400000000001',
+  'Prom TTN returned by the current payload must win even for a cancelled order',
 )

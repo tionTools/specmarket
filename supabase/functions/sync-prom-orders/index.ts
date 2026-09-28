@@ -27,7 +27,7 @@ import {
   marketplaceSettingsUnavailableResponse,
   shouldSkipAutomaticMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
-import { resolvePromShipping } from '../_shared/prom-delivery.ts'
+import { resolvePromShipping, resolvePromTrackingNumber } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   acceptPromOrders,
@@ -176,6 +176,8 @@ const promStatusNames: Record<string, string> = {
   pending: 'Новий',
   received: 'Принято',
   delivered: 'Виконано',
+  canceled: 'Скасовано',
+  cancelled: 'Скасовано',
 }
 const firstNumber = (...values: unknown[]) => {
   for (const value of values) {
@@ -1388,7 +1390,8 @@ Deno.serve(async (request) => {
         text(pick(paymentData, 'status', 'payment_status', 'state')) ||
         text(pick(order, 'payment_status', 'payment_state')),
     })
-    const trackingNumber =
+    const rawOrderStatus = text(order.status)
+    const marketplaceTrackingNumber =
       text(
         pick(
           order,
@@ -1399,8 +1402,12 @@ Deno.serve(async (request) => {
         ),
       ) ||
       text(pick(rawDelivery, 'declaration_number', 'declaration_id', 'tracking_number', 'ttn')) ||
-      findDeliveryTracking(order) ||
-      text(previousDelivery.ttn)
+      findDeliveryTracking(order)
+    const trackingNumber = resolvePromTrackingNumber({
+      orderStatus: rawOrderStatus,
+      marketplaceTrackingNumber,
+      previousTrackingNumber: text(previousDelivery.ttn),
+    })
     const deliveryCarrier =
       readable(pick(order, 'delivery_option', 'delivery_service')) ||
       readable(pick(rawDelivery, 'service', 'provider', 'option')) ||
@@ -1414,7 +1421,6 @@ Deno.serve(async (request) => {
     const ttnHistory = currentTtnHistory.filter(
       (ttn) => historyKey(ttn) !== historyKey(trackingNumber),
     )
-    const rawOrderStatus = text(order.status)
     const orderStatus = (promStatusNames[rawOrderStatus.toLowerCase()] ?? rawOrderStatus) || 'Новий'
     const apiDeliveryStatus =
       readable(
