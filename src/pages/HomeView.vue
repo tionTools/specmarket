@@ -345,6 +345,8 @@ let realtimeReconnectTimer: ReturnType<typeof window.setTimeout> | undefined
 let reconciliationTimer: ReturnType<typeof window.setTimeout> | undefined
 let isReconciliationRunning = false
 let lastReconciliationAt = 0
+let realtimeReconnectAttempt = 0
+const realtimeReconnectDelays = [5_000, 10_000, 20_000, 30_000] as const
 const pendingRemoteOrderIds = new Set<string>()
 const pendingNewOrderIds = new Set<string>()
 const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
@@ -365,6 +367,7 @@ function dismissNewOrderToastsOnPointerDown() {
 }
 
 const ordersRealtimeSubscribed = ref(false)
+const realtimeStatusDetail = ref('')
 let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
@@ -2901,7 +2904,21 @@ function scheduleReconciliation(delay = 750, force = false) {
   }, delay)
 }
 
-function scheduleRealtimeReconnect(delay = 2000) {
+function realtimeErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
+  return ''
+}
+
+function realtimeAuthFailure(message: string): boolean {
+  return /(?:401|jwt|token|auth|unauthor|expired)/i.test(message)
+}
+
+function scheduleRealtimeReconnect(delay?: number) {
   if (
     !supabase ||
     !isAutomaticOrdersRefreshActive ||
@@ -2909,10 +2926,15 @@ function scheduleRealtimeReconnect(delay = 2000) {
     realtimeReconnectTimer
   )
     return
+  const reconnectDelay =
+    delay ??
+    realtimeReconnectDelays[Math.min(realtimeReconnectAttempt, realtimeReconnectDelays.length - 1)] ??
+    30_000
+  if (delay === undefined) realtimeReconnectAttempt += 1
   realtimeReconnectTimer = window.setTimeout(() => {
     realtimeReconnectTimer = undefined
     void restartAutomaticOrdersRefresh()
-  }, delay)
+  }, reconnectDelay)
 }
 
 async function restartAutomaticOrdersRefresh() {
@@ -2921,7 +2943,29 @@ async function restartAutomaticOrdersRefresh() {
   const channel = ordersRealtimeChannel
   ordersRealtimeChannel = undefined
   try {
-    if (channel) await supabase.removeChannel(channel)
+    if (realtimeAuthFailure(realtimeStatusDetail.value)) {
+      try {
+        const { error } = await supabase.auth.refreshSession()
+        if (error) realtimeStatusDetail.value = error.message
+      } catch (error) {
+        const message = realtimeErrorMessage(error)
+        if (message) realtimeStatusDetail.value = message
+      }
+    }
+    try {
+      await supabase.realtime.setAuth()
+    } catch (error) {
+      const message = realtimeErrorMessage(error)
+      if (message) realtimeStatusDetail.value = message
+    }
+    if (channel) {
+      try {
+        await supabase.removeChannel(channel)
+      } catch (error) {
+        const message = realtimeErrorMessage(error)
+        if (message) realtimeStatusDetail.value = message
+      }
+    }
   } finally {
     isRealtimeRestarting = false
   }
@@ -2947,7 +2991,10 @@ function startAutomaticOrdersRefresh() {
   if (!supabase || ordersRealtimeChannel) return
   isAutomaticOrdersRefreshActive = true
   ordersRealtimeSubscribed.value = false
-  void supabase.realtime.setAuth()
+  void supabase.realtime.setAuth().catch((error) => {
+    const message = realtimeErrorMessage(error)
+    if (message) realtimeStatusDetail.value = message
+  })
   ordersRealtimeChannel = supabase
     .channel('crm:orders', { config: { private: true } })
     .on('broadcast', { event: 'order_changed' }, ({ payload }) => {
@@ -2959,9 +3006,11 @@ function startAutomaticOrdersRefresh() {
         queueRemoteOrderRefresh(event.order_id)
       }
     })
-    .subscribe((status) => {
+    .subscribe((status, error) => {
       if (status === 'SUBSCRIBED') {
         ordersRealtimeSubscribed.value = true
+        realtimeReconnectAttempt = 0
+        realtimeStatusDetail.value = ''
         if (realtimeReconnectTimer) {
           window.clearTimeout(realtimeReconnectTimer)
           realtimeReconnectTimer = undefined
@@ -2969,6 +3018,7 @@ function startAutomaticOrdersRefresh() {
         scheduleReconciliation(0, true)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         ordersRealtimeSubscribed.value = false
+        realtimeStatusDetail.value = realtimeErrorMessage(error) || status
         scheduleRealtimeReconnect()
       }
     })
@@ -5097,6 +5147,11 @@ function orderDateTime(order: Order) {
               'text-emerald-700': ordersRealtimeSubscribed,
               'text-red-700': !ordersRealtimeSubscribed,
             }"
+            :title="
+              ordersRealtimeSubscribed
+                ? 'Realtime подключён'
+                : realtimeStatusDetail || 'Realtime переподключается'
+            "
           >
             <span
               class="size-2 rounded-full"
