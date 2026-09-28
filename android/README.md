@@ -31,7 +31,7 @@ Marketplace secrets must never be embedded in the APK. Any marketplace write act
    - payment method/status when available.
 5. Realtime/common state:
    - Android reads the same `crm_orders` and `crm_order_items` as the web CRM;
-   - subscribe to relevant Supabase Realtime changes while the app is running;
+   - subscribe to relevant Supabase Realtime changes only while the app UI is in the foreground; background new-order notifications use the existing FCM push path;
    - refresh on resume and after write actions;
    - a status change made by the web CRM or another phone must appear without creating a separate mobile copy of the order.
 6. Prom acceptance action:

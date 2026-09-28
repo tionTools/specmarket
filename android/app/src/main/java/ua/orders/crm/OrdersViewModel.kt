@@ -47,9 +47,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 if (session is SessionStatus.Authenticated) {
                     if (email != nextEmail) {
                         initializing = true
-                        realtimeJob?.cancel()
-                        realtimeJob = null
-                        realtimeConnected = false
+                        stopRealtime()
                         clearOrders()
                         val account = nextEmail.orEmpty()
                         val cached = cache.load(account)
@@ -61,8 +59,10 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             initialLoadComplete = true
                         }
                         initializing = false
-                        startRealtime()
-                        if (visible) refresh()
+                        if (visible) {
+                            startRealtime()
+                            refresh()
+                        }
                     } else {
                         initializing = false
                     }
@@ -71,11 +71,9 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 } else if (session is SessionStatus.NotAuthenticated) {
                     initializing = false
                     email = null
-                    realtimeJob?.cancel()
-                    realtimeJob = null
+                    stopRealtime()
                     pushRegistrationJob?.cancel()
                     pushRegistrationJob = null
-                    realtimeConnected = false
                     getApplication<Application>().savePushSessionActive(false)
                     clearOrders()
                 }
@@ -85,10 +83,20 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun foreground(active: Boolean) {
         visible = active
-        if (active && email != null) {
+        if (!active) {
+            stopRealtime()
+            return
+        }
+        if (email != null) {
             retryConnection()
             syncPushRegistration()
         }
+    }
+
+    private fun stopRealtime() {
+        ++realtimeGeneration
+        realtimeConnected = false
+        realtimeJob?.cancel()
     }
 
     fun networkRestored() {
@@ -125,6 +133,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun startRealtime(forceRestart: Boolean = false) {
         val account = email ?: return
+        if (!visible) return
         val previousJob = realtimeJob
         if (!forceRestart && previousJob?.isActive == true) return
         val generation = ++realtimeGeneration
@@ -135,7 +144,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         realtimeJob = viewModelScope.launch {
             // Old channel cleanup must not prevent a new connection indefinitely.
             withTimeoutOrNull(7_000) { previousJob?.join() }
-            while (isActive && email == account && generation == realtimeGeneration) {
+            // Background new-order delivery uses FCM; Realtime is needed only while the UI is active.
+            while (isActive && visible && email == account && generation == realtimeGeneration) {
                 try {
                     repository.watch(onConnection = { connected ->
                         if (email == account && generation == realtimeGeneration) {

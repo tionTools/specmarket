@@ -10,6 +10,7 @@ import {
 } from '../_shared/marketplace-family.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
 import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
@@ -548,23 +549,25 @@ Deno.serve(async (request) => {
   }
   const listOrders = orders
   const externalIds = listOrders.map((order) => order.id).filter(Boolean)
-  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
-    ? await admin.from('crm_deleted_marketplace_orders').select('external_id').eq('platform', 'Эпицентр').in('external_id', externalIds)
-    : { data: [], error: null }
-  if (deletedOrdersError)
-    return Response.json({ ok: false, message: `Не удалось проверить удалённые заказы Эпицентра: ${deletedOrdersError.message}` }, { status: 500, headers: corsHeaders })
-  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => String(row.external_id)))
+  let syncContext
+  try {
+    syncContext = await loadMarketplaceOrderSyncContext(admin, 'Эпицентр', externalIds)
+  } catch (error) {
+    return Response.json(
+      {
+        ok: false,
+        message: `Не удалось проверить состояние заказов Эпицентра: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      { status: 500, headers: corsHeaders },
+    )
+  }
+  const { deletedExternalIds, stateByExternalId } = syncContext
   const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
     listOrders,
     deletedExternalIds,
     (order) => order.id,
   )
   const hashes = new Map(await Promise.all(importableOrders.map(async (order) => [order.id, await sourceHash(order)] as const)))
-  const { data: states, error: statesError } = importableOrders.length
-    ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash, synced_at').eq('platform', 'Эпицентр').in('external_id', importableOrders.map((order) => order.id))
-    : { data: [] }
-  if (statesError) return Response.json({ ok: false, message: statesError.message }, { status: 500, headers: corsHeaders })
-  const stateByExternalId = new Map((states ?? []).map((state) => [state.external_id, state]))
   const kyivHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
   const ttlMs = (kyivHour >= 7 ? 15 : 60) * 60_000
   const terminalStatusCodes = new Set(['finished', 'completed', 'closed', 'canceled', 'returned', 'canceled_by_seller'])
@@ -919,8 +922,15 @@ Deno.serve(async (request) => {
         if (!orderChanged) { updated += 1; changedOrderIds.push(orderId) }
       }
     }
-    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Эпицентр', external_id: externalId, order_id: orderId, source_hash: hashes.get(order.id), synced_at: new Date().toISOString() })
-    if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
+    const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({
+      platform: 'Эпицентр',
+      external_id: externalId,
+      order_id: orderId,
+      source_hash: hashes.get(order.id),
+      synced_at: new Date().toISOString(),
+    })
+    if (stateError)
+      return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
   }
 
   return Response.json({ ok: true, received: listOrders.length, created, updated, skipped, skippedUnchanged: skipped, deletedSkipped, changedOrderIds: [...new Set(changedOrderIds)] }, { headers: corsHeaders })
