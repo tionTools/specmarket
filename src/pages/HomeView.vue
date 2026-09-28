@@ -2113,6 +2113,7 @@ async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
 
 async function openProductPriceLink(order: Order, product: OrderProduct) {
   if (isGuest.value || !canLinkProductPrice(order, product)) return
+  if (order.platform !== 'Пром' && order.platform !== 'Эпицентр' && order.platform !== 'Каста') return
   const remoteId = order.remoteId
   const position = product.position
   if (!remoteId || position === undefined) return
@@ -2125,7 +2126,7 @@ async function openProductPriceLink(order: Order, product: OrderProduct) {
 
   const query = {
     linkMode: '1' as const,
-    linkPlatform: order.platform as 'Пром' | 'Эпицентр' | 'Каста',
+    linkPlatform: order.platform,
     linkProductKey,
     linkOrderRemoteId: remoteId,
     linkPosition: String(position),
