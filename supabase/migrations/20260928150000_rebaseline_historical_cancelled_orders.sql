@@ -91,7 +91,8 @@ begin
     and o.delivery ->> 'ttn' = '20451504028333'
     and lower(coalesce(o.status, '')) ~ '(скас|отмен|cancel)'
     and nullif(btrim(coalesce(o.delivery ->> 'printedAt', '')), '') is null
-    and nullif(btrim(coalesce(o.delivery ->> 'trackingStatus', '')), '') is null;
+    and lower(btrim(coalesce(o.delivery ->> 'trackingStatus', ''))) ~ '(видален|удален|deleted)'
+    and lower(btrim(coalesce(o.delivery ->> 'trackingNormalizedStatus', ''))) = 'deleted';
 
   if v_prom_usd is distinct from numeric '0'
      or v_prom_uah is distinct from numeric '291.00' then
