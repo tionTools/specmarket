@@ -51,3 +51,21 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
 
   return { shipping: 0, shippingSource: 'none' }
 }
+
+
+export type ResolvePromTrackingNumberInput = {
+  orderStatus: string
+  marketplaceTrackingNumber: string
+  previousTrackingNumber: string
+}
+
+export function isPromCancelledOrderStatus(value: string) {
+  return /cancel|скас|отмен/i.test(value.trim())
+}
+
+export function resolvePromTrackingNumber(input: ResolvePromTrackingNumberInput) {
+  const marketplaceTrackingNumber = input.marketplaceTrackingNumber.trim()
+  if (marketplaceTrackingNumber) return marketplaceTrackingNumber
+  if (isPromCancelledOrderStatus(input.orderStatus)) return ''
+  return input.previousTrackingNumber.trim()
+}
