@@ -3,6 +3,7 @@ import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts
 import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
 import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
@@ -462,22 +463,19 @@ Deno.serve(async (request) => {
       ),
     )
     const externalIds = [...hashes.keys()]
-    const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
-      ? await admin
-        .from('crm_deleted_marketplace_orders')
-        .select('external_id')
-        .eq('platform', 'Каста')
-        .in('external_id', externalIds)
-      : { data: [], error: null }
-    if (deletedOrdersError) {
-      return Response.json({ ok: false, message: `Не удалось проверить удалённые Kasta-заказы (${deletedOrdersError.message}).` }, { status: 500, headers: corsHeaders })
+    let syncContext
+    try {
+      syncContext = await loadMarketplaceOrderSyncContext(admin, 'Каста', externalIds)
+    } catch (error) {
+      return Response.json(
+        {
+          ok: false,
+          message: `Не удалось проверить состояние Kasta-заказов: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        { status: 500, headers: corsHeaders },
+      )
     }
-    const deletedExternalIds = new Set((deletedOrders ?? []).map((order) => text(order.external_id)))
-    const { data: syncRows, error: syncStateError } = externalIds.length
-      ? await admin.from('crm_marketplace_order_sync_state').select('external_id, source_hash').eq('platform', 'Каста').in('external_id', externalIds)
-      : { data: [], error: null }
-    if (syncStateError) return Response.json({ ok: false, message: syncStateError.message }, { status: 500, headers: corsHeaders })
-    const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
+    const { deletedExternalIds, stateByExternalId } = syncContext
     const activeOrders = orders.filter((order) => !deletedExternalIds.has(`kasta:${text(order.id)}`))
     deletedSkipped += orders.length - activeOrders.length
     const candidates = activeOrders.filter((order) => targetOrderId || fullSync || stateByExternalId.get(`kasta:${text(order.id)}`)?.source_hash !== hashes.get(`kasta:${text(order.id)}`))
@@ -702,8 +700,15 @@ Deno.serve(async (request) => {
           changedOrderIds.add(orderId)
         }
       }
-      const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({ platform: 'Каста', external_id: externalId, order_id: orderId, source_hash: hashes.get(externalId), synced_at: new Date().toISOString() })
-      if (stateError) return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
+      const { error: stateError } = await admin.from('crm_marketplace_order_sync_state').upsert({
+        platform: 'Каста',
+        external_id: externalId,
+        order_id: orderId,
+        source_hash: hashes.get(externalId),
+        synced_at: new Date().toISOString(),
+      })
+      if (stateError)
+        return Response.json({ ok: false, message: stateError.message }, { status: 500, headers: corsHeaders })
     }
     return null
   }

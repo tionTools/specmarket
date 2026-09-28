@@ -21,6 +21,7 @@ import {
   marketplaceReplacementHistory,
 } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
 import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
@@ -1231,22 +1232,19 @@ Deno.serve(async (request) => {
       ? payload.orders.map(asRecord)
       : []
   const externalIds = orders.map((order) => `prom:${text(order.id)}`).filter((id) => id !== 'prom:')
-  const { data: deletedOrders, error: deletedOrdersError } = externalIds.length
-    ? await admin
-        .from('crm_deleted_marketplace_orders')
-        .select('external_id')
-        .eq('platform', 'Пром')
-        .in('external_id', externalIds)
-    : { data: [], error: null }
-  if (deletedOrdersError)
+  let syncContext
+  try {
+    syncContext = await loadMarketplaceOrderSyncContext(admin, 'Пром', externalIds)
+  } catch (error) {
     return Response.json(
       {
         ok: false,
-        message: `Не удалось проверить удалённые Prom-заказы: ${deletedOrdersError.message}`,
+        message: `Не удалось проверить состояние Prom-заказов: ${error instanceof Error ? error.message : String(error)}`,
       },
       { status: 500, headers: corsHeaders },
     )
-  const deletedExternalIds = new Set((deletedOrders ?? []).map((row) => text(row.external_id)))
+  }
+  const { deletedExternalIds, stateByExternalId } = syncContext
   const { orders: importableOrders, deletedSkipped } = excludeDeletedMarketplaceOrders(
     orders,
     deletedExternalIds,
@@ -1259,19 +1257,6 @@ Deno.serve(async (request) => {
       ),
     ),
   )
-  const { data: syncRows, error: syncStateError } = hashes.size
-    ? await admin
-        .from('crm_marketplace_order_sync_state')
-        .select('external_id, source_hash, order_id')
-        .eq('platform', 'Пром')
-        .in('external_id', externalIds)
-    : { data: [] }
-  if (syncStateError)
-    return Response.json(
-      { ok: false, message: syncStateError.message },
-      { status: 500, headers: corsHeaders },
-    )
-  const stateByExternalId = new Map((syncRows ?? []).map((row) => [row.external_id, row]))
   const candidates = importableOrders.filter(
     (order) =>
       requestedExternalId ||
