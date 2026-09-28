@@ -3,7 +3,8 @@
 The three switches in Settings control CRM marketplace order import. When a marketplace is
 disabled, automatic polling and manual bulk refreshes ("Новые заказы" and "Полная
 синхронизация") are blocked before any marketplace API request. A signed-in non-guest may
-still refresh one specific existing order by `externalId`. External product publication is
+still refresh one specific existing order by `externalId`. Other order actions through these
+sync functions are also blocked while the marketplace is paused. External product publication is
 unaffected. Disabled price columns are hidden in the CRM, not deleted or replaced with zeros.
 Existing orders and tracking remain available; delivery tracking runs independently.
 
@@ -50,8 +51,9 @@ Expected inside the transaction: `kasta_paused_must_be_false = false`,
 - A cron-authorized Kasta invocation returns success `skipped: paused`. Signed-in
   non-guest bulk refreshes also return `skipped: paused` before any Kasta API request.
   A signed-in non-guest targeted refresh with one `externalId` remains allowed.
-  Even a request carrying one `externalId` stays paused when it is cron-authorized.
-  Unauthenticated and guest calls remain rejected.
+  Bulk refreshes and other order-action requests remain paused. Even a request carrying one
+  `externalId` stays paused when it is cron-authorized. Unauthenticated and guest calls remain
+  rejected.
 - A failed settings lookup returns 503 and does not proceed to the marketplace.
 - With Kasta enabled but no changed orders or within the two-minute cooldown,
   price links and currency-rate tables are **not** read by Kasta. When changed orders

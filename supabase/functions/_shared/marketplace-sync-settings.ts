@@ -21,10 +21,10 @@ export async function loadMarketplaceSyncAccess(
 export function shouldSkipMarketplaceSync(
   enabled: boolean,
   isScheduledRequest: boolean,
-  requestedExternalId: string,
+  isTargetedOrderRefresh: boolean,
 ): boolean {
   if (enabled) return false
-  return isScheduledRequest || !requestedExternalId.trim()
+  return isScheduledRequest || !isTargetedOrderRefresh
 }
 
 export function marketplacePausedResponse(headers: Record<string, string>): Response {

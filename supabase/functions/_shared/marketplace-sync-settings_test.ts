@@ -44,12 +44,12 @@ Deno.test('marketplace access fails closed on absent, invalid, or failed configu
 })
 
 Deno.test('marketplace pause blocks cron and manual bulk sync, but allows one targeted order', async () => {
-  assert(shouldSkipMarketplaceSync(false, true, ''))
-  assert(shouldSkipMarketplaceSync(false, false, ''))
-  assert(shouldSkipMarketplaceSync(false, true, 'order-1'))
-  assert(!shouldSkipMarketplaceSync(false, false, 'order-1'))
-  assert(!shouldSkipMarketplaceSync(true, true, ''))
-  assert(!shouldSkipMarketplaceSync(true, false, ''))
+  assert(shouldSkipMarketplaceSync(false, true, false))
+  assert(shouldSkipMarketplaceSync(false, false, false))
+  assert(shouldSkipMarketplaceSync(false, true, true))
+  assert(!shouldSkipMarketplaceSync(false, false, true))
+  assert(!shouldSkipMarketplaceSync(true, true, false))
+  assert(!shouldSkipMarketplaceSync(true, false, false))
   const paused = marketplacePausedResponse({})
   assert(paused.status === 200)
   const pausedJson = await paused.json()

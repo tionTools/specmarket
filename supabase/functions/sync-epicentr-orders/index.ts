@@ -357,6 +357,14 @@ Deno.serve(async (request) => {
     scheduled?: unknown
     acceptExternalIds?: unknown
   }
+  const requestedExternalId =
+    typeof body.externalId === 'string' ? body.externalId.trim() : ''
+  const isTargetedOrderRefresh =
+    Boolean(requestedExternalId) &&
+    body.full !== true &&
+    body.acceptExternalIds === undefined
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, isTargetedOrderRefresh))
+    return marketplacePausedResponse(corsHeaders)
 
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || body.scheduled === true) {
@@ -511,10 +519,6 @@ Deno.serve(async (request) => {
       { headers: corsHeaders },
     )
   }
-
-  const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
-  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, requestedExternalId))
-    return marketplacePausedResponse(corsHeaders)
 
   const fullSync = body.full === true
   const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}

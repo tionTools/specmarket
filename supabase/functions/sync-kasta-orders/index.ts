@@ -406,6 +406,14 @@ Deno.serve(async (request) => {
     scheduled?: unknown
     acceptExternalIds?: unknown
   }
+  const targetOrderId = text(body.externalId).replace(/^kasta:/, '').trim()
+  const isTargetedOrderRefresh =
+    Boolean(targetOrderId) &&
+    body.full !== true &&
+    body.acceptExternalIds === undefined
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, isTargetedOrderRefresh))
+    return marketplacePausedResponse(corsHeaders)
+
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || body.scheduled === true) {
       return Response.json(
@@ -422,10 +430,6 @@ Deno.serve(async (request) => {
       { status: 501, headers: corsHeaders },
     )
   }
-
-  const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
-  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, targetOrderId))
-    return marketplacePausedResponse(corsHeaders)
 
   let referenceDataPromise: Promise<{
     priceCostSnapshots: Awaited<ReturnType<typeof loadPlatformPriceCostSnapshots>>
