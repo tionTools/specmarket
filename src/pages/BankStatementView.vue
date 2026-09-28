@@ -293,38 +293,6 @@ onMounted(() => {
         {{ error }}
       </p>
 
-      <section
-        v-if="bank === 'novapay'"
-        class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-      >
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-lg font-bold text-slate-950">Журнал ошибок NovaPay</h2>
-          <div class="flex flex-wrap gap-2">
-            <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
-            <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
-          </div>
-        </div>
-        <p v-if="journalError" class="mt-3 text-sm text-rose-700" role="alert">{{ journalError }}</p>
-        <p v-if="copyStatus" class="mt-3 text-sm text-slate-600">{{ copyStatus }}</p>
-        <p class="mt-2 text-xs text-slate-500">Только ошибки и незавершённые запуски; успешные синхронизации не накапливаются.</p>
-        <p v-if="!journal.length" class="mt-3 text-sm text-slate-500">Ошибок пока нет.</p>
-        <div v-else class="mt-3 overflow-x-auto">
-          <table class="w-full min-w-[750px] text-left text-xs">
-            <thead><tr class="border-b border-slate-200 text-slate-500"><th class="py-2">Начало</th><th>Источник</th><th>Этап</th><th>Результат</th><th>Код / причина</th><th>Запрос</th></tr></thead>
-            <tbody>
-              <tr v-for="entry in journal" :key="entry.id" class="border-b border-slate-100">
-                <td class="py-2">{{ dateTime(entry.started_at) }}</td>
-                <td>{{ entry.source }}</td>
-                <td>{{ entry.stage }}</td>
-                <td>{{ entry.status === 'failed' ? 'Ошибка' : isInterruptedNovaPayRun(entry, now) ? 'Прерван' : 'Выполняется' }}</td>
-                <td>{{ entry.code ?? '—' }} / {{ entry.reason ?? '—' }}</td>
-                <td class="font-mono">{{ entry.request_ref ?? '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 px-5 py-4">
           <div>
@@ -369,6 +337,38 @@ onMounted(() => {
                   {{ money(receipt.balance) }}
                 </td>
                 <td class="min-w-[320px] px-4 py-3 text-slate-600">{{ receipt.comment || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        v-if="bank === 'novapay'"
+        class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-lg font-bold text-slate-950">Журнал ошибок NovaPay</h2>
+          <div class="flex flex-wrap gap-2">
+            <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
+            <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
+          </div>
+        </div>
+        <p v-if="journalError" class="mt-3 text-sm text-rose-700" role="alert">{{ journalError }}</p>
+        <p v-if="copyStatus" class="mt-3 text-sm text-slate-600">{{ copyStatus }}</p>
+        <p class="mt-2 text-xs text-slate-500">Только ошибки и незавершённые запуски; успешные синхронизации не накапливаются.</p>
+        <p v-if="!journal.length" class="mt-3 text-sm text-slate-500">Ошибок пока нет.</p>
+        <div v-else class="mt-3 overflow-x-auto">
+          <table class="w-full min-w-[750px] text-left text-xs">
+            <thead><tr class="border-b border-slate-200 text-slate-500"><th class="py-2">Начало</th><th>Источник</th><th>Этап</th><th>Результат</th><th>Код / причина</th><th>Запрос</th></tr></thead>
+            <tbody>
+              <tr v-for="entry in journal" :key="entry.id" class="border-b border-slate-100">
+                <td class="py-2">{{ dateTime(entry.started_at) }}</td>
+                <td>{{ entry.source }}</td>
+                <td>{{ entry.stage }}</td>
+                <td>{{ entry.status === 'failed' ? 'Ошибка' : isInterruptedNovaPayRun(entry, now) ? 'Прерван' : 'Выполняется' }}</td>
+                <td>{{ entry.code ?? '—' }} / {{ entry.reason ?? '—' }}</td>
+                <td class="font-mono">{{ entry.request_ref ?? '—' }}</td>
               </tr>
             </tbody>
           </table>
