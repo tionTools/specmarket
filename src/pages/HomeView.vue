@@ -1363,12 +1363,7 @@ watch(promRegistryFiles, (files) => {
 })
 
 async function confirmPromRegistryDistribution() {
-  if (
-    !supabase ||
-    isGuest.value ||
-    !isPromRegistryDraft.value ||
-    isApplyingPromRegistry.value
-  )
+  if (!supabase || isGuest.value || !isPromRegistryDraft.value || isApplyingPromRegistry.value)
     return
   const matchedOrders = promRegistryOrders.value
   if (!matchedOrders.length) {
