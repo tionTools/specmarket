@@ -14,7 +14,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
-  shouldSkipAutomaticMarketplaceSync,
+  shouldSkipMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
@@ -350,9 +350,6 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
-  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
-
-
   const body = await request.json().catch(() => ({})) as {
     externalId?: unknown
     full?: unknown
@@ -516,6 +513,9 @@ Deno.serve(async (request) => {
   }
 
   const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, requestedExternalId))
+    return marketplacePausedResponse(corsHeaders)
+
   const fullSync = body.full === true
   const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}
   const manualItems = Array.isArray(manual.items) ? manual.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []

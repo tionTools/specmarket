@@ -18,8 +18,13 @@ export async function loadMarketplaceSyncAccess(
   return { secret: access.secret, enabled: access.enabled }
 }
 
-export function shouldSkipAutomaticMarketplaceSync(isScheduledRequest: boolean, enabled: boolean): boolean {
-  return isScheduledRequest && !enabled
+export function shouldSkipMarketplaceSync(
+  enabled: boolean,
+  isScheduledRequest: boolean,
+  requestedExternalId: string,
+): boolean {
+  if (enabled) return false
+  return isScheduledRequest || !requestedExternalId.trim()
 }
 
 export function marketplacePausedResponse(headers: Record<string, string>): Response {
