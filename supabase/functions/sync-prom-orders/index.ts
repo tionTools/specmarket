@@ -25,7 +25,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
-  shouldSkipAutomaticMarketplaceSync,
+  shouldSkipMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import { resolvePromShipping } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
@@ -852,8 +852,6 @@ Deno.serve(async (request) => {
       { status: 403, headers: corsHeaders },
     )
 
-  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
-
   const body = (await request.json().catch(() => ({}))) as {
     externalId?: unknown
     full?: unknown
@@ -862,6 +860,17 @@ Deno.serve(async (request) => {
     dismissCompletionExternalIds?: unknown
     acceptExternalIds?: unknown
   }
+  const requestedExternalId =
+    typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '').trim() : ''
+  const isTargetedOrderRefresh =
+    Boolean(requestedExternalId) &&
+    body.full !== true &&
+    body.acceptExternalIds === undefined &&
+    body.completeExternalIds === undefined &&
+    body.dismissCompletionExternalIds === undefined
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, isTargetedOrderRefresh))
+    return marketplacePausedResponse(corsHeaders)
+
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || (body as RecordValue).scheduled === true) {
       return Response.json(
@@ -1200,8 +1209,6 @@ Deno.serve(async (request) => {
     )
   }
 
-  const requestedExternalId =
-    typeof body.externalId === 'string' ? body.externalId.replace(/^prom:/, '') : ''
   const fullSync = body.full === true
   const manual = asRecord(body.manual)
   const manualItems = Array.isArray(manual.items) ? manual.items.map(asRecord) : []

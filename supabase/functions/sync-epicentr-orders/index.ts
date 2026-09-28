@@ -14,7 +14,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
-  shouldSkipAutomaticMarketplaceSync,
+  shouldSkipMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
@@ -350,9 +350,6 @@ Deno.serve(async (request) => {
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') {
     return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
   }
-  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
-
-
   const body = await request.json().catch(() => ({})) as {
     externalId?: unknown
     full?: unknown
@@ -360,6 +357,14 @@ Deno.serve(async (request) => {
     scheduled?: unknown
     acceptExternalIds?: unknown
   }
+  const requestedExternalId =
+    typeof body.externalId === 'string' ? body.externalId.trim() : ''
+  const isTargetedOrderRefresh =
+    Boolean(requestedExternalId) &&
+    body.full !== true &&
+    body.acceptExternalIds === undefined
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, isTargetedOrderRefresh))
+    return marketplacePausedResponse(corsHeaders)
 
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || body.scheduled === true) {
@@ -515,7 +520,6 @@ Deno.serve(async (request) => {
     )
   }
 
-  const requestedExternalId = typeof body.externalId === 'string' ? body.externalId : ''
   const fullSync = body.full === true
   const manual = body.manual && typeof body.manual === 'object' ? body.manual as Record<string, unknown> : {}
   const manualItems = Array.isArray(manual.items) ? manual.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []

@@ -7,7 +7,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
-  shouldSkipAutomaticMarketplaceSync,
+  shouldSkipMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
 import {
   kastaPhysicalMovement,
@@ -400,15 +400,20 @@ Deno.serve(async (request) => {
   const { data: { user } } = isScheduledRequest ? { data: { user: null } } : await auth.auth.getUser()
   if (!isScheduledRequest && !user) return Response.json({ ok: false, message: 'Нужен вход в CRM.' }, { status: 401, headers: corsHeaders })
   if (!isScheduledRequest && user?.email?.toLowerCase() === 'guest@gmail.com') return Response.json({ ok: false, message: 'Гостевой аккаунт не может запускать синхронизацию.' }, { status: 403, headers: corsHeaders })
-  if (shouldSkipAutomaticMarketplaceSync(isScheduledRequest, syncAccess.enabled)) return marketplacePausedResponse(corsHeaders)
-
-
   const body = await request.json().catch(() => ({})) as {
     full?: unknown
     externalId?: unknown
     scheduled?: unknown
     acceptExternalIds?: unknown
   }
+  const targetOrderId = text(body.externalId).replace(/^kasta:/, '').trim()
+  const isTargetedOrderRefresh =
+    Boolean(targetOrderId) &&
+    body.full !== true &&
+    body.acceptExternalIds === undefined
+  if (shouldSkipMarketplaceSync(syncAccess.enabled, isScheduledRequest, isTargetedOrderRefresh))
+    return marketplacePausedResponse(corsHeaders)
+
   if (body.acceptExternalIds !== undefined) {
     if (isScheduledRequest || body.scheduled === true) {
       return Response.json(
@@ -436,7 +441,6 @@ Deno.serve(async (request) => {
   ]).then(([priceCostSnapshots, usdRateSchedule]) => ({ priceCostSnapshots, usdRateSchedule }))
 
   const fullSync = body.full === true
-  const targetOrderId = text(body.externalId).replace(/^kasta:/, '')
   const royaltyCache = new Map<string, number>()
   let feedImagesPromise: Promise<Map<string, string>> | undefined
   const getFeedImages = () => feedImagesPromise ??= imagesFromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))

@@ -3,7 +3,7 @@ import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
   marketplaceSettingsUnavailableResponse,
-  shouldSkipAutomaticMarketplaceSync,
+  shouldSkipMarketplaceSync,
 } from './marketplace-sync-settings.ts'
 
 function assert(value: unknown): asserts value {
@@ -43,15 +43,17 @@ Deno.test('marketplace access fails closed on absent, invalid, or failed configu
   }
 })
 
-Deno.test('marketplace pause skips only cron; manual authenticated refresh is allowed', async () => {
-  assert(shouldSkipAutomaticMarketplaceSync(true, false))
-  assert(!shouldSkipAutomaticMarketplaceSync(false, false))
-  assert(!shouldSkipAutomaticMarketplaceSync(true, true))
-  assert(!shouldSkipAutomaticMarketplaceSync(false, true))
-  const scheduled = marketplacePausedResponse({})
-  assert(scheduled.status === 200)
-  const scheduledJson = await scheduled.json()
-  assert(scheduledJson.ok === true && scheduledJson.skipped === 'paused')
+Deno.test('marketplace pause blocks cron and manual bulk sync, but allows one targeted order', async () => {
+  assert(shouldSkipMarketplaceSync(false, true, false))
+  assert(shouldSkipMarketplaceSync(false, false, false))
+  assert(shouldSkipMarketplaceSync(false, true, true))
+  assert(!shouldSkipMarketplaceSync(false, false, true))
+  assert(!shouldSkipMarketplaceSync(true, true, false))
+  assert(!shouldSkipMarketplaceSync(true, false, false))
+  const paused = marketplacePausedResponse({})
+  assert(paused.status === 200)
+  const pausedJson = await paused.json()
+  assert(pausedJson.ok === true && pausedJson.skipped === 'paused')
   const unavailable = marketplaceSettingsUnavailableResponse({})
   assert(unavailable.status === 503)
 })
