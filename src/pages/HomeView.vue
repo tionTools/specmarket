@@ -1387,13 +1387,17 @@ async function confirmPromRegistryDistribution() {
     return
   isApplyingPromRegistry.value = true
   try {
-    const updates = matchedOrders.map((order) => ({
-      orderId: order.remoteId!,
-      paymentAmount: order.paymentAmount ?? 0,
-      acquiring: order.acquiring,
-      acquiringPercent: order.acquiringPercent ?? null,
-      operationIds: promRegistryPendingOperationIds.get(order.id) ?? [],
-    }))
+    const updates = matchedOrders.map((order) => {
+      const orderId = order.remoteId
+      if (!orderId) throw new Error('У заказа реестра нет ID в общей CRM.')
+      return {
+        orderId,
+        paymentAmount: order.paymentAmount ?? 0,
+        acquiring: order.acquiring,
+        acquiringPercent: order.acquiringPercent ?? null,
+        operationIds: promRegistryPendingOperationIds.get(order.id) ?? [],
+      }
+    })
     const { data: updatedCount, error } = await supabase.rpc('apply_crm_registry_financials', {
       p_updates: updates,
     })
@@ -1402,7 +1406,7 @@ async function confirmPromRegistryDistribution() {
       throw new Error('Не все заказы реестра были обновлены.')
     }
 
-    const remoteIds = matchedOrders.map((order) => order.remoteId!)
+    const remoteIds = updates.map((update) => update.orderId)
     isPromRegistryDraft.value = false
     promRegistryOriginalFinancials.clear()
     promRegistryNewFields.value = new Set()
