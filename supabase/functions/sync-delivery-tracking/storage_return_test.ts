@@ -74,7 +74,88 @@ Deno.test('return flag is cleared when the carrier reports a terminal return del
   }
   const next = mergeTrackingDelivery(delivery, delivered, '2026-09-08T12:00:00Z')
   assert(next.trackingReturnInProgress === false, 'terminal delivery kept the return-in-progress flag')
+  assert(next.trackingReturnArrived === true, 'terminal return was not marked as arrived')
   assert(next.city === 'Циркуни', 'terminal return changed the return destination back to recipient')
+})
+
+Deno.test('ordinary buyer delivery does not become a returned-to-sender arrival', () => {
+  const delivery: JsonRecord = {
+    ttn: '20451528497280',
+    carrier: 'Новая почта',
+    city: 'Київ',
+    address: 'Відділення №343',
+    trackingStatus: 'У відділенні',
+    trackingNormalizedStatus: 'ready_for_pickup',
+    shipmentHistory: [
+      {
+        ttn: '20451528497280',
+        carrier: 'Новая почта',
+        relation: 'original',
+        city: 'Київ',
+        address: 'Відділення №343',
+        source: 'marketplace',
+        firstSeenAt: '2026-09-05T15:03:54Z',
+        lastSeenAt: '2026-09-08T11:00:00Z',
+      },
+    ],
+  }
+  const delivered: TrackingResult = {
+    status: 'Відправлення отримано',
+    final: true,
+    normalizedStatus: 'delivered',
+    destination: { city: 'Київ', address: 'Відділення №343' },
+  }
+  const next = mergeTrackingDelivery(delivery, delivered, '2026-09-08T12:00:00Z')
+  assert(next.trackingReturnInProgress === false, 'ordinary delivery became a return in progress')
+  assert(next.trackingReturnArrived === false, 'ordinary buyer delivery became a return arrival')
+})
+
+Deno.test('delivered return TTN repairs return-arrived state after the old flag was lost', () => {
+  const delivery: JsonRecord = {
+    ttn: '59001787388688',
+    carrier: 'Новая почта',
+    city: 'Циркуни',
+    address: 'Відділення №1',
+    trackingStatus: 'Відправлення отримано',
+    trackingNormalizedStatus: 'delivered',
+    trackingReturnInProgress: false,
+    shipmentHistory: [
+      {
+        ttn: '20451544077350',
+        carrier: 'Новая почта',
+        relation: 'original',
+        city: 'Ірпінь',
+        address: 'Відділення №11',
+        source: 'marketplace',
+        firstSeenAt: '2026-09-24T09:07:00Z',
+        lastSeenAt: '2026-09-27T10:00:00Z',
+      },
+      {
+        ttn: '59001787388688',
+        carrier: 'Новая почта',
+        relation: 'return',
+        relatedTtn: '20451544077350',
+        city: 'Циркуни',
+        address: 'Відділення №1',
+        source: 'carrier_api',
+        firstSeenAt: '2026-09-27T10:00:00Z',
+        lastSeenAt: '2026-09-29T08:29:00Z',
+      },
+    ],
+  }
+  const delivered: TrackingResult = {
+    status: 'Відправлення отримано',
+    final: true,
+    normalizedStatus: 'delivered',
+    destination: { city: 'Ірпінь', address: 'Відділення №11' },
+  }
+
+  assert(trackingChanged(delivery, delivered), 'lost return-arrived state was not detected')
+  const next = mergeTrackingDelivery(delivery, delivered, '2026-09-29T08:30:00Z')
+  assert(next.trackingReturnInProgress === false, 'arrived return was put back in progress')
+  assert(next.trackingReturnArrived === true, 'return history did not restore return-arrived state')
+  assert(next.city === 'Циркуни', 'recovery changed return destination back to the buyer')
+  assert(next.address === 'Відділення №1', 'recovery changed return branch back to the buyer')
 })
 
 Deno.test('CargoReturn relation promotes the return TTN and return destination from stale refusal data', () => {

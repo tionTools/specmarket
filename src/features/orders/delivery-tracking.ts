@@ -20,7 +20,9 @@ export function deliveryReturnStatus(
   rawStatus?: string,
   normalizedStatus?: string,
   returnInProgress = false,
+  returnArrived = false,
 ) {
+  if (returnArrived || normalizedStatus?.trim().toLowerCase() === 'returned') return 'Возврат прибыл'
   return isReturningDelivery(rawStatus, normalizedStatus, returnInProgress)
     ? 'Возвращается отправителю'
     : ''

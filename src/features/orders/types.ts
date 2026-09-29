@@ -70,6 +70,8 @@ export interface Delivery {
   trackingNormalizedStatus?: string
   /** Возврат уже начался, даже если текущий checkpoint перевозчика снова выглядит как обычное движение. */
   trackingReturnInProgress?: boolean
+  /** Возвратная ТТН уже доставлена обратно отправителю и ожидает ручного принятия возврата. */
+  trackingReturnArrived?: boolean
   trackingLastCheckedAt?: string
   trackingStatusChangedAt?: string
   trackingDataChangedAt?: string
