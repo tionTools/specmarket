@@ -1685,7 +1685,7 @@ const matchingOrders = computed(() => {
           ? lifecycleState === 'cancelled_before_shipment'
           : isShowingReturns.value
             ? order.delivery.trackingReturnInProgress === true ||
-              order.delivery.trackingReturnArrived === true ||
+              isReturnArrivedDelivery(order.delivery) ||
               isReturnLifecycleState(lifecycleState)
             : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
@@ -2293,7 +2293,7 @@ function returnSignalLabel(order: Order) {
   if (lifecycleState === 'cancelled_before_shipment') return null
   if (lifecycleState === 'return_completed') return 'Возврат принят'
   if (lifecycleState === 'return_partial') return 'Возврат принят частично'
-  if (order.delivery.trackingReturnArrived) return 'Возврат прибыл'
+  if (isReturnArrivedDelivery(order.delivery)) return 'Возврат прибыл'
   if (order.delivery.trackingReturnInProgress) return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
@@ -4105,6 +4105,21 @@ function trackingUrl(delivery: Delivery) {
   return ''
 }
 
+function normalizedTtn(value: string) {
+  return value.replace(/\s/g, '').toLowerCase()
+}
+
+function isReturnArrivedDelivery(delivery: Delivery) {
+  if (delivery.trackingReturnArrived === true) return true
+  const trackingNormalized = delivery.trackingNormalizedStatus?.trim().toLowerCase() ?? ''
+  if (!['delivered', 'returned'].includes(trackingNormalized)) return false
+  const currentTtn = normalizedTtn(delivery.ttn)
+  if (!currentTtn) return false
+  return (delivery.shipmentHistory ?? []).some(
+    (entry) => normalizedTtn(entry.ttn) === currentTtn && entry.relation === 'return',
+  )
+}
+
 function deliveryTtns(delivery: Delivery): string[] {
   const seen = new Set<string>()
   return [
@@ -4124,7 +4139,7 @@ function deliveryStatusForOrder(order: Order) {
     order.delivery.trackingStatus,
     order.delivery.trackingNormalizedStatus,
     order.delivery.trackingReturnInProgress,
-    order.delivery.trackingReturnArrived,
+    isReturnArrivedDelivery(order.delivery),
   )
   if (returnStatus) return returnStatus
   if (order.delivery.trackingStatus?.trim())
@@ -4145,7 +4160,7 @@ function orderStatusTone(order: Order): OrderStatusTone {
   const deliveryStatus = order.delivery.status?.trim().toLowerCase() ?? ''
 
   if (
-    order.delivery.trackingReturnArrived === true ||
+    isReturnArrivedDelivery(order.delivery) ||
     order.delivery.trackingReturnInProgress === true ||
     ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
     /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
@@ -6831,7 +6846,7 @@ function orderDateTime(order: Order) {
                         order.delivery.trackingStatus,
                         order.delivery.trackingNormalizedStatus,
                         order.delivery.trackingReturnInProgress,
-                        order.delivery.trackingReturnArrived,
+                        isReturnArrivedDelivery(order.delivery),
                       ) || deliveryStatusForOrder(order)
                     }}</span
                   >
