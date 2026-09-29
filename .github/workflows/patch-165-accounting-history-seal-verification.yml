@@ -1,0 +1,26 @@
+name: Patch 165 local database verification
+
+on:
+  push:
+    branches:
+      - codex/patch-165-verification
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start isolated local Supabase
+        run: supabase start
+
+      - name: Reset local database and apply Patch 165
+        run: supabase db reset --local
