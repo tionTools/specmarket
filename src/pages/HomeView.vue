@@ -1685,6 +1685,7 @@ const matchingOrders = computed(() => {
           ? lifecycleState === 'cancelled_before_shipment'
           : isShowingReturns.value
             ? order.delivery.trackingReturnInProgress === true ||
+              order.delivery.trackingReturnArrived === true ||
               isReturnLifecycleState(lifecycleState)
             : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
@@ -2292,6 +2293,7 @@ function returnSignalLabel(order: Order) {
   if (lifecycleState === 'cancelled_before_shipment') return null
   if (lifecycleState === 'return_completed') return 'Возврат принят'
   if (lifecycleState === 'return_partial') return 'Возврат принят частично'
+  if (order.delivery.trackingReturnArrived) return 'Возврат прибыл'
   if (order.delivery.trackingReturnInProgress) return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returning') return 'Возвращается'
   if (order.delivery.trackingNormalizedStatus === 'returned') return 'Возврат прибыл'
@@ -4118,6 +4120,13 @@ function deliveryTtns(delivery: Delivery): string[] {
 }
 
 function deliveryStatusForOrder(order: Order) {
+  const returnStatus = deliveryReturnStatus(
+    order.delivery.trackingStatus,
+    order.delivery.trackingNormalizedStatus,
+    order.delivery.trackingReturnInProgress,
+    order.delivery.trackingReturnArrived,
+  )
+  if (returnStatus) return returnStatus
   if (order.delivery.trackingStatus?.trim())
     return displayDeliveryStatus(order.delivery.trackingStatus)
   // У Эпицентра «Завершено» означает, что отправление получено покупателем.
@@ -4136,6 +4145,7 @@ function orderStatusTone(order: Order): OrderStatusTone {
   const deliveryStatus = order.delivery.status?.trim().toLowerCase() ?? ''
 
   if (
+    order.delivery.trackingReturnArrived === true ||
     order.delivery.trackingReturnInProgress === true ||
     ['returning', 'returned', 'cancelled'].includes(trackingNormalized) ||
     /скас|отмен|cancel|повер|возврат|return|refund/.test(status) ||
@@ -6821,6 +6831,7 @@ function orderDateTime(order: Order) {
                         order.delivery.trackingStatus,
                         order.delivery.trackingNormalizedStatus,
                         order.delivery.trackingReturnInProgress,
+                        order.delivery.trackingReturnArrived,
                       ) || deliveryStatusForOrder(order)
                     }}</span
                   >

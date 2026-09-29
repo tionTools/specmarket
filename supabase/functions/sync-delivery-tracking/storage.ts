@@ -41,20 +41,63 @@ function currentAddress(delivery: JsonRecord) {
   return [text(delivery.city), text(delivery.address)].filter(Boolean).join(', ')
 }
 
+function historyRelationForTtn(delivery: JsonRecord, ttn: string) {
+  const normalizedTtn = shipmentValue(ttn)
+  if (!normalizedTtn || !Array.isArray(delivery.shipmentHistory)) return ''
+  for (const rawEntry of delivery.shipmentHistory) {
+    const entry = record(rawEntry)
+    if (shipmentValue(entry.ttn) === normalizedTtn) return text(entry.relation)
+  }
+  return ''
+}
+
 function deliveryHasReturnInProgress(delivery: JsonRecord) {
   return delivery.trackingReturnInProgress === true || text(delivery.trackingNormalizedStatus) === 'returning'
 }
 
+function resultIsReturnShipment(delivery: JsonRecord, result: TrackingResult) {
+  const activeTtn = text(result.activeTtn) || text(delivery.ttn)
+  if (!activeTtn) return false
+  if (result.relation === 'return') return true
+  if (historyRelationForTtn(delivery, activeTtn) === 'return') return true
+  if (
+    result.relatedShipments?.some(
+      (shipment) => shipmentValue(shipment.ttn) === shipmentValue(activeTtn) && shipment.relation === 'return',
+    )
+  )
+    return true
+  return (
+    shipmentValue(activeTtn) === shipmentValue(delivery.ttn) &&
+    (deliveryHasReturnInProgress(delivery) || delivery.trackingReturnArrived === true)
+  )
+}
+
+function nextReturnArrived(delivery: JsonRecord, result: TrackingResult) {
+  return (
+    ['returned', 'delivered'].includes(result.normalizedStatus) &&
+    resultIsReturnShipment(delivery, result)
+  )
+}
+
 function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
+  if (nextReturnArrived(delivery, result)) return false
   if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
   return deliveryHasReturnInProgress(delivery) ||
     result.normalizedStatus === 'returning' ||
     result.relation === 'return'
 }
 
+function deliveryHasReturnContext(delivery: JsonRecord) {
+  return (
+    deliveryHasReturnInProgress(delivery) ||
+    delivery.trackingReturnArrived === true ||
+    historyRelationForTtn(delivery, text(delivery.ttn)) === 'return'
+  )
+}
+
 function destinationForTrackingUpdate(delivery: JsonRecord, result: TrackingResult) {
   if (
-    deliveryHasReturnInProgress(delivery) &&
+    deliveryHasReturnContext(delivery) &&
     result.normalizedStatus !== 'returning' &&
     !['redirect', 'return'].includes(result.relation ?? '')
   ) {
@@ -237,6 +280,7 @@ export function sameShipment(left: JsonRecord, right: JsonRecord) {
 export function trackingChanged(delivery: JsonRecord, result: TrackingResult) {
   if (hasDuplicateHistoryTtn(delivery.shipmentHistory)) return true
   if (text(delivery.ttn) && !historyRows(delivery.shipmentHistory).length) return true
+  if (nextReturnArrived(delivery, result) !== (delivery.trackingReturnArrived === true)) return true
   if (nextReturnInProgress(delivery, result) !== (delivery.trackingReturnInProgress === true))
     return true
   if (result.status !== text(delivery.trackingStatus)) return true
@@ -266,6 +310,7 @@ export function mergeTrackingDelivery(
   const activeTtn = text(result.activeTtn) || oldTtn
   const source = result.source ?? 'carrier_api'
   const destination = destinationForTrackingUpdate(currentDelivery, result)
+  const returnArrived = nextReturnArrived(currentDelivery, result)
   const returnInProgress = nextReturnInProgress(currentDelivery, result)
   const ttnChanged = Boolean(activeTtn) && shipmentValue(activeTtn) !== shipmentValue(oldTtn)
   const addressChanged = destinationHistoryChanged(currentDelivery, destination)
@@ -354,6 +399,7 @@ export function mergeTrackingDelivery(
   nextDelivery.trackingStatus = result.status
   nextDelivery.trackingNormalizedStatus = result.normalizedStatus
   nextDelivery.trackingReturnInProgress = returnInProgress
+  nextDelivery.trackingReturnArrived = returnArrived
   nextDelivery.trackingProvider = result.provider ?? carrierKind(currentDelivery)
   nextDelivery.trackingSource = source === 'public_tracking' ? 'public_tracking' : 'official_api'
   nextDelivery.trackingDataChangedAt = changedAt
