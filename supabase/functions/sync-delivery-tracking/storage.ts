@@ -82,9 +82,7 @@ function nextReturnArrived(delivery: JsonRecord, result: TrackingResult) {
 function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
   if (nextReturnArrived(delivery, result)) return false
   if (['returned', 'delivered'].includes(result.normalizedStatus)) return false
-  return deliveryHasReturnInProgress(delivery) ||
-    result.normalizedStatus === 'returning' ||
-    result.relation === 'return'
+  return resultIsReturnShipment(delivery, result) || result.normalizedStatus === 'returning'
 }
 
 function deliveryHasReturnContext(delivery: JsonRecord) {
