@@ -16,12 +16,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Start isolated PostgreSQL
-        run: docker run --detach --name patch165-postgres --env POSTGRES_PASSWORD=postgres postgres:17
+        run: docker run --detach --name patch165-postgres --env POSTGRES_PASSWORD=postgres --volume "$PWD:/work" postgres:17
 
       - name: Run Patch 165 SQL harness
         run: |
           until docker exec patch165-postgres pg_isready -U postgres; do sleep 1; done
-          docker exec -i patch165-postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/patch-165-accounting-history-seal-harness.sql
+          docker exec -i --workdir /work patch165-postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/patch-165-accounting-history-seal-harness.sql
 
       - name: Remove isolated PostgreSQL
         if: always()
