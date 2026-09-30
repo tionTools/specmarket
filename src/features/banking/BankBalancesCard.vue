@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useNow } from '@vueuse/core'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-import { currencyRateForDate, localDateKey, type CurrencyRateRow } from '@/features/prices/currencyRates'
 import { supabase } from '@/lib/supabase'
 import { consumeBankingReturn } from './navigation'
 import { hasNovaPaySyncIssue, type NovaPayJournalRow } from './novapayJournal'
@@ -71,69 +70,20 @@ function updatedAt(value: string | null) {
 async function loadSupplierDebt() {
   if (!supabase) return
 
-  const [ratesResult, reconciliationsResult, totalsResult] = await Promise.all([
-    supabase
-      .from('crm_currency_rates')
-      .select('effective_from, rate')
-      .eq('currency', 'USD')
-      .order('effective_from', { ascending: false }),
-    supabase
-      .from('crm_reconciliations')
-      .select(
-        'kind,created_at,crm_balance_usd_after_adjustment,crm_balance_uah_after_adjustment,cost_snapshot_usd,cost_snapshot_uah',
-      )
-      .order('created_at', { ascending: false }),
-    supabase.rpc('get_crm_current_cost_totals'),
-  ])
-
-  if (ratesResult.error || reconciliationsResult.error || totalsResult.error) {
-    console.error(
-      'Не удалось рассчитать текущий долг поставщику:',
-      ratesResult.error ?? reconciliationsResult.error ?? totalsResult.error,
-    )
+  const { data, error } = await supabase.rpc('get_crm_supplier_debt_snapshot')
+  if (error) {
+    console.error('Не удалось рассчитать текущий долг поставщику:', error)
     return
   }
 
-  const reconciliations = reconciliationsResult.data ?? []
-  const checkpoint =
-    reconciliations.find((item) => item.kind === 'reconciliation') ??
-    reconciliations.find((item) => item.kind === 'initial')
-  if (!checkpoint) return
+  const snapshot = data as { supplierDebtUah?: number | string | null } | null
+  const rawDebt = snapshot?.supplierDebtUah
+  if (rawDebt === null || rawDebt === undefined) return
 
-  const currencyRates: CurrencyRateRow[] = (ratesResult.data ?? []).map((row) => ({
-    effective_from: String(row.effective_from),
-    rate: Number(row.rate),
-  }))
-  const usdRate = currencyRateForDate(currencyRates, localDateKey(), 0)
-  if (usdRate <= 0) return
+  const debt = Number(rawDebt)
+  if (!Number.isFinite(debt)) return
 
-  const { data: payments, error: paymentsError } = await supabase
-    .from('crm_supplier_payments')
-    .select('created_at,debt_usd,debt_uah')
-    .gt('created_at', checkpoint.created_at)
-  if (paymentsError) {
-    console.error('Не удалось загрузить платежи поставщику:', paymentsError)
-    return
-  }
-
-  const paidDebt = (payments ?? []).reduce(
-    (total, payment) => ({
-      usd: total.usd + Number(payment.debt_usd),
-      uah: total.uah + Number(payment.debt_uah),
-    }),
-    { usd: 0, uah: 0 },
-  )
-  const currentCosts = (totalsResult.data ?? {}) as { usd?: number; uah?: number }
-  const debtUsd =
-    Number(checkpoint.crm_balance_usd_after_adjustment) +
-    (Number(currentCosts.usd ?? 0) - Number(checkpoint.cost_snapshot_usd)) -
-    paidDebt.usd
-  const debtUah =
-    Number(checkpoint.crm_balance_uah_after_adjustment) +
-    (Number(currentCosts.uah ?? 0) - Number(checkpoint.cost_snapshot_uah)) -
-    paidDebt.uah
-
-  supplierDebt.value = debtUsd * usdRate + debtUah
+  supplierDebt.value = debt
 }
 
 defineExpose({ refreshDebt: loadSupplierDebt })
