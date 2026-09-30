@@ -1439,10 +1439,12 @@ function isUnpaidShipmentOrder(order: Order) {
     includeInUnpaidShipment(order, displayOrderStatus(order.status), isPaid(order))
   )
 }
+const unpaidShipmentOrders = computed(() => orders.value.filter(isUnpaidShipmentOrder))
 const unpaidShipmentAmount = computed(() =>
-  orders.value
-    .filter(isUnpaidShipmentOrder)
-    .reduce((total, order) => total + getNetOrderAmount(order), 0),
+  unpaidShipmentOrders.value.reduce((total, order) => total + getNetOrderAmount(order), 0),
+)
+const unpaidShipmentPlannedProfit = computed(() =>
+  unpaidShipmentOrders.value.reduce((total, order) => total + getPlannedProfit(order), 0),
 )
 const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
@@ -5589,6 +5591,12 @@ function orderDateTime(order: Order) {
           <div class="border-l border-slate-300 pl-2 text-left">
             <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(unpaidShipmentAmount) }}
+            </p>
+            <p
+              v-if="isComparingPreviousPeriod"
+              class="mt-1 whitespace-nowrap text-xs font-semibold text-indigo-700"
+            >
+              Плановая прибыль: {{ formatMoney(unpaidShipmentPlannedProfit) }}
             </p>
           </div>
         </article>
