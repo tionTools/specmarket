@@ -82,7 +82,7 @@ class OrdersRepository {
     suspend fun recentOrders(): List<Order> = client.from("crm_orders").select(columns) {
         order("created_at", SortOrder.DESCENDING)
         order("id", SortOrder.DESCENDING)
-        limit(MANUAL_REFRESH_RECENT_COUNT.toLong())
+        range(0L..(MANUAL_REFRESH_RECENT_COUNT.toLong() - 1L))
     }.decodeList<Order>()
 
     suspend fun ordersChangedSince(updatedAt: String): List<Order> {
