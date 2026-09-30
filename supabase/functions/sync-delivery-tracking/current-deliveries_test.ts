@@ -12,7 +12,7 @@ Deno.test("current deliveries are read in batches of 25", async () => {
     return { data: batch.map((id) => ({ id, delivery: { ttn: id } })), error: null };
   });
   assert(sizes.join(",") === "25,25,11", "unexpected request count");
-  assert(current.deliveries.size === 61 && current.errors.size === 0, "missing delivery rows");
+  assert(current.deliveries.size === 61 && current.rows.size === 61 && current.errors.size === 0, "missing delivery rows");
 });
 
 Deno.test("batch failure falls back to individual reads without losing valid rows", async () => {
@@ -46,4 +46,22 @@ Deno.test("thrown batch and single-read errors are captured", async () => {
     throw new Error("network down");
   });
   assert(current.errors.get("1")?.includes("network down"), "network error was dropped");
+});
+
+
+Deno.test("current delivery reader preserves order metadata needed by tracking accounting", async () => {
+  const current = await readCurrentDeliveries(["1"], async () => ({
+    data: [{
+      id: "1",
+      delivery: { ttn: "20450000000000" },
+      platform: "Пром",
+      status: "Скасовано",
+      shipping: 30,
+    }],
+    error: null,
+  }));
+  const row = current.rows.get("1");
+  assert(row?.platform === "Пром", "platform metadata was dropped");
+  assert(row?.status === "Скасовано", "status metadata was dropped");
+  assert(row?.shipping === 30, "shipping metadata was dropped");
 });
