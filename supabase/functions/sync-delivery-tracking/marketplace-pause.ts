@@ -15,6 +15,12 @@ export function bulkTrackingEnabledFromRows(
   return enabled
 }
 
+export function bulkTrackingPlatformOrFilter(enabled: BulkTrackingEnabled): string {
+  const disabled = trackedMarketplacePlatforms.filter((platform) => !enabled[platform])
+  if (!disabled.length) return ''
+  return `platform.is.null,platform.not.in.(${disabled.map((platform) => JSON.stringify(platform)).join(',')})`
+}
+
 export function shouldBulkTrackPlatform(platform: unknown, enabled: BulkTrackingEnabled): boolean {
   if (typeof platform !== 'string') return true // Manually created orders without a marketplace.
   if (!trackedMarketplacePlatforms.some((candidate) => candidate === platform)) return true
