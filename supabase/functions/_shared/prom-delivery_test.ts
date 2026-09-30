@@ -1,4 +1,4 @@
-import { resolvePromShipping } from './prom-delivery.ts'
+import { resolvePromShipping, shouldWaivePromPromoShippingForUnclaimedReturn } from './prom-delivery.ts'
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
@@ -107,4 +107,106 @@ const novaBelowMinimum = resolvePromShipping({
 assert(
   novaBelowMinimum.shipping === 0 && novaBelowMinimum.shippingSource === 'none',
   'Prom Nova Poshta promo must not charge seller below the 200 UAH promotion minimum',
+)
+
+
+const waivedPromo = resolvePromShipping({
+  hasManualShipping: false,
+  manualShipping: 0,
+  hasSellerDeliveryCost: false,
+  sellerDeliveryCost: 0,
+  deliveryProvider: 'Нова Пошта',
+  isPromFreeDelivery: true,
+  orderAmount: 1479,
+  promoShippingWaived: true,
+})
+assert(
+  waivedPromo.shipping === 0 && waivedPromo.shippingSource === 'prom-promo',
+  'Unclaimed Prom promo return must waive the fallback seller delivery charge',
+)
+
+const waivedManual = resolvePromShipping({
+  hasManualShipping: true,
+  manualShipping: 44,
+  hasSellerDeliveryCost: false,
+  sellerDeliveryCost: 0,
+  deliveryProvider: 'Нова Пошта',
+  isPromFreeDelivery: true,
+  orderAmount: 1479,
+  promoShippingWaived: true,
+})
+assert(
+  waivedManual.shipping === 44 && waivedManual.shippingSource === 'manual',
+  'Promo waiver must not overwrite a manual shipping amount',
+)
+
+const waivedSellerApi = resolvePromShipping({
+  hasManualShipping: false,
+  manualShipping: 0,
+  hasSellerDeliveryCost: true,
+  sellerDeliveryCost: 17,
+  deliveryProvider: 'Нова Пошта',
+  isPromFreeDelivery: true,
+  orderAmount: 1479,
+  promoShippingWaived: true,
+})
+assert(
+  waivedSellerApi.shipping === 17 && waivedSellerApi.shippingSource === 'seller-api',
+  'Promo waiver must not overwrite an explicit seller delivery cost from Prom',
+)
+
+const unclaimedReturn = {
+  shippingSource: 'prom-promo',
+  trackingReturnArrived: true,
+  trackingBuyerReceived: false,
+}
+assert(
+  shouldWaivePromPromoShippingForUnclaimedReturn({
+    platform: 'Пром',
+    orderStatus: 'Скасовано',
+    delivery: unclaimedReturn,
+  }),
+  'Prom promo delivery must be waived when the buyer never received the parcel',
+)
+
+assert(
+  !shouldWaivePromPromoShippingForUnclaimedReturn({
+    platform: 'Пром',
+    orderStatus: 'Скасовано',
+    delivery: { ...unclaimedReturn, trackingBuyerReceived: true },
+  }),
+  'Prom promo delivery must remain charged when the buyer received the parcel before returning it',
+)
+
+assert(
+  !shouldWaivePromPromoShippingForUnclaimedReturn({
+    platform: 'Пром',
+    orderStatus: 'Скасовано',
+    delivery: { ...unclaimedReturn, shippingSource: 'manual' },
+  }),
+  'Return tracking must not zero a manually entered shipping cost',
+)
+
+assert(
+  shouldWaivePromPromoShippingForUnclaimedReturn({
+    platform: 'Пром',
+    orderStatus: 'Скасовано',
+    delivery: {
+      shippingSource: 'prom-promo',
+      trackingReturnArrived: true,
+    },
+  }),
+  'Legacy cancelled Prom return must waive promo shipping when receipt history predates the buyer-received flag',
+)
+
+assert(
+  !shouldWaivePromPromoShippingForUnclaimedReturn({
+    platform: 'Пром',
+    orderStatus: 'Виконано',
+    delivery: {
+      shippingSource: 'prom-promo',
+      trackingReturnArrived: true,
+    },
+  }),
+  'Legacy completed Prom return must keep promo shipping when buyer receipt history is unknown',
 )

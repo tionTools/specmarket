@@ -108,6 +108,7 @@ Deno.test('ordinary buyer delivery does not become a returned-to-sender arrival'
   const next = mergeTrackingDelivery(delivery, delivered, '2026-09-08T12:00:00Z')
   assert(next.trackingReturnInProgress === false, 'ordinary delivery became a return in progress')
   assert(next.trackingReturnArrived === false, 'ordinary buyer delivery became a return arrival')
+  assert(next.trackingBuyerReceived === true, 'ordinary buyer delivery was not remembered')
 })
 
 Deno.test('delivered return TTN repairs return-arrived state after the old flag was lost', () => {
@@ -194,6 +195,7 @@ Deno.test('CargoReturn relation promotes the return TTN and return destination f
   const next = mergeTrackingDelivery(delivery, liveReturn, '2026-09-07T16:12:37Z')
   assert(next.ttn === '59001764954977', 'return TTN did not become current')
   assert(next.trackingReturnInProgress === true, 'return relation did not restore return stage')
+  assert(next.trackingBuyerReceived === false, 'unclaimed return was incorrectly marked as buyer receipt')
   assert(next.trackingStatus === liveReturn.status, 'live return status was not stored')
   assert(next.city === 'Циркуни', 'live return city was not stored')
   assert(next.address === 'Відділення №1', 'live return branch was not stored')
@@ -206,4 +208,29 @@ Deno.test('CargoReturn relation promotes the return TTN and return destination f
     ),
     'return TTN was not preserved in shipment history',
   )
+})
+
+
+Deno.test('buyer receipt remains remembered when a later return shipment appears', () => {
+  const delivery: JsonRecord = {
+    ttn: '20451528497280',
+    carrier: 'Новая почта',
+    city: 'Київ',
+    address: 'Відділення №343',
+    trackingStatus: 'Відправлення отримано',
+    trackingNormalizedStatus: 'delivered',
+    trackingBuyerReceived: true,
+  }
+  const liveReturn: TrackingResult = {
+    status: 'Відправлення повертається відправнику',
+    final: false,
+    normalizedStatus: 'in_transit',
+    activeTtn: '59001764954977',
+    relation: 'return',
+    destination: { city: 'Циркуни', address: 'Відділення №1' },
+  }
+
+  const next = mergeTrackingDelivery(delivery, liveReturn, '2026-09-09T12:00:00Z')
+  assert(next.trackingReturnInProgress === true, 'later return was not recognized')
+  assert(next.trackingBuyerReceived === true, 'later return erased the earlier buyer receipt')
 })

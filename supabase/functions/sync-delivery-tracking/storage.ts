@@ -85,6 +85,13 @@ function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
   return resultIsReturnShipment(delivery, result) || result.normalizedStatus === 'returning'
 }
 
+function nextBuyerReceived(delivery: JsonRecord, result: TrackingResult) {
+  return (
+    delivery.trackingBuyerReceived === true ||
+    (result.normalizedStatus === 'delivered' && !resultIsReturnShipment(delivery, result))
+  )
+}
+
 function deliveryHasReturnContext(delivery: JsonRecord) {
   return (
     deliveryHasReturnInProgress(delivery) ||
@@ -281,6 +288,7 @@ export function trackingChanged(delivery: JsonRecord, result: TrackingResult) {
   if (nextReturnArrived(delivery, result) !== (delivery.trackingReturnArrived === true)) return true
   if (nextReturnInProgress(delivery, result) !== (delivery.trackingReturnInProgress === true))
     return true
+  if (nextBuyerReceived(delivery, result) !== (delivery.trackingBuyerReceived === true)) return true
   if (result.status !== text(delivery.trackingStatus)) return true
   if (result.normalizedStatus !== text(delivery.trackingNormalizedStatus)) return true
   if (result.activeTtn && shipmentValue(result.activeTtn) !== shipmentValue(delivery.ttn)) return true
@@ -310,6 +318,7 @@ export function mergeTrackingDelivery(
   const destination = destinationForTrackingUpdate(currentDelivery, result)
   const returnArrived = nextReturnArrived(currentDelivery, result)
   const returnInProgress = nextReturnInProgress(currentDelivery, result)
+  const buyerReceived = nextBuyerReceived(currentDelivery, result)
   const ttnChanged = Boolean(activeTtn) && shipmentValue(activeTtn) !== shipmentValue(oldTtn)
   const addressChanged = destinationHistoryChanged(currentDelivery, destination)
   const statusChanged =
@@ -398,6 +407,7 @@ export function mergeTrackingDelivery(
   nextDelivery.trackingNormalizedStatus = result.normalizedStatus
   nextDelivery.trackingReturnInProgress = returnInProgress
   nextDelivery.trackingReturnArrived = returnArrived
+  nextDelivery.trackingBuyerReceived = buyerReceived
   nextDelivery.trackingProvider = result.provider ?? carrierKind(currentDelivery)
   nextDelivery.trackingSource = source === 'public_tracking' ? 'public_tracking' : 'official_api'
   nextDelivery.trackingDataChangedAt = changedAt
