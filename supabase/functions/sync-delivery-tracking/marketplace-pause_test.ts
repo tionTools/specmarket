@@ -74,10 +74,10 @@ Deno.test('forced bulk tracking makes no carrier or tracking-state calls for pau
                 'paused marketplace must be pushed into the orders query',
               )
             }
-            return query
+            return this
           },
           not() {
-            return query
+            return this
           },
         }
         return { select: () => query }
