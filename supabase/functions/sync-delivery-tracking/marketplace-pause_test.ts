@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { runTrackingWorker } from './worker.ts'
 import {
   bulkTrackingEnabledFromRows,
+  bulkTrackingPlatformOrFilter,
   shouldBulkTrackPlatform,
 } from './marketplace-pause.ts'
 
@@ -20,6 +21,10 @@ Deno.test('bulk tracking skips paused marketplaces, preserves enabled and manual
   assert(shouldBulkTrackPlatform('Эпицентр', enabled), 'enabled Epicentr must remain bulk-trackable')
   assert(shouldBulkTrackPlatform('Ручной', enabled), 'manual orders must remain bulk-trackable')
   assert(shouldBulkTrackPlatform(null, enabled), 'orders without a marketplace remain bulk-trackable')
+  assert(
+    bulkTrackingPlatformOrFilter(enabled) === 'platform.is.null,platform.not.in.("Каста")',
+    'DB filter must exclude paused Kasta while preserving null/manual platforms',
+  )
 })
 
 Deno.test('bulk tracking settings fail closed on incomplete or invalid rows', () => {
@@ -59,23 +64,23 @@ Deno.test('forced bulk tracking makes no carrier or tracking-state calls for pau
         }
       }
       if (table === 'crm_orders') {
-        return {
-          select: () => ({
-            or: () => ({
-              not: async () => ({
-                data: [{
-                  id: 'paused-kasta',
-                  platform: 'Каста',
-                  external_id: 'kasta:123',
-                  status: 'Отправлен',
-                  shipping: 0,
-                  delivery: { ttn: '12345678901234', carrier: 'Новая почта' },
-                }],
-                error: null,
-              }),
-            }),
-          }),
+        const query = {
+          data: [] as unknown[],
+          error: null,
+          or(filter: string) {
+            if (filter.startsWith('platform.')) {
+              assert(
+                filter === 'platform.is.null,platform.not.in.("Каста")',
+                'paused marketplace must be pushed into the orders query',
+              )
+            }
+            return query
+          },
+          not() {
+            return query
+          },
         }
+        return { select: () => query }
       }
       throw new Error(`Paused order unexpectedly accessed ${table}`)
     },
