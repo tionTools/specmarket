@@ -6,6 +6,11 @@ on:
       - main
   workflow_dispatch:
 
+# A second push must wait rather than delete a deployment in progress.
+concurrency:
+  group: specmarket-production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -45,7 +50,7 @@ jobs:
           PROJECT_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
           echo "repo_name=$REPO_NAME" >> "$GITHUB_OUTPUT"
           echo "project_name=$PROJECT_NAME" >> "$GITHUB_OUTPUT"
-          echo "dist_name=dist-$PROJECT_NAME.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "dist_name=dist-$PROJECT_NAME-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "project_path=~/tion.tools/$PROJECT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: 📦 Create deployment archive ${{ steps.meta.outputs.dist_name }}
@@ -71,13 +76,28 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT }}
           script: |
-            mkdir -p ${{ steps.meta.outputs.project_path }}-temp
-            tar -xzf ~/${{ steps.meta.outputs.dist_name }} -C ${{ steps.meta.outputs.project_path }}-temp
+            set -eu
+            PROJECT="$HOME/tion.tools/${{ steps.meta.outputs.project_name }}"
+            ARCHIVE=~/${{ steps.meta.outputs.dist_name }}
+            TEMP="${PROJECT}-temp-${{ github.run_id }}-${{ github.run_attempt }}"
+            BACKUP="${PROJECT}-backup"
 
-            rm -rf ${{ steps.meta.outputs.project_path }}
+            # Never remove the live site until the archive extracts successfully.
+            rm -rf "$TEMP"
+            mkdir -p "$TEMP"
+            tar -xzf "$ARCHIVE" -C "$TEMP"
+            test -s "$TEMP/index.html"
+            test -d "$TEMP/assets"
 
-            mv ${{ steps.meta.outputs.project_path }}-temp ${{ steps.meta.outputs.project_path }}
-            rm -f ~/${{ steps.meta.outputs.dist_name }}
+            rm -rf "$BACKUP"
+            if [ -d "$PROJECT" ]; then mv "$PROJECT" "$BACKUP"; fi
+            if ! mv "$TEMP" "$PROJECT"; then
+              if [ -d "$BACKUP" ]; then mv "$BACKUP" "$PROJECT"; fi
+              exit 1
+            fi
+            rm -rf "$BACKUP"
+            rm -f "$ARCHIVE"
 
             echo "✅ Deployment completed! ${{ steps.meta.outputs.repo_name }}"
-            ls -la ${{ steps.meta.outputs.project_path }}
+            ls -la "$PROJECT"
+            test -s "$PROJECT/index.html"
