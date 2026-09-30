@@ -79,6 +79,12 @@ class OrdersRepository {
         return result
     }
 
+    suspend fun recentOrders(): List<Order> = client.from("crm_orders").select(columns) {
+        order("created_at", SortOrder.DESCENDING)
+        order("id", SortOrder.DESCENDING)
+        limit(MANUAL_REFRESH_RECENT_COUNT.toLong())
+    }.decodeList<Order>()
+
     suspend fun ordersChangedSince(updatedAt: String): List<Order> {
         val result = mutableListOf<Order>()
         var offset = 0L
