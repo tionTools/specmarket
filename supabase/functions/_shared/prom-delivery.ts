@@ -8,6 +8,57 @@ type ResolvePromShippingInput = {
   deliveryProvider: string
   isPromFreeDelivery: boolean
   orderAmount: number
+  promoShippingWaived?: boolean
+}
+
+type PromReturnShippingInput = {
+  platform: string
+  orderStatus: string
+  delivery: Record<string, unknown>
+}
+
+const normalized = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+
+function currentShipmentRelation(delivery: Record<string, unknown>) {
+  const currentTtn = normalized(delivery.ttn).replace(/\s/g, '')
+  if (!currentTtn || !Array.isArray(delivery.shipmentHistory)) return ''
+  for (const raw of delivery.shipmentHistory) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const row = raw as Record<string, unknown>
+    if (normalized(row.ttn).replace(/\s/g, '') === currentTtn) return normalized(row.relation)
+  }
+  return ''
+}
+
+function hasReturnContext(delivery: Record<string, unknown>) {
+  return (
+    delivery.trackingReturnInProgress === true ||
+    delivery.trackingReturnArrived === true ||
+    normalized(delivery.trackingNormalizedStatus) === 'returning' ||
+    currentShipmentRelation(delivery) === 'return'
+  )
+}
+
+function cancelledOrderStatus(value: string) {
+  return /скас|отмен|cancel/.test(normalized(value))
+}
+
+export function shouldWaivePromPromoShippingForUnclaimedReturn(
+  input: PromReturnShippingInput,
+): boolean {
+  if (!['пром', 'prom'].includes(normalized(input.platform))) return false
+  if (normalized(input.delivery.shippingSource) !== 'prom-promo') return false
+  if (!hasReturnContext(input.delivery)) return false
+  if (input.delivery.trackingBuyerReceived === true) return false
+  if (input.delivery.trackingBuyerReceived === false) return true
+
+  // Older tracked returns predate trackingBuyerReceived. A cancelled Prom order
+  // with an active/arrived carrier return is the safe legacy signal for a
+  // parcel that was refused at the pickup point rather than returned later.
+  return cancelledOrderStatus(input.orderStatus)
 }
 
 export function resolvePromShipping(input: ResolvePromShippingInput): {
@@ -20,6 +71,10 @@ export function resolvePromShipping(input: ResolvePromShippingInput): {
 
   if (input.hasSellerDeliveryCost) {
     return { shipping: input.sellerDeliveryCost, shippingSource: 'seller-api' }
+  }
+
+  if (input.promoShippingWaived) {
+    return { shipping: 0, shippingSource: 'prom-promo' }
   }
 
   const deliveryProvider = input.deliveryProvider
