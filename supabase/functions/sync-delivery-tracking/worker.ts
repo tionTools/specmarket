@@ -8,7 +8,7 @@ import { shouldWaivePromPromoShippingForUnclaimedReturn } from '../_shared/prom-
 import { isFinal, record, text } from './normalize.ts'
 import { readCurrentDeliveries } from './current-deliveries.ts'
 import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
-import { bulkTrackingEnabledFromRows, shouldBulkTrackPlatform } from './marketplace-pause.ts'
+import { bulkTrackingEnabledFromRows, bulkTrackingPlatformOrFilter, shouldBulkTrackPlatform } from './marketplace-pause.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
@@ -96,6 +96,8 @@ export async function runTrackingWorker(
     ordersQuery = ordersQuery
       .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled,deleted))`)
       .not('delivery->>ttn', 'is', null)
+    const platformFilter = bulkTrackingPlatformOrFilter(bulkTrackingEnabled!)
+    if (platformFilter) ordersQuery = ordersQuery.or(platformFilter)
   }
   const { data: rows, error } = await ordersQuery
   if (error) return { status: 500, body: { ok: false, message: error.message } }
