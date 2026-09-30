@@ -628,7 +628,7 @@ private fun OrdersScreen(
             OrderFilters(orders, filter, onFilterChange)
             PullToRefreshBox(
                 isRefreshing = vm.loading,
-                onRefresh = { vm.retryConnection() },
+                onRefresh = { vm.manualRefresh() },
                 modifier = Modifier.weight(1f),
             ) {
                 LazyColumn(
