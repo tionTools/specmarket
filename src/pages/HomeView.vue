@@ -6205,16 +6205,6 @@ function orderDateTime(order: Order) {
                     {{ returnSignalLabel(order) }} · возврат ожидает принятия
                   </span>
                   <button
-                    v-if="!isGuest"
-                    class="grid size-8 shrink-0 place-items-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-900"
-                    type="button"
-                    title="Повторить заказ"
-                    aria-label="Повторить заказ"
-                    @click.stop="openRepeatOrderDialog(order)"
-                  >
-                    <Copy class="size-4" aria-hidden="true" />
-                  </button>
-                  <button
                     v-if="!isGuest && hasPhysicalShipmentMovement(order)"
                     :disabled="isSavingReturn"
                     class="rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
@@ -6311,6 +6301,16 @@ function orderDateTime(order: Order) {
                       </option>
                     </select></label
                   >
+                  <button
+                    v-if="!isGuest"
+                    class="grid size-8 shrink-0 place-items-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-900"
+                    type="button"
+                    title="Повторить заказ"
+                    aria-label="Повторить заказ"
+                    @click.stop="openRepeatOrderDialog(order)"
+                  >
+                    <Copy class="size-4" aria-hidden="true" />
+                  </button>
                 </div>
               </div>
               <section
