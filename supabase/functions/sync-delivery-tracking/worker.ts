@@ -4,6 +4,7 @@ import { meestStatus } from './carriers/meest.ts'
 import { novaStatus, type NovaRedirectCircuit } from './carriers/nova-poshta.ts'
 import { rozetkaStatus } from './carriers/rozetka-delivery.ts'
 import { ukrposhtaStatus } from './carriers/ukrposhta.ts'
+import { shouldWaivePromPromoShippingForUnclaimedReturn } from '../_shared/prom-delivery.ts'
 import { isFinal, record, text } from './normalize.ts'
 import { readCurrentDeliveries } from './current-deliveries.ts'
 import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
@@ -12,7 +13,14 @@ import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './ty
 
 const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
 
-type TrackingOrderRow = { id: string; external_id: unknown; delivery: unknown }
+type TrackingOrderRow = {
+  id: string
+  external_id: unknown
+  platform: unknown
+  status: unknown
+  shipping: unknown
+  delivery: unknown
+}
 type TrackingStateRow = { order_id: string; last_checked_at: unknown }
 
 function currentKyiv() {
@@ -66,7 +74,7 @@ export async function runTrackingWorker(
   if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
 
   const now = new Date()
-  let ordersQuery = admin.from('crm_orders').select('id, external_id, delivery')
+  let ordersQuery = admin.from('crm_orders').select('id, external_id, platform, status, shipping, delivery')
   if (orderId) {
     ordersQuery = ordersQuery.eq('id', orderId)
   } else {
@@ -128,8 +136,11 @@ export async function runTrackingWorker(
     const current = await readCurrentDeliveries(
       batch.map(({ row }) => row.id),
       async (ids) => {
-        const { data, error } = await admin.from('crm_orders').select('id, delivery').in('id', ids)
-        return { data: data as Array<{ id: string; delivery: unknown }> | null, error }
+        const { data, error } = await admin
+          .from('crm_orders')
+          .select('id, platform, status, shipping, delivery')
+          .in('id', ids)
+        return { data, error }
       },
     )
     for (const [index, { row, delivery, carrier }] of batch.entries()) {
@@ -140,7 +151,8 @@ export async function runTrackingWorker(
       }
       if (!current.deliveries.has(row.id)) continue
       const currentDelivery = record(current.deliveries.get(row.id))
-      if (!sameShipment(delivery, currentDelivery)) continue
+      const currentRow = current.rows.get(row.id)
+      if (!currentRow || !sameShipment(delivery, currentDelivery)) continue
       const outcome = results[index]!
       if (outcome.error !== undefined) {
         failed += 1
@@ -166,7 +178,16 @@ export async function runTrackingWorker(
             now.toISOString(),
             text(row.external_id) ? 'marketplace' : 'manual',
           )
-          const { error: updateError } = await admin.from('crm_orders').update({ delivery: nextDelivery }).eq('id', row.id)
+          const waivePromoShipping = shouldWaivePromPromoShippingForUnclaimedReturn({
+            platform: text(currentRow.platform),
+            orderStatus: text(currentRow.status),
+            delivery: nextDelivery,
+          })
+          if (waivePromoShipping) nextDelivery.promPromoShippingWaived = true
+          const update = waivePromoShipping
+            ? { delivery: nextDelivery, shipping: 0 }
+            : { delivery: nextDelivery }
+          const { error: updateError } = await admin.from('crm_orders').update(update).eq('id', row.id)
           if (updateError) throw updateError
           updated += 1
         }
