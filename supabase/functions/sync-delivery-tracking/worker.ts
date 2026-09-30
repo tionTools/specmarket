@@ -8,6 +8,7 @@ import { shouldWaivePromPromoShippingForUnclaimedReturn } from '../_shared/prom-
 import { isFinal, record, text } from './normalize.ts'
 import { readCurrentDeliveries } from './current-deliveries.ts'
 import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
+import { bulkTrackingEnabledFromRows, shouldBulkTrackPlatform } from './marketplace-pause.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
@@ -74,6 +75,20 @@ export async function runTrackingWorker(
   if (!forced && !minutes) return { body: { ok: true, skipped: 'night', checked: 0, updated: 0 } }
 
   const now = new Date()
+  let bulkTrackingEnabled: ReturnType<typeof bulkTrackingEnabledFromRows> | null = null
+  if (!orderId) {
+    const { data: settings, error: settingsError } = await admin
+      .from('crm_marketplace_settings')
+      .select('platform, enabled')
+    if (settingsError) {
+      return { status: 503, body: { ok: false, message: 'Не удалось проверить настройки маркетплейсов.' } }
+    }
+    try {
+      bulkTrackingEnabled = bulkTrackingEnabledFromRows(settings ?? [])
+    } catch {
+      return { status: 503, body: { ok: false, message: 'Настройки маркетплейсов неполные или некорректные.' } }
+    }
+  }
   let ordersQuery = admin.from('crm_orders').select('id, external_id, platform, status, shipping, delivery')
   if (orderId) {
     ordersQuery = ordersQuery.eq('id', orderId)
@@ -84,7 +99,9 @@ export async function runTrackingWorker(
   }
   const { data: rows, error } = await ordersQuery
   if (error) return { status: 500, body: { ok: false, message: error.message } }
-  const orderRows = (rows ?? []) as TrackingOrderRow[]
+  const orderRows = ((rows ?? []) as TrackingOrderRow[]).filter((row) =>
+    orderId ? true : shouldBulkTrackPlatform(row.platform, bulkTrackingEnabled!),
+  )
   const ids = orderRows.map((row) => row.id)
   const { data: states, error: statesError } = ids.length
     ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)

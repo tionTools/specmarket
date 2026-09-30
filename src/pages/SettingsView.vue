@@ -260,8 +260,9 @@ onScopeDispose(() => systemTheme.removeEventListener('change', handleSystemTheme
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="text-lg font-semibold">Маркетплейсы</h2>
         <p class="mt-1 text-sm text-slate-500">
-          Пауза останавливает только автоматическую синхронизацию площадки и скрывает её колонки в «Ценах».
-          Ручное обновление, в том числе отдельного заказа, остаётся доступным. Старые заказы и цены сохраняются.
+          Пауза отключает автоматическую и массовую ручную синхронизацию заказов, а также массовое
+          отслеживание доставок этой площадки и скрывает её колонки в «Ценах». Доступно только
+          точечное обновление конкретного заказа. Старые заказы и цены сохраняются.
         </p>
         <p v-if="isMarketplaceLoading" class="mt-4 text-sm text-slate-500">Загрузка настроек…</p>
         <div v-else class="mt-4 space-y-3">
