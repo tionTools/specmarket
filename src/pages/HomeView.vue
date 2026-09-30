@@ -85,6 +85,7 @@ import type {
   ShipmentRelation,
 } from '@/features/orders/types'
 import { supabase } from '@/lib/supabase'
+import { marketplaceEnabledFromRows } from '@/features/marketplaces/syncSettings'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
 import CarrierLogo from '@/components/ui/CarrierLogo.vue'
 import { reapplyRegistryPreview } from '@/features/orders/registry-preview'
@@ -2654,39 +2655,66 @@ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
   await refreshOrdersAfterMarketplaceSync(data)
 }
 
+async function loadEnabledBulkMarketplaces() {
+  if (!supabase) throw new Error('Нет подключения к Supabase.')
+  const { data, error } = await supabase.from('crm_marketplace_settings').select('platform, enabled')
+  if (error) throw error
+  // Missing or invalid settings must stop every bulk request, not silently enable a platform.
+  return marketplaceEnabledFromRows(data ?? [])
+}
+
 async function syncNewAllPlatforms() {
-  if (isMarketplaceSyncBusy.value) return
+  if (isMarketplaceSyncBusy.value || isGuest.value) return
   isSyncingAllPlatforms.value = true
-  const syncResults: string[] = []
   try {
-    await syncEpicentrOrders(false, syncResults)
-    await syncPromOrders(false, syncResults)
-    await syncKastaOrders(false, syncResults)
-    if (syncResults.length) {
+    const enabled = await loadEnabledBulkMarketplaces()
+    const syncResults: string[] = []
+    if (enabled['Эпицентр']) await syncEpicentrOrders(false, syncResults)
+    if (enabled['Пром']) await syncPromOrders(false, syncResults)
+    if (enabled['Каста']) await syncKastaOrders(false, syncResults)
+    if (!syncResults.length) {
+      showSyncMessage('Все площадки отключены в настройках.')
+    } else {
       const summary = syncResults.join('\n')
       if (syncResults.some((result) => result.includes(': ошибка — '))) showSyncError(summary)
       else showSyncMessage(summary)
     }
+  } catch (error) {
+    showSyncError(`Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     isSyncingAllPlatforms.value = false
   }
 }
 
 async function syncFullAllPlatforms() {
-  if (isMarketplaceSyncBusy.value) return
-  if (
-    !window.confirm(
-      'Полная синхронизация обновит доступные заказы Prom и Эпицентра, а также заказы Kasta за последние 7 дней. Продолжить?',
-    )
-  )
-    return
+  if (isMarketplaceSyncBusy.value || isGuest.value) return
   isSyncingAllPlatforms.value = true
-  const fullSyncResults: string[] = []
   try {
-    await syncEpicentrOrders(true, fullSyncResults)
-    await syncPromOrders(true, fullSyncResults)
-    await syncKastaOrders(true, fullSyncResults)
-    showSyncMessage(fullSyncResults.join('\n'))
+    const enabled = await loadEnabledBulkMarketplaces()
+    const activePlatforms = [
+      ...(enabled['Эпицентр'] ? ['Эпицентр'] : []),
+      ...(enabled['Пром'] ? ['Prom'] : []),
+      ...(enabled['Каста'] ? ['Каста'] : []),
+    ]
+    if (!activePlatforms.length) {
+      showSyncMessage('Все площадки отключены в настройках.')
+      return
+    }
+    if (
+      !window.confirm(
+        `Полная синхронизация обновит заказы только включённых площадок: ${activePlatforms.join(', ')}. Продолжить?`,
+      )
+    )
+      return
+    const fullSyncResults: string[] = []
+    if (enabled['Эпицентр']) await syncEpicentrOrders(true, fullSyncResults)
+    if (enabled['Пром']) await syncPromOrders(true, fullSyncResults)
+    if (enabled['Каста']) await syncKastaOrders(true, fullSyncResults)
+    const summary = fullSyncResults.join('\n')
+    if (fullSyncResults.some((result) => result.includes(': ошибка — '))) showSyncError(summary)
+    else showSyncMessage(summary)
+  } catch (error) {
+    showSyncError(`Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     isSyncingAllPlatforms.value = false
   }
