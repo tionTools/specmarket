@@ -5585,20 +5585,19 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="text-sm font-medium text-slate-600">В дороге</p>
-          <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(unpaidShipmentAmount) }}
-            </p>
-            <p
-              v-if="isComparingPreviousPeriod"
-              class="mt-1 whitespace-nowrap text-xs font-semibold text-indigo-700"
-            >
-              Плановая прибыль: {{ formatMoney(unpaidShipmentPlannedProfit) }}
-            </p>
-          </div>
+          <p class="whitespace-nowrap text-lg font-semibold leading-none">
+            {{ formatMoney(unpaidShipmentAmount) }}
+            <span class="ml-1 text-sm font-medium text-slate-600">В дороге</span>
+          </p>
+          <p
+            v-if="isComparingPreviousPeriod"
+            class="mt-1 whitespace-nowrap text-xs font-semibold text-indigo-700"
+          >
+            {{ formatMoney(unpaidShipmentPlannedProfit) }}
+            <span class="ml-1">Плановая прибыль</span>
+          </p>
         </article>
       </section>
 
