@@ -28,7 +28,10 @@ import {
   marketplaceSettingsUnavailableResponse,
   shouldSkipMarketplaceSync,
 } from '../_shared/marketplace-sync-settings.ts'
-import { resolvePromShipping } from '../_shared/prom-delivery.ts'
+import {
+  resolvePromShipping,
+  shouldWaivePromPromoShippingForUnclaimedReturn,
+} from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 import {
   acceptPromOrders,
@@ -1464,6 +1467,13 @@ Deno.serve(async (request) => {
       hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
+    const promoShippingWaived =
+      previousDelivery.promPromoShippingWaived === true ||
+      shouldWaivePromPromoShippingForUnclaimedReturn({
+        platform: 'Пром',
+        orderStatus,
+        delivery: previousDelivery,
+      })
     const resolvedShipping = resolvePromShipping({
       hasManualShipping,
       manualShipping: number(existing?.shipping),
@@ -1472,6 +1482,7 @@ Deno.serve(async (request) => {
       deliveryProvider: text(deliveryProvider.provider) || deliveryCarrier,
       isPromFreeDelivery,
       orderAmount,
+      promoShippingWaived,
     })
     const { date, time } = dateParts(order.date_created ?? order.created_at)
     const orderUsdRate = usdRateForDate(usdRateSchedule, date)
@@ -1513,6 +1524,8 @@ Deno.serve(async (request) => {
         hasWebsiteCommission: isWebsiteOrder,
         isInstallmentPayment,
         shippingSource: resolvedShipping.shippingSource,
+        promPromoShippingWaived:
+          resolvedShipping.shippingSource === 'prom-promo' && promoShippingWaived ? true : undefined,
         ...preserveTracking(previousDelivery, deliveryCarrier, trackingNumber, {
           city: deliveryCity,
           address: deliveryAddress,
