@@ -1,5 +1,7 @@
 package ua.orders.crm
 
+const val MANUAL_REFRESH_RECENT_COUNT = 30
+
 fun connectionStatusLabel(realtimeConnected: Boolean, lastRefreshSucceeded: Boolean): String = when {
     realtimeConnected -> "Онлайн"
     lastRefreshSucceeded -> "CRM доступна · live-подключение восстанавливается"
