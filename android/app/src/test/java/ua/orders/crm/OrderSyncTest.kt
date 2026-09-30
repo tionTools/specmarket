@@ -37,6 +37,44 @@ class OrderSyncTest {
         assertNull(latestOrderUpdatedAt(listOf(Order("a"))))
     }
 
+    @Test fun manual_refresh_recovers_order_older_than_cached_updated_at_cursor() {
+        assertEquals(30, MANUAL_REFRESH_RECENT_COUNT)
+        val cached = listOf(
+            Order("newest", customer = "Already cached", updatedAt = "2026-09-30T09:00:00Z"),
+            Order("historical", customer = "Keep history", updatedAt = "2026-09-20T09:00:00Z"),
+        )
+        val missed = Order("missed", customer = "Recovered", updatedAt = "2026-09-30T07:00:00Z")
+        val incremental = emptyList<Order>()
+
+        assertTrue(missed.updatedAt!! < latestOrderUpdatedAt(cached)!!)
+        assertFalse(mergeOrders(cached, incremental).any { it.id == missed.id })
+
+        val manualResult = mergeOrders(cached, incremental + listOf(missed))
+
+        assertEquals(setOf("newest", "historical", "missed"), manualResult.map { it.id }.toSet())
+        assertEquals("Recovered", manualResult.single { it.id == "missed" }.customer)
+    }
+
+    @Test fun manual_refresh_uses_recent_server_snapshot_without_losing_cached_history() {
+        val cached = listOf(
+            Order("old", customer = "Retained", updatedAt = "2026-09-10T08:00:00Z"),
+            Order("recent", customer = "Stale", updatedAt = "2026-09-30T08:00:00Z"),
+        )
+        val incremental = listOf(
+            Order("recent", customer = "Incremental", updatedAt = "2026-09-30T08:00:00Z"),
+        )
+        val recent = listOf(
+            Order("recent", customer = "Latest server value", updatedAt = "2026-09-30T08:00:00Z"),
+            Order("missing", customer = "Recovered", updatedAt = "2026-09-30T07:00:00Z"),
+        )
+
+        val merged = mergeOrders(cached, incremental + recent)
+
+        assertEquals(setOf("old", "recent", "missing"), merged.map { it.id }.toSet())
+        assertEquals("Retained", merged.single { it.id == "old" }.customer)
+        assertEquals("Latest server value", merged.single { it.id == "recent" }.customer)
+    }
+
     @Test fun notification_rule_is_exactly_the_visual_new_order_rule() {
         val order = Order("1", platform = "Пром", status = "Принято")
         assertTrue(shouldNotifyNewOrder(order))

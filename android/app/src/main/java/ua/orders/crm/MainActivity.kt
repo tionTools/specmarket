@@ -615,7 +615,7 @@ private fun OrdersScreen(
                             contentDescription = if (searchOpen) "Закрыть поиск" else "Поиск",
                         )
                     }
-                    IconButton(onClick = { vm.retryConnection() }) {
+                    IconButton(onClick = { vm.manualRefresh() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Переподключиться и обновить")
                     }
                     TextButton(onSettings) { Text("Настройки") }
@@ -628,7 +628,7 @@ private fun OrdersScreen(
             OrderFilters(orders, filter, onFilterChange)
             PullToRefreshBox(
                 isRefreshing = vm.loading,
-                onRefresh = { vm.retryConnection() },
+                onRefresh = { vm.manualRefresh() },
                 modifier = Modifier.weight(1f),
             ) {
                 LazyColumn(

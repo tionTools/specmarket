@@ -109,6 +109,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         refresh(force = true)
     }
 
+    fun manualRefresh() {
+        if (email == null) return
+        startRealtime(forceRestart = true)
+        refresh(force = true, reconcileRecent = true)
+    }
+
     private fun syncPushRegistration(enabledOverride: Boolean? = null) {
         if (email == null) return
         pushRegistrationJob?.cancel()
@@ -267,7 +273,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         cache.save(currentAccount, orders, pendingNotificationIds)
     }
 
-    fun refresh(force: Boolean = false) {
+    fun refresh(force: Boolean = false, reconcileRecent: Boolean = false) {
         val account = email ?: return
         if (loading && !force) return
         val generation = ++refreshGeneration
@@ -299,9 +305,15 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                         } else {
                             repository.ordersChangedSince(cursor)
                         }
+                        val recent = if (reconcileRecent && cursor != null) {
+                            repository.recentOrders()
+                        } else emptyList()
                         if (email != account || generation != refreshGeneration) return@withLock
-                        val discovered = if (baselineComplete) fetched.filter { it.id !in knownIds } else emptyList()
-                        orders = mergeOrders(orders, fetched)
+                        val refreshed = fetched + recent
+                        val discovered = if (baselineComplete) {
+                            refreshed.filter { it.id !in knownIds }.distinctBy { it.id }
+                        } else emptyList()
+                        orders = mergeOrders(orders, refreshed)
                         initialLoadComplete = true
                         for (order in discovered) notifyOrQueue(order)
                         selectedId?.let { id ->
