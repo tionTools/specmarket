@@ -8,7 +8,11 @@ import { shouldWaivePromPromoShippingForUnclaimedReturn } from '../_shared/prom-
 import { isFinal, record, text } from './normalize.ts'
 import { readCurrentDeliveries } from './current-deliveries.ts'
 import { upsertTrackingStateBatches, type TrackingStateUpdate } from './state-batch.ts'
-import { bulkTrackingEnabledFromRows, bulkTrackingPlatformOrFilter, shouldBulkTrackPlatform } from './marketplace-pause.ts'
+import {
+  bulkTrackingEnabledFromRows,
+  bulkTrackingPlatformOrFilter,
+  shouldBulkTrackPlatform,
+} from './marketplace-pause.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
