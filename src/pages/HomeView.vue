@@ -2657,7 +2657,9 @@ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
 
 async function loadEnabledBulkMarketplaces() {
   if (!supabase) throw new Error('Нет подключения к Supabase.')
-  const { data, error } = await supabase.from('crm_marketplace_settings').select('platform, enabled')
+  const { data, error } = await supabase
+    .from('crm_marketplace_settings')
+    .select('platform, enabled')
   if (error) throw error
   // Missing or invalid settings must stop every bulk request, not silently enable a platform.
   return marketplaceEnabledFromRows(data ?? [])
@@ -2680,7 +2682,9 @@ async function syncNewAllPlatforms() {
       else showSyncMessage(summary)
     }
   } catch (error) {
-    showSyncError(`Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`)
+    showSyncError(
+      `Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`,
+    )
   } finally {
     isSyncingAllPlatforms.value = false
   }
@@ -2714,7 +2718,9 @@ async function syncFullAllPlatforms() {
     if (fullSyncResults.some((result) => result.includes(': ошибка — '))) showSyncError(summary)
     else showSyncMessage(summary)
   } catch (error) {
-    showSyncError(`Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`)
+    showSyncError(
+      `Не удалось проверить настройки площадок: ${error instanceof Error ? error.message : String(error)}`,
+    )
   } finally {
     isSyncingAllPlatforms.value = false
   }
