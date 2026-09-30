@@ -28,6 +28,7 @@ set search_path = pg_catalog, public
 as $$
 declare
   items_changed boolean;
+  previous_skip_parent_touch text;
 begin
   if p_items is null or jsonb_typeof(p_items) <> 'array' then
     raise exception 'p_items must be a JSON array';
@@ -91,6 +92,7 @@ begin
     return;
   end if;
 
+  previous_skip_parent_touch := current_setting('specmarket.skip_crm_order_item_parent_touch', true);
   perform set_config('specmarket.skip_crm_order_item_parent_touch', 'on', true);
 
   delete from public.crm_order_items
@@ -108,7 +110,11 @@ begin
     item.royalty_percent, item.royalty_amount, coalesce(item.royalty_manual, false)
   from jsonb_populate_recordset(null::public.crm_order_items, p_items) as item;
 
-  perform set_config('specmarket.skip_crm_order_item_parent_touch', 'off', true);
+  perform set_config(
+    'specmarket.skip_crm_order_item_parent_touch',
+    coalesce(previous_skip_parent_touch, 'off'),
+    true
+  );
 
   update public.crm_orders
      set updated_at = now()
