@@ -70,7 +70,9 @@ class FakeChannel {
   subscribe(callback) {
     this.subscribeCalls += 1
     if (this.subscribeCalls > 1) {
-      throw new Error("Tried to subscribe multiple times. 'subscribe' can only be called a single time per channel instance")
+      throw new Error(
+        "Tried to subscribe multiple times. 'subscribe' can only be called a single time per channel instance",
+      )
     }
     this.statusCallback = callback
     return this

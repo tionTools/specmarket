@@ -13,15 +13,8 @@ export function useBankingMonitor(options: {
   onPayment: (event: BankPaymentEvent) => void
   onJournalChange: () => void
 }) {
-  const {
-    supabase,
-    user,
-    isGuest,
-    isOnline,
-    documentVisibility,
-    onPayment,
-    onJournalChange,
-  } = options
+  const { supabase, user, isGuest, isOnline, documentVisibility, onPayment, onJournalChange } =
+    options
   const caches = ref<BankState>({
     monobank: { balance: null, updatedAt: null },
     novapay: { balance: null, updatedAt: null },
