@@ -64,7 +64,8 @@ export function writeRemoteOrdersSessionCache(
   if (!storage) return
 
   const remoteOrders = orders.filter(
-    (order): order is Order & { remoteId: string } => typeof order.remoteId === 'string',
+    (order): order is Order & { remoteId: string } =>
+      typeof order.remoteId === 'string' && Boolean(order.remoteId.trim()),
   )
   const remoteIds = new Set(remoteOrders.map((order) => order.remoteId))
   const remoteVersions = Object.fromEntries(
