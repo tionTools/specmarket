@@ -1,0 +1,46 @@
+name: Banking realtime publication cleanup
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/*banking_realtime_publication_cleanup.sql'
+      - 'supabase/tests/banking-realtime-publication-cleanup.sh'
+      - '.github/workflows/banking-realtime-publication-cleanup.yml'
+      - 'src/features/banking/**'
+      - 'src/pages/BankStatementView.vue'
+
+jobs:
+  postgres-publication-cleanup:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: specmarket_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d specmarket_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          psql --version
+
+      - name: Verify banking publication cleanup
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/specmarket_test
+        run: bash supabase/tests/banking-realtime-publication-cleanup.sh
