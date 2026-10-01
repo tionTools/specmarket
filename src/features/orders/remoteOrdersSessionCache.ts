@@ -27,6 +27,14 @@ export function readRemoteOrdersSessionCache(userId: string): RemoteOrdersSessio
     if (
       value.userId !== userId ||
       !Array.isArray(value.orders) ||
+      value.orders.some(
+        (order) =>
+          !order ||
+          typeof order !== 'object' ||
+          Array.isArray(order) ||
+          typeof (order as Partial<Order>).remoteId !== 'string' ||
+          !(order as Partial<Order>).remoteId?.trim(),
+      ) ||
       !value.versions ||
       typeof value.versions !== 'object' ||
       Array.isArray(value.versions)
