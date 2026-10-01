@@ -381,10 +381,21 @@ const remoteOrderVersions = new Map<string, string>()
 const targetedOrdersBatchSize = 100
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
-function persistRemoteOrdersSessionCache() {
+function persistConfirmedRemoteOrdersSessionCache(
+  cacheOrders: Order[],
+  cacheVersions = remoteOrderVersions,
+) {
   const userId = user.value?.id
   if (!userId) return
-  writeRemoteOrdersSessionCache(userId, orders.value, remoteOrderVersions)
+  writeRemoteOrdersSessionCache(userId, cacheOrders, cacheVersions)
+}
+
+function persistRemoteOrdersSessionCache() {
+  if (editingOrderCell.value || pendingLocalOrderSaves.size) return
+  const cacheOrders = orders.value.map((order) =>
+    cloneOrder(orderWithRegistryFinancialsRestored(order)),
+  )
+  persistConfirmedRemoteOrdersSessionCache(cacheOrders)
 }
 
 function playToastSound() {
@@ -2250,14 +2261,20 @@ function decrementPendingLocalSaves(remoteIds: Set<string>) {
 
 function persistOrders(order?: Order) {
   if (isGuest.value) return Promise.resolve()
-  const savedOrders = order
-    ? [orderWithRegistryFinancialsRestored(order)]
-    : orders.value.map(orderWithRegistryFinancialsRestored)
-  const localOrders = orders.value.map(orderWithRegistryFinancialsRestored)
+  const confirmedSnapshot = (value: Order) => cloneOrder(orderWithRegistryFinancialsRestored(value))
+  const cacheWriteSafe = editingOrderCell.value === null
+  const cacheVersions = new Map(remoteOrderVersions)
+  const savedOrders = order ? [confirmedSnapshot(order)] : orders.value.map(confirmedSnapshot)
+  const localOrders = orders.value.map(confirmedSnapshot)
   const pendingRemoteIds = incrementPendingLocalSaves(savedOrders)
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
-    .then(() => persistOrdersNow(savedOrders, localOrders))
+    .then(async () => {
+      const confirmedOrders = await persistOrdersNow(savedOrders, localOrders)
+      if (confirmedOrders && cacheWriteSafe) {
+        persistConfirmedRemoteOrdersSessionCache(confirmedOrders, cacheVersions)
+      }
+    })
     .finally(() => decrementPendingLocalSaves(pendingRemoteIds))
   return persistenceQueue
 }
@@ -2431,9 +2448,9 @@ async function saveAcceptedReturns(order: Order) {
 }
 
 async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value) {
-  if (isGuest.value) return
+  if (isGuest.value) return null
   window.localStorage.setItem(storageKey, JSON.stringify(localOrders))
-  if (!supabase) return
+  if (!supabase) return null
   const { data, error } = await supabase.functions.invoke('save-crm-orders', {
     method: 'POST',
     body: {
@@ -2443,14 +2460,15 @@ async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value
   if (error || !data?.ok)
     throw new Error(data?.message ?? error?.message ?? 'Не удалось сохранить заказы.')
   for (const saved of data.saved as Array<{ orderNumber: number; remoteId: string }>) {
-    const order = orders.value.find(
-      (item) =>
-        item.remoteId === saved.remoteId || (item.orderNumber ?? item.id) === saved.orderNumber,
-    )
-    if (order) order.remoteId = saved.remoteId
+    const matchesSavedOrder = (item: Order) =>
+      item.remoteId === saved.remoteId || (item.orderNumber ?? item.id) === saved.orderNumber
+    const liveOrder = orders.value.find(matchesSavedOrder)
+    if (liveOrder) liveOrder.remoteId = saved.remoteId
+    const cachedOrder = localOrders.find(matchesSavedOrder)
+    if (cachedOrder) cachedOrder.remoteId = saved.remoteId
   }
-  persistRemoteOrdersSessionCache()
   void bankBalancesCard.value?.refreshDebt()
+  return localOrders
 }
 
 async function signIn() {
