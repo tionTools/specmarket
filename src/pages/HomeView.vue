@@ -84,6 +84,11 @@ import type {
   ShipmentHistoryEntry,
   ShipmentRelation,
 } from '@/features/orders/types'
+import {
+  clearRemoteOrdersSessionCache,
+  readRemoteOrdersSessionCache,
+  writeRemoteOrdersSessionCache,
+} from '@/features/orders/remoteOrdersSessionCache'
 import { supabase } from '@/lib/supabase'
 import { marketplaceEnabledFromRows } from '@/features/marketplaces/syncSettings'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
@@ -373,7 +378,15 @@ const realtimeStatusDetail = ref('')
 let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
+const remoteOrdersPageSize = 200
+const targetedOrdersBatchSize = 100
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
+
+function persistRemoteOrdersSessionCache() {
+  const userId = user.value?.id
+  if (!userId) return
+  writeRemoteOrdersSessionCache(userId, orders.value, remoteOrderVersions)
+}
 
 function playToastSound() {
   if (!audioContext || audioContext.state !== 'running') return
@@ -2437,6 +2450,7 @@ async function persistOrdersNow(savedOrders: Order[], localOrders = orders.value
     )
     if (order) order.remoteId = saved.remoteId
   }
+  persistRemoteOrdersSessionCache()
   void bankBalancesCard.value?.refreshDebt()
 }
 
@@ -2461,6 +2475,7 @@ async function signIn() {
 }
 
 async function signOut() {
+  clearRemoteOrdersSessionCache()
   await supabase?.auth.signOut()
   user.value = null
   window.location.reload()
@@ -2946,6 +2961,7 @@ function removeRemoteOrder(remoteId: string | undefined) {
   orders.value = orders.value.filter((order) => order.remoteId !== remoteId)
   unregisterRemoteOrder(remoteId)
   reconcileLabelReminders()
+  persistRemoteOrdersSessionCache()
 }
 
 function scheduleReconciliation(delay = 750, force = false) {
@@ -3170,6 +3186,82 @@ function isRemoteOrderLocallyBusy(remoteId: string) {
   return focusedOrderCellOrder()?.remoteId === remoteId
 }
 
+function chunks<T>(values: T[], size: number) {
+  const result: T[][] = []
+  for (let start = 0; start < values.length; start += size) {
+    result.push(values.slice(start, start + size))
+  }
+  return result
+}
+
+async function fetchAllRemoteOrderVersions() {
+  if (!supabase) return null
+  const rows: Array<{ id: string; updated_at: string }> = []
+  for (let offset = 0; ; offset += remoteOrdersPageSize) {
+    const { data, error } = await supabase
+      .from('crm_orders')
+      .select('id, updated_at')
+      .order('id', { ascending: true })
+      .range(offset, offset + remoteOrdersPageSize - 1)
+    if (error) {
+      console.error('Не удалось сверить изменения заказов CRM:', error)
+      return null
+    }
+    const page = (data ?? []).map((row) => ({
+      id: String(row.id),
+      updated_at: String(row.updated_at),
+    }))
+    rows.push(...page)
+    if (page.length < remoteOrdersPageSize) return rows
+  }
+}
+
+async function fetchAllRemoteOrderRows() {
+  if (!supabase) return null
+  const rows: Array<Record<string, unknown>> = []
+  for (let offset = 0; ; offset += remoteOrdersPageSize) {
+    const { data, error } = await supabase
+      .from('crm_orders')
+      .select('*, crm_order_items(*)')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + remoteOrdersPageSize - 1)
+    if (error) {
+      console.error('Не удалось загрузить заказы CRM:', error)
+      return null
+    }
+    const page = (data ?? []) as Array<Record<string, unknown>>
+    rows.push(...page)
+    if (page.length < remoteOrdersPageSize) return rows
+  }
+}
+
+async function fetchAllOrderItemReturns() {
+  if (!supabase) return null
+  const rows: OrderItemReturn[] = []
+  for (let offset = 0; ; offset += remoteOrdersPageSize) {
+    const { data, error } = await supabase
+      .from('crm_order_item_returns')
+      .select('order_id, item_position, product_name, returned_quantity, returned_at')
+      .order('order_id', { ascending: true })
+      .order('item_position', { ascending: true })
+      .range(offset, offset + remoteOrdersPageSize - 1)
+    if (error) {
+      console.error('Не удалось загрузить возвраты заказов CRM:', error)
+      return null
+    }
+    const page = (data ?? []).map((row) => ({
+      order_id: String(row.order_id),
+      item_position: Number(row.item_position),
+      product_name: String(row.product_name),
+      returned_quantity: Number(row.returned_quantity),
+      returned_at: row.returned_at === null ? null : String(row.returned_at),
+    }))
+    rows.push(...page)
+    if (page.length < remoteOrdersPageSize) return rows
+  }
+}
+
 async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
   if (!supabase) return false
   if (!remoteIds.length) return true
@@ -3181,21 +3273,36 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
   })
   const refreshedAllRequestedOrders = refreshableIds.length === uniqueRemoteIds.length
   if (!refreshableIds.length) return false
-  const { data: remoteOrders, error: ordersError } = await supabase
-    .from('crm_orders')
-    .select('*, crm_order_items(*)')
-    .in('id', refreshableIds)
-  if (ordersError || !remoteOrders) {
-    console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
-    return false
-  }
-  const { data: orderItemReturns, error: returnsError } = await supabase
-    .from('crm_order_item_returns')
-    .select('order_id, item_position, product_name, returned_quantity, returned_at')
-    .in('order_id', refreshableIds)
-  if (returnsError) {
-    console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
-    return false
+  const remoteOrders: Array<Record<string, unknown>> = []
+  const orderItemReturns: OrderItemReturn[] = []
+  for (const remoteIdBatch of chunks(refreshableIds, targetedOrdersBatchSize)) {
+    const { data: orderRows, error: ordersError } = await supabase
+      .from('crm_orders')
+      .select('*, crm_order_items(*)')
+      .in('id', remoteIdBatch)
+    if (ordersError || !orderRows) {
+      console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
+      return false
+    }
+    remoteOrders.push(...(orderRows as Array<Record<string, unknown>>))
+
+    const { data: returnRows, error: returnsError } = await supabase
+      .from('crm_order_item_returns')
+      .select('order_id, item_position, product_name, returned_quantity, returned_at')
+      .in('order_id', remoteIdBatch)
+    if (returnsError) {
+      console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
+      return false
+    }
+    orderItemReturns.push(
+      ...(returnRows ?? []).map((row) => ({
+        order_id: String(row.order_id),
+        item_position: Number(row.item_position),
+        product_name: String(row.product_name),
+        returned_quantity: Number(row.returned_quantity),
+        returned_at: row.returned_at === null ? null : String(row.returned_at),
+      })),
+    )
   }
   const refreshedOrders = mapRemoteOrders(remoteOrders, orderItemReturns)
   const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
@@ -3224,6 +3331,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
   )
   sortOrders()
   reconcileLabelReminders()
+  persistRemoteOrdersSessionCache()
   void bankBalancesCard.value?.refreshDebt()
   return refreshedAllRequestedOrders
 }
@@ -3268,12 +3376,9 @@ async function reconcileRemoteOrders(force = false) {
     return
   isReconciliationRunning = true
   try {
-    const { data: remoteOrders, error } = await supabase.from('crm_orders').select('id, updated_at')
-    if (error || !remoteOrders) {
-      console.error('Не удалось сверить изменения заказов CRM:', error)
-      return
-    }
-    const remoteIds = new Set(remoteOrders.map((order) => String(order.id)))
+    const remoteOrders = await fetchAllRemoteOrderVersions()
+    if (!remoteOrders) return
+    const remoteIds = new Set(remoteOrders.map((order) => order.id))
     const deletedRemoteIds = orders.value
       .map((order) => order.remoteId)
       .filter(
@@ -3308,27 +3413,52 @@ async function loadRemoteOrders() {
   else if (!currencyRates.value.length)
     showSyncError('История курса USD пуста. Добавьте курс в прайсе.')
   await refreshLinkedPriceProductKeys()
-  const { data: remoteOrders } = await supabase
-    .from('crm_orders')
-    .select('*, crm_order_items(*)')
-    .order('created_at', { ascending: false })
-  const { data: orderItemReturns } = await supabase
-    .from('crm_order_item_returns')
-    .select('order_id, item_position, product_name, returned_quantity, returned_at')
-  if (!remoteOrders?.length) {
+
+  const cached = readRemoteOrdersSessionCache(session.session.user.id)
+  if (cached) {
+    orders.value = cached.orders
+    remoteOrderVersions.clear()
+    for (const [remoteId, version] of Object.entries(cached.versions)) {
+      remoteOrderVersions.set(remoteId, version)
+    }
+    registerRemoteOrders(
+      cached.orders.flatMap((order) =>
+        order.remoteId
+          ? [
+              {
+                remoteId: order.remoteId,
+                orderId: String(order.displayNumber ?? order.id),
+                platform: order.platform,
+              },
+            ]
+          : [],
+      ),
+    )
+    sortOrders()
+    await reconcileRemoteOrders(true)
+    return
+  }
+
+  const remoteOrders = await fetchAllRemoteOrderRows()
+  const orderItemReturns = await fetchAllOrderItemReturns()
+  if (!remoteOrders || !orderItemReturns) return
+  if (!remoteOrders.length) {
     await persistOrders()
+    persistRemoteOrdersSessionCache()
     return
   }
   registerRemoteOrders(
     remoteOrders.map((row) => ({
       remoteId: String(row.id),
-      orderId: row.order_label ?? String(row.order_number),
+      orderId: String(row.order_label ?? row.order_number),
       platform: row.platform as Platform,
     })),
   )
   orders.value = mapRemoteOrders(remoteOrders, orderItemReturns)
+  remoteOrderVersions.clear()
   for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
   sortOrders()
+  persistRemoteOrdersSessionCache()
 }
 
 onMounted(async () => {
@@ -4001,6 +4131,7 @@ async function deleteOrder(order: Order) {
   }
   orders.value = orders.value.filter((item) => item.id !== order.id)
   window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+  persistRemoteOrdersSessionCache()
   expandedOrderId.value = null
   deletingOrderId.value = null
   void bankBalancesCard.value?.refreshDebt()
