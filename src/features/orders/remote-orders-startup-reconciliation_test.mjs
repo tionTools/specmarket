@@ -24,7 +24,10 @@ const cacheBranchStart = homeScript.indexOf(
 const fullLoadStart = homeScript.indexOf(
   'const { rows: remoteOrders, error: ordersError } = await fetchAllRemoteOrderRows(supabase)',
 )
-assert.ok(cacheBranchStart >= 0 && fullLoadStart > cacheBranchStart, 'cache branch must be locatable')
+assert.ok(
+  cacheBranchStart >= 0 && fullLoadStart > cacheBranchStart,
+  'cache branch must be locatable',
+)
 const cacheBranch = homeScript.slice(cacheBranchStart, fullLoadStart)
 
 assert.match(
