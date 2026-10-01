@@ -7,11 +7,7 @@ const homeSource = readFileSync(new URL('../../pages/HomeView.vue', import.meta.
 const homeScript = homeSource.split('<script setup lang="ts">')[1].split('</script>')[0]
 const parsed = ts.createSourceFile('HomeView.ts', homeScript, ts.ScriptTarget.Latest, true)
 
-const names = [
-  'markRemoteOrderLocallyChanged',
-  'remoteOrderLocalRevision',
-  'refreshRemoteOrders',
-]
+const names = ['markRemoteOrderLocallyChanged', 'remoteOrderLocalRevision', 'refreshRemoteOrders']
 const statements = parsed.statements.filter(
   (node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text),
 )
@@ -165,7 +161,11 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
     false,
     'skipped stale row must not mark its server version fresh',
   )
-  assert.deepEqual(state.queued, ['r1'], 'clean-after-save stale row must schedule a fresh targeted read')
+  assert.deepEqual(
+    state.queued,
+    ['r1'],
+    'clean-after-save stale row must schedule a fresh targeted read',
+  )
   assert.equal(state.deferredRemoteOrderIds.has('r1'), false)
 }
 
