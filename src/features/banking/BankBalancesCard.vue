@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useNow } from '@vueuse/core'
-import type { RealtimeChannel } from '@supabase/supabase-js'
-
 import { supabase } from '@/lib/supabase'
 import { consumeBankingReturn } from './navigation'
 import { hasNovaPaySyncIssue, type NovaPayJournalRow } from './novapayJournal'
@@ -15,7 +13,6 @@ const supplierDebt = ref<number | null>(null)
 const journal = ref<NovaPayJournalRow[]>([])
 const journalUnavailable = ref(false)
 const now = useNow({ interval: 60_000 })
-let journalChannel: RealtimeChannel | undefined
 
 const syncIssue = computed(() =>
   hasNovaPaySyncIssue(journal.value, props.caches.novapay.updatedAt, now.value),
@@ -86,7 +83,7 @@ async function loadSupplierDebt() {
   supplierDebt.value = debt
 }
 
-defineExpose({ refreshDebt: loadSupplierDebt })
+defineExpose({ refreshDebt: loadSupplierDebt, refreshJournal: loadNovaPayJournal })
 
 function scrollToBankingBlock() {
   if (!consumeBankingReturn()) return
@@ -111,17 +108,6 @@ onMounted(() => {
   scrollToBankingBlock()
   void loadSupplierDebt()
   void loadNovaPayJournal()
-  if (supabase) {
-    journalChannel = supabase
-      .channel('crm:banking', { config: { private: true } })
-      .on('broadcast', { event: 'novapay_journal_changed' }, () => void loadNovaPayJournal())
-      .subscribe()
-  }
-})
-
-onUnmounted(() => {
-  if (supabase && journalChannel) void supabase.removeChannel(journalChannel)
-  journalChannel = undefined
 })
 </script>
 

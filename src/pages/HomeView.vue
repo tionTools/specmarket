@@ -418,6 +418,7 @@ const bankingMonitor = useBankingMonitor({
   isOnline,
   documentVisibility,
   onPayment: notifyBankPayment,
+  onJournalChange: () => void bankBalancesCard.value?.refreshJournal(),
 })
 const bankCaches = bankingMonitor.caches
 const bankTotalBalance = bankingMonitor.totalBalance
