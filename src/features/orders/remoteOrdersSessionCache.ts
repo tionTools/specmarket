@@ -8,8 +8,12 @@ type RemoteOrdersSessionCache = {
   versions: Record<string, string>
 }
 
-function sessionStorageAvailable() {
-  return typeof window !== 'undefined' && window.sessionStorage
+function sessionStorageAvailable(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.sessionStorage
+  } catch {
+    return null
+  }
 }
 
 export function readRemoteOrdersSessionCache(userId: string): RemoteOrdersSessionCache | null {
