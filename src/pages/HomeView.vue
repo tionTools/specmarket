@@ -3197,12 +3197,15 @@ function chunks<T>(values: T[], size: number) {
 async function fetchAllRemoteOrderVersions() {
   if (!supabase) return null
   const rows: Array<{ id: string; updated_at: string }> = []
-  for (let offset = 0; ; offset += remoteOrdersPageSize) {
-    const { data, error } = await supabase
+  let lastId = ''
+  while (true) {
+    let query = supabase
       .from('crm_orders')
       .select('id, updated_at')
       .order('id', { ascending: true })
-      .range(offset, offset + remoteOrdersPageSize - 1)
+      .limit(remoteOrdersPageSize)
+    if (lastId) query = query.gt('id', lastId)
+    const { data, error } = await query
     if (error) {
       console.error('Не удалось сверить изменения заказов CRM:', error)
       return null
@@ -3213,19 +3216,23 @@ async function fetchAllRemoteOrderVersions() {
     }))
     rows.push(...page)
     if (page.length < remoteOrdersPageSize) return rows
+    lastId = page.at(-1)?.id ?? ''
+    if (!lastId) return rows
   }
 }
 
 async function fetchAllRemoteOrderRows() {
   if (!supabase) return null
   const rows: Array<Record<string, unknown>> = []
-  for (let offset = 0; ; offset += remoteOrdersPageSize) {
-    const { data, error } = await supabase
+  let lastId = ''
+  while (true) {
+    let query = supabase
       .from('crm_orders')
       .select('*, crm_order_items(*)')
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(offset, offset + remoteOrdersPageSize - 1)
+      .order('id', { ascending: true })
+      .limit(remoteOrdersPageSize)
+    if (lastId) query = query.gt('id', lastId)
+    const { data, error } = await query
     if (error) {
       console.error('Не удалось загрузить заказы CRM:', error)
       return null
@@ -3233,6 +3240,8 @@ async function fetchAllRemoteOrderRows() {
     const page = (data ?? []) as Array<Record<string, unknown>>
     rows.push(...page)
     if (page.length < remoteOrdersPageSize) return rows
+    lastId = String(page.at(-1)?.id ?? '')
+    if (!lastId) return rows
   }
 }
 
