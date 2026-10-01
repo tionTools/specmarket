@@ -1,0 +1,44 @@
+name: Order item replace concurrency
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/*order_item_replace*.sql'
+      - 'supabase/tests/order-item-replace-concurrency.sh'
+      - '.github/workflows/order-item-replace-concurrency.yml'
+
+jobs:
+  postgres-concurrency:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: specmarket_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d specmarket_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          psql --version
+
+      - name: Run concurrent replace regression
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/specmarket_test
+        run: bash supabase/tests/order-item-replace-concurrency.sh
