@@ -351,6 +351,8 @@ let realtimeRefreshTimer: ReturnType<typeof window.setTimeout> | undefined
 let realtimeReconnectTimer: ReturnType<typeof window.setTimeout> | undefined
 let reconciliationTimer: ReturnType<typeof window.setTimeout> | undefined
 let isReconciliationRunning = false
+let reconciliationRequestedWhileRunning = false
+let startupCacheReconciliationPending = false
 let lastReconciliationAt = 0
 let realtimeReconnectAttempt = 0
 const realtimeReconnectDelays = [5_000, 10_000, 20_000, 30_000] as const
@@ -3075,6 +3077,30 @@ function handleBrowserOnline() {
   if (!ordersRealtimeSubscribed.value) scheduleRealtimeReconnect(0)
 }
 
+function handleOrdersRealtimeStatus(status: string, error: unknown) {
+  if (status === 'SUBSCRIBED') {
+    ordersRealtimeSubscribed.value = true
+    startupCacheReconciliationPending = false
+    realtimeReconnectAttempt = 0
+    realtimeStatusDetail.value = ''
+    if (realtimeReconnectTimer) {
+      window.clearTimeout(realtimeReconnectTimer)
+      realtimeReconnectTimer = undefined
+    }
+    scheduleReconciliation(0, true)
+    return
+  }
+  if (status !== 'CHANNEL_ERROR' && status !== 'TIMED_OUT' && status !== 'CLOSED') return
+
+  ordersRealtimeSubscribed.value = false
+  realtimeStatusDetail.value = realtimeErrorMessage(error) || status
+  if (startupCacheReconciliationPending) {
+    startupCacheReconciliationPending = false
+    scheduleReconciliation(0, true)
+  }
+  scheduleRealtimeReconnect()
+}
+
 function startAutomaticOrdersRefresh() {
   if (!supabase || ordersRealtimeChannel) return
   isAutomaticOrdersRefreshActive = true
@@ -3094,22 +3120,7 @@ function startAutomaticOrdersRefresh() {
         queueRemoteOrderRefresh(event.order_id)
       }
     })
-    .subscribe((status, error) => {
-      if (status === 'SUBSCRIBED') {
-        ordersRealtimeSubscribed.value = true
-        realtimeReconnectAttempt = 0
-        realtimeStatusDetail.value = ''
-        if (realtimeReconnectTimer) {
-          window.clearTimeout(realtimeReconnectTimer)
-          realtimeReconnectTimer = undefined
-        }
-        scheduleReconciliation(0, true)
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        ordersRealtimeSubscribed.value = false
-        realtimeStatusDetail.value = realtimeErrorMessage(error) || status
-        scheduleRealtimeReconnect()
-      }
-    })
+    .subscribe((status, error) => handleOrdersRealtimeStatus(status, error))
 }
 
 function sortOrders() {
@@ -3349,8 +3360,11 @@ function unlockNewOrderSound() {
 }
 
 async function reconcileRemoteOrders(force = false) {
-  if (!supabase || isReconciliationRunning || (!force && documentVisibility.value !== 'visible'))
+  if (!supabase || (!force && documentVisibility.value !== 'visible')) return
+  if (isReconciliationRunning) {
+    reconciliationRequestedWhileRunning = reconciliationRequestedWhileRunning || force
     return
+  }
   isReconciliationRunning = true
   try {
     const { rows: remoteOrders, error } = await fetchAllRemoteOrderVersions(supabase)
@@ -3372,6 +3386,10 @@ async function reconcileRemoteOrders(force = false) {
     lastReconciliationAt = Date.now()
   } finally {
     isReconciliationRunning = false
+    if (reconciliationRequestedWhileRunning) {
+      reconciliationRequestedWhileRunning = false
+      scheduleReconciliation(0, true)
+    }
   }
 }
 
@@ -3415,7 +3433,8 @@ async function loadRemoteOrders() {
       ),
     )
     sortOrders()
-    await reconcileRemoteOrders(true)
+    startupCacheReconciliationPending = true
+    startAutomaticOrdersRefresh()
     return
   }
 
@@ -3489,6 +3508,8 @@ onMounted(async () => {
 onScopeDispose(() => {
   isAutomaticOrdersRefreshActive = false
   ordersRealtimeSubscribed.value = false
+  startupCacheReconciliationPending = false
+  reconciliationRequestedWhileRunning = false
   if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
   if (realtimeReconnectTimer) window.clearTimeout(realtimeReconnectTimer)
   if (reconciliationTimer) window.clearTimeout(reconciliationTimer)
