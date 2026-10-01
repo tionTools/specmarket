@@ -89,6 +89,13 @@ import {
   readRemoteOrdersSessionCache,
   writeRemoteOrdersSessionCache,
 } from '@/features/orders/remoteOrdersSessionCache'
+import {
+  chunks,
+  fetchAllOrderItemReturns,
+  fetchAllRemoteOrderRows,
+  fetchAllRemoteOrderVersions,
+  type OrderItemReturnRow,
+} from '@/features/orders/remoteOrderQueries'
 import { supabase } from '@/lib/supabase'
 import { marketplaceEnabledFromRows } from '@/features/marketplaces/syncSettings'
 import PlatformLogo from '@/components/ui/PlatformLogo.vue'
@@ -293,13 +300,6 @@ type ManualOrderPriceSelection = {
   costUsd: number
   costUah: number
 }
-type OrderItemReturn = {
-  order_id: string
-  item_position: number
-  product_name: string
-  returned_quantity: number
-  returned_at: string | null
-}
 const promRegistryEntries = ref<PromRegistryEntry[]>([])
 const promRegistryFileName = ref('')
 const promRegistryError = ref('')
@@ -378,7 +378,6 @@ const realtimeStatusDetail = ref('')
 let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
-const remoteOrdersPageSize = 200
 const targetedOrdersBatchSize = 100
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
@@ -3103,7 +3102,7 @@ function sortOrders() {
 
 function mapRemoteOrders(
   remoteOrders: Array<Record<string, unknown>>,
-  orderItemReturns: OrderItemReturn[] | null,
+  orderItemReturns: OrderItemReturnRow[] | null,
 ) {
   if (remoteOrders) {
     const returnedItemsByKey = new Map(
@@ -3186,91 +3185,6 @@ function isRemoteOrderLocallyBusy(remoteId: string) {
   return focusedOrderCellOrder()?.remoteId === remoteId
 }
 
-function chunks<T>(values: T[], size: number) {
-  const result: T[][] = []
-  for (let start = 0; start < values.length; start += size) {
-    result.push(values.slice(start, start + size))
-  }
-  return result
-}
-
-async function fetchAllRemoteOrderVersions() {
-  if (!supabase) return null
-  const rows: Array<{ id: string; updated_at: string }> = []
-  let lastId = ''
-  while (true) {
-    let query = supabase
-      .from('crm_orders')
-      .select('id, updated_at')
-      .order('id', { ascending: true })
-      .limit(remoteOrdersPageSize)
-    if (lastId) query = query.gt('id', lastId)
-    const { data, error } = await query
-    if (error) {
-      console.error('Не удалось сверить изменения заказов CRM:', error)
-      return null
-    }
-    const page = (data ?? []).map((row) => ({
-      id: String(row.id),
-      updated_at: String(row.updated_at),
-    }))
-    rows.push(...page)
-    if (page.length < remoteOrdersPageSize) return rows
-    lastId = page.at(-1)?.id ?? ''
-    if (!lastId) return rows
-  }
-}
-
-async function fetchAllRemoteOrderRows() {
-  if (!supabase) return null
-  const rows: Array<Record<string, unknown>> = []
-  let lastId = ''
-  while (true) {
-    let query = supabase
-      .from('crm_orders')
-      .select('*, crm_order_items(*)')
-      .order('id', { ascending: true })
-      .limit(remoteOrdersPageSize)
-    if (lastId) query = query.gt('id', lastId)
-    const { data, error } = await query
-    if (error) {
-      console.error('Не удалось загрузить заказы CRM:', error)
-      return null
-    }
-    const page = (data ?? []) as Array<Record<string, unknown>>
-    rows.push(...page)
-    if (page.length < remoteOrdersPageSize) return rows
-    lastId = String(page.at(-1)?.id ?? '')
-    if (!lastId) return rows
-  }
-}
-
-async function fetchAllOrderItemReturns() {
-  if (!supabase) return null
-  const rows: OrderItemReturn[] = []
-  for (let offset = 0; ; offset += remoteOrdersPageSize) {
-    const { data, error } = await supabase
-      .from('crm_order_item_returns')
-      .select('order_id, item_position, product_name, returned_quantity, returned_at')
-      .order('order_id', { ascending: true })
-      .order('item_position', { ascending: true })
-      .range(offset, offset + remoteOrdersPageSize - 1)
-    if (error) {
-      console.error('Не удалось загрузить возвраты заказов CRM:', error)
-      return null
-    }
-    const page = (data ?? []).map((row) => ({
-      order_id: String(row.order_id),
-      item_position: Number(row.item_position),
-      product_name: String(row.product_name),
-      returned_quantity: Number(row.returned_quantity),
-      returned_at: row.returned_at === null ? null : String(row.returned_at),
-    }))
-    rows.push(...page)
-    if (page.length < remoteOrdersPageSize) return rows
-  }
-}
-
 async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
   if (!supabase) return false
   if (!remoteIds.length) return true
@@ -3283,7 +3197,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
   const refreshedAllRequestedOrders = refreshableIds.length === uniqueRemoteIds.length
   if (!refreshableIds.length) return false
   const remoteOrders: Array<Record<string, unknown>> = []
-  const orderItemReturns: OrderItemReturn[] = []
+  const orderItemReturns: OrderItemReturnRow[] = []
   for (const remoteIdBatch of chunks(refreshableIds, targetedOrdersBatchSize)) {
     const { data: orderRows, error: ordersError } = await supabase
       .from('crm_orders')
@@ -3385,8 +3299,11 @@ async function reconcileRemoteOrders(force = false) {
     return
   isReconciliationRunning = true
   try {
-    const remoteOrders = await fetchAllRemoteOrderVersions()
-    if (!remoteOrders) return
+    const { rows: remoteOrders, error } = await fetchAllRemoteOrderVersions(supabase)
+    if (error || !remoteOrders) {
+      console.error('Не удалось сверить изменения заказов CRM:', error)
+      return
+    }
     const remoteIds = new Set(remoteOrders.map((order) => order.id))
     const deletedRemoteIds = orders.value
       .map((order) => order.remoteId)
@@ -3448,9 +3365,16 @@ async function loadRemoteOrders() {
     return
   }
 
-  const remoteOrders = await fetchAllRemoteOrderRows()
-  const orderItemReturns = await fetchAllOrderItemReturns()
-  if (!remoteOrders || !orderItemReturns) return
+  const { rows: remoteOrders, error: ordersError } = await fetchAllRemoteOrderRows(supabase)
+  if (ordersError || !remoteOrders) {
+    console.error('Не удалось загрузить заказы CRM:', ordersError)
+    return
+  }
+  const { rows: orderItemReturns, error: returnsError } = await fetchAllOrderItemReturns(supabase)
+  if (returnsError || !orderItemReturns) {
+    console.error('Не удалось загрузить возвраты заказов CRM:', returnsError)
+    return
+  }
   if (!remoteOrders.length) {
     await persistOrders()
     persistRemoteOrdersSessionCache()
