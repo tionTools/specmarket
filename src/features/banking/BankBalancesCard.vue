@@ -113,12 +113,8 @@ onMounted(() => {
   void loadNovaPayJournal()
   if (supabase) {
     journalChannel = supabase
-      .channel('crm:novapay-sync-journal')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'crm_novapay_sync_log' },
-        () => void loadNovaPayJournal(),
-      )
+      .channel('crm:banking', { config: { private: true } })
+      .on('broadcast', { event: 'novapay_journal_changed' }, () => void loadNovaPayJournal())
       .subscribe()
   }
 })
