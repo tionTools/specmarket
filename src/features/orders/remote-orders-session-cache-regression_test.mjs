@@ -216,6 +216,7 @@ const queueNames = [
   'incrementPendingLocalSaves',
   'decrementPendingLocalSaves',
   'persistOrders',
+  'markRemoteOrderLocallyChanged',
   'cloneOrder',
 ]
 const queueStatements = parsed.statements.filter(
@@ -248,6 +249,7 @@ const queueContext = {
   pendingLocalOrderSaves: new Map(),
   deferredRemoteOrderIds: new Set(),
   remoteOrderVersions: new Map([['remote-1', 'server-v1']]),
+  localRemoteOrderRevisions: new Map(),
   persistenceQueue: Promise.resolve(),
   queueRemoteOrderRefresh: () => {},
   writeRemoteOrdersSessionCache: (_userId, orders) => {
@@ -335,6 +337,7 @@ assert.equal(
       ['remote-1', 'a-v1'],
       ['remote-2', 'b-v1'],
     ]),
+    localRemoteOrderRevisions: new Map(),
     persistenceQueue: Promise.resolve(),
     queueRemoteOrderRefresh: () => {},
     writeRemoteOrdersSessionCache: (_userId, orders, versions) => {
@@ -393,6 +396,7 @@ function createQueueContext(persistOrdersNow) {
     pendingLocalOrderSaves: new Map(),
     deferredRemoteOrderIds: new Set(),
     remoteOrderVersions: new Map([['remote-1', 'server-v1']]),
+    localRemoteOrderRevisions: new Map(),
     persistenceQueue: Promise.resolve(),
     queueRemoteOrderRefresh: () => {},
     writeRemoteOrdersSessionCache: (_userId, orders) => writes.push(structuredClone(orders)),
@@ -462,6 +466,7 @@ const actualSaveNames = [
   'persistOrders',
   'persistOrdersNow',
   'serializeOrder',
+  'markRemoteOrderLocallyChanged',
   'cloneOrder',
 ]
 const actualSaveStatements = parsed.statements.filter(
@@ -491,6 +496,7 @@ assert.equal(
     pendingLocalOrderSaves: new Map(),
     deferredRemoteOrderIds: new Set(),
     remoteOrderVersions: new Map(),
+    localRemoteOrderRevisions: new Map(),
     persistenceQueue: Promise.resolve(),
     queueRemoteOrderRefresh: () => {},
     writeRemoteOrdersSessionCache: (_userId, orders) => writes.push(structuredClone(orders)),

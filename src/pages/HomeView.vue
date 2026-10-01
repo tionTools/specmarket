@@ -378,6 +378,7 @@ const realtimeStatusDetail = ref('')
 let isAutomaticOrdersRefreshActive = false
 let isRealtimeRestarting = false
 const remoteOrderVersions = new Map<string, string>()
+const localRemoteOrderRevisions = new Map<string, number>()
 const targetedOrdersBatchSize = 100
 const isGuest = computed(() => user.value?.email?.toLowerCase() === 'guest@gmail.com')
 
@@ -2266,6 +2267,7 @@ function persistOrders(order?: Order) {
   const cacheVersions = new Map(remoteOrderVersions)
   const savedOrders = order ? [confirmedSnapshot(order)] : orders.value.map(confirmedSnapshot)
   const localOrders = orders.value.map(confirmedSnapshot)
+  for (const savedOrder of savedOrders) markRemoteOrderLocallyChanged(savedOrder.remoteId)
   const pendingRemoteIds = incrementPendingLocalSaves(savedOrders)
   persistenceQueue = persistenceQueue
     .catch((error: unknown) => console.error('Не удалось сохранить заказ:', error))
@@ -3183,6 +3185,15 @@ function mapRemoteOrders(
   return []
 }
 
+function markRemoteOrderLocallyChanged(remoteId: string | undefined) {
+  if (!remoteId) return
+  localRemoteOrderRevisions.set(remoteId, (localRemoteOrderRevisions.get(remoteId) ?? 0) + 1)
+}
+
+function remoteOrderLocalRevision(remoteId: string) {
+  return localRemoteOrderRevisions.get(remoteId) ?? 0
+}
+
 function focusedOrderCellOrder() {
   const activeElement = document.activeElement
   if (
@@ -3212,8 +3223,11 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
     deferredRemoteOrderIds.add(remoteId)
     return false
   })
-  const refreshedAllRequestedOrders = refreshableIds.length === uniqueRemoteIds.length
+  const initiallyRefreshableAllRequestedOrders = refreshableIds.length === uniqueRemoteIds.length
   if (!refreshableIds.length) return false
+  const refreshRevisions = new Map(
+    refreshableIds.map((remoteId) => [remoteId, remoteOrderLocalRevision(remoteId)]),
+  )
   const remoteOrders: Array<Record<string, unknown>> = []
   const orderItemReturns: OrderItemReturnRow[] = []
   for (const remoteIdBatch of chunks(refreshableIds, targetedOrdersBatchSize)) {
@@ -3245,9 +3259,25 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
       })),
     )
   }
-  const refreshedOrders = mapRemoteOrders(remoteOrders, orderItemReturns)
+  const applicableIds = new Set(
+    refreshableIds.filter((remoteId) => {
+      const revisionUnchanged =
+        refreshRevisions.get(remoteId) === remoteOrderLocalRevision(remoteId)
+      if (revisionUnchanged && !isRemoteOrderLocallyBusy(remoteId)) return true
+
+      if (isRemoteOrderLocallyBusy(remoteId)) deferredRemoteOrderIds.add(remoteId)
+      else {
+        deferredRemoteOrderIds.delete(remoteId)
+        queueRemoteOrderRefresh(remoteId)
+      }
+      return false
+    }),
+  )
+  const applicableRows = remoteOrders.filter((row) => applicableIds.has(String(row.id)))
+  const applicableReturns = orderItemReturns.filter((row) => applicableIds.has(row.order_id))
+  const refreshedOrders = mapRemoteOrders(applicableRows, applicableReturns)
   const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
-  for (const remoteId of refreshableIds) {
+  for (const remoteId of applicableIds) {
     if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
   }
   for (const order of refreshedOrders) {
@@ -3264,17 +3294,23 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
       platform: order.platform,
     })),
   )
-  for (const row of remoteOrders) remoteOrderVersions.set(String(row.id), String(row.updated_at))
-  reapplyRegistryPreview(
-    isPromRegistryDraft.value,
-    promRegistryEntries.value,
-    applyPromRegistryPreview,
+  for (const row of applicableRows) {
+    remoteOrderVersions.set(String(row.id), String(row.updated_at))
+  }
+  if (applicableIds.size) {
+    reapplyRegistryPreview(
+      isPromRegistryDraft.value,
+      promRegistryEntries.value,
+      applyPromRegistryPreview,
+    )
+    sortOrders()
+    reconcileLabelReminders()
+    persistRemoteOrdersSessionCache()
+    void bankBalancesCard.value?.refreshDebt()
+  }
+  return (
+    initiallyRefreshableAllRequestedOrders && applicableIds.size === refreshableIds.length
   )
-  sortOrders()
-  reconcileLabelReminders()
-  persistRemoteOrdersSessionCache()
-  void bankBalancesCard.value?.refreshDebt()
-  return refreshedAllRequestedOrders
 }
 
 function notifyNewOrder(order: Order) {
@@ -5138,6 +5174,7 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
     persistOrders(order)
     return
   }
+  markRemoteOrderLocallyChanged(order?.remoteId)
   editingOrderCell.value = key
   editingOrderValue.value[key] = (event.target as HTMLInputElement).value
   await nextTick()
