@@ -49,28 +49,22 @@ export function useBankingMonitor(options: {
   function startRealtime() {
     if (!supabase || !active() || channel) return
     channel = supabase
-      .channel('crm:banking')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'bank_account_cache' },
-        (payload) => applyCache(payload.new as Record<string, unknown>),
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'bank_payment_events' },
-        (payload) => {
-          const row = payload.new as Record<string, unknown>
-          const amount = Number(row.amount)
-          if (!isBankName(row.bank) || !Number.isFinite(amount) || amount <= 0) return
-          onPayment({
-            bank: row.bank,
-            amount,
-            payer: typeof row.payer === 'string' ? row.payer : '',
-            description: typeof row.description === 'string' ? row.description : '',
-            comment: typeof row.comment === 'string' ? row.comment : '',
-          })
-        },
-      )
+      .channel('crm:banking', { config: { private: true } })
+      .on('broadcast', { event: 'bank_cache_changed' }, ({ payload }) => {
+        applyCache(payload as Record<string, unknown>)
+      })
+      .on('broadcast', { event: 'bank_payment_inserted' }, ({ payload }) => {
+        const row = payload as Record<string, unknown>
+        const amount = Number(row.amount)
+        if (!isBankName(row.bank) || !Number.isFinite(amount) || amount <= 0) return
+        onPayment({
+          bank: row.bank,
+          amount,
+          payer: typeof row.payer === 'string' ? row.payer : '',
+          description: typeof row.description === 'string' ? row.description : '',
+          comment: typeof row.comment === 'string' ? row.comment : '',
+        })
+      })
       .subscribe()
   }
 
