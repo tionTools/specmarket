@@ -103,8 +103,17 @@ async function handleClearJournal() {
     if (clearError) throw clearError
     journal.value = []
     copyStatus.value = `Журнал очищен. Удалено записей: ${Number(data) || 0}.`
-  } catch {
-    journalError.value = 'Не удалось очистить журнал NovaPay.'
+  } catch (clearError) {
+    const errorCode =
+      clearError &&
+      typeof clearError === 'object' &&
+      'code' in clearError &&
+      typeof clearError.code === 'string'
+        ? clearError.code
+        : ''
+    journalError.value = errorCode
+      ? `Не удалось очистить журнал NovaPay. Код: ${errorCode}`
+      : 'Не удалось очистить журнал NovaPay.'
   } finally {
     isClearingJournal.value = false
   }
