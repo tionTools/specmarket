@@ -1436,6 +1436,8 @@ async function confirmPromRegistryDistribution() {
     promRegistryMismatchedFields.value = new Set()
     promRegistryExistingFinancials.value = { complete: 0, partial: 0 }
     clearPromRegistry()
+    await nextTick()
+    scrollOrdersToTop()
     await refreshRemoteOrders(remoteIds)
     showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
