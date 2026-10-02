@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useClipboard, useNow } from '@vueuse/core'
-import { ArrowLeft, Check, RefreshCw } from '@lucide/vue'
+import { ArrowLeft, Check, RefreshCw, Trash2 } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { requestBankingReturn } from '@/features/banking/navigation'
@@ -32,6 +32,7 @@ const error = ref('')
 const journal = ref<NovaPayJournalRow[]>([])
 const journalError = ref('')
 const copyStatus = ref('')
+const isClearingJournal = ref(false)
 const registryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
 const now = useNow({ interval: 60_000 })
 const { copy } = useClipboard()
@@ -85,6 +86,27 @@ async function handleCopyJournal() {
     copyStatus.value = 'Журнал скопирован.'
   } catch {
     copyStatus.value = 'Не удалось скопировать журнал.'
+  }
+}
+
+async function handleClearJournal() {
+  if (!supabase || bank.value !== 'novapay' || isClearingJournal.value || !journal.value.length)
+    return
+  if (!window.confirm(`Очистить журнал ошибок NovaPay? Будут удалены записей: ${journal.value.length}.`))
+    return
+
+  isClearingJournal.value = true
+  journalError.value = ''
+  copyStatus.value = ''
+  try {
+    const { data, error: clearError } = await supabase.rpc('clear_crm_novapay_sync_log')
+    if (clearError) throw clearError
+    journal.value = []
+    copyStatus.value = `Журнал очищен. Удалено записей: ${Number(data) || 0}.`
+  } catch {
+    journalError.value = 'Не удалось очистить журнал NovaPay.'
+  } finally {
+    isClearingJournal.value = false
   }
 }
 
@@ -401,6 +423,15 @@ onMounted(() => {
           <div class="flex flex-wrap gap-2">
             <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
             <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
+            <button
+              class="inline-flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              :disabled="isClearingJournal || journal.length === 0"
+              @click="handleClearJournal"
+            >
+              <Trash2 class="size-4" aria-hidden="true" />
+              {{ isClearingJournal ? 'Очищаю…' : 'Очистить журнал' }}
+            </button>
           </div>
         </div>
         <p v-if="journalError" class="mt-3 text-sm text-rose-700" role="alert">{{ journalError }}</p>
