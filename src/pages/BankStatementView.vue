@@ -9,6 +9,10 @@ import {
   isInterruptedNovaPayRun,
   type NovaPayJournalRow,
 } from '@/features/banking/novapayJournal'
+import {
+  matchedRegistryImportIdentifier,
+  type RegistryImportIdentifier,
+} from '@/features/banking/registryImportIdentifiers'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
 import { supabase } from '@/lib/supabase'
 
@@ -28,6 +32,7 @@ const error = ref('')
 const journal = ref<NovaPayJournalRow[]>([])
 const journalError = ref('')
 const copyStatus = ref('')
+const registryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
 const now = useNow({ interval: 60_000 })
 const { copy } = useClipboard()
 
@@ -40,6 +45,31 @@ async function loadNovaPayJournal() {
     .limit(100)
   journalError.value = loadError ? 'Не удалось загрузить журнал NovaPay.' : ''
   if (!loadError) journal.value = (data ?? []) as NovaPayJournalRow[]
+}
+
+async function loadRegistryImportIdentifiers() {
+  if (!supabase || !bank.value) return
+  const { data, error: loadError } = await supabase
+    .from('crm_registry_import_identifiers')
+    .select('bank,identifier,identifier_type,label')
+    .eq('bank', bank.value)
+  if (loadError) return
+  registryImportIdentifiers.value = (data ?? []).flatMap((row) => {
+    if (
+      (row.identifier_type !== 'registry' && row.identifier_type !== 'operation') ||
+      typeof row.identifier !== 'string' ||
+      typeof row.label !== 'string'
+    )
+      return []
+    return [
+      {
+        bank: bank.value as BankName,
+        identifier: row.identifier,
+        identifierType: row.identifier_type,
+        label: row.label,
+      },
+    ]
+  })
 }
 
 async function handleCopyJournal() {
@@ -168,6 +198,13 @@ function isRecentReceipt(receipt: BankReceipt) {
   return age >= 0 && age <= 24 * 60 * 60 * 1000
 }
 
+function appliedRegistryIdentifier(receipt: BankReceipt) {
+  return matchedRegistryImportIdentifier(
+    `${receipt.description}\n${receipt.comment}`,
+    registryImportIdentifiers.value,
+  )
+}
+
 const periodLabel = computed(() => {
   const from = periodDate(snapshot.value?.period.from ?? null)
   const to = periodDate(snapshot.value?.period.to ?? null)
@@ -212,6 +249,7 @@ async function load(refresh: boolean) {
     if (invokeError) throw invokeError
     if (!data || data.ok === false) throw new Error(bankFunctionErrorMessage(data ?? {}))
     snapshot.value = normalizeSnapshot(data)
+    await loadRegistryImportIdentifiers()
   } catch (loadError) {
     error.value = await edgeFunctionErrorMessage(loadError)
   } finally {
@@ -232,8 +270,7 @@ async function initialize() {
     await router.replace('/')
     return
   }
-  await load(false)
-  await loadNovaPayJournal()
+  await Promise.all([load(false), loadNovaPayJournal()])
 }
 
 function goBackToBanking() {
@@ -311,7 +348,7 @@ onMounted(() => {
         </div>
         <div v-else class="overflow-x-auto">
           <table
-            class="w-full min-w-[900px] border-collapse border border-slate-400 text-sm [&_td]:border [&_td]:border-slate-400 [&_th]:border [&_th]:border-slate-400"
+            class="w-full min-w-[1000px] border-collapse border border-slate-400 text-sm [&_td]:border [&_td]:border-slate-400 [&_th]:border [&_th]:border-slate-400"
           >
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
@@ -320,6 +357,7 @@ onMounted(() => {
                 <th class="px-4 py-3 text-right">Сумма</th>
                 <th class="px-4 py-3 text-right">Баланс</th>
                 <th class="px-4 py-3">Комментарий</th>
+                <th class="px-4 py-3 text-center">Проведён</th>
               </tr>
             </thead>
             <tbody>
@@ -337,6 +375,15 @@ onMounted(() => {
                   {{ money(receipt.balance) }}
                 </td>
                 <td class="min-w-[320px] px-4 py-3 text-slate-600">{{ receipt.comment || '—' }}</td>
+                <td class="px-4 py-3 text-center">
+                  <span
+                    v-if="appliedRegistryIdentifier(receipt)"
+                    class="font-bold text-emerald-700"
+                    :title="appliedRegistryIdentifier(receipt)?.label"
+                    >✓</span
+                  >
+                  <span v-else>—</span>
+                </td>
               </tr>
             </tbody>
           </table>
