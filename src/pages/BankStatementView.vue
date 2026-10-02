@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useClipboard, useNow } from '@vueuse/core'
-import { ArrowLeft, RefreshCw } from '@lucide/vue'
+import { ArrowLeft, Check, RefreshCw } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { requestBankingReturn } from '@/features/banking/navigation'
@@ -378,10 +378,12 @@ onMounted(() => {
                 <td class="px-4 py-3 text-center">
                   <span
                     v-if="appliedRegistryIdentifier(receipt)"
-                    class="font-bold text-emerald-700"
+                    class="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-700/30"
                     :title="appliedRegistryIdentifier(receipt)?.label"
-                    >✓</span
+                    aria-label="Проведён"
                   >
+                    <Check class="size-5 stroke-[3]" aria-hidden="true" />
+                  </span>
                   <span v-else>—</span>
                 </td>
               </tr>
