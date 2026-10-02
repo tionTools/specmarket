@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useClipboard, useNow } from '@vueuse/core'
-import { ArrowLeft, Check, RefreshCw } from '@lucide/vue'
+import { ArrowLeft, Check, RefreshCw, Trash2 } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { requestBankingReturn } from '@/features/banking/navigation'
@@ -14,11 +14,8 @@ import {
   type RegistryImportIdentifier,
 } from '@/features/banking/registryImportIdentifiers'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
-import { supabase, supabasePublishableKey, supabaseUrl } from '@/lib/supabase'
-import {
-  postgrestDiagnosticMessage,
-  rollbackPreferenceApplied,
-} from '@/features/banking/novapayClearDiagnostic'
+import { supabase } from '@/lib/supabase'
+import { postgrestDiagnosticMessage } from '@/features/banking/novapayClearDiagnostic'
 
 type BankFunctionResponse = Partial<BankSnapshot> & {
   ok?: boolean
@@ -96,51 +93,24 @@ async function handleCopyJournal() {
 async function handleClearJournal() {
   if (!supabase || bank.value !== 'novapay' || isClearingJournal.value || !journal.value.length)
     return
-  if (!window.confirm('Проверить очистку журнала через PostgREST? Записи не будут удалены.'))
+  if (!window.confirm(`Очистить журнал ошибок NovaPay? Будут удалены записей: ${journal.value.length}.`))
     return
 
   isClearingJournal.value = true
   journalError.value = ''
   copyStatus.value = ''
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) {
-      journalError.value = postgrestDiagnosticMessage({
-        code: 'SESSION_MISSING',
-        message: 'Сессия пользователя не найдена.',
-      })
+    const { data, error: clearError } = await supabase.rpc('clear_crm_novapay_sync_log')
+    if (clearError) {
+      journalError.value = postgrestDiagnosticMessage(clearError)
       return
     }
-    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/clear_crm_novapay_sync_log`, {
-      method: 'POST',
-      headers: {
-        apikey: supabasePublishableKey,
-        Authorization: `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'tx=rollback, handling=strict',
-      },
-      body: '{}',
-    })
-    const payload: unknown = await response.json().catch(() => null)
-    if (!rollbackPreferenceApplied(response.headers.get('Preference-Applied'))) {
-      journalError.value = postgrestDiagnosticMessage({
-        code: 'TX_ROLLBACK_NOT_APPLIED',
-        message: 'PostgREST не подтвердил tx=rollback; реальная очистка не выполнялась.',
-        hint: 'Проверьте Preference-Applied в ответе.',
-      })
-      return
-    }
-    if (!response.ok) {
-      journalError.value = postgrestDiagnosticMessage(payload)
-      return
-    }
-    copyStatus.value = `Rollback-проверка выполнена: RPC вернула ${Number(payload) || 0}. Журнал не удалён.`
+    journal.value = []
+    copyStatus.value = `Журнал очищен. Удалено записей: ${Number(data) || 0}.`
   } catch {
     journalError.value = postgrestDiagnosticMessage({
-      code: 'POSTGREST_DIAGNOSTIC_FAILED',
-      message: 'Не удалось выполнить rollback-проверку PostgREST.',
+      code: 'RPC_CLEAR_FAILED',
+      message: 'Не удалось выполнить очистку журнала NovaPay.',
     })
   } finally {
     isClearingJournal.value = false
@@ -461,13 +431,13 @@ onMounted(() => {
             <button class="rounded-lg border border-slate-300 px-3 py-2 text-sm" type="button" @click="loadNovaPayJournal">Обновить журнал</button>
             <button class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white" type="button" @click="handleCopyJournal">Скопировать журнал для ChatGPT</button>
             <button
-              class="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              class="inline-flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
               type="button"
               :disabled="isClearingJournal || journal.length === 0"
               @click="handleClearJournal"
             >
-              <RefreshCw :class="['size-4', { 'animate-spin': isClearingJournal }]" aria-hidden="true" />
-              {{ isClearingJournal ? 'Проверяю…' : 'Проверить очистку' }}
+              <Trash2 class="size-4" aria-hidden="true" />
+              {{ isClearingJournal ? 'Очищаю…' : 'Очистить журнал' }}
             </button>
           </div>
         </div>
