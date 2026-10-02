@@ -152,8 +152,7 @@ const registryDraftNavigation = useSessionStorage<string | null>(
 )
 const searchQuery = ref('')
 const platformFilter = ref<'all' | Platform>('all')
-type PlatformSummaryPeriod = 'week' | 'decade' | 'month' | 'last30' | 'custom'
-type OrderListPeriod = PlatformSummaryPeriod | 'day'
+type OrderListPeriod = 'day' | 'week' | 'decade' | 'month' | 'last30' | 'custom'
 type PreferredOrderListMonthPeriod = Extract<OrderListPeriod, 'month' | 'last30'>
 
 function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
@@ -162,24 +161,17 @@ function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
     : 'month'
 }
 
-const platformSummaryPeriod = ref<PlatformSummaryPeriod>('month')
-const platformSummaryFrom = ref('')
-const platformSummaryTo = ref('')
 const orderListPeriod = ref<OrderListPeriod>(loadPreferredOrderListMonthPeriod())
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const orderListDate = ref('')
-const customDateFields = { platformSummaryFrom, platformSummaryTo, orderListFrom, orderListTo }
+const customDateFields = { orderListFrom, orderListTo }
 type CustomDateField = keyof typeof customDateFields
 const customDateDisplay = reactive<Record<CustomDateField, string>>({
-  platformSummaryFrom: '',
-  platformSummaryTo: '',
   orderListFrom: '',
   orderListTo: '',
 })
 const customDatePickers = {
-  platformSummaryFrom: useTemplateRef<HTMLInputElement>('platformSummaryFromPicker'),
-  platformSummaryTo: useTemplateRef<HTMLInputElement>('platformSummaryToPicker'),
   orderListFrom: useTemplateRef<HTMLInputElement>('orderListFromPicker'),
   orderListTo: useTemplateRef<HTMLInputElement>('orderListToPicker'),
 }
@@ -803,23 +795,13 @@ function formatShortDate(value: Date) {
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit' }).format(value)
 }
 
-const defaultPlatformSummaryDate = startOfLocalDay(new Date())
-platformSummaryFrom.value = inputDate(
-  new Date(defaultPlatformSummaryDate.getFullYear(), defaultPlatformSummaryDate.getMonth(), 1),
-)
-platformSummaryTo.value = inputDate(defaultPlatformSummaryDate)
-const defaultOrderListDate = new Date(defaultPlatformSummaryDate)
+const defaultOrderListDate = startOfLocalDay(new Date())
 defaultOrderListDate.setDate(defaultOrderListDate.getDate() - 1)
 orderListFrom.value = inputDate(defaultOrderListDate)
 orderListTo.value = inputDate(defaultOrderListDate)
 orderListDate.value = inputDate(defaultOrderListDate)
 
-for (const field of [
-  'platformSummaryFrom',
-  'platformSummaryTo',
-  'orderListFrom',
-  'orderListTo',
-] as const) {
+for (const field of ['orderListFrom', 'orderListTo'] as const) {
   watch(
     customDateFields[field],
     (value) => {
@@ -1518,71 +1500,6 @@ const printRegistryOrders = computed(() => {
 const ordersForToday = computed(() =>
   reportOrders.value.filter((order) => order.date === todayKey()),
 )
-const platformSummaryRange = computed(() => {
-  const today = startOfLocalDay(new Date())
-  if (platformSummaryPeriod.value === 'week') {
-    const dayFromMonday = (today.getDay() + 6) % 7
-    const from = new Date(today)
-    from.setDate(today.getDate() - dayFromMonday)
-    const to = new Date(from)
-    to.setDate(from.getDate() + 6)
-    return { from, to }
-  }
-  if (platformSummaryPeriod.value === 'decade') {
-    const startDay = today.getDate() <= 10 ? 1 : today.getDate() <= 20 ? 11 : 21
-    const from = new Date(today.getFullYear(), today.getMonth(), startDay)
-    const to = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      startDay === 21
-        ? new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
-        : startDay + 9,
-    )
-    return { from, to }
-  }
-  if (platformSummaryPeriod.value === 'last30') {
-    const from = new Date(today)
-    from.setDate(today.getDate() - 29)
-    return { from, to: today }
-  }
-  if (platformSummaryPeriod.value === 'custom') {
-    const first = parseInputDate(platformSummaryFrom.value) ?? today
-    const second = parseInputDate(platformSummaryTo.value) ?? first
-    return first <= second ? { from: first, to: second } : { from: second, to: first }
-  }
-  return {
-    from: new Date(today.getFullYear(), today.getMonth(), 1),
-    to: new Date(today.getFullYear(), today.getMonth() + 1, 0),
-  }
-})
-const ordersForPlatformSummary = computed(() => {
-  const { from, to } = platformSummaryRange.value
-  return reportOrders.value.filter((order) => {
-    const date = parseOrderDate(order.date)
-    return date !== null && date >= from && date <= to
-  })
-})
-const previousPlatformSummaryRange = computed(() => {
-  const { from, to } = platformSummaryRange.value
-  if (platformSummaryPeriod.value === 'month') {
-    return {
-      from: new Date(from.getFullYear(), from.getMonth() - 1, 1),
-      to: new Date(from.getFullYear(), from.getMonth(), 0),
-    }
-  }
-  return { from: shiftDateByMonths(from, -1), to: shiftDateByMonths(to, -1) }
-})
-const previousPlatformSummaryRangeLabel = computed(
-  () =>
-    `${formatShortDate(previousPlatformSummaryRange.value.from)}–${formatShortDate(previousPlatformSummaryRange.value.to)}`,
-)
-const ordersForPreviousPlatformSummary = computed(() => {
-  const { from, to } = previousPlatformSummaryRange.value
-  return reportOrders.value.filter((order) => {
-    const date = parseOrderDate(order.date)
-    return date !== null && date >= from && date <= to
-  })
-})
 const orderListRange = computed(() => {
   const today = startOfLocalDay(new Date())
   if (orderListPeriod.value === 'day') {
@@ -1613,6 +1530,28 @@ const orderListRange = computed(() => {
     to: today,
   }
 })
+const previousOrderListRange = computed(() => ({
+  from: shiftDateByMonths(orderListRange.value.from, -1),
+  to: shiftDateByMonths(orderListRange.value.to, -1),
+}))
+const ordersForPlatformSummary = computed(() => {
+  const { from, to } = orderListRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
+const previousPlatformSummaryRangeLabel = computed(
+  () =>
+    `${formatShortDate(previousOrderListRange.value.from)}–${formatShortDate(previousOrderListRange.value.to)}`,
+)
+const ordersForPreviousPlatformSummary = computed(() => {
+  const { from, to } = previousOrderListRange.value
+  return reportOrders.value.filter((order) => {
+    const date = parseOrderDate(order.date)
+    return date !== null && date >= from && date <= to
+  })
+})
 const ordersForSelectedPeriod = computed(() => {
   const { from, to } = orderListRange.value
   return reportOrders.value.filter((order) => {
@@ -1620,10 +1559,6 @@ const ordersForSelectedPeriod = computed(() => {
     return date !== null && date >= from && date <= to
   })
 })
-const previousOrderListRange = computed(() => ({
-  from: shiftDateByMonths(orderListRange.value.from, -1),
-  to: shiftDateByMonths(orderListRange.value.to, -1),
-}))
 function shiftOrderListDate(days: number) {
   const fallback = startOfLocalDay(new Date())
   fallback.setDate(fallback.getDate() - 1)
@@ -1640,13 +1575,6 @@ const previousOrderListRangeLabel = computed(
   () =>
     `${formatShortDate(previousOrderListRange.value.from)}–${formatShortDate(previousOrderListRange.value.to)}`,
 )
-const ordersForPreviousPeriod = computed(() => {
-  const { from, to } = previousOrderListRange.value
-  return reportOrders.value.filter((order) => {
-    const date = parseOrderDate(order.date)
-    return date !== null && date >= from && date <= to
-  })
-})
 const orderListPeriodLabel = computed(() => {
   if (orderListPeriod.value === 'day') {
     return new Intl.DateTimeFormat('ru-RU').format(orderListRange.value.from)
@@ -5812,7 +5740,7 @@ function orderDateTime(order: Order) {
       </section>
 
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <button
             class="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-950"
             type="button"
@@ -5826,91 +5754,139 @@ function orderDateTime(order: Order) {
               aria-hidden="true"
             />
           </button>
-          <div v-if="isPlatformSummaryExpanded" class="flex min-w-0 items-center justify-end gap-2">
-            <select
-              v-model="platformSummaryPeriod"
-              class="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
-              aria-label="Период статистики по площадкам"
+          <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <label
+              class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
             >
+              <input
+                v-model="isComparingPreviousPeriod"
+                class="size-3.5 accent-indigo-600"
+                type="checkbox"
+              />
+              Сравнить
+            </label>
+            <select
+              v-model="orderListPeriod"
+              class="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              aria-label="Общий период статистики и списка заказов"
+            >
+              <option value="day">День</option>
               <option value="week">Неделя</option>
               <option value="decade">Декада</option>
               <option value="month">Месяц</option>
               <option value="last30">Последние 30 дней</option>
               <option value="custom">Произвольный период</option>
             </select>
-            <template v-if="platformSummaryPeriod === 'custom'">
-              <span class="text-xs text-slate-400">с</span>
+            <template v-if="orderListPeriod === 'day'">
               <div
-                class="relative flex h-8 w-44 items-center rounded-lg border border-slate-200 bg-white"
+                class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                aria-label="Общий фильтр по одному дню"
+              >
+                <button
+                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  type="button"
+                  aria-label="На один день назад"
+                  title="На один день назад"
+                  @click="shiftOrderListDate(-1)"
+                >
+                  <ChevronLeft class="size-4" aria-hidden="true" />
+                </button>
+                <input
+                  v-model="orderListDate"
+                  class="h-9 w-36 border-x border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums text-slate-700 outline-none"
+                  type="date"
+                  aria-label="Дата статистики и заказов"
+                />
+                <button
+                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  type="button"
+                  aria-label="На один день вперёд"
+                  title="На один день вперёд"
+                  @click="shiftOrderListDate(1)"
+                >
+                  <ChevronRight class="size-4" aria-hidden="true" />
+                </button>
+              </div>
+              <button
+                class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+                type="button"
+                @click="showTodayInOrderList"
+              >
+                Сегодня
+              </button>
+            </template>
+            <template v-if="orderListPeriod === 'custom'">
+              <div
+                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
               >
                 <input
-                  :value="customDateDisplay.platformSummaryFrom"
-                  class="min-w-0 flex-1 bg-transparent pl-2 text-xs tabular-nums outline-none"
+                  :value="customDateDisplay.orderListFrom"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
                   type="text"
                   inputmode="numeric"
                   maxlength="10"
                   placeholder="ДД.ММ.ГГГГ"
-                  aria-label="Начало периода"
-                  @input="handleCustomDateInput('platformSummaryFrom', $event)"
+                  aria-label="Начало общего периода"
+                  @input="handleCustomDateInput('orderListFrom', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
-                  @keydown="handleCustomDateKeydown('platformSummaryFrom', $event)"
-                  @blur="handleCustomDateBlur('platformSummaryFrom')"
+                  @keydown="handleCustomDateKeydown('orderListFrom', $event)"
+                  @blur="handleCustomDateBlur('orderListFrom')"
                 />
                 <button
                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
                   type="button"
-                  aria-label="Открыть календарь начала периода"
+                  aria-label="Открыть календарь начала общего периода"
                   title="Открыть календарь начала периода"
-                  @click="handleCustomDatePicker('platformSummaryFrom')"
+                  @click="handleCustomDatePicker('orderListFrom')"
                 >
                   <CalendarDays class="size-4" aria-hidden="true" />
                 </button>
                 <input
-                  ref="platformSummaryFromPicker"
-                  :value="platformSummaryFrom"
+                  ref="orderListFromPicker"
+                  :value="orderListFrom"
                   class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
                   type="date"
                   tabindex="-1"
                   aria-hidden="true"
-                  @change="handleCustomDatePick('platformSummaryFrom', $event)"
+                  @change="handleCustomDatePick('orderListFrom', $event)"
                 />
               </div>
-              <span class="text-xs text-slate-400">по</span>
+              <span class="text-sm text-slate-400">—</span>
               <div
-                class="relative flex h-8 w-44 items-center rounded-lg border border-slate-200 bg-white"
+                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
               >
                 <input
-                  :value="customDateDisplay.platformSummaryTo"
-                  class="min-w-0 flex-1 bg-transparent pl-2 text-xs tabular-nums outline-none"
+                  :value="customDateDisplay.orderListTo"
+                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
                   type="text"
                   inputmode="numeric"
                   maxlength="10"
                   placeholder="ДД.ММ.ГГГГ"
-                  aria-label="Конец периода"
-                  @input="handleCustomDateInput('platformSummaryTo', $event)"
+                  aria-label="Конец общего периода"
+                  @input="handleCustomDateInput('orderListTo', $event)"
                   @focus="handleCustomDateFocus"
                   @click="handleCustomDateSegmentClick"
-                  @keydown="handleCustomDateKeydown('platformSummaryTo', $event)"
-                  @blur="handleCustomDateBlur('platformSummaryTo')"
+                  @keydown="handleCustomDateKeydown('orderListTo', $event)"
+                  @blur="handleCustomDateBlur('orderListTo')"
                 />
                 <button
                   class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
                   type="button"
-                  aria-label="Открыть календарь конца периода"
+                  aria-label="Открыть календарь конца общего периода"
                   title="Открыть календарь конца периода"
-                  @click="handleCustomDatePicker('platformSummaryTo')"
+                  @click="handleCustomDatePicker('orderListTo')"
                 >
                   <CalendarDays class="size-4" aria-hidden="true" />
                 </button>
                 <input
-                  ref="platformSummaryToPicker"
-                  :value="platformSummaryTo"
+                  ref="orderListToPicker"
+                  :value="orderListTo"
                   class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
                   type="date"
                   tabindex="-1"
                   aria-hidden="true"
-                  @change="handleCustomDatePick('platformSummaryTo', $event)"
+                  @change="handleCustomDatePick('orderListTo', $event)"
                 />
               </div>
             </template>
@@ -6022,143 +5998,6 @@ function orderDateTime(order: Order) {
           >
             Возвраты
           </button>
-          <div class="flex items-center gap-2 sm:ml-auto">
-            <label
-              class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"
-            >
-              <input
-                v-model="isComparingPreviousPeriod"
-                class="size-3.5 accent-indigo-600"
-                type="checkbox"
-              />
-              Сравнить
-            </label>
-            <select
-              v-model="orderListPeriod"
-              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-              aria-label="Фильтр заказов по дате или периоду"
-            >
-              <option value="day">День</option>
-              <option value="week">Неделя</option>
-              <option value="decade">Декада</option>
-              <option value="month">Месяц</option>
-              <option value="last30">Последние 30 дней</option>
-              <option value="custom">Произвольный период</option>
-            </select>
-            <template v-if="orderListPeriod === 'day'">
-              <div
-                class="flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-                aria-label="Фильтр заказов по одному дню"
-              >
-                <button
-                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                  type="button"
-                  aria-label="На один день назад"
-                  title="На один день назад"
-                  @click="shiftOrderListDate(-1)"
-                >
-                  <ChevronLeft class="size-4" aria-hidden="true" />
-                </button>
-                <input
-                  v-model="orderListDate"
-                  class="h-9 w-36 border-x border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums text-slate-700 outline-none"
-                  type="date"
-                  aria-label="Дата заказов"
-                />
-                <button
-                  class="grid size-9 place-items-center text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                  type="button"
-                  aria-label="На один день вперёд"
-                  title="На один день вперёд"
-                  @click="shiftOrderListDate(1)"
-                >
-                  <ChevronRight class="size-4" aria-hidden="true" />
-                </button>
-              </div>
-              <button
-                class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
-                type="button"
-                @click="showTodayInOrderList"
-              >
-                Сегодня
-              </button>
-            </template>
-            <template v-if="orderListPeriod === 'custom'">
-              <div
-                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
-              >
-                <input
-                  :value="customDateDisplay.orderListFrom"
-                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="10"
-                  placeholder="ДД.ММ.ГГГГ"
-                  aria-label="Начало периода заказов"
-                  @input="handleCustomDateInput('orderListFrom', $event)"
-                  @focus="handleCustomDateFocus"
-                  @click="handleCustomDateSegmentClick"
-                  @keydown="handleCustomDateKeydown('orderListFrom', $event)"
-                  @blur="handleCustomDateBlur('orderListFrom')"
-                />
-                <button
-                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
-                  type="button"
-                  aria-label="Открыть календарь начала периода заказов"
-                  title="Открыть календарь начала периода заказов"
-                  @click="handleCustomDatePicker('orderListFrom')"
-                >
-                  <CalendarDays class="size-4" aria-hidden="true" />
-                </button>
-                <input
-                  ref="orderListFromPicker"
-                  :value="orderListFrom"
-                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
-                  type="date"
-                  tabindex="-1"
-                  aria-hidden="true"
-                  @change="handleCustomDatePick('orderListFrom', $event)"
-                />
-              </div>
-              <span class="text-sm text-slate-400">—</span>
-              <div
-                class="relative flex h-9 w-44 items-center rounded-xl border border-slate-200 bg-white"
-              >
-                <input
-                  :value="customDateDisplay.orderListTo"
-                  class="min-w-0 flex-1 bg-transparent pl-2 text-sm tabular-nums outline-none"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="10"
-                  placeholder="ДД.ММ.ГГГГ"
-                  aria-label="Конец периода заказов"
-                  @input="handleCustomDateInput('orderListTo', $event)"
-                  @focus="handleCustomDateFocus"
-                  @click="handleCustomDateSegmentClick"
-                  @keydown="handleCustomDateKeydown('orderListTo', $event)"
-                  @blur="handleCustomDateBlur('orderListTo')"
-                />
-                <button
-                  class="z-10 grid size-8 shrink-0 place-items-center text-slate-500 hover:text-slate-700"
-                  type="button"
-                  aria-label="Открыть календарь конца периода заказов"
-                  title="Открыть календарь конца периода заказов"
-                  @click="handleCustomDatePicker('orderListTo')"
-                >
-                  <CalendarDays class="size-4" aria-hidden="true" />
-                </button>
-                <input
-                  ref="orderListToPicker"
-                  :value="orderListTo"
-                  class="pointer-events-none absolute right-0 top-0 size-8 opacity-0"
-                  type="date"
-                  tabindex="-1"
-                  aria-hidden="true"
-                  @change="handleCustomDatePick('orderListTo', $event)"
-                />
-              </div>
-            </template>
-          </div>
         </div>
         <div
           class="mt-3 hidden grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
