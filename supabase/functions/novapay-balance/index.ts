@@ -11,7 +11,7 @@ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
 const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
 const SOAP_NAMESPACE = 'http://schemas.xmlsoap.org/soap/envelope/'
 const TEM_NAMESPACE = 'http://tempuri.org/'
-const SOAP_TIMEOUT_MS = 20_000
+const SOAP_TIMEOUT_MS = 30_000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

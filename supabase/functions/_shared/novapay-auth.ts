@@ -1,7 +1,7 @@
 const LOCK_LEASE_SECONDS = 90
 const LOCK_WAIT_ATTEMPTS = 121
 const LOCK_WAIT_MS = 250
-// Six SOAP calls with a 20s timeout and one retry each: 240s + 60s headroom.
+// Keep five minutes of JWT lifetime before reuse so a normal full sync does not expire mid-request.
 const JWT_SAFETY_MARGIN_MS = 300_000
 const AUTH_STATE_SAVE_ATTEMPTS = 2
 const AUTH_STATE_SAVE_RETRY_MS = 250
