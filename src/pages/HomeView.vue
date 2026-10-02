@@ -1976,10 +1976,13 @@ const summary = computed(() => {
       actual: sum(ordersForSelectedPeriod.value.filter(hasActualFinancialResult), getActualProfit),
     },
     previous: {
-      orders: ordersForPreviousPeriod.value.length,
-      turnover: sum(ordersForPreviousPeriod.value, getNetOrderAmount),
-      planned: sum(ordersForPreviousPeriod.value, getPlannedProfit),
-      actual: sum(ordersForPreviousPeriod.value.filter(hasActualFinancialResult), getActualProfit),
+      orders: ordersForPreviousPlatformSummary.value.length,
+      turnover: sum(ordersForPreviousPlatformSummary.value, getNetOrderAmount),
+      planned: sum(ordersForPreviousPlatformSummary.value, getPlannedProfit),
+      actual: sum(
+        ordersForPreviousPlatformSummary.value.filter(hasActualFinancialResult),
+        getActualProfit,
+      ),
     },
   }
 })
