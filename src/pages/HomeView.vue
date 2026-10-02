@@ -107,6 +107,10 @@ import PrintRegistry from '@/features/orders/PrintRegistry.vue'
 import BankBalancesCard from '@/features/banking/BankBalancesCard.vue'
 import { useBankingMonitor } from '@/features/banking/useBankingMonitor'
 import type { BankPaymentEvent } from '@/features/banking/types'
+import {
+  registryImportIdentifiers,
+  type RegistryImportIdentifier,
+} from '@/features/banking/registryImportIdentifiers'
 
 const storageKey = 'specmarket-crm-demo-orders'
 const registryDraftNavigationStorageKey = 'specmarket-crm-registry-navigation'
@@ -276,6 +280,7 @@ type RegistryDraftNavigation = {
   fileName: string
   source: RegistrySource
   keyType: RegistryKeyType
+  importIdentifiers: RegistryImportIdentifier[]
 }
 type UnopenedNewOrder = {
   remoteId: string
@@ -306,6 +311,7 @@ const promRegistryError = ref('')
 const isPromRegistryDraft = ref(false)
 const registrySource = ref<RegistrySource | null>(null)
 const registryKeyType = ref<RegistryKeyType>('orderNumber')
+const promRegistryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
 const promRegistryOriginalFinancials = new Map<
   string | number,
   { paymentAmount: number; acquiring: number; acquiringPercent: number | undefined }
@@ -1012,6 +1018,7 @@ function clearPromRegistry() {
   isPromRegistryDraft.value = false
   registrySource.value = null
   registryKeyType.value = 'orderNumber'
+  promRegistryImportIdentifiers.value = []
   expandedRegistryOrderIds.value = []
   expandedOrderId.value = null
   registryDraftNavigation.value = null
@@ -1025,6 +1032,7 @@ function saveRegistryDraftNavigation() {
     fileName: promRegistryFileName.value,
     source: registrySource.value,
     keyType: registryKeyType.value,
+    importIdentifiers: promRegistryImportIdentifiers.value,
   }
   registryDraftNavigation.value = JSON.stringify(draft)
 }
@@ -1040,6 +1048,9 @@ function restoreRegistryDraftNavigation() {
     promRegistryFileName.value = draft.fileName ?? 'реестр'
     registrySource.value = draft.source
     registryKeyType.value = draft.keyType
+    promRegistryImportIdentifiers.value = Array.isArray(draft.importIdentifiers)
+      ? draft.importIdentifiers
+      : []
     isPromRegistryDraft.value = true
     applyPromRegistryPreview(draft.entries)
   } catch {
@@ -1363,11 +1374,18 @@ async function handlePromRegistryFile(file: File) {
     }
     const entries = [...entriesByOrder.values()]
     if (!entries.length) throw new Error('В реестре не найдены строки платежей.')
+    const importIdentifiers = registryImportIdentifiers(
+      `${file.name}\n${rows.flat().map(String).join('\n')}`,
+      source === 'NovaPay' ? 'novapay' : 'monobank',
+      entries.map((entry) => entry.orderNumber),
+      keyType === 'ttn' ? 'ТТН' : 'Заказ',
+    )
     clearPromRegistry()
     promRegistryEntries.value = entries
     promRegistryFileName.value = file.name
     registrySource.value = source
     registryKeyType.value = keyType
+    promRegistryImportIdentifiers.value = importIdentifiers
     isPromRegistryDraft.value = true
     searchQuery.value = ''
     platformFilter.value = 'all'
@@ -1430,6 +1448,19 @@ async function confirmPromRegistryDistribution() {
     }
 
     const remoteIds = updates.map((update) => update.orderId)
+    const appliedImportIdentifiers = promRegistryImportIdentifiers.value
+    const { error: identifierError } = appliedImportIdentifiers.length
+      ? await supabase.from('crm_registry_import_identifiers').upsert(
+          appliedImportIdentifiers.map((identifier) => ({
+            bank: identifier.bank,
+            identifier: identifier.identifier,
+            identifier_type: identifier.identifierType,
+            label: identifier.label,
+            source: registrySource.value ?? 'реестр',
+          })),
+          { onConflict: 'bank,identifier', ignoreDuplicates: true },
+        )
+      : { error: null }
     isPromRegistryDraft.value = false
     promRegistryOriginalFinancials.clear()
     promRegistryNewFields.value = new Set()
@@ -1439,7 +1470,9 @@ async function confirmPromRegistryDistribution() {
     await nextTick()
     scrollOrdersToTop()
     await refreshRemoteOrders(remoteIds)
-    showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
+    if (identifierError) {
+      showSyncError('Оплаты разнесены, но отметки проведённого реестра не сохранены.')
+    } else showSyncMessage(`Разнесено оплат: ${matchedOrders.length}.`)
   } catch (error) {
     promRegistryError.value =
       error instanceof Error ? error.message : 'Не удалось сохранить разнесение.'
