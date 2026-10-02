@@ -1,4 +1,5 @@
 name: Deploy NovaPay Edge Functions
+# Temporary one-shot production deploy.
 
 on:
   push:
