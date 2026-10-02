@@ -5,6 +5,7 @@ type Source = 'scheduled' | 'manual' | 'balance'
 type Stage = 'starting' | 'authorization' | 'auth_request' | 'data_sync'
 
 function codeFor(error: unknown) {
+  if (error instanceof NovaPayTransportError) return 'NOVAPAY_TRANSPORT_ERROR'
   const raw = error && typeof error === 'object' && 'code' in error ? error.code : null
   return typeof raw === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(raw)
     ? raw
