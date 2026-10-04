@@ -15,7 +15,7 @@ const logoSources: Record<string, string> = {
     :alt="props.platform"
     :class="[
       'inline-block w-auto object-contain align-[-0.14em]',
-      props.platform === 'Эпицентр' ? 'h-[2em] max-w-36' : 'h-[1.65em] max-w-32',
+      props.platform === 'Эпицентр' ? 'h-7 max-w-28' : 'h-[1.65em] max-w-32',
     ]"
   />
   <span v-else>{{ props.platform }}</span>
