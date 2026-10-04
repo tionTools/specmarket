@@ -4,7 +4,7 @@ const props = defineProps<{ platform: string }>()
 const logoSources: Record<string, string> = {
   Пром: '/platform-logos/prom.png',
   Каста: '/platform-logos/kasta.png',
-  Эпицентр: '/platform-logos/epicentr.png',
+  Эпицентр: '/platform-logos/epicentr-v166.png',
 }
 </script>
 
