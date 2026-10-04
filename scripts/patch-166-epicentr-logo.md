@@ -104,7 +104,9 @@ Keep the existing `PlatformLogo()` mapping and Epicentr size values unchanged:
 - 22.dp height;
 - 96.dp max width.
 
-Do not resize Prom or Kasta. Do not change order-card spacing or status/date layout.
+Do not resize Prom or Kasta.
+
+For the compact Android card only, Epicentr must not share one horizontal row with the full date/time text. Render the Epicentr logo first and the full `date · time` on the next line inside the same left column. Keep Prom/Kasta compact-card layout unchanged.
 
 ### 5. Android version
 
@@ -169,10 +171,10 @@ If the local Windows/SDK environment prevents a check, report the exact environm
 
 Visually confirm on the real emulator compact-card scenario:
 - Epicentr shows the orange-symbol/blue-wordmark image, not the old hard-coded blue text;
-- no clipping;
-- it remains on one horizontal line;
-- the date/status/card spacing is unchanged;
-- Prom/Kasta are unchanged.
+- the logo itself remains on one horizontal line with no clipping;
+- on 320 dp with font scale 1.3 the full date and full time are readable below the Epicentr logo;
+- the status remains readable and does not overlap the left column;
+- Prom/Kasta compact-card layout is unchanged.
 
 ## Stop conditions
 

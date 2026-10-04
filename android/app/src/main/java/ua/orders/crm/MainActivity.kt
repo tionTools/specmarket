@@ -725,17 +725,29 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    val compactEpicentr = normalizedStatus(order.platform) in setOf("эпицентр", "епіцентр")
+                    if (compactEpicentr) {
                         PlatformLogo(order.platform)
-                        Spacer(Modifier.width(6.dp))
                         Text(
                             "${order.orderDate.display()} · ${order.orderTime.display()}",
-                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlatformLogo(order.platform)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "${order.orderDate.display()} · ${order.orderTime.display()}",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(6.dp))
