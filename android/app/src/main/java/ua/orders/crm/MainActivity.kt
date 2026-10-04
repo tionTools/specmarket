@@ -725,27 +725,29 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (normalizedStatus(order.platform) in setOf("эпицентр", "епіцентр")) {
-                            Text(
-                                "Епіцентр",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0758B6),
-                                maxLines = 1,
-                            )
-                        } else {
-                            PlatformLogo(order.platform)
-                        }
-                        Spacer(Modifier.width(6.dp))
+                    val compactEpicentr = normalizedStatus(order.platform) in setOf("эпицентр", "епіцентр")
+                    if (compactEpicentr) {
+                        PlatformLogo(order.platform)
                         Text(
                             "${order.orderDate.display()} · ${order.orderTime.display()}",
-                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlatformLogo(order.platform)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "${order.orderDate.display()} · ${order.orderTime.display()}",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(6.dp))
