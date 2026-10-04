@@ -726,17 +726,7 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (normalizedStatus(order.platform) in setOf("эпицентр", "епіцентр")) {
-                            Text(
-                                "Епіцентр",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0758B6),
-                                maxLines = 1,
-                            )
-                        } else {
-                            PlatformLogo(order.platform)
-                        }
+                        PlatformLogo(order.platform)
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "${order.orderDate.display()} · ${order.orderTime.display()}",

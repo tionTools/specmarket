@@ -53,7 +53,9 @@ Current Epicentr sizing:
 - height: 22.dp
 - max width: 96.dp
 
-The approved 4:1 asset fits this box without a layout change: at 22.dp height its natural width is about 88.dp, below the existing 96.dp cap.
+Important: the compact order card currently bypasses `PlatformLogo()` for Epicentr and renders a hard-coded blue `Text("Епіцентр")`. The successful Android UI-review workflow exposed this: replacing the drawable alone does not change the compact card.
+
+The approved 4:1 asset fits the existing logo box without a sizing change: at 22.dp height its natural width is about 88.dp, below the existing 96.dp cap.
 
 Current Android version:
 - versionCode 25
@@ -94,15 +96,15 @@ with the same approved source asset:
 
 The resulting Android drawable must also be byte-identical to the approved source asset.
 
-### 4. Android layout
+### 4. Android compact-card rendering
 
-Keep the existing Epicentr layout values unchanged:
+In `android/app/src/main/java/ua/orders/crm/MainActivity.kt`, remove the Epicentr-only hard-coded blue text branch in the compact order card and render `PlatformLogo(order.platform)` for Epicentr the same way as the other marketplaces.
+
+Keep the existing `PlatformLogo()` mapping and Epicentr size values unchanged:
 - 22.dp height;
 - 96.dp max width.
 
-Do not resize Prom or Kasta.
-
-Do not change `PlatformLogo()` mapping logic unless compilation proves a change is required.
+Do not resize Prom or Kasta. Do not change order-card spacing or status/date layout.
 
 ### 5. Android version
 
@@ -119,6 +121,7 @@ Only these files may change:
 - `public/platform-logos/epicentr.png`
 - `src/components/ui/PlatformLogo.vue`
 - `android/app/src/main/res/drawable-nodpi/platform_epicentr.png`
+- `android/app/src/main/java/ua/orders/crm/MainActivity.kt`
 - `android/app/build.gradle.kts`
 - `scripts/patch-166-epicentr-logo.md`
 - `scripts/assets/patch-166-epicentr-logo.png`
@@ -164,10 +167,11 @@ Run:
 
 If the local Windows/SDK environment prevents a check, report the exact environment failure rather than changing the implementation.
 
-Visually confirm:
-- the same orange-symbol/blue-wordmark logo is shown;
+Visually confirm on the real emulator compact-card scenario:
+- Epicentr shows the orange-symbol/blue-wordmark image, not the old hard-coded blue text;
 - no clipping;
 - it remains on one horizontal line;
+- the date/status/card spacing is unchanged;
 - Prom/Kasta are unchanged.
 
 ## Stop conditions
