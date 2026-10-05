@@ -1491,6 +1491,33 @@ const unpaidShipmentAmount = computed(() =>
 const unpaidShipmentPlannedProfit = computed(() =>
   unpaidShipmentOrders.value.reduce((total, order) => total + getPlannedProfit(order), 0),
 )
+
+const unpaidShipmentDiagnosticOrderNumber = 57877691
+const unpaidShipmentDiagnostic = computed(() => {
+  const order = orders.value.find(
+    (item) =>
+      item.orderNumber === unpaidShipmentDiagnosticOrderNumber ||
+      item.displayNumber === String(unpaidShipmentDiagnosticOrderNumber) ||
+      String(item.id) === String(unpaidShipmentDiagnosticOrderNumber),
+  )
+  if (!order) return null
+
+  const status = displayOrderStatus(order.status)
+  const paid = isPaid(order)
+  return {
+    included: includeInUnpaidShipment(order, status, paid),
+    lifecycleState: getOrderLifecycleState(order, status),
+    paid,
+    amount: getNetOrderAmount(order),
+    printed: Boolean(order.delivery.printedAt),
+    returnedQuantity: order.products.reduce(
+      (total, product) => total + Math.max(0, product.returnedQuantity ?? 0),
+      0,
+    ),
+    trackingNormalizedStatus:
+      order.delivery.trackingNormalizedStatus?.trim().toLowerCase() || '—',
+  }
+})
 const printRegistryOrders = computed(() => {
   if (printRegistryMode.value === 'history')
     return orders.value.filter((order) => Boolean(order.delivery.printedAt))
@@ -5738,6 +5765,21 @@ function orderDateTime(order: Order) {
           >
             {{ formatMoney(unpaidShipmentPlannedProfit) }}
             <span class="ml-1">Плановая прибыль</span>
+          </p>
+          <p
+            v-if="unpaidShipmentDiagnostic"
+            class="mt-1 max-w-[36rem] text-[10px] leading-4 font-medium text-rose-700"
+          >
+            #57877691 · {{ unpaidShipmentDiagnostic.included ? 'ВКЛ' : 'ВЫКЛ' }} · paid={{
+              unpaidShipmentDiagnostic.paid
+            }}
+            · lifecycle={{ unpaidShipmentDiagnostic.lifecycleState }} · amount={{
+              formatMoney(unpaidShipmentDiagnostic.amount)
+            }}
+            · printed={{ unpaidShipmentDiagnostic.printed }} · returned={{
+              unpaidShipmentDiagnostic.returnedQuantity
+            }}
+            · tracking={{ unpaidShipmentDiagnostic.trackingNormalizedStatus }}
           </p>
         </article>
       </section>
