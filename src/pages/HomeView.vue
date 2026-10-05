@@ -5738,7 +5738,8 @@ function orderDateTime(order: Order) {
           >
             {{ formatMoney(unpaidShipmentPlannedProfit) }}
             <span class="ml-1">Плановая прибыль</span>
-          </p>        </article>
+          </p>
+        </article>
       </section>
 
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
