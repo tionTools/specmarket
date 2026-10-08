@@ -1,0 +1,45 @@
+SpecMarket — Patch 167 v2 (Windows-safe transfer correction)
+Base commit: 5f3ed237c02fa4129e5f48e64d0feb1b84aabf29
+Patch: origin/chatgpt-patches:167-v2.patch
+Status: not merged, not deployed, no production changes.
+
+IMPORTANT
+The CODE DIFF is exactly the same as 167.patch. This is a PACKAGE/TRANSFER revision, not a new redesign of NovaPay code. In the user's last attempt, git apply --check failed on the first hunks of every EXISTING file even though the original code matched the GitHub main base. Git on Windows rejects LF-context patches that have been converted to CRLF. A controlled reproduction of CRLF conversion produced the exact same error at novapay-auth.ts:177, while Git checkout preserved the LF patch and git apply --check passed on the matching fixture.
+
+CODEX: DO NOT COPY/PASTE OR SHELL-REDIRECT THE PATCH
+1. Continue in the ORIGINAL CLEAN separate worktree from the exact base SHA above; do not modify a dirty main checkout. The previously failed git apply --check made no changes, so do not rebuild or overwrite anything unrelated.
+2. Fetch latest references: git fetch origin main chatgpt-patches
+3. In the clean worktree, extract the new patch directly from Git's object database without any shell text conversion:
+   git restore --source=origin/chatgpt-patches --worktree -- 167-v2.patch
+   This creates a temporary untracked patch file. DO NOT git add it.
+4. Validate bytes (Python installed on user's Windows system):
+   python -c "from pathlib import Path; d=Path('167-v2.patch').read_bytes(); print('LF:',d.count(b'\n'),'CRLF:',d.count(b'\r\n')); assert b'\r' not in d, 'Patch transferred with CRLF/CR; stop'"
+   If Python isn't available use git's raw blob SHA comparison:
+   git hash-object 167-v2.patch
+   git rev-parse origin/chatgpt-patches:167-v2.patch
+   Both SHAs must match.
+5. Validate base: git rev-parse HEAD, and ensure it is 5f3ed237c02fa4129e5f48e64d0feb1b84aabf29. If current origin/main has advanced, stop and report before changing the base.
+6. Run:
+   git apply --check --verbose 167-v2.patch
+   If PASS:
+   git apply 167-v2.patch
+   git diff --check
+   If FAIL, STOP and report the full verbose output plus:
+   git ls-files --eol supabase/functions/_shared/novapay-auth.ts supabase/functions/_shared/novapay-auth_test.ts supabase/functions/novapay-data/index.ts supabase/functions/novapay-balance/index.ts
+   git hash-object 167-v2.patch
+   git rev-parse origin/chatgpt-patches:167-v2.patch
+   DO NOT attempt --ignore-whitespace or --unidiff-zero, do not change code to force apply.
+7. Remove ONLY the temporary untracked 167-v2.patch from the worktree after apply/check. Leave all user files untouched.
+8. From there, follow the original 167.txt scope and verification gates:
+   - format ONLY two newly added novapay-preflight.ts and novapay-preflight_test.ts with project oxfmt;
+   - targeted deno test --node-modules-dir=auto for novapay-auth_test.ts, novapay-preflight_test.ts and novapay-soap-timeout_test.ts;
+   - scoped Deno checks, scoped Oxlint/ESLint, pnpm type-check, pnpm build, git diff --check;
+   - validate WSDL GET availability from a compatible network without ever using provider credentials.
+   - protect one-shot refresh-token guard, tests for no preflight with valid JWT, no token use or guard on failed preflight, normal guarded authentication after successful preflight.
+   - full lint unrelated known monobank-webhook Unexpected any and baseline implicit-any warnings remain separately documented; do not reformat or change unrelated files.
+9. Only if validation passes, commit six changed NovaPay files and create a Draft PR.
+   No merge, deploy, migrations, Vault/token change, recovery flag reset, cron change or new PR if tests blocked.
+10. Report patch byte count and LF count, git apply --check result, test results, SHA, Draft PR link and remaining risks. If no WSDL access from a production-like network, explicitly report it as blocker.
+
+Why the guard is retained:
+A WSDL health GET (8-second timeout, no credentials) avoids attempting known-offline one-shot rotation and auto-recovers with next scheduled job. It cannot guarantee success of the subsequent UserAuthenticationJWT POST and cannot safely reissue a consumed refresh token.
