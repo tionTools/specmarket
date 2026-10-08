@@ -1,0 +1,70 @@
+SpecMarket — TEMPORARY Supabase Edge WSDL probe for Patch 167 (authorized by user)
+Published: origin/chatgpt-patches:167-probe.patch
+Target: ONLY project rtkhgldaswsclkorlyxx
+Source: existing Draft PR #67, head 11b4be5448650cbb0fae68984cb2110d7af06487
+Temporary function name: novapay-preflight-probe-167
+Status of main NovaPay functions: leave unchanged. DO NOT merge Draft PR #67.
+
+PURPOSE
+Verify network availability from the REAL Supabase Edge execution environment, invoking the exact checkNovaPayPreflight function implemented in Draft PR #67. This makes one credential-free GET to NovaPay's WSDL with an 8-second timeout and no SOAP authorization. A local Windows/Deno request does NOT satisfy this requirement.
+
+BOUNDARIES
+- User has explicitly authorized a temporary diagnostic function deployment AND cleanup, not deployment of Patch 167 to the live novapay-data / novapay-balance functions.
+- No Vault, NovaPay refresh token, certificate, migration, cron, recovery flag, application data, or production auth rotation changes.
+- Never call UserAuthenticationJWT in the probe.
+- No new permanent PR. Work only in a clean SEPARATE worktree detached at EXACT Draft PR head SHA above. Preserve any user's local dirty main checkout.
+- Deploy ONLY novapay-preflight-probe-167; do not deploy ALL functions. NEVER use --prune, --no-verify-jwt, or db push.
+- Default JWT verification is required. The new function's name must not appear in config.toml with verify_jwt=false; do not alter config.toml.
+- The probe accepts only POST with a fixed upstream URL and returns status/category without the WSDL body, credentials, logs or response data.
+- Immediately delete the temporary function from remote project after the test, WHETHER pass or fail; do not leave a public service running. Leave Draft PR #67 unchanged.
+
+CODEX EXECUTION (Windows-safe)
+1. git fetch origin main chatgpt-patches codex/patch-167-novapay
+   Confirm `git rev-parse origin/codex/patch-167-novapay` == 11b4be5448650cbb0fae68984cb2110d7af06487.
+   Use an isolated CLEAN worktree based on that commit (don't change main checkout).
+2. In that worktree, obtain 167-probe.patch directly through Git, without PowerShell text redirection (CRLF previously broke apply):
+   git restore --source=origin/chatgpt-patches --worktree -- 167-probe.patch
+   Ensure object checksum matches:
+   git hash-object 167-probe.patch
+   git rev-parse origin/chatgpt-patches:167-probe.patch
+   Compare the two lines, and reject any mismatch.
+3. git apply --check --verbose 167-probe.patch
+   If FAIL, STOP; report full error. If PASS: git apply 167-probe.patch
+   Confirm exactly one new file:
+   supabase/functions/novapay-preflight-probe-167/index.ts
+   DO NOT stage, commit, or add it to PR #67.
+   Remove only temporary root 167-probe.patch after applying.
+4. Run only scoped static checks for the new Edge handler:
+   deno check --node-modules-dir=auto supabase/functions/novapay-preflight-probe-167/index.ts
+   pnpm exec oxfmt --check supabase/functions/novapay-preflight-probe-167/index.ts
+   git diff --check
+   If formatting check fails, run oxfmt on ONLY the new index.ts, check again. No unrelated formatting. If any check fails, DO NOT deploy.
+5. Ensure available CLI authorized for intended Supabase project:
+   pnpm exec supabase functions list --project-ref rtkhgldaswsclkorlyxx
+   If the name novapay-preflight-probe-167 ALREADY exists in the remote list, STOP to avoid overwriting someone else's function.
+   No secret or bearer key should appear in command logs or chat responses.
+6. Deploy ONLY the temporary diagnostic function, with standard JWT verification (NEVER --no-verify-jwt):
+   pnpm exec supabase functions deploy novapay-preflight-probe-167 --project-ref rtkhgldaswsclkorlyxx --use-api
+   If --use-api is unavailable, try the same exact one-function deploy without --use-api; do not widen scope.
+7. TEST FROM REMOTE EDGE (not locally) by invoking this deployed function using Supabase Dashboard > Edge Functions > novapay-preflight-probe-167 > Test; choose POST and the project's normal authorized API key/session. Alternatively call the remote URL with approved credentials from an existing secure local environment:
+   https://rtkhgldaswsclkorlyxx.supabase.co/functions/v1/novapay-preflight-probe-167
+   Supply authentication using the platform's standard key/session; do NOT paste or print keys. Do NOT disable JWT verification to make a 401 go away. If 401, that is an invocation/auth problem, not evidence of NovaPay being down.
+   Expected: HTTP 200 and JSON {"ok":true,"check":"novapay_wsdl_preflight","elapsed_ms":N}.
+   Retry once, at most twice total, if the first probe succeeds. Report HTTP status and safe JSON response for each try (no secrets).
+   Error: HTTP 503 and "NOVAPAY_PREFLIGHT_UNAVAILABLE", with reason timeout / transport_failure / http_NNN / unexpected_content_type. If this happens, Patch 167 MUST NOT BE DEPLOYED to real functions.
+   Any other code is not a confirmed positive result; report blocker.
+8. MANDATORY CLEANUP FROM REMOTE Supabase, regardless of prior outcome:
+   pnpm exec supabase functions delete novapay-preflight-probe-167 --project-ref rtkhgldaswsclkorlyxx
+   pnpm exec supabase functions list --project-ref rtkhgldaswsclkorlyxx
+   Confirm that the temporary function is NO LONGER listed. If deletion fails, repeat safe deletion once and escalate/report honestly; DO NOT claim cleanup succeeded until confirmed.
+   Cleanup only this exact named temporary function, never delete novapay-data, novapay-balance, or others.
+9. Remove isolated diagnostic worktree when possible, WITHOUT discarding unrelated user changes; leave local user main untouched. Neither commit the probe nor edit PR #67.
+10. Report:
+   - PR #67 head SHA;
+   - exact remote function deploy result;
+   - HTTP code, ok/code/reason/elapsed_ms from Edge-runtime probe;
+   - remote delete result and absence from function list;
+   - whether Patch 167's WSDL preflight is GREEN from Supabase Edge or BLOCKED.
+   No merge or live NovaPay function deploy: ChatGPT will review the report.
+
+Important: HTTP 200 WSDL preflight only confirms that the WSDL endpoint is reachable from the remote Edge runtime AT TEST TIME. It never guarantees future NovaPay auth POST success, does not prove correct one-time credential rotation, and may not represent every global Edge region.
