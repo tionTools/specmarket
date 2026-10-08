@@ -1,4 +1,4 @@
-import { getValidNovaPayJwt, NovaPayTransportError } from './novapay-auth.ts'
+import { getValidNovaPayJwt, NovaPayAuthError, NovaPayTransportError } from './novapay-auth.ts'
 import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
 
 Deno.test('NovaPay auth XML preserves returned credentials through the next SOAP request', () => {
@@ -181,6 +181,7 @@ Deno.test('database circuit breaker denies lock with recovery-required error', a
 
 Deno.test('reuses a valid shared NovaPay JWT without authenticating', async () => {
   let authenticated = 0
+  let preflightCalls = 0
   const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
   const admin = {
     rpc: async (name: string) => {
@@ -196,12 +197,88 @@ Deno.test('reuses a valid shared NovaPay JWT without authenticating', async () =
   }
   const result = await getValidNovaPayJwt({
     admin,
+    preflight: async () => { preflightCalls += 1 },
     authenticate: async () => {
       authenticated += 1
       return {}
     },
   })
-  if (result !== validJwt || authenticated !== 0) throw new Error('valid session was not reused')
+  if (result !== validJwt || authenticated !== 0 || preflightCalls !== 0)
+    throw new Error('valid session was not reused without availability probing')
+})
+
+Deno.test('failed preflight leaves rotation guard unset and releases lock', async () => {
+  const events: string[] = []
+  const admin = {
+    rpc: async (name: string) => {
+      events.push(name)
+      if (name === 'acquire_novapay_rotation_lock_owned') return { data: true }
+      if (name === 'get_novapay_auth_state')
+        return { data: { refresh_token: 'unused', public_certificate: 'unused' } }
+      if (name === 'release_novapay_rotation_lock') return { data: true }
+      throw new Error('Unexpected RPC after failed preflight: ' + name)
+    },
+  }
+  let authenticated = 0
+  let caught: unknown
+  try {
+    await getValidNovaPayJwt({
+      admin,
+      preflight: async () => {
+        events.push('preflight')
+        throw new NovaPayAuthError(503, 'NOVAPAY_PREFLIGHT_UNAVAILABLE', 'Retry later.', 'timeout')
+      },
+      authenticate: async () => {
+        authenticated++
+        throw new Error('One-time token was consumed')
+      },
+    })
+  } catch (error) {
+    caught = error
+  }
+  if (!(caught instanceof NovaPayAuthError) || caught.code !== 'NOVAPAY_PREFLIGHT_UNAVAILABLE')
+    throw new Error('Preflight failure did not propagate')
+  if (authenticated !== 0 || events.includes('begin_novapay_auth_rotation'))
+    throw new Error('Preflight failure armed guard or sent credentials')
+  if (events.join(',') !== 'acquire_novapay_rotation_lock_owned,get_novapay_auth_state,preflight,release_novapay_rotation_lock')
+    throw new Error('Wrong preflight ordering or rotation lock leaked')
+})
+
+Deno.test('successful preflight precedes guard and one-shot authorization', async () => {
+  const events: string[] = []
+  let state: Record<string, string> = { refresh_token: 'old', public_certificate: 'old' }
+  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
+  const admin = {
+    rpc: async (name: string, args?: Record<string, string>) => {
+      if (name === 'acquire_novapay_rotation_lock_owned' ||
+          name === 'release_novapay_rotation_lock') return { data: true }
+      if (name === 'get_novapay_auth_state') return { data: state }
+      if (name === 'begin_novapay_auth_rotation') {
+        events.push('begin')
+        return { data: null }
+      }
+      if (name === 'save_novapay_auth_state_owned') {
+        state = {
+          refresh_token: args!.new_refresh_token,
+          public_certificate: args!.new_public_certificate,
+          jwt: args!.new_jwt,
+          jwt_expires_at: args!.new_jwt_expires_at,
+        }
+        return { data: null }
+      }
+      throw new Error(name)
+    },
+  }
+  const actual = await getValidNovaPayJwt({
+    admin,
+    preflight: async () => { events.push('preflight') },
+    authenticate: async () => {
+      events.push('authenticate')
+      return { jwt: nextJwt, refresh_token: 'new', public_certificate: 'new' }
+    },
+  })
+  if (actual !== nextJwt || events.join(',') !== 'preflight,begin,authenticate')
+    throw new Error('Unexpected preflight/guard/auth ordering')
 })
 
 Deno.test('uses JWT exp when stored expiry is empty', async () => {

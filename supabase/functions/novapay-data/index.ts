@@ -7,6 +7,7 @@ import {
 } from '../_shared/novapay-auth.ts'
 import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
 import { failNovaPaySyncAttempt } from '../_shared/novapay-sync-journal.ts'
+import { checkNovaPayPreflight } from '../_shared/novapay-preflight.ts'
 import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
 import {
   assignRunningBalances,
@@ -873,6 +874,7 @@ Deno.serve(async (request) => {
 
     const jwt = await getValidNovaPayJwt({
       admin,
+      preflight: checkNovaPayPreflight,
       authenticate: async ({ refreshToken, publicCertificate }) => {
         const authRequestRef = requestRef()
         syncRequestRef = authRequestRef
