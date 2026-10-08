@@ -1,0 +1,38 @@
+SpecMarket / NovaPay — Patch 167 v2: focused test import fix
+
+BASE
+- Main/base: 5f3ed237c02fa4129e5f48e64d0feb1b84aabf29.
+- Existing worktree: Patch 167 v2 already applied successfully and oxfmt for two new modules passed. Do NOT reapply 167-v2.patch.
+- Corrective patch: origin/chatgpt-patches:167-v2-fix.patch
+- Scope: ONE existing file, ONE import line. No runtime production logic changes.
+
+CAUSE
+167-v2.patch added tests using NovaPayAuthError in supabase/functions/_shared/novapay-auth_test.ts, but missed importing the exported class. This triggers Deno TS2304 at two test sites and TS18046 for the catch variable.
+
+CODEX STEPS
+1. Stay in the same separate worktree containing the six applied Patch 167 v2 changes. Protect the user's dirty main checkout. No reset, rebase, stashing, cleaning of unrelated files, or starting over.
+2. git fetch origin chatgpt-patches
+3. Retrieve the fix directly from Git object store, preserving LF (no PowerShell redirection):
+   git restore --source=origin/chatgpt-patches --worktree -- 167-v2-fix.patch
+   This patch file is temporary/untracked. Never stage it.
+4. Validate exact patch object bytes using:
+   git hash-object 167-v2-fix.patch
+   git rev-parse origin/chatgpt-patches:167-v2-fix.patch
+   The two SHA outputs must match.
+5. git apply --check --verbose 167-v2-fix.patch
+   If FAIL, stop and report; do not improvise code edits or --ignore-whitespace.
+6. git apply 167-v2-fix.patch
+   git diff --check
+   Delete ONLY temporary untracked 167-v2-fix.patch after application.
+7. Run TARGETED Deno tests first:
+   deno test --node-modules-dir=auto supabase/functions/_shared/novapay-auth_test.ts supabase/functions/_shared/novapay-preflight_test.ts supabase/functions/_shared/novapay-soap-timeout_test.ts
+   Then project oxfmt for two NEW files and scoped Deno check, pnpm type-check, scoped lint and build, per instructions in 167-v2.txt.
+8. Ensure total changed files remain exactly SIX from 167-v2.patch and diff from base only adds NovaPay preflight + tests; do not widen scope. Existing full project lint baseline unrelated monobank-webhook/index.ts:31 can be reported separately, without changes.
+9. Verify WSDL GET availability from suitable network before allowing new preflight to be deployed, as in original instructions. No requests with provider refresh tokens.
+10. Only if checks and live WSDL availability validation pass, create Draft PR. NEVER merge/deploy automatically or alter Vault, recovery flag, tokens, migrations or cron. Report tests, commit SHA, Draft PR URL. If failures remain stop and provide exact logs.
+
+CHATGPT VALIDATION
+- Checked existing novapay-auth_test.ts on exact main base: line 1 only imports getValidNovaPayJwt and NovaPayTransportError.
+- Confirmed NovaPayAuthError is exported in shared novapay-auth.ts.
+- Confirmed 167-v2.patch does not edit the test file's line 1.
+- This fix adds NovaPayAuthError to that import only. Runtime behavior unchanged.
