@@ -1,0 +1,41 @@
+diff --git a/supabase/functions/novapay-preflight-probe-167/index.ts b/supabase/functions/novapay-preflight-probe-167/index.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/novapay-preflight-probe-167/index.ts
+@@ -0,0 +1,36 @@
++import { NovaPayAuthError } from '../_shared/novapay-auth.ts'
++import { checkNovaPayPreflight } from '../_shared/novapay-preflight.ts'
++
++// Temporary read-only probe. Do not configure verify_jwt=false or accept arbitrary URLs.
++Deno.serve(async (request) => {
++  if (request.method !== 'POST') {
++    return new Response(null, { status: 405, headers: { Allow: 'POST' } })
++  }
++
++  const startedAt = Date.now()
++  try {
++    await checkNovaPayPreflight()
++    return Response.json({
++      ok: true,
++      check: 'novapay_wsdl_preflight',
++      elapsed_ms: Date.now() - startedAt,
++    })
++  } catch (error) {
++    if (error instanceof NovaPayAuthError) {
++      return Response.json(
++        {
++          ok: false,
++          check: 'novapay_wsdl_preflight',
++          code: error.code,
++          reason: error.reason ?? 'not_classified',
++          elapsed_ms: Date.now() - startedAt,
++        },
++        { status: error.status },
++      )
++    }
++    return Response.json(
++      { ok: false, check: 'novapay_wsdl_preflight', code: 'NOVAPAY_PROBE_INTERNAL_ERROR' },
++      { status: 500 },
++    )
++  }
++})
