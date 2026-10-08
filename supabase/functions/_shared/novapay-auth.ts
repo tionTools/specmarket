@@ -1,4 +1,4 @@
-const LOCK_LEASE_SECONDS = 90
+const LOCK_LEASE_SECONDS = 120
 const LOCK_WAIT_ATTEMPTS = 121
 const LOCK_WAIT_MS = 250
 // Keep five minutes of JWT lifetime before reuse so a normal full sync does not expire mid-request.
@@ -126,13 +126,14 @@ async function authenticateOnce(
   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>,
   state: { refreshToken: string; publicCertificate: string },
 ) {
+  const startedAt = Date.now()
   try {
     return await authenticate(state)
   } catch (error) {
     // A single-use refresh credential may be consumed even if its response is lost.
     // Never log raw provider errors: they may contain credentials or response payloads.
     console.error(
-      `NovaPay JWT rotation failed: reason=${authExchangeFailureReason(error)}; recovery_guard=retained.`,
+      `NovaPay JWT rotation failed: reason=${authExchangeFailureReason(error)}; recovery_guard=retained; auth_elapsed_ms=${Math.max(0, Date.now() - startedAt)}.`,
     )
     if (!ambiguousAuthenticationError(error)) throw error
     throw new NovaPayAuthError(

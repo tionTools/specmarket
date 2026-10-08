@@ -7,6 +7,7 @@ import {
 } from '../_shared/novapay-auth.ts'
 import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
 import { failNovaPaySyncAttempt } from '../_shared/novapay-sync-journal.ts'
+import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
 import {
   assignRunningBalances,
   copyKnownBalancesByProviderAlias,
@@ -16,7 +17,6 @@ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
 const SOAP_ACTION_BASE = 'http://tempuri.org/IClientAPIService/'
 const SOAP_NAMESPACE = 'http://schemas.xmlsoap.org/soap/envelope/'
 const TEM_NAMESPACE = 'http://tempuri.org/'
-const SOAP_TIMEOUT_MS = 30_000
 const FULL_SYNC_LEASE_SECONDS = 600
 
 const corsHeaders = {
@@ -104,7 +104,7 @@ function apiError(result, method) {
 
 async function soapCallOnce(method, params) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), novaPaySoapTimeoutMs(method))
   let response
   let responseText
   try {
