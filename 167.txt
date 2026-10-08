@@ -1,0 +1,52 @@
+SpecMarket — PATCH 167: NovaPay read-only availability preflight before one-time JWT rotation
+Base: origin/main 5f3ed237c02fa4129e5f48e64d0feb1b84aabf29 (Patch 166 deployed)
+Package: chatgpt-patches/167.patch
+Status: code patch authored by ChatGPT and published in chatgpt-patches. NOT applied to main, merged, or deployed.
+NO migrations. NO Vault modifications. NO changes to cron. NO refresh-token retries.
+
+WHY
+UserAuthenticationJWT rotates single-use credentials. If NovaPay is down when a JWT is expired, the current code immediately arms a persistent uncertainty guard and POSTs credentials. A timeout can require manual replacement of a fresh pair. We can skip known-offline periods BEFORE that sensitive POST.
+
+DESIGN (ALREADY IN THE PATCH; DO NOT REDESIGN)
+1. getValidNovaPayJwt checks the cached JWT as before. If still valid, do not issue GET preflight.
+2. Only before an actual JWT rotation, while holding the existing owner lock and BEFORE begin_novapay_auth_rotation, invoke optional preflight callback.
+3. Both novapay-data and novapay-balance supply checkNovaPayPreflight.
+4. New shared check performs a credential-free GET to
+   https://business.novapay.ua/Services/ClientAPIService.svc?wsdl
+   with cache:no-store, redirect:error and an 8-second AbortController timeout.
+   It accepts HTTP 2xx XML only. It does not read/log the response body, SOAP payload, or secrets.
+5. If WSDL unavailable (timeout, network error, HTTP error, HTML/login response): fail with NOVAPAY_PREFLIGHT_UNAVAILABLE (HTTP 503), a safe reason code, NO call to begin_novapay_auth_rotation, NO UserAuthenticationJWT. Cron will retry at its existing cadence (usually 15 minutes).
+6. If WSDL appears available, proceed through the existing atomic begin → one-shot POST → atomic save. Preserve all existing guards and failure handling unchanged.
+7. WSDL GET is only a preliminary server availability signal; it is NOT proof the authorization backend is healthy or that the next POST cannot fail. A lost auth reply may STILL require manual credentials.
+
+FILES (6 total; 4 modified, 2 new)
+supabase/functions/_shared/novapay-auth.ts
+supabase/functions/_shared/novapay-auth_test.ts
+supabase/functions/_shared/novapay-preflight.ts [new]
+supabase/functions/_shared/novapay-preflight_test.ts [new]
+supabase/functions/novapay-data/index.ts
+supabase/functions/novapay-balance/index.ts
+
+CODEX — APPLY AND VERIFY, DO NOT IMPLEMENT
+1. Fetch origin/main and origin/chatgpt-patches. Confirm current origin/main SHA contains the above base. Use a CLEAN separate worktree from current origin/main; protect any dirty main checkout and avoid formatting unrelated files. Do not reuse Patch 166 worktree.
+2. Read `git show origin/chatgpt-patches:167.txt` and retrieve `git show origin/chatgpt-patches:167.patch` as UTF-8 WITHOUT BOM; watch out for PowerShell 5.1 UTF-16 redirects.
+3. `git apply --check <absolute path to 167.patch>`. If fails due to drift: STOP and report conflicts; no self-redesign.
+4. Apply 167.patch, then `git diff --check`, inspect only the six listed files. Preserve existing baseline formatting.
+5. For the two NEW files only:
+   `pnpm exec oxfmt supabase/functions/_shared/novapay-preflight.ts supabase/functions/_shared/novapay-preflight_test.ts`
+   `pnpm exec oxfmt --check supabase/functions/_shared/novapay-preflight.ts supabase/functions/_shared/novapay-preflight_test.ts`
+   DO NOT deno fmt entire existing files or run project-wide format that changes unrelated files.
+6. Run Deno tests (resolve npm dependencies as in Patch 166):
+   `deno test --node-modules-dir=auto supabase/functions/_shared/novapay-auth_test.ts supabase/functions/_shared/novapay-preflight_test.ts supabase/functions/_shared/novapay-soap-timeout_test.ts`
+   Focus: valid JWT -> no preflight, 503/network/timeout/HTML -> NO begin and NO auth POST; success probe -> existing guard and one-shot exchange; rotation failure still fail-closed; lock always released; no secrets logged or sent in WSDL GET.
+7. Run scoped checks on changed shared modules (Deno check), relevant scoped Oxlint/ESLint, `pnpm type-check`, `pnpm build`, `git diff --check`. Full lint may still show existing unrelated baseline monobank-webhook/index.ts:31 Unexpected any; report honestly. Broad Deno Edge entrypoint check can have known baseline implicit-any; do not refactor unrelated files.
+8. If feasible, verify that public WSDL GET responds 2xx XML from a network comparable to Supabase Edge runtime. Do not send any refresh tokens or probe by invoking UserAuthenticationJWT. An inability to reach WSDL from the runtime is a production blocker (could stop authorization altogether when JWT expires); STOP and report if documented endpoint is not consistently reachable from the relevant environment.
+9. When ALL necessary checks pass and WSDL behavior is validated, commit changes on a new branch and create a DRAFT PR. No merge, deploy, migrations, vault writes, recovery flag reset or provider credential changes. Do not create unrequested infrastructure.
+10. Report full verification summary, any live availability test result/location (if done), files, SHA, Draft PR URL, remaining limitations.
+
+CHATGPT CHECKS COMPLETED
+- Checked current GitHub origin/main SHA and real NovaPay source code.
+- Confirmed the service explicitly documents a public WSDL URL in its landing page.
+- Generated patch using exact current GitHub main sources.
+- Independently parsed and checked every unified diff hunk against the actual current GitHub source; all 6 files match cleanly and guard ordering verified.
+- The current ChatGPT environment has no Deno runtime; runtime tests and real git apply --check in the worktree have NOT been executed here. Codex MUST do them.
