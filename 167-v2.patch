@@ -1,0 +1,277 @@
+diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_shared/novapay-auth.ts
+--- a/supabase/functions/_shared/novapay-auth.ts
++++ b/supabase/functions/_shared/novapay-auth.ts
+@@ -177,9 +177,11 @@
+ export async function getValidNovaPayJwt({
+   admin,
+   authenticate,
++  preflight,
+ }: {
+   admin: NovaPayAdmin
+   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>
++  preflight?: () => Promise<void>
+ }) {
+   const owner = crypto.randomUUID()
+   let locked = false
+@@ -215,6 +217,9 @@
+ 
+     if (jwt && expiresAt && expiresAt - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
+ 
++    // A failed read-only check must not arm the one-time credential rotation guard.
++    if (preflight) await preflight()
++
+     const authState = {
+       refreshToken: text(data.refresh_token),
+       publicCertificate: text(data.public_certificate),
+diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/functions/_shared/novapay-auth_test.ts
+--- a/supabase/functions/_shared/novapay-auth_test.ts
++++ b/supabase/functions/_shared/novapay-auth_test.ts
+@@ -181,6 +181,7 @@
+ 
+ Deno.test('reuses a valid shared NovaPay JWT without authenticating', async () => {
+   let authenticated = 0
++  let preflightCalls = 0
+   const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
+   const admin = {
+     rpc: async (name: string) => {
+@@ -196,14 +197,90 @@
+   }
+   const result = await getValidNovaPayJwt({
+     admin,
++    preflight: async () => { preflightCalls += 1 },
+     authenticate: async () => {
+       authenticated += 1
+       return {}
+     },
+   })
+-  if (result !== validJwt || authenticated !== 0) throw new Error('valid session was not reused')
++  if (result !== validJwt || authenticated !== 0 || preflightCalls !== 0)
++    throw new Error('valid session was not reused without availability probing')
+ })
+ 
++Deno.test('failed preflight leaves rotation guard unset and releases lock', async () => {
++  const events: string[] = []
++  const admin = {
++    rpc: async (name: string) => {
++      events.push(name)
++      if (name === 'acquire_novapay_rotation_lock_owned') return { data: true }
++      if (name === 'get_novapay_auth_state')
++        return { data: { refresh_token: 'unused', public_certificate: 'unused' } }
++      if (name === 'release_novapay_rotation_lock') return { data: true }
++      throw new Error('Unexpected RPC after failed preflight: ' + name)
++    },
++  }
++  let authenticated = 0
++  let caught: unknown
++  try {
++    await getValidNovaPayJwt({
++      admin,
++      preflight: async () => {
++        events.push('preflight')
++        throw new NovaPayAuthError(503, 'NOVAPAY_PREFLIGHT_UNAVAILABLE', 'Retry later.', 'timeout')
++      },
++      authenticate: async () => {
++        authenticated++
++        throw new Error('One-time token was consumed')
++      },
++    })
++  } catch (error) {
++    caught = error
++  }
++  if (!(caught instanceof NovaPayAuthError) || caught.code !== 'NOVAPAY_PREFLIGHT_UNAVAILABLE')
++    throw new Error('Preflight failure did not propagate')
++  if (authenticated !== 0 || events.includes('begin_novapay_auth_rotation'))
++    throw new Error('Preflight failure armed guard or sent credentials')
++  if (events.join(',') !== 'acquire_novapay_rotation_lock_owned,get_novapay_auth_state,preflight,release_novapay_rotation_lock')
++    throw new Error('Wrong preflight ordering or rotation lock leaked')
++})
++
++Deno.test('successful preflight precedes guard and one-shot authorization', async () => {
++  const events: string[] = []
++  let state: Record<string, string> = { refresh_token: 'old', public_certificate: 'old' }
++  const nextJwt = jwt(Math.floor(Date.now() / 1000) + 900)
++  const admin = {
++    rpc: async (name: string, args?: Record<string, string>) => {
++      if (name === 'acquire_novapay_rotation_lock_owned' ||
++          name === 'release_novapay_rotation_lock') return { data: true }
++      if (name === 'get_novapay_auth_state') return { data: state }
++      if (name === 'begin_novapay_auth_rotation') {
++        events.push('begin')
++        return { data: null }
++      }
++      if (name === 'save_novapay_auth_state_owned') {
++        state = {
++          refresh_token: args!.new_refresh_token,
++          public_certificate: args!.new_public_certificate,
++          jwt: args!.new_jwt,
++          jwt_expires_at: args!.new_jwt_expires_at,
++        }
++        return { data: null }
++      }
++      throw new Error(name)
++    },
++  }
++  const actual = await getValidNovaPayJwt({
++    admin,
++    preflight: async () => { events.push('preflight') },
++    authenticate: async () => {
++      events.push('authenticate')
++      return { jwt: nextJwt, refresh_token: 'new', public_certificate: 'new' }
++    },
++  })
++  if (actual !== nextJwt || events.join(',') !== 'preflight,begin,authenticate')
++    throw new Error('Unexpected preflight/guard/auth ordering')
++})
++
+ Deno.test('uses JWT exp when stored expiry is empty', async () => {
+   let authenticated = 0
+   const validJwt = jwt(Math.floor(Date.now() / 1000) + 900)
+diff --git a/supabase/functions/_shared/novapay-preflight.ts b/supabase/functions/_shared/novapay-preflight.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-preflight.ts
+@@ -0,0 +1,39 @@
++import { NovaPayAuthError } from './novapay-auth.ts'
++
++const NOVAPAY_WSDL_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc?wsdl'
++export const NOVAPAY_PREFLIGHT_TIMEOUT_MS = 8_000
++
++function unavailable(reason: string) {
++  return new NovaPayAuthError(
++    503,
++    'NOVAPAY_PREFLIGHT_UNAVAILABLE',
++    'NovaPay availability check failed. Authorization was not attempted; retry on the next sync.',
++    reason,
++  )
++}
++
++// Read-only GET without the single-use refresh token. WSDL is not an auth health guarantee.
++export async function checkNovaPayPreflight(
++  request: typeof fetch = fetch,
++  timeoutMs = NOVAPAY_PREFLIGHT_TIMEOUT_MS,
++): Promise<void> {
++  const controller = new AbortController()
++  const timer = setTimeout(() => controller.abort(), timeoutMs)
++  try {
++    const response = await request(NOVAPAY_WSDL_URL, {
++      method: 'GET',
++      cache: 'no-store',
++      redirect: 'error',
++      signal: controller.signal,
++    })
++    if (response.body) void response.body.cancel().catch(() => {})
++    if (!response.ok) throw unavailable(`http_${response.status}`)
++    if (!response.headers.get('content-type')?.toLowerCase().includes('xml'))
++      throw unavailable('unexpected_content_type')
++  } catch (error) {
++    if (error instanceof NovaPayAuthError) throw error
++    throw unavailable(controller.signal.aborted ? 'timeout' : 'transport_failure')
++  } finally {
++    clearTimeout(timer)
++  }
++}
+diff --git a/supabase/functions/_shared/novapay-preflight_test.ts b/supabase/functions/_shared/novapay-preflight_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-preflight_test.ts
+@@ -0,0 +1,62 @@
++import { NovaPayAuthError } from './novapay-auth.ts'
++import { checkNovaPayPreflight } from './novapay-preflight.ts'
++
++async function expectUnavailable(request: typeof fetch, expectedReason: string, timeoutMs = 8_000) {
++  let failure: unknown
++  try {
++    await checkNovaPayPreflight(request, timeoutMs)
++  } catch (error) {
++    failure = error
++  }
++  if (!(failure instanceof NovaPayAuthError) ||
++      failure.code !== 'NOVAPAY_PREFLIGHT_UNAVAILABLE' ||
++      failure.status !== 503 ||
++      failure.reason !== expectedReason) {
++    throw new Error('Unexpected preflight failure: ' + expectedReason)
++  }
++}
++
++Deno.test('WSDL preflight is a credential-free noncached GET', async () => {
++  let requests = 0
++  const request: typeof fetch = async (input, init) => {
++    requests++
++    if (String(input) !== 'https://business.novapay.ua/Services/ClientAPIService.svc?wsdl' ||
++        init?.method !== 'GET' ||
++        init?.cache !== 'no-store' ||
++        init?.redirect !== 'error' ||
++        !init?.signal ||
++        init?.headers !== undefined ||
++        init?.body !== undefined) {
++      throw new Error('Availability request was not a credential-free WSDL GET')
++    }
++    return new Response('<definitions/>', { headers: { 'content-type': 'text/xml; charset=utf-8' } })
++  }
++  await checkNovaPayPreflight(request)
++  if (requests !== 1) throw new Error('Unexpected repeated preflight')
++})
++
++Deno.test('preflight rejects NovaPay HTTP 503', async () => {
++  const request: typeof fetch = async () => new Response('', { status: 503 })
++  await expectUnavailable(request, 'http_503')
++})
++
++Deno.test('preflight rejects HTML or login response', async () => {
++  const request: typeof fetch = async () => new Response('<html/>', {
++    headers: { 'content-type': 'text/html' },
++  })
++  await expectUnavailable(request, 'unexpected_content_type')
++})
++
++Deno.test('preflight classifies transport errors without leaking server text', async () => {
++  const request: typeof fetch = async () => {
++    throw new Error('PRIVATE_PROVIDER_RESPONSE')
++  }
++  await expectUnavailable(request, 'transport_failure')
++})
++
++Deno.test('preflight timeout aborts before credentials are used', async () => {
++  const request: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
++    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
++  })
++  await expectUnavailable(request, 'timeout', 5)
++})
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -7,6 +7,7 @@
+ } from '../_shared/novapay-auth.ts'
+ import { isIncomingNovaPayPayment } from '../_shared/novapay-incoming-payment.ts'
+ import { failNovaPaySyncAttempt } from '../_shared/novapay-sync-journal.ts'
++import { checkNovaPayPreflight } from '../_shared/novapay-preflight.ts'
+ import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
+ import {
+   assignRunningBalances,
+@@ -873,6 +874,7 @@
+ 
+     const jwt = await getValidNovaPayJwt({
+       admin,
++      preflight: checkNovaPayPreflight,
+       authenticate: async ({ refreshToken, publicCertificate }) => {
+         const authRequestRef = requestRef()
+         syncRequestRef = authRequestRef
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -6,6 +6,7 @@
+   NovaPayTransportError,
+ } from '../_shared/novapay-auth.ts'
+ import { recordNovaPayBalanceFailure } from '../_shared/novapay-sync-journal.ts'
++import { checkNovaPayPreflight } from '../_shared/novapay-preflight.ts'
+ import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
+ 
+ const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
+@@ -239,6 +240,7 @@
+   try {
+     const jwt = await getValidNovaPayJwt({
+       admin,
++      preflight: checkNovaPayPreflight,
+       authenticate: ({ refreshToken, publicCertificate }) =>
+         soapCall('UserAuthenticationJWT', {
+           request_ref: requestRef(),
