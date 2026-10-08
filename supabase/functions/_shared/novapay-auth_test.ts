@@ -458,7 +458,8 @@ Deno.test('NovaPay auth diagnostics classify failures without logging raw creden
     logs.length !== 2 ||
     !logs[0].includes('reason=timeout; recovery_guard=retained') ||
     !logs[1].includes('reason=transport_failure; recovery_guard=retained') ||
-    logs.some((line) => line.includes('PRIVATE_CREDENTIAL_VALUE'))
+    logs.some((line) => line.includes('PRIVATE_CREDENTIAL_VALUE')) ||
+    logs.some((line) => !/auth_elapsed_ms=[0-9]+\./.test(line))
   ) {
     throw new Error('NovaPay auth diagnostics lost the failure category or leaked raw data')
   }
