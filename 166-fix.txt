@@ -1,0 +1,61 @@
+SpecMarket — Patch 166 follow-up, NovaPay
+Verified base: origin/main 2497153af855f02c4e25ecbb446dcb7ccb893b79
+Status: original 166.patch already applied in isolated clean worktree, Codex stopped before commit/PR.
+
+PURPOSE
+Correct only the numeric elapsed-ms test assertion (reported double escaping), and fix TEST PROCEDURE.
+No redesign of auth. No changes to the original 166.patch, no rollback of its code, no production actions.
+
+FILES:
+- 166-fix.patch: applies if worktree has the published single-escaped /auth_elapsed_ms=\d+/ form.
+- 166-fix-escaped.patch: applies only if worktree has the reported double-escaped /auth_elapsed_ms=\\d+/ form.
+BOTH change the same single test line to /auth_elapsed_ms=[0-9]+\./ and must NEVER both be applied.
+
+INSTRUCTIONS FOR CODEX
+1. Remain inside the EXISTING isolated NovaPay Patch 166 worktree, where original patch was applied.
+   Do not reset, do not reapply 166.patch, do not create a new patch branch yet.
+2. Fetch updated patch library:
+     git fetch origin main chatgpt-patches
+   Read this file using git show origin/chatgpt-patches:166-fix.txt.
+   Materialize the two .patch files as UTF-8 without BOM (avoid Windows PowerShell 5.1 redirection's UTF-16 encoding).
+3. Examine the exact current line in supabase/functions/_shared/novapay-auth_test.ts.
+   First attempt:
+     git apply --check 166-fix.patch
+   If PASS, run:
+     git apply 166-fix.patch
+   If FAIL, but only if the line literally has two backslashes before d:
+     git apply --check 166-fix-escaped.patch
+     git apply 166-fix-escaped.patch
+   Apply exactly one; STOP if neither matches and provide the exact local line.
+4. Previous `deno fmt --check` on the old project files was an unsuitable gate:
+   the project uses .oxfmtrc.json (semi=false, singleQuote=true); many baseline files are not deno-fmt-clean.
+   Keep all four existing touched files' baseline formatting.
+   Format ONLY the two new files (if needed) using the project formatter:
+     pnpm exec oxfmt supabase/functions/_shared/novapay-soap-timeout.ts supabase/functions/_shared/novapay-soap-timeout_test.ts
+   Verify ONLY those new files were formatted. Optionally:
+     pnpm exec oxfmt --check supabase/functions/_shared/novapay-soap-timeout.ts supabase/functions/_shared/novapay-soap-timeout_test.ts
+   Run:
+     git diff --check
+   Note: new untracked files won't appear in git diff --check until staged; use direct formatter check, not blind git add -A. Follow AGENTS.md.
+5. Deno dependency resolution:
+   This repo has package.json and Deno 2 defaults to manual node_modules mode.
+   In the worktree, try:
+     deno test --node-modules-dir=auto supabase/functions/_shared/novapay-auth_test.ts supabase/functions/_shared/novapay-soap-timeout_test.ts
+   Auto mode may download npm:fast-xml-parser@5.11.1 and remote imports. It needs registry/network access. Do not change dependency versions or application code for this local issue.
+   If network unavailable, report infrastructure blocker; do not mark tests PASS.
+   Check git status for a generated deno.lock or node_modules: no unrelated tracked changes in commit.
+   When test runner needs permissions, grant only documented minimal permissions and rerun.
+6. Run relevant type checks if possible (e.g. deno check --node-modules-dir=auto for changed module entrypoints).
+   Use diff scoped to exact six NovaPay files; verify that timeout policy is auth=60s, data=30s, auth lock=120s, one-time refresh not retried, guard retained.
+7. If all required tests/checks PASS, create ONE separate branch+Draft PR for original Patch 166 plus this fix.
+   No merge, production deploy, Vault writes, recovery reset, or cron changes.
+8. Report each command's result, git status, changed files, commit SHA, Draft PR link.
+   If still blocked, stop with concise diagnosis. No made-up PASS results.
+
+IMPORTANT
+Previous CodeX failure report:
+  git apply --check and git diff --check original: PASS.
+  deno fmt --check original: FAIL on old baseline and new files.
+  deno test original: blocked resolving npm:fast-xml-parser@5.11.1.
+  Local line was reportedly /auth_elapsed_ms=\\d+/ while published 166.patch has /auth_elapsed_ms=\d+/.
+Two separate corrective variants are provided so Codex can resolve the exact local file without guessing.
