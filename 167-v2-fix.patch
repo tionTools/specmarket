@@ -1,0 +1,7 @@
+diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/functions/_shared/novapay-auth_test.ts
+--- a/supabase/functions/_shared/novapay-auth_test.ts
++++ b/supabase/functions/_shared/novapay-auth_test.ts
+@@ -1,2 +1,2 @@
+-import { getValidNovaPayJwt, NovaPayTransportError } from './novapay-auth.ts'
++import { getValidNovaPayJwt, NovaPayAuthError, NovaPayTransportError } from './novapay-auth.ts'
+ import { XMLParser } from 'npm:fast-xml-parser@5.11.1'
