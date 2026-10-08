@@ -6,6 +6,7 @@ import {
   NovaPayTransportError,
 } from '../_shared/novapay-auth.ts'
 import { recordNovaPayBalanceFailure } from '../_shared/novapay-sync-journal.ts'
+import { checkNovaPayPreflight } from '../_shared/novapay-preflight.ts'
 import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
 
 const NOVAPAY_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc'
@@ -239,6 +240,7 @@ Deno.serve(async (request) => {
   try {
     const jwt = await getValidNovaPayJwt({
       admin,
+      preflight: checkNovaPayPreflight,
       authenticate: ({ refreshToken, publicCertificate }) =>
         soapCall('UserAuthenticationJWT', {
           request_ref: requestRef(),

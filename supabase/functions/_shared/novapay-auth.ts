@@ -177,9 +177,11 @@ async function saveRotatedAuthState(admin: NovaPayAdmin, state: Record<string, s
 export async function getValidNovaPayJwt({
   admin,
   authenticate,
+  preflight,
 }: {
   admin: NovaPayAdmin
   authenticate: (state: { refreshToken: string; publicCertificate: string }) => Promise<unknown>
+  preflight?: () => Promise<void>
 }) {
   const owner = crypto.randomUUID()
   let locked = false
@@ -214,6 +216,9 @@ export async function getValidNovaPayJwt({
       tokenExpiry && storedExpiry ? Math.min(tokenExpiry, storedExpiry) : tokenExpiry
 
     if (jwt && expiresAt && expiresAt - Date.now() > JWT_SAFETY_MARGIN_MS) return jwt
+
+    // A failed read-only check must not arm the one-time credential rotation guard.
+    if (preflight) await preflight()
 
     const authState = {
       refreshToken: text(data.refresh_token),
