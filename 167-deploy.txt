@@ -1,0 +1,42 @@
+SpecMarket / NovaPay — RELEASE Patch 167, PR #67 (ALREADY MERGED)
+User expressly authorized full release including Supabase Edge Functions.
+Merged main SHA: 73fce89f68e88150c2d711e0bfbdc0ff9f87394e
+GitHub PR: https://github.com/tionTools/specmarket/pull/67
+Target Supabase project: rtkhgldaswsclkorlyxx
+
+OBJECTIVE
+Deploy ONLY the two existing NovaPay Edge Functions from exact merged main commit (or a newer main containing this commit) and verify them. No further code changes or PR.
+
+SAFE DEPLOY PROCESS FOR CODEX
+1. `git fetch origin main`. Verify `git rev-parse origin/main` is `73fce89f68e88150c2d711e0bfbdc0ff9f87394e` or a descendant. Verify `git merge-base --is-ancestor 73fce89f68e88150c2d711e0bfbdc0ff9f87394e origin/main` succeeds.
+2. Preserve the user's dirty local main checkout. Create a clean independent temporary worktree at EXACT merge commit to avoid deploying uncommitted changes or mixing with other main changes:
+   `git worktree add --detach <temporary-worktree-path> 73fce89f68e88150c2d711e0bfbdc0ff9f87394e`
+   Work only in this temporary worktree. No edits. Ensure `git status --porcelain` is empty.
+3. Verify source contains:
+   `supabase/functions/_shared/novapay-preflight.ts` and imports/calls checkNovaPayPreflight in both `supabase/functions/novapay-data/index.ts` and `supabase/functions/novapay-balance/index.ts`.
+4. Verify Supabase CLI authenticated for correct production project, e.g. `pnpm exec supabase functions list --project-ref rtkhgldaswsclkorlyxx`. DO NOT paste access tokens or secrets into logs, output or responses. If CLI unavailable or project not accessible, STOP and report; do not switch projects.
+5. Deploy exactly two production functions, one at a time, from clean exact merge commit:
+   `pnpm exec supabase functions deploy novapay-data --project-ref rtkhgldaswsclkorlyxx`
+   `pnpm exec supabase functions deploy novapay-balance --project-ref rtkhgldaswsclkorlyxx`
+   If pnpm cannot run Supabase CLI despite existing project setup, use the same proven CLI invocation from prior Patch 166 rollout, but do not change scope or code.
+6. Confirm both deployments independently using CLI:
+   `pnpm exec supabase functions list --project-ref rtkhgldaswsclkorlyxx`
+   Record each function's verified version and ACTIVE status. If CLI output isn't definitive, inspect Supabase UI or approved CLI read-only status; never invent versions.
+7. Verify that the temporary `novapay-preflight-probe-167` function is still ABSENT from the project (it was deleted after two green WSDL checks).
+8. A site-build GitHub Actions workflow may run after main merge, but it deploys the frontend only; do not count it as Edge Function deployment. Report GitHub Actions if relevant, separately.
+9. Do not force a new UserAuthenticationJWT operation or manually reset the rotation recovery flag to test this release. Previously, scheduled NovaPay syncs were observed working; the next normal scheduled sync is an acceptable functional check. Distinguish ACTIVE from an actually successful scheduled sync.
+10. Post-deploy cleanup: remove only the clean, temporary deployment worktree (after verifying no untracked user data in it), leaving the user's local main and other worktrees untouched.
+
+STRICTLY FORBIDDEN
+No new PR, patch, DB migration, schema change, Vault access or update, credential/token changes, manual recovery flag reset, cron change, broad redeploy, unnecessary logs, temporary permanent diagnostic functions, or UserAuthenticationJWT retry.
+
+SUCCESS REPORT REQUIRED
+- Source merge SHA, deployed Supabase project ref.
+- For novapay-data and novapay-balance: deployment result, verified version, ACTIVE status.
+- Confirmation no diagnostic probe function remained.
+- Confirmation no changes to Vault/tokens/migrations/recovery flag and no user checkout changes.
+- GitHub frontend Actions run status as separate information, if verified.
+- Next scheduled-sync result if already observed, otherwise clearly marked pending.
+
+SECURITY NOTE
+Patch 167's preflight is only a read-only WSDL accessibility check when JWT requires rotation. A successful WSDL GET does NOT prove that a subsequent one-time auth POST cannot lose its response. If the auth response is lost, the pre-existing persistent recovery guard remains in force.
