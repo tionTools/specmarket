@@ -1,0 +1,100 @@
+diff --git a/supabase/functions/_shared/novapay-auth.ts b/supabase/functions/_shared/novapay-auth.ts
+--- a/supabase/functions/_shared/novapay-auth.ts
++++ b/supabase/functions/_shared/novapay-auth.ts
+@@ -1,2 +1,2 @@
+-const LOCK_LEASE_SECONDS = 90
++const LOCK_LEASE_SECONDS = 120
+ const LOCK_WAIT_ATTEMPTS = 121
+@@ -128,2 +128,3 @@
+ ) {
++  const startedAt = Date.now()
+   try {
+@@ -134,3 +135,3 @@
+     console.error(
+-      `NovaPay JWT rotation failed: reason=${authExchangeFailureReason(error)}; recovery_guard=retained.`,
++      `NovaPay JWT rotation failed: reason=${authExchangeFailureReason(error)}; recovery_guard=retained; auth_elapsed_ms=${Math.max(0, Date.now() - startedAt)}.`,
+     )
+diff --git a/supabase/functions/novapay-data/index.ts b/supabase/functions/novapay-data/index.ts
+--- a/supabase/functions/novapay-data/index.ts
++++ b/supabase/functions/novapay-data/index.ts
+@@ -9,2 +9,3 @@
+ import { failNovaPaySyncAttempt } from '../_shared/novapay-sync-journal.ts'
++import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
+ import {
+@@ -18,3 +19,2 @@
+ const TEM_NAMESPACE = 'http://tempuri.org/'
+-const SOAP_TIMEOUT_MS = 30_000
+ const FULL_SYNC_LEASE_SECONDS = 600
+@@ -106,3 +106,3 @@
+   const controller = new AbortController()
+-  const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
++  const timeout = setTimeout(() => controller.abort(), novaPaySoapTimeoutMs(method))
+   let response
+diff --git a/supabase/functions/novapay-balance/index.ts b/supabase/functions/novapay-balance/index.ts
+--- a/supabase/functions/novapay-balance/index.ts
++++ b/supabase/functions/novapay-balance/index.ts
+@@ -8,2 +8,3 @@
+ import { recordNovaPayBalanceFailure } from '../_shared/novapay-sync-journal.ts'
++import { novaPaySoapTimeoutMs } from '../_shared/novapay-soap-timeout.ts'
+ 
+@@ -13,3 +14,2 @@
+ const TEM_NAMESPACE = 'http://tempuri.org/'
+-const SOAP_TIMEOUT_MS = 30_000
+ 
+@@ -100,3 +100,3 @@
+   const controller = new AbortController()
+-  const timeout = setTimeout(() => controller.abort(), SOAP_TIMEOUT_MS)
++  const timeout = setTimeout(() => controller.abort(), novaPaySoapTimeoutMs(method))
+   let response
+diff --git a/supabase/functions/_shared/novapay-auth_test.ts b/supabase/functions/_shared/novapay-auth_test.ts
+--- a/supabase/functions/_shared/novapay-auth_test.ts
++++ b/supabase/functions/_shared/novapay-auth_test.ts
+@@ -459,3 +459,4 @@
+     !logs[1].includes('reason=transport_failure; recovery_guard=retained') ||
+-    logs.some((line) => line.includes('PRIVATE_CREDENTIAL_VALUE'))
++    logs.some((line) => line.includes('PRIVATE_CREDENTIAL_VALUE')) ||
++    logs.some((line) => !/auth_elapsed_ms=\d+/.test(line))
+   ) {
+diff --git a/supabase/functions/_shared/novapay-soap-timeout.ts b/supabase/functions/_shared/novapay-soap-timeout.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-soap-timeout.ts
+@@ -0,0 +1,8 @@
++export const NOVAPAY_AUTH_SOAP_TIMEOUT_MS = 60_000
++export const NOVAPAY_DATA_SOAP_TIMEOUT_MS = 30_000
++
++export function novaPaySoapTimeoutMs(method: string): number {
++  return method === 'UserAuthenticationJWT'
++    ? NOVAPAY_AUTH_SOAP_TIMEOUT_MS
++    : NOVAPAY_DATA_SOAP_TIMEOUT_MS
++}
+diff --git a/supabase/functions/_shared/novapay-soap-timeout_test.ts b/supabase/functions/_shared/novapay-soap-timeout_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/novapay-soap-timeout_test.ts
+@@ -0,0 +1,25 @@
++import {
++  NOVAPAY_AUTH_SOAP_TIMEOUT_MS,
++  NOVAPAY_DATA_SOAP_TIMEOUT_MS,
++  novaPaySoapTimeoutMs,
++} from './novapay-soap-timeout.ts'
++
++Deno.test('NovaPay authentication has its own longer timeout', () => {
++  if (novaPaySoapTimeoutMs('UserAuthenticationJWT') !== 60_000) {
++    throw new Error('Authentication SOAP timeout must be 60 seconds')
++  }
++  if (NOVAPAY_AUTH_SOAP_TIMEOUT_MS >= 120_000) {
++    throw new Error('Authentication SOAP timeout must leave room within the 120-second lock')
++  }
++})
++
++Deno.test('NovaPay data requests keep their original timeout', () => {
++  for (const method of ['GetClientsList', 'GetAccountsList', 'GetAccountRest', 'GetPaymentsList']) {
++    if (novaPaySoapTimeoutMs(method) !== NOVAPAY_DATA_SOAP_TIMEOUT_MS) {
++      throw new Error(`Unexpected SOAP timeout for ${method}`)
++    }
++  }
++  if (NOVAPAY_DATA_SOAP_TIMEOUT_MS !== 30_000) {
++    throw new Error('Data SOAP timeout unexpectedly changed')
++  }
++})
