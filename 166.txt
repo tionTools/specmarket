@@ -1,0 +1,54 @@
+Patch 166 — SpecMarket / NovaPay authorization resilience
+
+Repository: tionTools/specmarket
+Verified source: origin/main at 2497153af855f02c4e25ecbb446dcb7ccb893b79 (2026-10-05)
+Package: 166.patch (6 files: 4 modified + 2 added)
+Status: stored on GitHub branch chatgpt-patches; NOT applied to main, NOT deployed or merged.
+
+Objective
+- UserAuthenticationJWT SOAP timeout: 30,000 → 60,000 ms in both novapay-data and novapay-balance.
+- Other SOAP methods: retain 30,000 ms.
+- Credentials rotation lock lease: 90 → 120 s. Existing database function accepts up to 120 s; no SQL migration.
+- Add numeric auth_elapsed_ms only to the EXISTING concise rotation failure log; no secrets, routine success logs, or new database rows.
+- Retain one-shot authorization and persistent NOVAPAY_AUTH_UNCERTAIN / recovery guard; never auto-clear it.
+
+Changed files
+supabase/functions/_shared/novapay-auth.ts
+supabase/functions/_shared/novapay-auth_test.ts
+supabase/functions/_shared/novapay-soap-timeout.ts (new)
+supabase/functions/_shared/novapay-soap-timeout_test.ts (new)
+supabase/functions/novapay-data/index.ts
+supabase/functions/novapay-balance/index.ts
+
+CODEX INSTRUCTIONS — VERIFY, APPLY, TEST; DO NOT RE-DESIGN
+1. git fetch origin main chatgpt-patches; compare current origin/main with base SHA above.
+   Fetch the exact patch into the working directory without switching branches:
+     git show origin/chatgpt-patches:166.patch > /tmp/specmarket-novapay-166.patch
+2. Work in a clean dedicated worktree/branch based on current origin/main (not a dirty worktree).
+3. If origin/main changed, first inspect the exact relevant functions for drift and test the patch with `git apply --check`; STOP and report conflicting hunks instead of guessing or hand-rewriting.
+4. Copy 166.patch into the worktree or use its absolute path. Run:
+     git apply --check /tmp/specmarket-novapay-166.patch
+     git apply /tmp/specmarket-novapay-166.patch
+     git diff --check
+     git diff --stat
+   Confirm only the 6 listed NovaPay files changed and no unrelated files.
+5. Run:
+     deno fmt --check supabase/functions/_shared/novapay-auth.ts supabase/functions/_shared/novapay-auth_test.ts supabase/functions/_shared/novapay-soap-timeout.ts supabase/functions/_shared/novapay-soap-timeout_test.ts supabase/functions/novapay-data/index.ts supabase/functions/novapay-balance/index.ts
+     deno test supabase/functions/_shared/novapay-auth_test.ts supabase/functions/_shared/novapay-soap-timeout_test.ts
+   Check Deno types for the changed files if the runner permits resolving imports. Run available repository checks without formatting unrelated files.
+   If formatter fails only because of pre-existing baseline format, format ONLY changed ranges or report blocker. Do not reformat entire files.
+6. Confirm tests protect: one-shot auth, no retry after ambiguous timeout, persisted recovery guard, reuse of valid JWT, atomic update, and no secrets in logs. Confirm new helper chooses 60s for auth, 30s for other methods.
+7. Check that Supabase 150-second initial response deadline, existing 180-second cron HTTP timeout and 120-second SQL rotation lease can coexist with the 60-second request. If not, STOP and report precise blocker: do not silently change business logic/cron/migrations.
+8. On PASS, commit to a separate branch and open a Draft PR. Do NOT merge/deploy or modify production Vault.
+9. Report PASS/FAIL for each check, changed-file list, SHA, PR URL, and remaining risk: loss of reply after token rotation can still require manual new credentials. No claim of zero future lockouts.
+
+SAFETY / STOP RULES
+- No secret values, JWT, refresh token, public certificate, SOAP request/response payload or IBAN in logs or PR.
+- Do not change Supabase migrations, scheduler, UI, finance/accounting code or database writes.
+- Do not reset novapay_auth_uncertain, bypass ownership checks, or retry UserAuthenticationJWT automatically.
+- If a test fails or GitHub access is unavailable, stop and report, no merge/deploy.
+
+VALIDATION ALREADY DONE BY CHATGPT
+- Inspected GitHub main SHA and AGENTS.md, relevant Edge functions, shared auth helper, tests and SQL constraint.
+- Generated a valid unified git patch; `git apply --check` and apply succeeded against synthetic matching source fragments, NOT against the full live repo because this session did not have a full local clone. Codex MUST perform real `git apply --check` against latest origin/main.
+- Runtime Deno tests NOT RUN in this session (Deno unavailable).
