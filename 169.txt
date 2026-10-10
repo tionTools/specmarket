@@ -1,0 +1,70 @@
+SpecMarket CRM — Patch 169: make Reconciliation History table fit desktop width
+Repo: tionTools/specmarket
+Files in root of branch chatgpt-patches: 169.patch, 169.txt
+Exact origin/main base: 8d9c3184c504625cfd15013616d7f73783d44189 (after Patch 168 / PR #69)
+Status: patch package only, NOT yet applied, merged or deployed.
+
+ISSUE
+User's actual production screenshot (2026-10-10) shows only some of the "История сверок"
+columns at ~1600px visible card width, while "Тип" consumes >200px repeating "Сверка"
+on almost every row and "Бронь" is very wide. Earlier Patch 168 fixed gridlines only.
+Important rightmost Сторно USD, Сторно грн and Расхождение must fit without horizontal
+scroll on user's desktop. Don't treat narrow mobile scroll as an adequate desktop solution.
+
+PATCH IMPLEMENTS ONLY PRESENTATION CHANGES
+- Remove "Тип" as standalone column; for the kind=initial row show small
+  "Начальное сальдо" below its date; never erase the kind field or initial calculations.
+- Stack reserve's values inside one right-aligned cell: "$12,00" on first line,
+  "+ 0,00 грн" on second. Preserve exact source amounts and formatting functions.
+- Shorten visible delete action to "Удалить", preserve aria-label/title
+  "Удалить последнюю сверку", row-only visibility, disabled state, event/confirmation.
+- Compact cell/header horizontal padding px-3 -> px-2 and improve intrinsic table sizing
+  to w-max min-w-full (avoid large wasted column space).
+- Keep cell grid, banding, numbers right-aligned and all remaining columns.
+- No table source data, finances, business behavior or API changes.
+
+SCOPE
+Only src/features/reconciliation/ReconciliationHistoryTable.vue. No changes to other
+Vue files, database, Supabase, backend, Edge, migrations, calculations or deployments
+outside the site's existing frontend pipeline.
+
+CODEX INSTRUCTIONS
+1. Fetch main and chatgpt-patches. Read AGENTS.md, frontend skill. Confirm the actual
+   origin/main is the declared SHA or descendant without changes conflicting with file.
+2. Preserve dirty user checkout. Use a fresh isolated worktree/branch from origin/main.
+   Retrieve 169.patch as raw UTF-8 WITHOUT BOM (PowerShell 5.1 redirection may give UTF-16).
+3. Run git apply --check against current source; if FAIL stop and report drift.
+   Apply once. Check only the named file is modified.
+4. Format touched file ONLY:
+   pnpm exec oxfmt src/features/reconciliation/ReconciliationHistoryTable.vue
+   pnpm exec oxfmt --check src/features/reconciliation/ReconciliationHistoryTable.vue
+   Do not reformat whole project or introduce unrelated formatter churn.
+5. Run:
+   pnpm type-check
+   pnpm exec oxlint src/features/reconciliation/ReconciliationHistoryTable.vue
+   pnpm exec eslint src/features/reconciliation/ReconciliationHistoryTable.vue
+   pnpm build
+   git diff --check
+   As seen in Patch 168, the project-wide pnpm format and pnpm lint write broadly;
+   run only in clean isolated worktree and revert incidental unrelated auto-fixes,
+   or explain why those mutating commands were replaced by targeted checks.
+6. VISUAL QA IS MANDATORY before merge: Chromium preview at user's 1739px screenshot
+   desktop viewport with about 1600px content card. Render typical row incl.
+   '$12,00 + 0,00 грн' reserve, all storno values, discrepancy, latest delete button,
+   and an initial balance row.
+   REQUIRE all headers and ALL remaining cells visible at once on DESKTOP without
+   horizontal scrolling: scrollWidth <= clientWidth on the table's scroll container.
+   If still overflowing, DON'T MERGE. Fix layout in same branch without hiding
+   finance columns, then repeat checks; avoid unrelated redesign.
+   Verify also narrow 320px container scrolls horizontally without overlap/cut-off.
+   Confirm "Начальное сальдо" remains identifiable, deletion works and values unchanged.
+7. git diff --stat; git diff --check. Verify only named Vue file and minimal scope.
+   On PASS create PR, merge, and verify GitHub Actions Deploy to Production SUCCESS
+   for the precise merge SHA; if tests/build/visual check fail, STOP and report.
+8. Report PR, commits, changed file, test results, desktop and 320px measured
+   scrollWidth/clientWidth, merge SHA, Production Deploy run and status.
+
+CHATGPT VALIDATION (NOT A SUBSTITUTE FOR CODEX)
+- Read real file at main SHA above, no extrapolation from screenshot alone.
+- Each patch hunk was checked against main line-by-line and reconstructed target content
+  verified exactly. No local app build, browser preview, or production deploy in this session.
