@@ -1,0 +1,57 @@
+diff --git a/src/features/reconciliation/ReconciliationHistoryTable.vue b/src/features/reconciliation/ReconciliationHistoryTable.vue
+--- a/src/features/reconciliation/ReconciliationHistoryTable.vue
++++ b/src/features/reconciliation/ReconciliationHistoryTable.vue
+@@ -36,6 +36,23 @@
+           ...(row.original.kind === 'initial'
+             ? [h('span', { class: 'text-xs font-semibold text-slate-500' }, 'Начальное сальдо')]
+             : []),
++          ...(!props.guest && row.original.id === props.latestId
++            ? [
++                h(
++                  'button',
++                  {
++                    type: 'button',
++                    class:
++                      'w-fit rounded px-1 py-0.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 disabled:opacity-50',
++                    disabled: props.saving,
++                    'aria-label': 'Удалить последнюю сверку',
++                    title: 'Удалить последнюю сверку',
++                    onClick: () => emit('deleteLatest'),
++                  },
++                  'Удалить',
++                ),
++              ]
++            : []),
+         ]),
+     },
+     {
+@@ -109,28 +126,7 @@
+       ),
+     },
+   ] satisfies ColumnDef<typeof features, Reconciliation>[]
+-  if (props.guest) return base
+-  return [
+-    ...base,
+-    {
+-      id: 'actions',
+-      header: () => h('span', { class: 'sr-only' }, 'Действия'),
+-      cell: ({ row }: { row: { original: Reconciliation } }) =>
+-        row.original.id === props.latestId
+-          ? h(
+-              'button',
+-              {
+-                class: 'rounded-lg px-1.5 py-1 text-rose-700 hover:bg-rose-50',
+-                'aria-label': 'Удалить последнюю сверку',
+-                title: 'Удалить последнюю сверку',
+-                disabled: props.saving,
+-                onClick: () => emit('deleteLatest'),
+-              },
+-              'Удалить',
+-            )
+-          : null,
+-    },
+-  ] satisfies ColumnDef<typeof features, Reconciliation>[]
++  return base
+ })()
+ 
+ const table = useTable<typeof features, Reconciliation>({
