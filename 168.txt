@@ -1,0 +1,69 @@
+SpecMarket CRM — Patch 168: readable reconciliation history table
+Repository: tionTools/specmarket
+Source: GitHub branch chatgpt-patches, files 168.patch and 168.txt
+Base main SHA: 73fce89f68e88150c2d711e0bfbdc0ff9f87394e (verified 2026-10-10)
+Status: patch authored; NOT applied to main, NOT merged, NOT deployed.
+Previous premature PR #68 is superseded and must NOT be merged.
+
+GOAL
+Fix ONLY the presentation of "История сверок": visible vertical/horizontal cell borders,
+proper horizontal padding and row spacing, numerical right alignment, readable header,
+alternating row background, horizontal scroll rather than overlapping data.
+Preserve ALL headers, financial calculations, row order, formatting functions, actions,
+delete permissions and guest behavior.
+
+EXACT SCOPE
+Modified only: src/features/reconciliation/ReconciliationHistoryTable.vue
+NO changes to ReconciliationView.vue, backend, Supabase, migrations, Edge Functions,
+payments, adjustments, currency rates, Android, or other marketplace pages.
+Do NOT redesign the layout or change the underlying business logic.
+
+CODEX — APPLY, VALIDATE, RELEASE; DO NOT RE-DESIGN
+1. Fetch origin main and origin chatgpt-patches. Read AGENTS.md and frontend skill.
+   Verify that main is 73fce89f68e88150c2d711e0bfbdc0ff9f87394e or that this exact patch applies cleanly against current
+   origin/main. Stop if patch conflicts or an intervening change touches the target.
+2. Protect dirty user checkouts. Use a NEW isolated worktree/patch branch from current origin/main.
+   Do not change AGENTS.md or user's other uncommitted/untracked files.
+3. Retrieve origin/chatgpt-patches:168.patch as raw UTF-8 WITHOUT BOM.
+   NOTE Windows PowerShell 5.1 redirection may create UTF-16; use cmd.exe
+   redirection to a temporary file, PowerShell 7 UTF-8 without BOM, or another raw-byte method.
+4. BEFORE applying: git apply --check <168.patch>.
+   On PASS, git apply <168.patch>; inspect git diff --stat and git diff --check.
+   The ONLY modified file must be src/features/reconciliation/ReconciliationHistoryTable.vue.
+   If context does not match, STOP. Never recreate or improvise an alternative patch.
+5. Run formatting ONLY on the changed file:
+     pnpm exec oxfmt src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm exec oxfmt --check src/features/reconciliation/ReconciliationHistoryTable.vue
+   If formatting introduces unrelated baseline churn inside that file, restore the
+   unrelated formatting and keep only changes required by the patch.
+   NEVER run broad formatter writes that modify unrelated source files.
+6. Run checks in this order (do not skip a failed check):
+     pnpm type-check
+     pnpm exec oxlint src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm exec eslint src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm build
+     git diff --check
+   For repository-mandated pnpm lint and pnpm format, verify scope in the clean worktree
+   before/after invocation: revert only incidental formatter/linter changes outside
+   the target (never discard user changes); report pre-existing baseline failures distinctly.
+   Perform any minimal style fixes in THIS patch branch; repeat affected checks.
+7. Verify the rendered table (when browser preview is available) at desktop and narrow width:
+   borders between cells and rows visible; USD/UAH/rate columns do not run together;
+   no horizontal collision or truncation of amounts; no wrapping inside individual numbers;
+   horizontal scrolling works on narrow screens; last-column delete action still works.
+   Compare the original screenshot: only table appearance may change, not values.
+8. Inspect final diff and git diff --check; commit ONLY the target Vue component.
+   Do not use git add . or include unrelated changes. Push a new PR from your isolated branch.
+9. IF all required checks PASS: merge PR to main and wait for successful GitHub Actions
+   "Deploy to Production" for the MERGE SHA (frontend only). No SQL/Edge deployment is needed.
+   If checks fail, deployment fails or there is any unexpected diff, STOP and report; do NOT merge.
+10. Report: Patch 168 / PR URL / changed files / format, type-check, scoped lint,
+    full lint if run, build, diff-check / commit & merge SHA / production deployment run URL
+    and status. Never claim live deployment without successful workflow evidence.
+
+CHECKS COMPLETED BY CHATGPT (NOT A REPLACEMENT FOR CODEX)
+- Verified main SHA and target Vue component / frontend conventions.
+- Exact patch hunks validated against GitHub main source, resulting content equals
+  previously reviewed PR #68 branch; diff only touches the requested table.
+- Local pnpm runtime validation, visual browser QA, and GitHub Production Deploy
+  have NOT been run in ChatGPT session.
