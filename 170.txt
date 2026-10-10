@@ -1,0 +1,81 @@
+SpecMarket CRM — PATCH 170: Show every history column and keep Delete action visible
+
+Repository: tionTools/specmarket
+Source branch: chatgpt-patches, files at root 170.patch and 170.txt
+Base production main SHA: 0e58f8e0e4b657f4dbd7149918ceb949e0ea0a1d (Patch 169 PR #70 merged)
+Status: package prepared only, NOT merged or deployed.
+
+USER ISSUE
+The new production screenshot from 2026-10-10 shows all 12 FINANCIAL/DATA columns
+up through "Расхождение" at the right edge of a ~1600px card, but the final extra
+"Действия" column, containing "Удалить", extends beyond it. We must fit the
+delete action too. The prior Patch 169 preview incorrectly gave PASS for
+all columns; the real screenshot is authoritative.
+
+FIX ALREADY IN 170.patch
+- Move existing conditional "Удалить" button into the DATE CELL, on a SECOND LINE
+  immediately beneath the date of ONLY the latest reconciliation.
+- REMOVE the separate "Действия" column altogether. No other column is removed,
+  shortened or hidden; dates, numbers, headers, reserves and financial fields unchanged.
+- Same save-in-progress disabled state, red button styling, same 'deleteLatest' event,
+  exact confirmation and deletion logic in existing parent. The button now has
+  explicit type=button, aria-label and title.
+- Show no delete control for guest or non-latest rows.
+- Preserve the existing 'Начальное сальдо' under date for initial rows.
+- Preserve right aligned figures, gridlines, alternating backgrounds, and narrow
+  screen horizontal scrolling. Do NOT change font size or reduce readability.
+- This change is more reliable than abbreviating meaningful headers.
+
+SCOPE:
+ONLY src/features/reconciliation/ReconciliationHistoryTable.vue
+No business calculations, reconciliation values, backups, backend, Supabase,
+migration, Edge Functions, cron, or other application files.
+
+CODEX RULES / RELEASE PLAN
+1. Fetch origin/main + origin/chatgpt-patches; check base main SHA listed above or
+   newer descendant with identical target file. Read AGENTS.md and frontend SKILL.md.
+2. In the user's Windows environment preserve their dirty main checkout:
+   known previous isolated worktree example:
+   C:\Users\Вадим\Documents\CRM моя\specmarket-patch-169
+   (NOT a guaranteed current checkout). Discover actual existing repository path;
+   use fresh isolated worktree from origin/main; do not overwrite any user files.
+3. Retrieve git show origin/chatgpt-patches:170.patch in RAW UTF-8 without BOM
+   (Windows PowerShell 5.1 redirection may write UTF-16). Apply only after:
+     git apply --check <path-to-170.patch>
+   STOP on conflict, no self-invented redesign.
+4. Format ONLY changed Vue file:
+     pnpm exec oxfmt src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm exec oxfmt --check src/features/reconciliation/ReconciliationHistoryTable.vue
+   Do NOT format/rewrite unrelated baseline files.
+5. Run in order:
+     pnpm type-check
+     pnpm exec oxlint src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm exec eslint src/features/reconciliation/ReconciliationHistoryTable.vue
+     pnpm build
+     git diff --check
+   Preserve scoped methodology of Patches 168/169; do not cause broad auto-fix churn.
+6. CRITICAL VISUAL QA: Chromium at user's desktop viewport about 1740px, content
+   table container ~1599px, with realistic records including nonzero reserve,
+   all 12 financial/data columns, and the LATEST reconciliation with its
+   visible inline date-cell "Удалить" button.
+   Verify both the last "Расхождение" and the DELETE CONTROL are simultaneously
+   VISIBLE without horizontal scrolling: scrollWidth <= clientWidth in container.
+   Verify the delete button clicks through existing confirmation (cancel first
+   to avoid modifying data). For guest verify button absent; for initial row
+   "Начальное сальдо" visible and no delete button.
+   At 320px container verify horizontal scrolling, no overlapping/truncated numbers.
+   If the test fails, STOP and fix only in same patch branch then rerun validations.
+   Do NOT claim PASS from a preview that omits delete action or guest state.
+7. Inspect final diff; exactly one file changed, no unrelated churn. Commit, open
+   PR, merge ONLY on all PASS, check GitHub Production Deploy workflow completes
+   SUCCESS for the exact merged main SHA. No Supabase manual deployment.
+8. Report PR number, HEAD/merge SHA, changed-file list, formatting, type/lint/build/
+   diff results, exact 1599px and 320px measurements, proof the action is visible,
+   production GitHub Actions URL and status.
+9. If checks, visual QA or deployment fail, stop and report honestly.
+
+CHATGPT PACKAGE VERIFICATION
+- Inspected main source and screenshot. Verified financially relevant columns intact.
+- All generated unified diff hunks replay to the intended target source exactly.
+- pnpm runtime/build and Chromium preview NOT available in this session;
+  Codex MUST run before merge/deploy.
