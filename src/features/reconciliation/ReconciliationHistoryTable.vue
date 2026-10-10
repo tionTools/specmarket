@@ -136,22 +136,28 @@ const table = useTable<typeof features, Reconciliation>({
 </script>
 
 <template>
-  <div v-if="history.length" class="mt-4 overflow-x-auto">
-    <table class="w-full min-w-[78rem] text-left text-sm">
-      <thead class="text-slate-500">
+  <div v-if="history.length" class="mt-4 max-w-full overflow-x-auto rounded-lg border border-slate-200">
+    <table class="w-full min-w-max border-collapse text-sm">
+      <thead class="bg-slate-100 text-slate-700">
         <tr v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
-          <th v-for="header in headerGroup.headers" :key="header.id" class="pb-2">
+          <th
+            v-for="header in headerGroup.headers"
+            :key="header.id"
+            scope="col"
+            class="whitespace-nowrap border-b border-r border-slate-300 px-3 py-3 text-left font-semibold last:border-r-0"
+            :class="{ 'text-right': !['date', 'kind'].includes(header.column.id) }"
+          >
             <FlexRender v-if="!header.isPlaceholder" :header="header" />
           </th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in table.getRowModel().rows" :key="row.id" class="border-t border-slate-100">
+        <tr v-for="row in table.getRowModel().rows" :key="row.id" class="even:bg-slate-50 hover:bg-emerald-50/40">
           <td
             v-for="cell in row.getAllCells()"
             :key="cell.id"
-            class="py-2"
-            :class="{ 'text-right': cell.column.id === 'actions' }"
+            class="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2.5 align-middle tabular-nums last:border-r-0"
+            :class="{ 'text-right': !['date', 'kind'].includes(cell.column.id) }"
           >
             <FlexRender :cell="cell" />
           </td>
