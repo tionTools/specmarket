@@ -27,14 +27,16 @@ function valueCell(value: (item: Reconciliation) => string, className = 'py-2') 
 
 const columns = (() => {
   const base = [
-    { id: 'date', header: 'Дата', cell: valueCell((item) => props.dateTime(item.reconciled_at)) },
     {
-      id: 'kind',
-      header: 'Тип',
-      cell: valueCell(
-        (item) => (item.kind === 'initial' ? 'Начальное сальдо' : 'Сверка'),
-        'py-2 font-semibold',
-      ),
+      id: 'date',
+      header: 'Дата',
+      cell: ({ row }: { row: { original: Reconciliation } }) =>
+        h('div', { class: 'flex flex-col items-start gap-0.5' }, [
+          h('span', props.dateTime(row.original.reconciled_at)),
+          ...(row.original.kind === 'initial'
+            ? [h('span', { class: 'text-xs font-semibold text-slate-500' }, 'Начальное сальдо')]
+            : []),
+        ]),
     },
     {
       id: 'usd',
@@ -76,12 +78,14 @@ const columns = (() => {
     {
       id: 'reserve',
       header: 'Бронь',
-      cell: valueCell((item) => {
+      cell: ({ row }: { row: { original: Reconciliation } }) => {
+        const item = row.original
         if (item.kind === 'initial') return '—'
-        return `$${props.money(reconciliationReserveUsd(item.reserve_usd))} + ${props.money(
-          Number(item.reserve_uah),
-        )} грн`
-      }),
+        return h('div', { class: 'flex flex-col items-end gap-0.5 leading-tight' }, [
+          h('span', `$${props.money(reconciliationReserveUsd(item.reserve_usd))}`),
+          h('span', { class: 'text-slate-500' }, `+ ${props.money(Number(item.reserve_uah))} грн`),
+        ])
+      },
     },
     {
       id: 'adjustmentUsd',
@@ -116,11 +120,13 @@ const columns = (() => {
           ? h(
               'button',
               {
-                class: 'rounded-lg px-2 py-1 text-rose-700 hover:bg-rose-50',
+                class: 'rounded-lg px-1.5 py-1 text-rose-700 hover:bg-rose-50',
+                'aria-label': 'Удалить последнюю сверку',
+                title: 'Удалить последнюю сверку',
                 disabled: props.saving,
                 onClick: () => emit('deleteLatest'),
               },
-              'Удалить последнюю',
+              'Удалить',
             )
           : null,
     },
@@ -140,15 +146,15 @@ const table = useTable<typeof features, Reconciliation>({
     v-if="history.length"
     class="mt-4 max-w-full overflow-x-auto rounded-lg border border-slate-200"
   >
-    <table class="w-full min-w-max border-collapse text-sm">
+    <table class="w-max min-w-full border-collapse text-sm">
       <thead class="bg-slate-100 text-slate-700">
         <tr v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
           <th
             v-for="header in headerGroup.headers"
             :key="header.id"
             scope="col"
-            class="whitespace-nowrap border-b border-r border-slate-300 px-3 py-3 text-left font-semibold last:border-r-0"
-            :class="{ 'text-right': !['date', 'kind'].includes(header.column.id) }"
+            class="whitespace-nowrap border-b border-r border-slate-300 px-2 py-2.5 text-left font-semibold last:border-r-0"
+            :class="{ 'text-right': header.column.id !== 'date' }"
           >
             <FlexRender v-if="!header.isPlaceholder" :header="header" />
           </th>
@@ -163,8 +169,8 @@ const table = useTable<typeof features, Reconciliation>({
           <td
             v-for="cell in row.getAllCells()"
             :key="cell.id"
-            class="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2.5 align-middle tabular-nums last:border-r-0"
-            :class="{ 'text-right': !['date', 'kind'].includes(cell.column.id) }"
+            class="whitespace-nowrap border-b border-r border-slate-200 px-2 py-2.5 align-middle tabular-nums last:border-r-0"
+            :class="{ 'text-right': cell.column.id !== 'date' }"
           >
             <FlexRender :cell="cell" />
           </td>
