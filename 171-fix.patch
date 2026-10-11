@@ -66,7 +66,8 @@ diff --git a/src/features/orders/platform-summary-compare_test.mjs b/src/feature
  assert.equal(month.from.getMonth(), 7)
 +assert.equal(month.to.getDate(), 30, 'comparison uses the matching previous-month date')
 -assert.equal(month.to.getDate(), 31, 'full previous calendar month includes its final day')
- assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
+-assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
++assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
  
  const prom = fixture.platformSummary.value.find((item) => item.platform === 'Пром')
 @@ -94,11 +98,10 @@
