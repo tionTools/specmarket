@@ -10,10 +10,14 @@ const script = home.slice(
 )
 const parsed = ts.createSourceFile('HomeView.ts', script, ts.ScriptTarget.Latest, true)
 const names = [
+  'percentageChange',
+  'formatPercentageChange',
+  'percentageChangeClass',
   'parseOrderDate',
   'shiftDateByMonths',
   'formatShortDate',
-  'previousPlatformSummaryRange',
+  'previousOrderListRange',
+  'ordersForPlatformSummary',
   'previousPlatformSummaryRangeLabel',
   'ordersForPreviousPlatformSummary',
   'platformOrderMetrics',
@@ -30,26 +34,29 @@ const statements = parsed.statements.filter(
 assert.equal(statements.length, names.length, 'use the real platform comparison declarations')
 
 const state = {
-  platformSummaryPeriod: { value: 'month' },
-  platformSummaryRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
+  orderListRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
   reportOrders: {
     value: [
       { date: '15.08.2026', platform: 'Пром', amount: 100, planned: 25, actual: 17, paid: true },
       { date: '16.08.2026', platform: 'Пром', amount: 200, planned: 35, actual: 55, paid: false },
       {
-        date: '31.08.2026',
+        date: '30.08.2026',
         platform: 'Эпицентр',
         amount: 300,
         planned: 45,
         actual: 40,
         paid: true,
       },
-      { date: '01.07.2026', platform: 'Пром', amount: 999, planned: 99, actual: 99, paid: true },
-    ],
-  },
-  ordersForPlatformSummary: {
-    value: [
+      {
+        date: '31.08.2026',
+        platform: 'Эпицентр',
+        amount: 700,
+        planned: 50,
+        actual: 55,
+        paid: true,
+      },
       { date: '15.09.2026', platform: 'Пром', amount: 400, planned: 60, actual: 50, paid: true },
+      { date: '01.07.2026', platform: 'Пром', amount: 999, planned: 99, actual: 99, paid: true },
     ],
   },
   platformOptions: ['Пром', 'Эпицентр'],
@@ -72,15 +79,15 @@ runInNewContext(
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.None,
   }) +
-    '\nthis.fixture = { previousPlatformSummaryRange, previousPlatformSummaryRangeLabel, platformSummary }',
+    '\nthis.fixture = { previousOrderListRange, previousPlatformSummaryRangeLabel, platformSummary, formatPercentageChange, percentageChangeClass }',
   context,
 )
 const fixture = context.fixture
-const month = fixture.previousPlatformSummaryRange.value
+const month = fixture.previousOrderListRange.value
 assert.equal(month.from.getDate(), 1)
 assert.equal(month.from.getMonth(), 7)
-assert.equal(month.to.getDate(), 31, 'full previous calendar month includes its final day')
-assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
+assert.equal(month.to.getDate(), 30, 'comparison uses the matching previous-month date')
+assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
 
 const prom = fixture.platformSummary.value.find((item) => item.platform === 'Пром')
 const epicentr = fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр')
@@ -91,11 +98,10 @@ assert.equal(prom.previous.turnover, 300)
 assert.equal(prom.previous.planned, 60)
 assert.equal(prom.previous.actual, 17, 'only actual financial results count')
 assert.equal(epicentr.previous.count, 1)
-assert.equal(epicentr.previous.turnover, 300, '31st day is included')
+assert.equal(epicentr.previous.turnover, 300, 'Aug 30 is included and Aug 31 is excluded')
 
-state.platformSummaryPeriod.value = 'custom'
-state.platformSummaryRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
-const custom = fixture.previousPlatformSummaryRange.value
+state.orderListRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
+const custom = fixture.previousOrderListRange.value
 assert.equal(custom.from.getMonth(), 7)
 assert.equal(custom.from.getDate(), 15)
 assert.equal(custom.to.getDate(), 25)
@@ -103,6 +109,14 @@ assert.equal(
   fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр').previous.count,
   0,
 )
+
+assert.equal(fixture.formatPercentageChange(68, 79), '-13,9%')
+assert.equal(fixture.formatPercentageChange(0, 9), '-100%')
+assert.equal(fixture.formatPercentageChange(0, 0), '0%')
+assert.equal(fixture.formatPercentageChange(1, 0), '—', 'zero previous baseline is undefined')
+assert.equal(fixture.formatPercentageChange(-20, -50), '+60%')
+assert.equal(fixture.percentageChangeClass(200, 100), 'text-emerald-600')
+assert.equal(fixture.percentageChangeClass(50, 100), 'text-rose-600')
 
 const cardStart = home.indexOf('v-for="item in platformSummary"')
 const cardEnd = home.indexOf('</article>', cardStart)
@@ -112,6 +126,18 @@ assert.match(card, /v-if="isComparingPreviousPeriod"/)
 assert.match(card, /previousPlatformSummaryRangeLabel/)
 for (const field of ['count', 'turnover', 'planned', 'actual'])
   assert.ok(card.includes('item.previous.' + field), 'previous ' + field + ' is rendered')
+for (const field of ['count', 'turnover', 'planned', 'actual']) {
+  assert.ok(
+    card.includes(`formatPercentageChange(item.${field}, item.previous.${field})`),
+    'percentage change for platform ' + field,
+  )
+}
+for (const field of ['orders', 'turnover', 'planned', 'actual']) {
+  assert.ok(
+    home.includes(`formatPercentageChange(summary.period.${field}, summary.previous.${field})`),
+    'percentage change for total ' + field,
+  )
+}
 assert.match(home, /v-model="isComparingPreviousPeriod"/)
 console.log(
   'Platform summary compare: previous dates, independent platform metrics and shared checkbox PASS',

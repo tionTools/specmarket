@@ -850,6 +850,25 @@ const getActualProfit = (order: Order) =>
   order.shipping -
   order.acquiring -
   (order.extraExpenses ?? 0)
+function percentageChange(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null
+  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10
+}
+
+function formatPercentageChange(current: number, previous: number): string {
+  const percent = percentageChange(current, previous)
+  if (percent === null) return '—'
+  return `${percent > 0 ? '+' : ''}${new Intl.NumberFormat('uk-UA', {
+    maximumFractionDigits: 1,
+  }).format(percent)}%`
+}
+
+function percentageChangeClass(current: number, previous: number): string {
+  const percent = percentageChange(current, previous)
+  if (percent === null || percent === 0) return 'text-slate-500'
+  return percent > 0 ? 'text-emerald-600' : 'text-rose-600'
+}
+
 const formatMoney = (value: number) => {
   const fractionDigits = Number.isInteger(value) ? 0 : 2
   return (
@@ -2119,7 +2138,8 @@ async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
 
 async function openProductPriceLink(order: Order, product: OrderProduct) {
   if (isGuest.value || !canLinkProductPrice(order, product)) return
-  if (order.platform !== 'Пром' && order.platform !== 'Эпицентр' && order.platform !== 'Каста') return
+  if (order.platform !== 'Пром' && order.platform !== 'Эпицентр' && order.platform !== 'Каста')
+    return
   const remoteId = order.remoteId
   const position = product.position
   if (!remoteId || position === undefined) return
@@ -2985,7 +3005,9 @@ function scheduleRealtimeReconnect(delay?: number) {
     return
   const reconnectDelay =
     delay ??
-    realtimeReconnectDelays[Math.min(realtimeReconnectAttempt, realtimeReconnectDelays.length - 1)] ??
+    realtimeReconnectDelays[
+      Math.min(realtimeReconnectAttempt, realtimeReconnectDelays.length - 1)
+    ] ??
     30_000
   if (delay === undefined) realtimeReconnectAttempt += 1
   realtimeReconnectTimer = window.setTimeout(() => {
@@ -3286,9 +3308,7 @@ async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
     persistRemoteOrdersSessionCache()
     void bankBalancesCard.value?.refreshDebt()
   }
-  return (
-    initiallyRefreshableAllRequestedOrders && applicableIds.size === refreshableIds.length
-  )
+  return initiallyRefreshableAllRequestedOrders && applicableIds.size === refreshableIds.length
 }
 
 function notifyNewOrder(order: Order) {
@@ -5654,7 +5674,15 @@ function orderDateTime(order: Order) {
             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
-            <strong>{{ summary.previous.orders }}</strong>
+            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+              <span>{{ summary.previous.orders }}</span>
+              <span
+                class="text-[10px]"
+                :class="percentageChangeClass(summary.period.orders, summary.previous.orders)"
+              >
+                {{ formatPercentageChange(summary.period.orders, summary.previous.orders) }}
+              </span>
+            </strong>
           </div>
         </article>
         <article
@@ -5678,7 +5706,15 @@ function orderDateTime(order: Order) {
             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
-            <strong>{{ formatMoney(summary.previous.turnover) }}</strong>
+            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+              <span>{{ formatMoney(summary.previous.turnover) }}</span>
+              <span
+                class="text-[10px]"
+                :class="percentageChangeClass(summary.period.turnover, summary.previous.turnover)"
+              >
+                {{ formatPercentageChange(summary.period.turnover, summary.previous.turnover) }}
+              </span>
+            </strong>
           </div>
         </article>
         <article
@@ -5702,7 +5738,15 @@ function orderDateTime(order: Order) {
             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
-            <strong>{{ formatMoney(summary.previous.planned) }}</strong>
+            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+              <span>{{ formatMoney(summary.previous.planned) }}</span>
+              <span
+                class="text-[10px]"
+                :class="percentageChangeClass(summary.period.planned, summary.previous.planned)"
+              >
+                {{ formatPercentageChange(summary.period.planned, summary.previous.planned) }}
+              </span>
+            </strong>
           </div>
         </article>
         <article
@@ -5722,12 +5766,18 @@ function orderDateTime(order: Order) {
             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
-            <strong>{{ formatMoney(summary.previous.actual) }}</strong>
+            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+              <span>{{ formatMoney(summary.previous.actual) }}</span>
+              <span
+                class="text-[10px]"
+                :class="percentageChangeClass(summary.period.actual, summary.previous.actual)"
+              >
+                {{ formatPercentageChange(summary.period.actual, summary.previous.actual) }}
+              </span>
+            </strong>
           </div>
         </article>
-        <article
-          class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-        >
+        <article class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
           <p class="whitespace-nowrap text-lg font-semibold leading-none">
             {{ formatMoney(unpaidShipmentAmount) }}
             <span class="ml-1 text-sm font-medium text-slate-600">В дороге</span>
@@ -5928,16 +5978,52 @@ function orderDateTime(order: Order) {
             >
               <p class="mb-1 font-semibold">{{ previousPlatformSummaryRangeLabel }}</p>
               <p class="flex justify-between gap-2">
-                <span>Заказы:</span><b>{{ item.previous.count }}</b>
+                <span>Заказы:</span>
+                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+                  <span>{{ item.previous.count }}</span>
+                  <span
+                    class="text-[10px]"
+                    :class="percentageChangeClass(item.count, item.previous.count)"
+                  >
+                    {{ formatPercentageChange(item.count, item.previous.count) }}
+                  </span>
+                </b>
               </p>
               <p class="flex justify-between gap-2">
-                <span>Оборот:</span><b>{{ formatMoney(item.previous.turnover) }}</b>
+                <span>Оборот:</span>
+                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+                  <span>{{ formatMoney(item.previous.turnover) }}</span>
+                  <span
+                    class="text-[10px]"
+                    :class="percentageChangeClass(item.turnover, item.previous.turnover)"
+                  >
+                    {{ formatPercentageChange(item.turnover, item.previous.turnover) }}
+                  </span>
+                </b>
               </p>
               <p class="flex justify-between gap-2">
-                <span>План:</span><b>{{ formatMoney(item.previous.planned) }}</b>
+                <span>План:</span>
+                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+                  <span>{{ formatMoney(item.previous.planned) }}</span>
+                  <span
+                    class="text-[10px]"
+                    :class="percentageChangeClass(item.planned, item.previous.planned)"
+                  >
+                    {{ formatPercentageChange(item.planned, item.previous.planned) }}
+                  </span>
+                </b>
               </p>
               <p class="flex justify-between gap-2">
-                <span>Факт:</span><b>{{ formatMoney(item.previous.actual) }}</b>
+                <span>Факт:</span>
+                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+                  <span>{{ formatMoney(item.previous.actual) }}</span>
+                  <span
+                    class="text-[10px]"
+                    :class="percentageChangeClass(item.actual, item.previous.actual)"
+                  >
+                    {{ formatPercentageChange(item.actual, item.previous.actual) }}
+                  </span>
+                </b>
               </p>
             </div>
           </article>
