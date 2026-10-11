@@ -1,0 +1,218 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -850,7 +850,26 @@
+   order.shipping -
+   order.acquiring -
+   (order.extraExpenses ?? 0)
+-const formatMoney = (value: number) => {
++function percentageChange(current: number, previous: number): number | null {
++  if (previous === 0) return current === 0 ? 0 : null
++  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10
++}
++
++function formatPercentageChange(current: number, previous: number): string {
++  const percent = percentageChange(current, previous)
++  if (percent === null) return '—'
++  return `${percent > 0 ? '+' : ''}${new Intl.NumberFormat('uk-UA', {
++    maximumFractionDigits: 1,
++  }).format(percent)}%`
++}
++
++function percentageChangeClass(current: number, previous: number): string {
++  const percent = percentageChange(current, previous)
++  if (percent === null || percent === 0) return 'text-slate-500'
++  return percent > 0 ? 'text-emerald-600' : 'text-rose-600'
++}
++
++const formatMoney = (value: number) => {
+   const fractionDigits = Number.isInteger(value) ? 0 : 2
+   return (
+     new Intl.NumberFormat('uk-UA', {
+@@ -5654,7 +5673,15 @@
+             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+           >
+             <span>{{ previousOrderListRangeLabel }}</span>
+-            <strong>{{ summary.previous.orders }}</strong>
++            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++              <span>{{ summary.previous.orders }}</span>
++              <span
++                class="text-[10px]"
++                :class="percentageChangeClass(summary.period.orders, summary.previous.orders)"
++              >
++                {{ formatPercentageChange(summary.period.orders, summary.previous.orders) }}
++              </span>
++            </strong>
+           </div>
+         </article>
+         <article
+@@ -5678,7 +5705,15 @@
+             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+           >
+             <span>{{ previousOrderListRangeLabel }}</span>
+-            <strong>{{ formatMoney(summary.previous.turnover) }}</strong>
++            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++              <span>{{ formatMoney(summary.previous.turnover) }}</span>
++              <span
++                class="text-[10px]"
++                :class="percentageChangeClass(summary.period.turnover, summary.previous.turnover)"
++              >
++                {{ formatPercentageChange(summary.period.turnover, summary.previous.turnover) }}
++              </span>
++            </strong>
+           </div>
+         </article>
+         <article
+@@ -5702,7 +5737,15 @@
+             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+           >
+             <span>{{ previousOrderListRangeLabel }}</span>
+-            <strong>{{ formatMoney(summary.previous.planned) }}</strong>
++            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++              <span>{{ formatMoney(summary.previous.planned) }}</span>
++              <span
++                class="text-[10px]"
++                :class="percentageChangeClass(summary.period.planned, summary.previous.planned)"
++              >
++                {{ formatPercentageChange(summary.period.planned, summary.previous.planned) }}
++              </span>
++            </strong>
+           </div>
+         </article>
+         <article
+@@ -5722,7 +5765,15 @@
+             class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+           >
+             <span>{{ previousOrderListRangeLabel }}</span>
+-            <strong>{{ formatMoney(summary.previous.actual) }}</strong>
++            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++              <span>{{ formatMoney(summary.previous.actual) }}</span>
++              <span
++                class="text-[10px]"
++                :class="percentageChangeClass(summary.period.actual, summary.previous.actual)"
++              >
++                {{ formatPercentageChange(summary.period.actual, summary.previous.actual) }}
++              </span>
++            </strong>
+           </div>
+         </article>
+         <article
+@@ -5928,16 +5979,52 @@
+             >
+               <p class="mb-1 font-semibold">{{ previousPlatformSummaryRangeLabel }}</p>
+               <p class="flex justify-between gap-2">
+-                <span>Заказы:</span><b>{{ item.previous.count }}</b>
++                <span>Заказы:</span>
++                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++                  <span>{{ item.previous.count }}</span>
++                  <span
++                    class="text-[10px]"
++                    :class="percentageChangeClass(item.count, item.previous.count)"
++                  >
++                    {{ formatPercentageChange(item.count, item.previous.count) }}
++                  </span>
++                </b>
+               </p>
+               <p class="flex justify-between gap-2">
+-                <span>Оборот:</span><b>{{ formatMoney(item.previous.turnover) }}</b>
++                <span>Оборот:</span>
++                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++                  <span>{{ formatMoney(item.previous.turnover) }}</span>
++                  <span
++                    class="text-[10px]"
++                    :class="percentageChangeClass(item.turnover, item.previous.turnover)"
++                  >
++                    {{ formatPercentageChange(item.turnover, item.previous.turnover) }}
++                  </span>
++                </b>
+               </p>
+               <p class="flex justify-between gap-2">
+-                <span>План:</span><b>{{ formatMoney(item.previous.planned) }}</b>
++                <span>План:</span>
++                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++                  <span>{{ formatMoney(item.previous.planned) }}</span>
++                  <span
++                    class="text-[10px]"
++                    :class="percentageChangeClass(item.planned, item.previous.planned)"
++                  >
++                    {{ formatPercentageChange(item.planned, item.previous.planned) }}
++                  </span>
++                </b>
+               </p>
+               <p class="flex justify-between gap-2">
+-                <span>Факт:</span><b>{{ formatMoney(item.previous.actual) }}</b>
++                <span>Факт:</span>
++                <b class="flex items-baseline justify-end gap-1 whitespace-nowrap">
++                  <span>{{ formatMoney(item.previous.actual) }}</span>
++                  <span
++                    class="text-[10px]"
++                    :class="percentageChangeClass(item.actual, item.previous.actual)"
++                  >
++                    {{ formatPercentageChange(item.actual, item.previous.actual) }}
++                  </span>
++                </b>
+               </p>
+             </div>
+           </article>
+diff --git a/src/features/orders/platform-summary-compare_test.mjs b/src/features/orders/platform-summary-compare_test.mjs
+--- a/src/features/orders/platform-summary-compare_test.mjs
++++ b/src/features/orders/platform-summary-compare_test.mjs
+@@ -9,7 +9,10 @@
+   home.indexOf('</script>'),
+ )
+ const parsed = ts.createSourceFile('HomeView.ts', script, ts.ScriptTarget.Latest, true)
+-const names = [
++const names = [
++  'percentageChange',
++  'formatPercentageChange',
++  'percentageChangeClass',
+   'parseOrderDate',
+   'shiftDateByMonths',
+   'formatShortDate',
+@@ -72,7 +75,7 @@
+     target: ts.ScriptTarget.ES2022,
+     module: ts.ModuleKind.None,
+   }) +
+-    '\nthis.fixture = { previousPlatformSummaryRange, previousPlatformSummaryRangeLabel, platformSummary }',
++    '\nthis.fixture = { previousPlatformSummaryRange, previousPlatformSummaryRangeLabel, platformSummary, formatPercentageChange, percentageChangeClass }',
+   context,
+ )
+ const fixture = context.fixture
+@@ -104,7 +107,15 @@
+   0,
+ )
+ 
+-const cardStart = home.indexOf('v-for="item in platformSummary"')
++assert.equal(fixture.formatPercentageChange(68, 79), '-13,9%')
++assert.equal(fixture.formatPercentageChange(0, 9), '-100%')
++assert.equal(fixture.formatPercentageChange(0, 0), '0%')
++assert.equal(fixture.formatPercentageChange(1, 0), '—', 'zero previous baseline is undefined')
++assert.equal(fixture.formatPercentageChange(-20, -50), '+60%')
++assert.equal(fixture.percentageChangeClass(200, 100), 'text-emerald-600')
++assert.equal(fixture.percentageChangeClass(50, 100), 'text-rose-600')
++
++const cardStart = home.indexOf('v-for="item in platformSummary"')
+ const cardEnd = home.indexOf('</article>', cardStart)
+ assert.ok(cardStart > 0 && cardEnd > cardStart)
+ const card = home.slice(cardStart, cardEnd)
+@@ -112,7 +123,19 @@
+ assert.match(card, /previousPlatformSummaryRangeLabel/)
+ for (const field of ['count', 'turnover', 'planned', 'actual'])
+   assert.ok(card.includes('item.previous.' + field), 'previous ' + field + ' is rendered')
+-assert.match(home, /v-model="isComparingPreviousPeriod"/)
++for (const field of ['count', 'turnover', 'planned', 'actual']) {
++  assert.ok(
++    card.includes(`formatPercentageChange(item.${field}, item.previous.${field})`),
++    'percentage change for platform ' + field,
++  )
++}
++for (const field of ['orders', 'turnover', 'planned', 'actual']) {
++  assert.ok(
++    home.includes(`formatPercentageChange(summary.period.${field}, summary.previous.${field})`),
++    'percentage change for total ' + field,
++  )
++}
++assert.match(home, /v-model="isComparingPreviousPeriod"/)
+ console.log(
+   'Platform summary compare: previous dates, independent platform metrics and shared checkbox PASS',
+ )
