@@ -1,0 +1,86 @@
+diff --git a/src/features/orders/platform-summary-compare_test.mjs b/src/features/orders/platform-summary-compare_test.mjs
+--- a/src/features/orders/platform-summary-compare_test.mjs
++++ b/src/features/orders/platform-summary-compare_test.mjs
+@@ -16,7 +16,8 @@
+   'parseOrderDate',
+   'shiftDateByMonths',
+   'formatShortDate',
++  'previousOrderListRange',
++  'ordersForPlatformSummary',
+-  'previousPlatformSummaryRange',
+   'previousPlatformSummaryRangeLabel',
+   'ordersForPreviousPlatformSummary',
+   'platformOrderMetrics',
+@@ -33,28 +34,31 @@
+ assert.equal(statements.length, names.length, 'use the real platform comparison declarations')
+ 
+ const state = {
++  orderListRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
+-  platformSummaryPeriod: { value: 'month' },
+-  platformSummaryRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
+   reportOrders: {
+     value: [
+       { date: '15.08.2026', platform: 'Пром', amount: 100, planned: 25, actual: 17, paid: true },
+       { date: '16.08.2026', platform: 'Пром', amount: 200, planned: 35, actual: 55, paid: false },
+       {
++        date: '30.08.2026',
+-        date: '31.08.2026',
+         platform: 'Эпицентр',
+         amount: 300,
+         planned: 45,
+         actual: 40,
+         paid: true,
+       },
++      {
++        date: '31.08.2026',
++        platform: 'Эпицентр',
++        amount: 700,
++        planned: 50,
++        actual: 55,
++        paid: true,
++      },
++      { date: '15.09.2026', platform: 'Пром', amount: 400, planned: 60, actual: 50, paid: true },
+       { date: '01.07.2026', platform: 'Пром', amount: 999, planned: 99, actual: 99, paid: true },
+     ],
+   },
+-  ordersForPlatformSummary: {
+-    value: [
+-      { date: '15.09.2026', platform: 'Пром', amount: 400, planned: 60, actual: 50, paid: true },
+-    ],
+-  },
+   platformOptions: ['Пром', 'Эпицентр'],
+ }
+ const context = {
+@@ -75,14 +79,14 @@
+     target: ts.ScriptTarget.ES2022,
+     module: ts.ModuleKind.None,
+   }) +
++    '\nthis.fixture = { previousOrderListRange, previousPlatformSummaryRangeLabel, platformSummary, formatPercentageChange, percentageChangeClass }',
+-    '\nthis.fixture = { previousPlatformSummaryRange, previousPlatformSummaryRangeLabel, platformSummary, formatPercentageChange, percentageChangeClass }',
+   context,
+ )
+ const fixture = context.fixture
++const month = fixture.previousOrderListRange.value
+-const month = fixture.previousPlatformSummaryRange.value
+ assert.equal(month.from.getDate(), 1)
+ assert.equal(month.from.getMonth(), 7)
++assert.equal(month.to.getDate(), 30, 'comparison uses the matching previous-month date')
+-assert.equal(month.to.getDate(), 31, 'full previous calendar month includes its final day')
+ assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
+ 
+ const prom = fixture.platformSummary.value.find((item) => item.platform === 'Пром')
+@@ -94,11 +98,10 @@
+ assert.equal(prom.previous.planned, 60)
+ assert.equal(prom.previous.actual, 17, 'only actual financial results count')
+ assert.equal(epicentr.previous.count, 1)
++assert.equal(epicentr.previous.turnover, 300, 'Aug 30 is included and Aug 31 is excluded')
+-assert.equal(epicentr.previous.turnover, 300, '31st day is included')
+ 
++state.orderListRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
++const custom = fixture.previousOrderListRange.value
+-state.platformSummaryPeriod.value = 'custom'
+-state.platformSummaryRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
+-const custom = fixture.previousPlatformSummaryRange.value
+ assert.equal(custom.from.getMonth(), 7)
+ assert.equal(custom.from.getDate(), 15)
+ assert.equal(custom.to.getDate(), 25)
