@@ -1,0 +1,122 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -1549,10 +1549,25 @@
+     to: today,
+   }
+ })
+-const previousOrderListRange = computed(() => ({
+-  from: shiftDateByMonths(orderListRange.value.from, -1),
+-  to: shiftDateByMonths(orderListRange.value.to, -1),
+-}))
++const previousOrderListRange = computed(() => {
++  const { from, to } = orderListRange.value
++  if (
++    orderListPeriod.value === 'custom' &&
++    from.getDate() === 1 &&
++    from.getFullYear() === to.getFullYear() &&
++    from.getMonth() === to.getMonth() &&
++    to.getDate() === new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate()
++  ) {
++    return {
++      from: new Date(from.getFullYear(), from.getMonth() - 1, 1),
++      to: new Date(from.getFullYear(), from.getMonth(), 0),
++    }
++  }
++  return {
++    from: shiftDateByMonths(from, -1),
++    to: shiftDateByMonths(to, -1),
++  }
++}
+ const ordersForPlatformSummary = computed(() => {
+   const { from, to } = orderListRange.value
+   return reportOrders.value.filter((order) => {
+diff --git a/src/features/orders/platform-summary-compare_test.mjs b/src/features/orders/platform-summary-compare_test.mjs
+--- a/src/features/orders/platform-summary-compare_test.mjs
++++ b/src/features/orders/platform-summary-compare_test.mjs
+@@ -33,8 +33,9 @@
+ )
+ assert.equal(statements.length, names.length, 'use the real platform comparison declarations')
+ 
+-const state = {
+-  orderListRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
++const state = {
++  orderListPeriod: { value: 'custom' },
++  orderListRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
+   reportOrders: {
+     value: [
+       { date: '15.08.2026', platform: 'Пром', amount: 100, planned: 25, actual: 17, paid: true },
+@@ -86,8 +87,8 @@
+ const month = fixture.previousOrderListRange.value
+ assert.equal(month.from.getDate(), 1)
+ assert.equal(month.from.getMonth(), 7)
+-assert.equal(month.to.getDate(), 30, 'comparison uses the matching previous-month date')
+-assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
++assert.equal(month.to.getDate(), 31, 'full custom month compares with the full previous month')
++assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
+ 
+ const prom = fixture.platformSummary.value.find((item) => item.platform === 'Пром')
+ const epicentr = fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр')
+@@ -97,10 +98,24 @@
+ assert.equal(prom.previous.turnover, 300)
+ assert.equal(prom.previous.planned, 60)
+ assert.equal(prom.previous.actual, 17, 'only actual financial results count')
+-assert.equal(epicentr.previous.count, 1)
+-assert.equal(epicentr.previous.turnover, 300, 'Aug 30 is included and Aug 31 is excluded')
++assert.equal(epicentr.previous.count, 2, 'August 31 is included')
++assert.equal(epicentr.previous.turnover, 1000)
++assert.equal(epicentr.previous.planned, 95)
++assert.equal(epicentr.previous.actual, 95, 'both August payments count')
+ 
+-state.orderListRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
++state.orderListPeriod.value = 'month'
++const nonCustom = fixture.previousOrderListRange.value
++assert.equal(nonCustom.to.getDate(), 30, 'month mode retains its existing shift-by-month logic')
++assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
++assert.equal(
++  fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр').previous.count,
++  1,
++  'month mode excludes August 31',
++)
++state.orderListRange.value = { from: new Date(2026, 8, 1), to: new Date(2026, 8, 12) }
++assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–12.08')
++state.orderListPeriod.value = 'custom'
++state.orderListRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
+ const custom = fixture.previousOrderListRange.value
+ assert.equal(custom.from.getMonth(), 7)
+ assert.equal(custom.from.getDate(), 15)
+@@ -110,7 +125,33 @@
+   0,
+ )
+ 
+-assert.equal(fixture.formatPercentageChange(68, 79), '-13,9%')
++function assertFullMonthComparison(year, monthIndex, finalDay, expectedYear, expectedMonthIndex, expectedFinalDay) {
++  state.orderListPeriod.value = 'custom'
++  state.orderListRange.value = {
++    from: new Date(year, monthIndex, 1),
++    to: new Date(year, monthIndex, finalDay),
++  }
++  const { from, to } = fixture.previousOrderListRange.value
++  assert.deepEqual(
++    [from.getFullYear(), from.getMonth(), from.getDate(), to.getFullYear(), to.getMonth(), to.getDate()],
++    [expectedYear, expectedMonthIndex, 1, expectedYear, expectedMonthIndex, expectedFinalDay],
++  )
++}
++assertFullMonthComparison(2026, 8, 30, 2026, 7, 31)
++assertFullMonthComparison(2026, 3, 30, 2026, 2, 31)
++assertFullMonthComparison(2026, 4, 31, 2026, 3, 30)
++assertFullMonthComparison(2026, 0, 31, 2025, 11, 31)
++assertFullMonthComparison(2024, 1, 29, 2024, 0, 31)
++assertFullMonthComparison(2025, 1, 28, 2025, 0, 31)
++
++state.orderListRange.value = { from: new Date(2026, 8, 1), to: new Date(2026, 8, 29) }
++assert.equal(
++  fixture.previousOrderListRange.value.to.getDate(),
++  29,
++  'partial custom month keeps old comparison',
++)
++
++assert.equal(fixture.formatPercentageChange(68, 79), '-13,9%')
+ assert.equal(fixture.formatPercentageChange(0, 9), '-100%')
+ assert.equal(fixture.formatPercentageChange(0, 0), '0%')
+ assert.equal(fixture.formatPercentageChange(1, 0), '—', 'zero previous baseline is undefined')
