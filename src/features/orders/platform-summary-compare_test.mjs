@@ -34,6 +34,7 @@ const statements = parsed.statements.filter(
 assert.equal(statements.length, names.length, 'use the real platform comparison declarations')
 
 const state = {
+  orderListPeriod: { value: 'custom' },
   orderListRange: { value: { from: new Date(2026, 8, 1), to: new Date(2026, 8, 30) } },
   reportOrders: {
     value: [
@@ -86,8 +87,8 @@ const fixture = context.fixture
 const month = fixture.previousOrderListRange.value
 assert.equal(month.from.getDate(), 1)
 assert.equal(month.from.getMonth(), 7)
-assert.equal(month.to.getDate(), 30, 'comparison uses the matching previous-month date')
-assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
+assert.equal(month.to.getDate(), 31, 'full custom month compares with the full previous month')
+assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–31.08')
 
 const prom = fixture.platformSummary.value.find((item) => item.platform === 'Пром')
 const epicentr = fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр')
@@ -97,9 +98,23 @@ assert.equal(prom.previous.count, 2)
 assert.equal(prom.previous.turnover, 300)
 assert.equal(prom.previous.planned, 60)
 assert.equal(prom.previous.actual, 17, 'only actual financial results count')
-assert.equal(epicentr.previous.count, 1)
-assert.equal(epicentr.previous.turnover, 300, 'Aug 30 is included and Aug 31 is excluded')
+assert.equal(epicentr.previous.count, 2, 'August 31 is included')
+assert.equal(epicentr.previous.turnover, 1000)
+assert.equal(epicentr.previous.planned, 95)
+assert.equal(epicentr.previous.actual, 95, 'both August payments count')
 
+state.orderListPeriod.value = 'month'
+const nonCustom = fixture.previousOrderListRange.value
+assert.equal(nonCustom.to.getDate(), 30, 'month mode retains its existing shift-by-month logic')
+assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–30.08')
+assert.equal(
+  fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр').previous.count,
+  1,
+  'month mode excludes August 31',
+)
+state.orderListRange.value = { from: new Date(2026, 8, 1), to: new Date(2026, 8, 12) }
+assert.equal(fixture.previousPlatformSummaryRangeLabel.value, '01.08–12.08')
+state.orderListPeriod.value = 'custom'
 state.orderListRange.value = { from: new Date(2026, 8, 15), to: new Date(2026, 8, 25) }
 const custom = fixture.previousOrderListRange.value
 assert.equal(custom.from.getMonth(), 7)
@@ -108,6 +123,46 @@ assert.equal(custom.to.getDate(), 25)
 assert.equal(
   fixture.platformSummary.value.find((item) => item.platform === 'Эпицентр').previous.count,
   0,
+)
+
+function assertFullMonthComparison(
+  year,
+  monthIndex,
+  finalDay,
+  expectedYear,
+  expectedMonthIndex,
+  expectedFinalDay,
+) {
+  state.orderListPeriod.value = 'custom'
+  state.orderListRange.value = {
+    from: new Date(year, monthIndex, 1),
+    to: new Date(year, monthIndex, finalDay),
+  }
+  const { from, to } = fixture.previousOrderListRange.value
+  assert.deepEqual(
+    [
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate(),
+      to.getFullYear(),
+      to.getMonth(),
+      to.getDate(),
+    ],
+    [expectedYear, expectedMonthIndex, 1, expectedYear, expectedMonthIndex, expectedFinalDay],
+  )
+}
+assertFullMonthComparison(2026, 8, 30, 2026, 7, 31)
+assertFullMonthComparison(2026, 3, 30, 2026, 2, 31)
+assertFullMonthComparison(2026, 4, 31, 2026, 3, 30)
+assertFullMonthComparison(2026, 0, 31, 2025, 11, 31)
+assertFullMonthComparison(2024, 1, 29, 2024, 0, 31)
+assertFullMonthComparison(2025, 1, 28, 2025, 0, 31)
+
+state.orderListRange.value = { from: new Date(2026, 8, 1), to: new Date(2026, 8, 29) }
+assert.equal(
+  fixture.previousOrderListRange.value.to.getDate(),
+  29,
+  'partial custom month keeps old comparison',
 )
 
 assert.equal(fixture.formatPercentageChange(68, 79), '-13,9%')

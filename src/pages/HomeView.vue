@@ -1549,10 +1549,25 @@ const orderListRange = computed(() => {
     to: today,
   }
 })
-const previousOrderListRange = computed(() => ({
-  from: shiftDateByMonths(orderListRange.value.from, -1),
-  to: shiftDateByMonths(orderListRange.value.to, -1),
-}))
+const previousOrderListRange = computed(() => {
+  const { from, to } = orderListRange.value
+  if (
+    orderListPeriod.value === 'custom' &&
+    from.getDate() === 1 &&
+    from.getFullYear() === to.getFullYear() &&
+    from.getMonth() === to.getMonth() &&
+    to.getDate() === new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate()
+  ) {
+    return {
+      from: new Date(from.getFullYear(), from.getMonth() - 1, 1),
+      to: new Date(from.getFullYear(), from.getMonth(), 0),
+    }
+  }
+  return {
+    from: shiftDateByMonths(from, -1),
+    to: shiftDateByMonths(to, -1),
+  }
+})
 const ordersForPlatformSummary = computed(() => {
   const { from, to } = orderListRange.value
   return reportOrders.value.filter((order) => {
@@ -6821,15 +6836,15 @@ function orderDateTime(order: Order) {
                 class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_6.5rem_6.5rem]"
               >
                 <div>
-                  <span class="text-slate-500">Итого с/с</span
-                  ><strong class="mt-1 block text-base">{{
-                    formatMoney(getNetOrderCost(order))
-                  }}</strong>
-                </div>
-                <div>
                   <span class="text-slate-500">Итого продажа</span
                   ><strong class="mt-1 block text-base">{{
                     formatMoney(getNetOrderAmount(order))
+                  }}</strong>
+                </div>
+                <div>
+                  <span class="text-slate-500">Итого с/с</span
+                  ><strong class="mt-1 block text-base">{{
+                    formatMoney(getNetOrderCost(order))
                   }}</strong>
                 </div>
                 <div>
