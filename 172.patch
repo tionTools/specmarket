@@ -27,10 +27,43 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +    from: shiftDateByMonths(from, -1),
 +    to: shiftDateByMonths(to, -1),
 +  }
-+}
++})
  const ordersForPlatformSummary = computed(() => {
    const { from, to } = orderListRange.value
    return reportOrders.value.filter((order) => {
+@@ -6819,20 +6834,20 @@
+               <div
+                 data-order-card
+                 class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_6.5rem_6.5rem]"
+               >
+-                <div>
+-                  <span class="text-slate-500">Итого с/с</span
+-                  ><strong class="mt-1 block text-base">{{
+-                    formatMoney(getNetOrderCost(order))
+-                  }}</strong>
+-                </div>
+-                <div>
+-                  <span class="text-slate-500">Итого продажа</span
+-                  ><strong class="mt-1 block text-base">{{
+-                    formatMoney(getNetOrderAmount(order))
+-                  }}</strong>
+-                </div>
++                <div>
++                  <span class="text-slate-500">Итого продажа</span
++                  ><strong class="mt-1 block text-base">{{
++                    formatMoney(getNetOrderAmount(order))
++                  }}</strong>
++                </div>
++                <div>
++                  <span class="text-slate-500">Итого с/с</span
++                  ><strong class="mt-1 block text-base">{{
++                    formatMoney(getNetOrderCost(order))
++                  }}</strong>
++                </div>
+                 <div>
+                   <span class="text-slate-500">Роялти</span
+                   ><strong class="mt-1 block text-base">{{
+                     formatMoney(getNetRoyalty(order))
 diff --git a/src/features/orders/platform-summary-compare_test.mjs b/src/features/orders/platform-summary-compare_test.mjs
 --- a/src/features/orders/platform-summary-compare_test.mjs
 +++ b/src/features/orders/platform-summary-compare_test.mjs
