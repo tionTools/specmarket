@@ -5990,7 +5990,7 @@ function orderDateTime(order: Order) {
             </strong>
           </div>
         </article>
-        <article class="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <article class="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm xl:w-[calc(100%+32px)]">
           <p class="text-lg font-semibold leading-none">
             {{ formatMoney(unpaidShipmentAmount) }}
             <span class="mt-1 block text-sm font-medium text-slate-600">В дороге</span>
