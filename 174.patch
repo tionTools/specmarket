@@ -1,0 +1,390 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -1866,14 +1866,13 @@
+   registryTtnProgress.value = { checked: 0, total: 0 }
+   try {
+     if (!(await waitForPendingSaves()) || !active()) return
+-    const ordersWithoutTtn = orders.value.filter(
+-      (order) =>
+-        !order.delivery.printedAt &&
+-        isOpenForPrintRegistry(order) &&
+-        !order.delivery.ttn.trim() &&
+-        Boolean(order.externalId) &&
+-        ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
+-    )
++    const enabled = await loadEnabledBulkMarketplaces()
++    if (!active()) return
++    const candidates = missingPrintRegistryTtnOrders()
++    const ordersWithoutTtn = candidates.filter(
++      (order) => enabled[order.platform as keyof typeof enabled],
++    )
++    const pausedCount = candidates.length - ordersWithoutTtn.length
+     let syncErrors = 0
+     const deadline = Date.now() + 30_000
+     registryTtnProgress.value = { checked: 0, total: ordersWithoutTtn.length }
+@@ -1918,8 +1917,8 @@
+       )
+       if (!active()) return
+       registryTtnProgress.value = { checked: index + batch.length, total: ordersWithoutTtn.length }
+-      for (const { order, data, error } of results) {
+-        if (error || !data?.ok) {
++      for (const { order, data, error } of results) {
++        if (error || !data?.ok || data.skipped) {
+           syncErrors += 1
+           continue
+         }
+@@ -1949,8 +1948,9 @@
+     const messages = [
+       `Проверено ${registryTtnProgress.value.checked} из ${registryTtnProgress.value.total} заказов без ТТН.`,
+     ]
+-    if (syncErrors) messages.push(`Ошибок: ${syncErrors}.`)
+-    if (remaining) messages.push(`Не проверено: ${remaining}. Повторите проверку.`)
++    if (syncErrors) messages.push(`Ошибок: ${syncErrors}.`)
++    if (pausedCount) messages.push(`Пропущено на паузе: ${pausedCount}.`)
++    if (remaining) messages.push(`Не проверено: ${remaining}. Повторите проверку.`)
+     if (hasNewPrintRegistryOrders.value)
+       messages.push('Новые ТТН найдены. Нажмите «Обновить реестр».')
+     if (active()) registryTtnMessage.value = messages.join(' ')
+@@ -2237,9 +2237,20 @@
+     product.position === undefined ||
+     isMarketplaceSyncBusy.value
+   )
+-    return product.marketplaceProductKey ?? ''
+-
+-  const functionName =
++    return product.marketplaceProductKey ?? ''
++
++  try {
++    const enabled = await loadEnabledBulkMarketplaces()
++    if (!enabled[order.platform as keyof typeof enabled]) {
++      showSyncError(`${order.platform}: автообновление на паузе. Обновите заказ вручную перед привязкой товара.`)
++      return ''
++    }
++  } catch {
++    showSyncError('Не удалось проверить настройки маркетплейсов перед привязкой товара.')
++    return ''
++  }
++
++  const functionName =
+     order.platform === 'Пром'
+       ? 'sync-prom-orders'
+       : order.platform === 'Эпицентр'
+@@ -2253,14 +2264,16 @@
+           manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+         }
+   const { data, error } = await supabase.functions.invoke(functionName, { method: 'POST', body })
+-  if (error || !data?.ok) {
+-    showSyncError(
+-      data?.message ??
+-        error?.message ??
+-        'Не удалось обновить идентификатор товара перед привязкой.',
+-    )
+-    return ''
+-  }
++  if (error || !data?.ok || data?.skipped) {
++    showSyncError(
++      data?.skipped
++        ? 'Автообновление товара пропущено на сервере.'
++        : (data?.message ??
++            error?.message ??
++            'Не удалось обновить идентификатор товара перед привязкой.'),
++    )
++    return ''
++  }
+ 
+   const { data: rows, error: itemError } = await supabase
+     .from('crm_order_items')
+@@ -2650,8 +2663,10 @@
+     body: full ? { full: true } : undefined,
+   })
+   isSyncingEpicentr.value = false
+-  if (error || !data?.ok) {
+-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.'
++  if (error || !data?.ok || data?.skipped) {
++    const errorMessage = data?.skipped
++      ? 'Эпицентр: синхронизация пропущена, площадка на паузе.'
++      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
+     if (fullSyncResults) fullSyncResults.push(`Эпицентр: ошибка — ${errorMessage}`)
+     else showSyncError(errorMessage)
+     return
+@@ -2677,8 +2692,10 @@
+     body: full ? { full: true } : undefined,
+   })
+   isSyncingProm.value = false
+-  if (error || !data?.ok) {
+-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.'
++  if (error || !data?.ok || data?.skipped) {
++    const errorMessage = data?.skipped
++      ? 'Prom: синхронизация пропущена, площадка на паузе.'
++      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
+     if (fullSyncResults) fullSyncResults.push(`Prom: ошибка — ${errorMessage}`)
+     else showSyncError(errorMessage)
+     return
+@@ -2735,16 +2752,21 @@
+     const { data, error } = await supabase.functions.invoke<{
+       ok?: boolean
+       message?: string
+-      completed?: number
+-      changedOrderIds?: string[]
++      completed?: number
++      changedOrderIds?: string[]
++      skipped?: string
+     }>('sync-prom-orders', {
+       method: 'POST',
+       body: { completeExternalIds },
+     })
+-    if (error || !data?.ok) {
+-      showSyncError(data?.message ?? error?.message ?? 'Не удалось изменить статусы заказов Prom.')
+-      return
+-    }
++    if (data?.skipped) {
++      showSyncError('Prom на паузе: статусы заказов не изменены.')
++      return
++    }
++    if (error || !data?.ok) {
++      showSyncError(data?.message ?? error?.message ?? 'Не удалось изменить статусы заказов Prom.')
++      return
++    }
+     selectedPromDeliveredOrderIds.value = new Set()
+     await refreshOrdersAfterMarketplaceSync(data)
+     showSyncMessage(
+@@ -2779,18 +2801,23 @@
+     const { data, error } = await supabase.functions.invoke<{
+       ok?: boolean
+       message?: string
+-      dismissed?: number
+-      changedOrderIds?: string[]
++      dismissed?: number
++      changedOrderIds?: string[]
++      skipped?: string
+     }>('sync-prom-orders', {
+       method: 'POST',
+       body: { dismissCompletionExternalIds },
+     })
+-    if (error || !data?.ok) {
+-      showSyncError(
+-        data?.message ?? error?.message ?? 'Не удалось убрать заказы из подтверждения Prom.',
+-      )
+-      return
+-    }
++    if (data?.skipped) {
++      showSyncError('Prom на паузе: подтверждения не изменены.')
++      return
++    }
++    if (error || !data?.ok) {
++      showSyncError(
++        data?.message ?? error?.message ?? 'Не удалось убрать заказы из подтверждения Prom.',
++      )
++      return
++    }
+     selectedPromDeliveredOrderIds.value = new Set()
+     await refreshOrdersAfterMarketplaceSync(data)
+     showSyncMessage(`Prom: убрано из подтверждения — ${data.dismissed ?? selectedOrders.length}.`)
+@@ -2812,8 +2839,10 @@
+     body: full ? { full: true } : undefined,
+   })
+   isSyncingKasta.value = false
+-  if (error || !data?.ok) {
+-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.'
++  if (error || !data?.ok || data?.skipped) {
++    const errorMessage = data?.skipped
++      ? 'Каста: синхронизация пропущена, площадка на паузе.'
++      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.')
+     if (fullSyncResults) fullSyncResults.push(`Каста: ошибка — ${errorMessage}`)
+     else showSyncError(errorMessage)
+     return
+@@ -2988,10 +3017,14 @@
+     body: { externalId: order.externalId },
+   })
+   isSyncingKasta.value = false
+-  if (error || !data?.ok) {
+-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Каста.')
+-    return
+-  }
++  if (data?.skipped) {
++    showSyncError('Каста: сервер пропустил обновление заказа.')
++    return
++  }
++  if (error || !data?.ok) {
++    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Каста.')
++    return
++  }
+   showSyncMessage(`Заказ № ${order.displayNumber ?? order.id} обновлён из Каста.`)
+   await refreshOrdersAfterMarketplaceSync(data)
+   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
+@@ -3021,10 +3054,14 @@
+     },
+   })
+   isSyncingProm.value = false
+-  if (error || !data?.ok) {
+-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
+-    return
+-  }
++  if (data?.skipped) {
++    showSyncError('Пром: сервер пропустил обновление заказа.')
++    return
++  }
++  if (error || !data?.ok) {
++    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
++    return
++  }
+   showSyncMessage(`Заказ № ${order.id} обновлён из Prom.`)
+   await refreshOrdersAfterMarketplaceSync(data)
+   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
+@@ -3054,10 +3091,14 @@
+     },
+   })
+   isSyncingEpicentr.value = false
+-  if (error || !data?.ok) {
+-    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.')
+-    return
+-  }
++  if (data?.skipped) {
++    showSyncError('Эпицентр: сервер пропустил обновление заказа.')
++    return
++  }
++  if (error || !data?.ok) {
++    showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.')
++    return
++  }
+   showSyncMessage(`Заказ № ${order.id} обновлён из Эпицентра.`)
+   await refreshOrdersAfterMarketplaceSync(data)
+   showInlineActionNotice(`sync:${order.id}`, 'Синхронизировано')
+diff --git a/src/features/orders/print-registry-ttn_test.mjs b/src/features/orders/print-registry-ttn_test.mjs
+--- a/src/features/orders/print-registry-ttn_test.mjs
++++ b/src/features/orders/print-registry-ttn_test.mjs
+@@ -56,7 +56,12 @@
+   for (let index = 0; index < 8; index += 1) await Promise.resolve()
+ }
+ 
+-function fixture(initialOrders, invoke, readback = async () => true) {
++function fixture(
++  initialOrders,
++  invoke,
++  readback = async () => true,
++  loadSettings = async () => ({ Пром: true, Эпицентр: true, Каста: true }),
++) {
+   const errors = []
+   const calls = []
+   const timeouts = []
+@@ -103,7 +108,8 @@
+         return calculate()
+       },
+     }),
+-    waitForPendingSaves: async () => true,
++    waitForPendingSaves: async () => true,
++    loadEnabledBulkMarketplaces: loadSettings,
+     isOpenForPrintRegistry: () => true,
+     orderSyncSnapshot: (item) => item,
+     orderWithRegistryFinancialsRestored: (item) => item,
+@@ -242,6 +248,55 @@
+   assert.equal(f.printRegistryMode.value, null)
+ }
+ 
+-console.log(
+-  'Print registry TTN: 10/50 orders, partial batch, deadline, stale run, checked/printed, failed save PASS',
+-)
++{
++  const orders = [order(1), { ...order(2), platform: 'Каста' }, { ...order(3), platform: 'Эпицентр' }]
++  let readbackIds
++  const f = fixture(
++    orders,
++    async () => ({ data: { ok: true, changedOrderIds: ['changed-epicentr'] }, error: null }),
++    async (ids) => {
++      readbackIds = [...ids]
++      return true
++    },
++    async () => ({ Пром: false, Эпицентр: true, Каста: false }),
++  )
++  f.openPrintRegistry()
++  await settle()
++  await f.checkPrintRegistryTtn()
++  assert.equal(f.calls.length, 1, 'paused marketplaces must never reach Edge Functions')
++  assert.equal(f.calls[0].name, 'sync-epicentr-orders')
++  assert.deepEqual(readbackIds, ['remote-3', 'changed-epicentr'])
++  assert.equal(f.registryTtnProgress.value.total, 1)
++  assert.match(f.registryTtnMessage.value, /Пропущено на паузе: 2/)
++}
++
++{
++  const f = fixture(
++    [order(1)],
++    async () => ({ data: { ok: true, skipped: 'paused' }, error: null }),
++    async () => { throw new Error('paused response must not run readback') },
++  )
++  f.openPrintRegistry()
++  await settle()
++  await f.checkPrintRegistryTtn()
++  assert.equal(f.calls.length, 1)
++  assert.match(f.registryTtnMessage.value, /Ошибок: 1/)
++}
++
++{
++  const f = fixture(
++    [order(1)],
++    async () => { throw new Error('settings error must not call marketplace') },
++    async () => true,
++    async () => { throw new Error('settings unavailable') },
++  )
++  f.openPrintRegistry()
++  await settle()
++  await f.checkPrintRegistryTtn()
++  assert.equal(f.calls.length, 0, 'settings lookup must fail closed')
++  assert.match(f.registryTtnMessage.value, /Не удалось проверить ТТН/)
++}
++
++console.log(
++  'Print registry TTN: paused filters, partial batch, deadline, stale run, checked/printed, failed save PASS',
++)
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+@@ -25,8 +25,9 @@
+     val ok: Boolean = false,
+     val accepted: Int = 0,
+     val changedOrderIds: List<String> = emptyList(),
+-    val alreadyAccepted: List<String> = emptyList(),
+-    val message: String? = null,
++    val alreadyAccepted: List<String> = emptyList(),
++    val skipped: String? = null,
++    val message: String? = null,
+ )
+ @Serializable
+ data class PushDeviceResponse(val ok: Boolean = false, val message: String? = null)
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -409,8 +409,9 @@
+             try {
+                 val result = repository.accept(route, requireNotNull(order.externalId))
+                 message = when {
+-                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
+-                    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
++                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
++                    !result.skipped.isNullOrBlank() -> "Площадка на паузе. Заказ не принят."
++                    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
+                     else -> "Заказ принят."
+                 }
+             } catch (cancel: CancellationException) { throw cancel }
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -16,7 +16,16 @@
+         for ((key, value) in values) put(key, value)
+     }
+ 
+-    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
++    @Test fun paused_marketplace_accept_response_does_not_mean_accepted() {
++        val result = Json.decodeFromString<AcceptResponse>(
++            """{"ok":true,"skipped":"paused","accepted":0,"changedOrderIds":[]}""",
++        )
++        assertTrue(result.ok)
++        assertEquals("paused", result.skipped)
++        assertEquals(0, result.accepted)
++    }
++
++    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
+         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
+             assertTrue(isNewStatus(status))
+             assertEquals(StatusTone.BLUE, orderStatusTone(order(status)))
