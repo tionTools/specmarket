@@ -11,7 +11,7 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
  import {
    acceptPromOrders,
    normalizePromExternalIds,
-@@ -1328,7 +1329,27 @@
+@@ -1328,7 +1329,32 @@
        { status: 500, headers: corsHeaders },
      )
    }
@@ -23,11 +23,16 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +        return sourceItems(order).map((item, position) => {
 +          const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
 +          const previous = previousItems.find((saved) => Number(saved.position) === position)
++          const previousKey = text(previous?.marketplace_product_key)
++          const legacyKeys = promLegacyProductKeys(item)
++          const sameProduct = Boolean(previousKey) &&
++            (legacyKeys.includes(previousKey) ||
++              mappedFamilyKey(productFamilyMappings, legacyKeys) === previousKey)
 +          return {
 +            hasSize: Boolean(productSize(item, sourceName)),
 +            hasImage: Boolean(
 +              text(pick(item, 'image', 'image_url', 'imageUrl')) ||
-+              (previous?.product_name === sourceName ? text(previous.image_url) : ''),
++              (sameProduct ? text(previous?.image_url) : ''),
 +            ),
 +          }
 +        })
