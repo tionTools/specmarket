@@ -1,0 +1,51 @@
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersRepository.kt
+@@ -25,8 +25,9 @@
+     val ok: Boolean = false,
+     val accepted: Int = 0,
+     val changedOrderIds: List<String> = emptyList(),
+-    val alreadyAccepted: List<String> = emptyList(),
+-    val message: String? = null,
++    val alreadyAccepted: List<String> = emptyList(),
++    val skipped: String? = null,
++    val message: String? = null,
+ )
+ @Serializable
+ data class PushDeviceResponse(val ok: Boolean = false, val message: String? = null)
+diff --git a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+--- a/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
++++ b/android/app/src/main/java/ua/orders/crm/OrdersViewModel.kt
+@@ -409,8 +409,9 @@
+             try {
+                 val result = repository.accept(route, requireNotNull(order.externalId))
+                 message = when {
+-                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
+-                    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
++                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
++                    !result.skipped.isNullOrBlank() -> "Площадка на паузе. Заказ не принят."
++                    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
+                     else -> "Заказ принят."
+                 }
+             } catch (cancel: CancellationException) { throw cancel }
+diff --git a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+--- a/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
++++ b/android/app/src/test/java/ua/orders/crm/OrderModelsTest.kt
+@@ -16,7 +16,16 @@
+         for ((key, value) in values) put(key, value)
+     }
+ 
+-    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
++    @Test fun paused_marketplace_accept_response_does_not_mean_accepted() {
++        val result = Json.decodeFromString<AcceptResponse>(
++            """{"ok":true,"skipped":"paused","accepted":0,"changedOrderIds":[]}""",
++        )
++        assertTrue(result.ok)
++        assertEquals("paused", result.skipped)
++        assertEquals(0, result.accepted)
++    }
++
++    @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
+         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
+             assertTrue(isNewStatus(status))
+             assertEquals(StatusTone.BLUE, orderStatusTone(order(status)))
