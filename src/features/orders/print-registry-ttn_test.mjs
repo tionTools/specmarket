@@ -56,7 +56,12 @@ async function settle() {
   for (let index = 0; index < 8; index += 1) await Promise.resolve()
 }
 
-function fixture(initialOrders, invoke, readback = async () => true) {
+function fixture(
+  initialOrders,
+  invoke,
+  readback = async () => true,
+  loadSettings = async () => ({ Пром: true, Эпицентр: true, Каста: true }),
+) {
   const errors = []
   const calls = []
   const timeouts = []
@@ -104,6 +109,7 @@ function fixture(initialOrders, invoke, readback = async () => true) {
       },
     }),
     waitForPendingSaves: async () => true,
+    loadEnabledBulkMarketplaces: loadSettings,
     isOpenForPrintRegistry: () => true,
     orderSyncSnapshot: (item) => item,
     orderWithRegistryFinancialsRestored: (item) => item,
@@ -242,6 +248,110 @@ function fixture(initialOrders, invoke, readback = async () => true) {
   assert.equal(f.printRegistryMode.value, null)
 }
 
+{
+  const orders = [
+    order(1),
+    { ...order(2), platform: 'Каста' },
+    { ...order(3), platform: 'Эпицентр' },
+  ]
+  let readbackIds
+  const f = fixture(
+    orders,
+    async () => ({ data: { ok: true, changedOrderIds: ['changed-epicentr'] }, error: null }),
+    async (ids) => {
+      readbackIds = [...ids]
+      return true
+    },
+    async () => ({ Пром: false, Эпицентр: true, Каста: false }),
+  )
+  f.openPrintRegistry()
+  await settle()
+  await f.checkPrintRegistryTtn()
+  assert.equal(f.calls.length, 1, 'paused marketplaces must never reach Edge Functions')
+  assert.equal(f.calls[0].name, 'sync-epicentr-orders')
+  assert.deepEqual(readbackIds, ['remote-3', 'changed-epicentr'])
+  assert.equal(f.registryTtnProgress.value.total, 1)
+  assert.match(f.registryTtnMessage.value, /Пропущено на паузе: 2/)
+}
+
+{
+  const f = fixture(
+    [order(1)],
+    async () => ({ data: { ok: true, skipped: 'paused' }, error: null }),
+    async () => {
+      throw new Error('paused response must not run readback')
+    },
+  )
+  f.openPrintRegistry()
+  await settle()
+  await f.checkPrintRegistryTtn()
+  assert.equal(f.calls.length, 1)
+  assert.match(f.registryTtnMessage.value, /Ошибок: 1/)
+}
+
+{
+  const f = fixture(
+    [order(1)],
+    async () => {
+      throw new Error('settings error must not call marketplace')
+    },
+    async () => true,
+    async () => {
+      throw new Error('settings unavailable')
+    },
+  )
+  f.openPrintRegistry()
+  await settle()
+  await f.checkPrintRegistryTtn()
+  assert.equal(f.calls.length, 0, 'settings lookup must fail closed')
+  assert.match(f.registryTtnMessage.value, /Не удалось проверить ТТН/)
+}
+
+{
+  const f = fixture(
+    [order(1), { ...order(2), platform: 'Каста' }, { ...order(3), platform: 'Эпицентр' }],
+    async () => {
+      throw new Error('all paused marketplaces must not be invoked')
+    },
+    async () => {
+      throw new Error('all paused marketplaces must not be read back')
+    },
+    async () => ({ Пром: false, Эпицентр: false, Каста: false }),
+  )
+  f.openPrintRegistry()
+  await settle()
+  await f.checkPrintRegistryTtn()
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.registryTtnProgress.value.total, 0)
+  assert.match(f.registryTtnMessage.value, /Пропущено на паузе: 3/)
+}
+
+{
+  const pending = deferred()
+  let settingsSignal
+  const f = fixture(
+    [order(1)],
+    async () => {
+      throw new Error('closed registry must not invoke marketplace')
+    },
+    async () => true,
+    async (signal) => {
+      settingsSignal = signal
+      return pending.promise
+    },
+  )
+  f.openPrintRegistry()
+  await settle()
+  const check = f.checkPrintRegistryTtn()
+  await settle()
+  assert.ok(settingsSignal, 'settings request must receive a cancellation signal')
+  f.closePrintRegistry()
+  assert.equal(settingsSignal.aborted, true)
+  pending.resolve({ Пром: true, Эпицентр: true, Каста: true })
+  await check
+  assert.equal(f.calls.length, 0)
+}
+
 console.log(
-  'Print registry TTN: 10/50 orders, partial batch, deadline, stale run, checked/printed, failed save PASS',
+  'Print registry TTN: paused filters, partial batch, deadline, stale run, checked/printed, failed save PASS',
 )
