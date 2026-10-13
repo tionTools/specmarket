@@ -4,6 +4,7 @@ import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderIt
 import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
 import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
+import { shouldLoadMarketplaceFeed } from '../_shared/targeted-feed-fast-path.ts'
 import {
   loadMarketplaceSyncAccess,
   marketplacePausedResponse,
@@ -500,7 +501,21 @@ Deno.serve(async (request) => {
     if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
     const itemsByOrder = new Map<string, RecordValue[]>()
     for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
-    const feedImages = await getFeedImages()
+    const feedCoverage = targetOrderId
+      ? candidates.flatMap((order) => {
+          const existing = existingByExternalId.get(`kasta:${text(order.id)}`)
+          const previousItems = itemsByOrder.get(existing?.id) ?? []
+          return itemRows(order).map((item, position) => {
+            const previous = previousItems.find((saved) => Number(saved.position) === position)
+            const sameProduct = Boolean(kastaProductKey(item)) && previous?.marketplace_product_key === kastaProductKey(item)
+            return { hasImage: Boolean(itemImage(item) || (sameProduct && previous?.image_url)) }
+          })
+        })
+      : []
+    // Existing product images are preserved; a targeted request fetches the feed only for missing images.
+    const feedImages = shouldLoadMarketplaceFeed(Boolean(targetOrderId), feedCoverage)
+      ? await getFeedImages()
+      : new Map<string, string>()
 
     for (const order of candidates) {
       const kastaId = text(order.id)
