@@ -1,19 +1,19 @@
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
-@@ -320,7 +320,10 @@
- const printRegistryMode = ref<'draft' | 'history' | null>(null)
+@@ -321,6 +321,11 @@
  const printRegistryOrderIds = ref<Array<string | number>>([])
  const isUpdatingPrintRegistry = ref(false)
--const isPreparingPrintRegistry = ref(false)
-+const isPreparingPrintRegistry = ref(false)
+ const isPreparingPrintRegistry = ref(false)
 +const isCheckingRegistryTtn = ref(false)
 +const registryTtnProgress = ref({ checked: 0, total: 0 })
 +const registryTtnMessage = ref('')
++let printRegistryGeneration = 0
++let registryTtnController: AbortController | null = null
  const returnEditorOrderId = ref<string | number | null>(null)
  const returnDraftQuantities = ref<Record<string, string>>({})
  const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
-@@ -1756,94 +1759,178 @@
+@@ -1756,15 +1761,17 @@
    )
  }
  
@@ -24,15 +24,25 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 -    isPreparingPrintRegistry.value = false
 -    return
 -  }
--
++function eligiblePrintRegistryOrders() {
++  return orders.value.filter(
++    (order) =>
++      !order.delivery.printedAt &&
++      isOpenForPrintRegistry(order) &&
++      Boolean(order.delivery.ttn.trim()),
++  )
++}
+ 
 -  const ordersWithoutTtn = orders.value.filter(
--    (order) =>
--      !order.delivery.printedAt &&
--      isOpenForPrintRegistry(order) &&
--      !order.delivery.ttn.trim() &&
--      Boolean(order.externalId) &&
--      ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
--  )
++function missingPrintRegistryTtnOrders() {
++  return orders.value.filter(
+     (order) =>
+       !order.delivery.printedAt &&
+       isOpenForPrintRegistry(order) &&
+@@ -1772,79 +1779,198 @@
+       Boolean(order.externalId) &&
+       ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
+   )
 -  let syncErrors = 0
 -  const changedOrderIds = new Set<string>()
 -  const functions = supabase.functions
@@ -59,15 +69,66 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 -          body,
 -        })
 -      }),
--    )
++}
++
++const missingPrintRegistryTtnCount = computed(() => missingPrintRegistryTtnOrders().length)
++const hasNewPrintRegistryOrders = computed(() => {
++  const ids = new Set(printRegistryOrderIds.value.map(String))
++  return eligiblePrintRegistryOrders().some((order) => !ids.has(String(order.id)))
++})
++
++function openPrintRegistry() {
++  if (!supabase || isGuest.value || printRegistryMode.value !== null) return
++  const generation = ++printRegistryGeneration
++  printRegistryOrderIds.value = eligiblePrintRegistryOrders().map((order) => order.id)
++  registryTtnMessage.value = ''
++  registryTtnProgress.value = { checked: 0, total: 0 }
++  printRegistryMode.value = 'draft'
++  void refreshPrintRegistry(false, generation)
++}
++
++function currentPrintRegistry(generation: number) {
++  return generation === printRegistryGeneration && printRegistryMode.value === 'draft'
++}
++
++async function refreshPrintRegistry(includeNew: boolean, generation = printRegistryGeneration) {
++  if (
++    !supabase ||
++    isGuest.value ||
++    isPreparingPrintRegistry.value ||
++    isCheckingRegistryTtn.value ||
++    isUpdatingPrintRegistry.value ||
++    !currentPrintRegistry(generation)
++  ) return
++  isPreparingPrintRegistry.value = true
++  try {
++    if (!(await waitForPendingSaves()) || !currentPrintRegistry(generation)) return
++    const ids = new Set(printRegistryOrderIds.value.map(String))
++    const selected = eligiblePrintRegistryOrders().filter(
++      (order) => includeNew || ids.has(String(order.id)),
+     )
 -    for (const { data, error } of results) {
 -      if (error || !data?.ok) {
 -        syncErrors += 1
 -        continue
--      }
++    const unchecked = selected.filter((order) => !order.delivery.printCheckedAt)
++    if (unchecked.length) {
++      const printCheckedAt = new Date().toISOString()
++      const saved = await savePrintState(
++        unchecked.map((order) => ({ order, printCheckedAt })),
++        AbortSignal.timeout(20_000),
++      )
++      if (!currentPrintRegistry(generation)) return
++      if (!saved) {
++        registryTtnMessage.value =
++          'Не удалось подтвердить сохранение отметок. Часть могла сохраниться на сервере; обновите заказы.'
++        return
+       }
 -      for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
 -        if (typeof id === 'string') changedOrderIds.add(id)
--    }
++      for (const order of unchecked) order.delivery.printCheckedAt = printCheckedAt
++      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+     }
 -  }
 -  const registryRefreshIds = new Set(changedOrderIds)
 -  for (const order of ordersWithoutTtn) {
@@ -81,9 +142,19 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 -        'Не удалось получить актуальные данные заказов перед формированием реестра. Реестр не сформирован.',
 -      )
 -      return
--    }
--  }
--
++    if (includeNew && currentPrintRegistry(generation)) {
++      printRegistryOrderIds.value = selected.map((order) => order.id)
++      registryTtnMessage.value = 'Реестр обновлён.'
+     }
++  } catch (error) {
++    if (!currentPrintRegistry(generation)) return
++    registryTtnMessage.value = 'Ошибка подготовки реестра.'
++    showSyncError(error instanceof Error ? error.message : 'Ошибка подготовки реестра.')
++  } finally {
++    isPreparingPrintRegistry.value = false
+   }
++}
+ 
 -  const registryOrders = orders.value.filter(
 -    (order) =>
 -      !order.delivery.printedAt &&
@@ -97,86 +168,6 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 -    if (await savePrintState(uncheckedOrders.map((order) => ({ order, printCheckedAt })))) {
 -      for (const order of uncheckedOrders) order.delivery.printCheckedAt = printCheckedAt
 -      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
--    }
--  }
--  isPreparingPrintRegistry.value = false
--  printRegistryMode.value = 'draft'
--  if (syncErrors)
--    showSyncError(`Не удалось проверить заказов без ТТН: ${syncErrors}. Они не добавлены в реестр.`)
--}
--
-+function eligiblePrintRegistryOrders() {
-+  return orders.value.filter(
-+    (order) =>
-+      !order.delivery.printedAt &&
-+      isOpenForPrintRegistry(order) &&
-+      Boolean(order.delivery.ttn.trim()),
-+  )
-+}
-+
-+function missingPrintRegistryTtnOrders() {
-+  return orders.value.filter(
-+    (order) =>
-+      !order.delivery.printedAt &&
-+      isOpenForPrintRegistry(order) &&
-+      !order.delivery.ttn.trim() &&
-+      Boolean(order.externalId) &&
-+      ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
-+  )
-+}
-+
-+const missingPrintRegistryTtnCount = computed(() => missingPrintRegistryTtnOrders().length)
-+const hasNewPrintRegistryOrders = computed(() => {
-+  const ids = new Set(printRegistryOrderIds.value.map(String))
-+  return eligiblePrintRegistryOrders().some((order) => !ids.has(String(order.id)))
-+})
-+
-+function openPrintRegistry() {
-+  if (!supabase || isGuest.value || printRegistryMode.value !== null) return
-+  printRegistryOrderIds.value = eligiblePrintRegistryOrders().map((order) => order.id)
-+  registryTtnMessage.value = ''
-+  printRegistryMode.value = 'draft'
-+  void refreshPrintRegistry(false)
-+}
-+
-+async function refreshPrintRegistry(includeNew: boolean) {
-+  if (
-+    !supabase ||
-+    isGuest.value ||
-+    isPreparingPrintRegistry.value ||
-+    isCheckingRegistryTtn.value ||
-+    isUpdatingPrintRegistry.value ||
-+    printRegistryMode.value !== 'draft'
-+  ) return
-+  isPreparingPrintRegistry.value = true
-+  try {
-+    if (!(await waitForPendingSaves())) return
-+    const ids = new Set(printRegistryOrderIds.value.map(String))
-+    const selected = eligiblePrintRegistryOrders().filter(
-+      (order) => includeNew || ids.has(String(order.id)),
-+    )
-+    const unchecked = selected.filter((order) => !order.delivery.printCheckedAt)
-+    if (unchecked.length) {
-+      const printCheckedAt = new Date().toISOString()
-+      if (!(await savePrintState(unchecked.map((order) => ({ order, printCheckedAt }))))) {
-+        registryTtnMessage.value = 'Не удалось сохранить отметки печати. Список не изменён.'
-+        return
-+      }
-+      for (const order of unchecked) order.delivery.printCheckedAt = printCheckedAt
-+      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
-+    }
-+    if (includeNew) {
-+      printRegistryOrderIds.value = selected.map((order) => order.id)
-+      registryTtnMessage.value = 'Реестр обновлён.'
-+    }
-+  } catch (error) {
-+    registryTtnMessage.value = 'Ошибка подготовки реестра.'
-+    showSyncError(error instanceof Error ? error.message : 'Ошибка подготовки реестра.')
-+  } finally {
-+    isPreparingPrintRegistry.value = false
-+  }
-+}
-+
 +async function checkPrintRegistryTtn() {
 +  if (
 +    !supabase ||
@@ -186,11 +177,15 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +    isUpdatingPrintRegistry.value ||
 +    printRegistryMode.value !== 'draft'
 +  ) return
++  const generation = printRegistryGeneration
++  const controller = new AbortController()
++  registryTtnController = controller
++  const active = () => currentPrintRegistry(generation) && !controller.signal.aborted
 +  isCheckingRegistryTtn.value = true
 +  registryTtnMessage.value = ''
 +  registryTtnProgress.value = { checked: 0, total: 0 }
 +  try {
-+    if (!(await waitForPendingSaves())) return
++    if (!(await waitForPendingSaves()) || !active()) return
 +    const ordersWithoutTtn = orders.value.filter(
 +      (order) =>
 +        !order.delivery.printedAt &&
@@ -200,13 +195,15 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +        ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
 +    )
 +    let syncErrors = 0
-+    const started = Date.now()
++    const deadline = Date.now() + 30_000
 +    registryTtnProgress.value = { checked: 0, total: ordersWithoutTtn.length }
 +    const changedOrderIds = new Set<string>()
 +    const functions = supabase.functions
 +    const syncConcurrency = 4
 +    for (let index = 0; index < ordersWithoutTtn.length; index += syncConcurrency) {
-+      if (Date.now() - started >= 30_000) break
++      if (!active()) return
++      const timeLeft = deadline - Date.now()
++      if (timeLeft <= 0) break
 +      const batch = ordersWithoutTtn.slice(index, index + syncConcurrency)
 +      const results = await Promise.all(
 +        batch.map(async (order) => {
@@ -227,7 +224,10 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +            const { data, error } = await functions.invoke(functionName, {
 +              method: 'POST',
 +              body,
-+              signal: AbortSignal.timeout(12_000),
++              signal: AbortSignal.any([
++                controller.signal,
++                AbortSignal.timeout(Math.min(timeLeft, 12_000)),
++              ]),
 +            })
 +            return { data, error }
 +          } catch {
@@ -235,6 +235,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +          }
 +        }),
 +      )
++      if (!active()) return
 +      registryTtnProgress.value = { checked: index + batch.length, total: ordersWithoutTtn.length }
 +      for (const { data, error } of results) {
 +        if (error || !data?.ok) {
@@ -244,22 +245,29 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +        for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
 +          if (typeof id === 'string') changedOrderIds.add(id)
 +      }
-+    }
+     }
++    if (!active()) return
 +    const registryRefreshIds = new Set(changedOrderIds)
 +    for (const order of ordersWithoutTtn) {
 +      if (order.remoteId) registryRefreshIds.add(order.remoteId)
 +    }
 +    if (registryRefreshIds.size) {
-+      const registryRefreshSucceeded = await refreshRemoteOrders([...registryRefreshIds])
++      const readbackSignal = AbortSignal.any([
++        controller.signal,
++        AbortSignal.timeout(15_000),
++      ])
++      const registryRefreshSucceeded = await refreshRemoteOrders(
++        [...registryRefreshIds],
++        readbackSignal,
++      )
++      if (!active()) return
 +      if (!registryRefreshSucceeded) {
-+        showSyncError(
-+          'Не удалось прочитать обновлённые ТТН. Повторите проверку.',
-+        )
++        registryTtnMessage.value = 'Не удалось прочитать ТТН за 15 секунд. Повторите проверку.'
 +        return
 +      }
 +    }
-+  
-+  
++
++
 +    const remaining = registryTtnProgress.value.total - registryTtnProgress.value.checked
 +    const messages = [
 +      `Проверено ${registryTtnProgress.value.checked} из ${registryTtnProgress.value.total} заказов без ТТН.`,
@@ -268,40 +276,159 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +    if (remaining) messages.push(`Не проверено: ${remaining}. Повторите проверку.`)
 +    if (hasNewPrintRegistryOrders.value)
 +      messages.push('Новые ТТН найдены. Нажмите «Обновить реестр».')
-+    registryTtnMessage.value = messages.join(' ')
++    if (active()) registryTtnMessage.value = messages.join(' ')
 +  } catch (error) {
++    if (!active()) return
 +    registryTtnMessage.value = 'Не удалось проверить ТТН. Попробуйте ещё раз.'
 +    showSyncError(error instanceof Error ? error.message : 'Ошибка проверки ТТН.')
 +  } finally {
-+    isCheckingRegistryTtn.value = false
-+  }
-+}
-+
++    if (registryTtnController === controller) registryTtnController = null
++    if (generation === printRegistryGeneration) isCheckingRegistryTtn.value = false
+   }
+-  isPreparingPrintRegistry.value = false
+-  printRegistryMode.value = 'draft'
+-  if (syncErrors)
+-    showSyncError(`Не удалось проверить заказов без ТТН: ${syncErrors}. Они не добавлены в реестр.`)
+ }
+ 
  function closePrintRegistry() {
++  if (isPreparingPrintRegistry.value || isUpdatingPrintRegistry.value) return
++  ++printRegistryGeneration
++  registryTtnController?.abort()
++  registryTtnController = null
++  isCheckingRegistryTtn.value = false
    printRegistryMode.value = null
    printRegistryOrderIds.value = []
-@@ -5412,11 +5499,10 @@
+ }
+@@ -1863,6 +1989,7 @@
+     printCheckedAt?: string | null
+     printedAt?: string | null
+   }>,
++  signal?: AbortSignal,
+ ) {
+   if (!supabase || isGuest.value || isUpdatingPrintRegistry.value) return false
+   const missingRemoteOrder = updates.find((update) => !update.order.remoteId)
+@@ -1876,22 +2003,29 @@
+   }
+ 
+   isUpdatingPrintRegistry.value = true
+-  const { data, error } = await supabase.functions.invoke('update-order-print-state', {
+-    method: 'POST',
+-    body: {
+-      updates: updates.map((update) => ({
+-        orderId: update.order.remoteId,
+-        ...('printCheckedAt' in update ? { printCheckedAt: update.printCheckedAt } : {}),
+-        ...('printedAt' in update ? { printedAt: update.printedAt } : {}),
+-      })),
+-    },
+-  })
+-  isUpdatingPrintRegistry.value = false
+-  if (error || !data?.ok) {
+-    showSyncError(data?.message ?? error?.message ?? 'Не удалось сохранить отметки печати.')
++  try {
++    const { data, error } = await supabase.functions.invoke('update-order-print-state', {
++      method: 'POST',
++      signal,
++      body: {
++        updates: updates.map((update) => ({
++          orderId: update.order.remoteId,
++          ...('printCheckedAt' in update ? { printCheckedAt: update.printCheckedAt } : {}),
++          ...('printedAt' in update ? { printedAt: update.printedAt } : {}),
++        })),
++      },
++    })
++    if (error || !data?.ok) {
++      showSyncError(data?.message ?? error?.message ?? 'Не удалось сохранить отметки печати.')
++      return false
++    }
++    return true
++  } catch (error) {
++    showSyncError(error instanceof Error ? error.message : 'Не удалось сохранить отметки печати.')
+     return false
++  } finally {
++    isUpdatingPrintRegistry.value = false
+   }
+-  return true
+ }
+ 
+ async function handlePrintCheckedChange(order: Order, checked: boolean) {
+@@ -3229,7 +3363,10 @@
+   return focusedOrderCellOrder()?.remoteId === remoteId
+ }
+ 
+-async function refreshRemoteOrders(remoteIds: string[]): Promise<boolean> {
++async function refreshRemoteOrders(
++  remoteIds: string[],
++  signal?: AbortSignal,
++): Promise<boolean> {
+   if (!supabase) return false
+   if (!remoteIds.length) return true
+   const uniqueRemoteIds = [...new Set(remoteIds)]
+@@ -3246,20 +3383,28 @@
+   const remoteOrders: Array<Record<string, unknown>> = []
+   const orderItemReturns: OrderItemReturnRow[] = []
+   for (const remoteIdBatch of chunks(refreshableIds, targetedOrdersBatchSize)) {
+-    const { data: orderRows, error: ordersError } = await supabase
++    if (signal?.aborted) return false
++    const ordersQuery = supabase
+       .from('crm_orders')
+       .select('*, crm_order_items(*)')
+       .in('id', remoteIdBatch)
++    const { data: orderRows, error: ordersError } = await (signal
++      ? ordersQuery.abortSignal(signal)
++      : ordersQuery)
+     if (ordersError || !orderRows) {
+       console.error('Не удалось обновить изменённые заказы CRM:', ordersError)
+       return false
+     }
+     remoteOrders.push(...(orderRows as Array<Record<string, unknown>>))
+ 
+-    const { data: returnRows, error: returnsError } = await supabase
++    if (signal?.aborted) return false
++    const returnsQuery = supabase
+       .from('crm_order_item_returns')
+       .select('order_id, item_position, product_name, returned_quantity, returned_at')
+       .in('order_id', remoteIdBatch)
++    const { data: returnRows, error: returnsError } = await (signal
++      ? returnsQuery.abortSignal(signal)
++      : returnsQuery)
+     if (returnsError) {
+       console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
+       return false
+@@ -3274,6 +3419,7 @@
+       })),
+     )
+   }
++  if (signal?.aborted) return false
+   const applicableIds = new Set(
+     refreshableIds.filter((remoteId) => {
+       const revisionUnchanged =
+@@ -3291,6 +3437,7 @@
+   const applicableRows = remoteOrders.filter((row) => applicableIds.has(String(row.id)))
+   const applicableReturns = orderItemReturns.filter((row) => applicableIds.has(row.order_id))
+   const refreshedOrders = mapRemoteOrders(applicableRows, applicableReturns)
++  if (signal?.aborted) return false
+   const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
+   for (const remoteId of applicableIds) {
+     if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
+@@ -5412,11 +5559,10 @@
            <button
              v-if="!isGuest"
              class="whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
 -            :disabled="isPreparingPrintRegistry"
--            type="button"
--            @click="openPrintRegistry"
--          >
+             type="button"
+             @click="openPrintRegistry"
+           >
 -            {{ isPreparingPrintRegistry ? 'Проверяем ТТН…' : 'Реестр печати' }}
-+            type="button"
-+            @click="openPrintRegistry"
-+          >
 +            Реестр печати
            </button>
            <RouterLink
              class="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
-@@ -7835,8 +7921,15 @@
+@@ -7835,7 +7981,14 @@
        v-if="printRegistryMode"
        :orders="printRegistryOrders"
        :mode="printRegistryMode"
 -      :busy="isUpdatingPrintRegistry"
--      @close="closePrintRegistry"
 +      :busy="isUpdatingPrintRegistry || isPreparingPrintRegistry || isCheckingRegistryTtn"
 +      :checkingTtn="isCheckingRegistryTtn"
 +      :ttnProgress="registryTtnProgress"
@@ -310,47 +437,60 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +      :hasNewOrders="hasNewPrintRegistryOrders"
 +      @checkTtn="checkPrintRegistryTtn"
 +      @refreshOrders="refreshPrintRegistry(true)"
-+      @close="closePrintRegistry"
+       @close="closePrintRegistry"
        @markPrinted="markPrintRegistryPrinted"
        @showHistory="showPrintRegistryHistory"
-       @showDraft="showCurrentPrintRegistry"
 diff --git a/src/features/orders/PrintRegistry.vue b/src/features/orders/PrintRegistry.vue
 --- a/src/features/orders/PrintRegistry.vue
 +++ b/src/features/orders/PrintRegistry.vue
-@@ -15,8 +15,13 @@
- const props = defineProps<{
+@@ -16,6 +16,11 @@
    orders: Order[]
    mode: 'draft' | 'history'
--  busy: boolean
--}>()
-+  busy: boolean
+   busy: boolean
 +  checkingTtn: boolean
 +  ttnProgress: { checked: number; total: number }
 +  ttnMessage: string
 +  missingTtnCount: number
 +  hasNewOrders: boolean
-+}>()
+ }>()
  
  const emit = defineEmits<{
-   close: []
-@@ -26,8 +31,10 @@
-   checkedChange: [order: Order, checked: boolean]
+@@ -27,6 +32,8 @@
    checkAll: [checked: boolean]
    restore: [order: Order]
--  restoreUnchecked: []
--}>()
-+  restoreUnchecked: []
+   restoreUnchecked: []
 +  checkTtn: []
 +  refreshOrders: []
-+}>()
+ }>()
  
  const checkedCount = computed(
-   () => props.orders.filter((order) => Boolean(order.delivery.printCheckedAt)).length,
-@@ -189,7 +196,40 @@
+@@ -159,6 +166,7 @@
+               v-if="mode === 'draft'"
+               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+               type="button"
++              :disabled="busy"
+               @click="emit('showHistory')"
+             >
+               История
+@@ -167,6 +175,7 @@
+               v-else
+               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+               type="button"
++              :disabled="busy"
+               @click="emit('showDraft')"
+             >
+               Текущий реестр
+@@ -183,12 +192,46 @@
+             <button
+               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+               type="button"
++              :disabled="busy && !checkingTtn"
+               @click="emit('close')"
+             >
+               Закрыть
              </button>
            </div>
          </div>
--        <div class="mt-5 grid gap-3 sm:grid-cols-4">
 +        <div
 +          v-if="mode === 'draft'"
 +          class="print-registry-actions mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
@@ -384,7 +524,6 @@ diff --git a/src/features/orders/PrintRegistry.vue b/src/features/orders/PrintRe
 +          </div>
 +          <p v-if="ttnMessage" class="mt-2" role="status">{{ ttnMessage }}</p>
 +        </div>
-+        <div class="mt-5 grid gap-3 sm:grid-cols-4">
+         <div class="mt-5 grid gap-3 sm:grid-cols-4">
            <div class="rounded-xl bg-slate-100 px-4 py-3">
              <p class="text-xs text-slate-500">Заказов</p>
-             <p class="mt-1 text-xl font-bold">{{ orders.length }}</p>
