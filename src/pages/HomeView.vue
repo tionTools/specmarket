@@ -1866,14 +1866,15 @@ async function checkPrintRegistryTtn() {
   registryTtnProgress.value = { checked: 0, total: 0 }
   try {
     if (!(await waitForPendingSaves()) || !active()) return
-    const ordersWithoutTtn = orders.value.filter(
-      (order) =>
-        !order.delivery.printedAt &&
-        isOpenForPrintRegistry(order) &&
-        !order.delivery.ttn.trim() &&
-        Boolean(order.externalId) &&
-        ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
+    const enabled = await loadEnabledBulkMarketplaces(
+      AbortSignal.any([controller.signal, AbortSignal.timeout(12_000)]),
     )
+    if (!active()) return
+    const candidates = missingPrintRegistryTtnOrders()
+    const ordersWithoutTtn = candidates.filter(
+      (order) => enabled[order.platform as keyof typeof enabled],
+    )
+    const pausedCount = candidates.length - ordersWithoutTtn.length
     let syncErrors = 0
     const deadline = Date.now() + 30_000
     registryTtnProgress.value = { checked: 0, total: ordersWithoutTtn.length }
@@ -1919,7 +1920,7 @@ async function checkPrintRegistryTtn() {
       if (!active()) return
       registryTtnProgress.value = { checked: index + batch.length, total: ordersWithoutTtn.length }
       for (const { order, data, error } of results) {
-        if (error || !data?.ok) {
+        if (error || !data?.ok || data.skipped) {
           syncErrors += 1
           continue
         }
@@ -1950,6 +1951,7 @@ async function checkPrintRegistryTtn() {
       `Проверено ${registryTtnProgress.value.checked} из ${registryTtnProgress.value.total} заказов без ТТН.`,
     ]
     if (syncErrors) messages.push(`Ошибок: ${syncErrors}.`)
+    if (pausedCount) messages.push(`Пропущено на паузе: ${pausedCount}.`)
     if (remaining) messages.push(`Не проверено: ${remaining}. Повторите проверку.`)
     if (hasNewPrintRegistryOrders.value)
       messages.push('Новые ТТН найдены. Нажмите «Обновить реестр».')
@@ -2239,6 +2241,19 @@ async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
   )
     return product.marketplaceProductKey ?? ''
 
+  try {
+    const enabled = await loadEnabledBulkMarketplaces()
+    if (!enabled[order.platform as keyof typeof enabled]) {
+      showSyncError(
+        `${order.platform}: автообновление на паузе. Обновите заказ вручную перед привязкой товара.`,
+      )
+      return ''
+    }
+  } catch {
+    showSyncError('Не удалось проверить настройки маркетплейсов перед привязкой товара.')
+    return ''
+  }
+
   const functionName =
     order.platform === 'Пром'
       ? 'sync-prom-orders'
@@ -2253,11 +2268,13 @@ async function refreshPriceLinkProductKey(order: Order, product: OrderProduct) {
           manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
         }
   const { data, error } = await supabase.functions.invoke(functionName, { method: 'POST', body })
-  if (error || !data?.ok) {
+  if (error || !data?.ok || data?.skipped) {
     showSyncError(
-      data?.message ??
-        error?.message ??
-        'Не удалось обновить идентификатор товара перед привязкой.',
+      data?.skipped
+        ? 'Автообновление товара пропущено на сервере.'
+        : (data?.message ??
+            error?.message ??
+            'Не удалось обновить идентификатор товара перед привязкой.'),
     )
     return ''
   }
@@ -2650,8 +2667,10 @@ async function syncEpicentrOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingEpicentr.value = false
-  if (error || !data?.ok) {
-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.'
+  if (error || !data?.ok || data?.skipped) {
+    const errorMessage = data?.skipped
+      ? 'Эпицентр: синхронизация пропущена, площадка на паузе.'
+      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
     if (fullSyncResults) fullSyncResults.push(`Эпицентр: ошибка — ${errorMessage}`)
     else showSyncError(errorMessage)
     return
@@ -2677,8 +2696,10 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingProm.value = false
-  if (error || !data?.ok) {
-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.'
+  if (error || !data?.ok || data?.skipped) {
+    const errorMessage = data?.skipped
+      ? 'Prom: синхронизация пропущена, площадка на паузе.'
+      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     if (fullSyncResults) fullSyncResults.push(`Prom: ошибка — ${errorMessage}`)
     else showSyncError(errorMessage)
     return
@@ -2737,10 +2758,15 @@ async function confirmPromDeliveredOrders() {
       message?: string
       completed?: number
       changedOrderIds?: string[]
+      skipped?: string
     }>('sync-prom-orders', {
       method: 'POST',
       body: { completeExternalIds },
     })
+    if (data?.skipped) {
+      showSyncError('Prom на паузе: статусы заказов не изменены.')
+      return
+    }
     if (error || !data?.ok) {
       showSyncError(data?.message ?? error?.message ?? 'Не удалось изменить статусы заказов Prom.')
       return
@@ -2781,10 +2807,15 @@ async function dismissPromDeliveredOrders() {
       message?: string
       dismissed?: number
       changedOrderIds?: string[]
+      skipped?: string
     }>('sync-prom-orders', {
       method: 'POST',
       body: { dismissCompletionExternalIds },
     })
+    if (data?.skipped) {
+      showSyncError('Prom на паузе: подтверждения не изменены.')
+      return
+    }
     if (error || !data?.ok) {
       showSyncError(
         data?.message ?? error?.message ?? 'Не удалось убрать заказы из подтверждения Prom.',
@@ -2812,8 +2843,10 @@ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingKasta.value = false
-  if (error || !data?.ok) {
-    const errorMessage = data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.'
+  if (error || !data?.ok || data?.skipped) {
+    const errorMessage = data?.skipped
+      ? 'Каста: синхронизация пропущена, площадка на паузе.'
+      : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Касты.')
     if (fullSyncResults) fullSyncResults.push(`Каста: ошибка — ${errorMessage}`)
     else showSyncError(errorMessage)
     return
@@ -2826,11 +2859,10 @@ async function syncKastaOrders(full = false, fullSyncResults?: string[]) {
   await refreshOrdersAfterMarketplaceSync(data)
 }
 
-async function loadEnabledBulkMarketplaces() {
+async function loadEnabledBulkMarketplaces(signal?: AbortSignal) {
   if (!supabase) throw new Error('Нет подключения к Supabase.')
-  const { data, error } = await supabase
-    .from('crm_marketplace_settings')
-    .select('platform, enabled')
+  const query = supabase.from('crm_marketplace_settings').select('platform, enabled')
+  const { data, error } = await (signal ? query.abortSignal(signal) : query)
   if (error) throw error
   // Missing or invalid settings must stop every bulk request, not silently enable a platform.
   return marketplaceEnabledFromRows(data ?? [])
@@ -2988,6 +3020,10 @@ async function syncKastaOrder(order: Order) {
     body: { externalId: order.externalId },
   })
   isSyncingKasta.value = false
+  if (data?.skipped) {
+    showSyncError('Каста: сервер пропустил обновление заказа.')
+    return
+  }
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Каста.')
     return
@@ -3021,6 +3057,10 @@ async function syncPromOrder(order: Order) {
     },
   })
   isSyncingProm.value = false
+  if (data?.skipped) {
+    showSyncError('Пром: сервер пропустил обновление заказа.')
+    return
+  }
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Prom.')
     return
@@ -3054,6 +3094,10 @@ async function syncEpicentrOrder(order: Order) {
     },
   })
   isSyncingEpicentr.value = false
+  if (data?.skipped) {
+    showSyncError('Эпицентр: сервер пропустил обновление заказа.')
+    return
+  }
   if (error || !data?.ok) {
     showSyncError(data?.message ?? error?.message ?? 'Не удалось обновить заказ Эпицентра.')
     return
