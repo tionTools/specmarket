@@ -1,0 +1,21 @@
+Patch 174 — пауза маркетплейсов: исключение фоновых адресных запросов и честный результат действий
+
+BASE main: 7e4d5860c8a1345afbb020d1d735f40ea188d7ad (Patch 173, PR #74).
+DO NOT MERGE OR OPEN PR WITHOUT USER APPROVAL.
+Scope: browser HomeView, existing TTN regression test, Android acceptance result and focused test. No Edge, SQL, cron, secrets, banking, finance or product publication changes.
+
+1. Реестр печати: при «Проверить ТТН» читаем crm_marketplace_settings; запросы к отключённым Prom/Epicentr/Kasta не запускаем. В сообщении показываем количество исключённых. Если настройки не прочитались — fail-closed. При ответе skipped нельзя считать заказ успешно проверенным и делать readback. Открытие реестра, сохранение print state и ручная печать не меняются.
+2. Автоматическое уточнение ID товара при привязке: не обращаемся к API отключённой площадки. При отсутствии настроек — fail-closed. Уже имеющиеся связи/ключи сохраняются.
+3. Prom complete/dismiss, общий/полный sync, targeted messages: skipped не является успехом. В Android при принятии заказа проверяем skipped: paused, не сообщаем «Заказ принят».
+4. Ручное targeted-обновление конкретного заказа и доставка остаются разрешены. Никаких массовых прочтений старых заказов не исключаем; cron и tracking pause уже защищены сервером.
+
+Verification requirements for Codex in isolated clean worktree from EXACT base SHA:
+- git apply --check 174.patch; git apply 174.patch; git diff --check.
+- node src/features/orders/print-registry-ttn_test.mjs
+- node src/features/marketplaces/bulk-sync_test.mjs
+- node src/features/orders/remote-order-refresh-race_test.mjs
+- Android unit: OrderModelsTest.kt, plus Kotlin compile as available.
+- scoped Oxfmt check (format changed Vue/JS only), scoped Oxlint/ESLint, pnpm type-check, pnpm build.
+- Ensure existing baseline RED manual-draft-checkpoint_test.mjs is reported as baseline-only; do not modify unrelated files.
+- Verify paused Kasta no Edge call on TTN check, paused response no readback, settings unavailable fail closed, other two platforms unaffected.
+- Report diff and tests; STOP on any safety failure. No PR/merge/deploy until explicit instruction.
