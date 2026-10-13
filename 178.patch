@@ -1,0 +1,24 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+index 43acc22..27bf016 100644
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -5868,7 +5868,7 @@ function orderDateTime(order: Order) {
+       </section>
+ 
+       <section
+-        class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[0.58fr_1.04fr_1.19fr_1.05fr_minmax(0,0.85fr)]"
++        class="mt-4 grid gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:[&>article:not(:last-child)]:flex-[0_0_min-content]"
+       >
+         <article
+           class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+@@ -5990,7 +5990,9 @@ function orderDateTime(order: Order) {
+             </strong>
+           </div>
+         </article>
+-        <article class="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
++        <article
++          class="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm sm:col-span-2 xl:flex-1 xl:basis-48"
++        >
+           <p class="text-lg font-semibold leading-none">
+             {{ formatMoney(unpaidShipmentAmount) }}
+             <span class="mt-1 block text-sm font-medium text-slate-600">В дороге</span>
