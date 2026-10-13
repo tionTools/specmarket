@@ -666,17 +666,21 @@ Deno.serve(async (request) => {
     if (currentMapping?.category_id) categoryByOffer.set(offerId, currentMapping.category_id)
   }
   for (const order of orders) {
-    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
-      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-    })
-    if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
-    const detailPayload: unknown = await detailResponse.json()
-    const detail = extractOrder(detailPayload)
-    const source: EpicentrOrder = {
-      ...order,
-      ...detail,
-      address: detail.address ?? order.address,
-      items: (detail.items ?? order.items) as EpicentrOrder['items'],
+    // The targeted endpoint already returns the full order. Keep detail fetches for bulk rows only.
+    let source: EpicentrOrder = order
+    if (!requestedExternalId) {
+      const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
+        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+      })
+      if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
+      const detailPayload: unknown = await detailResponse.json()
+      const detail = extractOrder(detailPayload)
+      source = {
+        ...order,
+        ...detail,
+        address: detail.address ?? order.address,
+        items: (detail.items ?? order.items) as EpicentrOrder['items'],
+      }
     }
     const externalId = source.id
     const existing = { data: existingByExternalId.get(externalId) ?? null }

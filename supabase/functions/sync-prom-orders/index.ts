@@ -33,6 +33,7 @@ import {
   shouldWaivePromPromoShippingForUnclaimedReturn,
 } from '../_shared/prom-delivery.ts'
 import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
+import { shouldLoadMarketplaceFeed } from '../_shared/targeted-feed-fast-path.ts'
 import {
   acceptPromOrders,
   normalizePromExternalIds,
@@ -1328,7 +1329,32 @@ Deno.serve(async (request) => {
       { status: 500, headers: corsHeaders },
     )
   }
-  const feedProducts = await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
+  const feedCoverage = requestedExternalId
+    ? candidates.flatMap((order) => {
+        const existing = existingByExternalId.get(`prom:${text(order.id)}`)
+        const previousItems = itemsByOrder.get(existing?.id) ?? []
+        return sourceItems(order).map((item, position) => {
+          const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+          const previous = previousItems.find((saved) => Number(saved.position) === position)
+          const previousKey = text(previous?.marketplace_product_key)
+          const legacyKeys = promLegacyProductKeys(item)
+          const sameProduct = Boolean(previousKey) &&
+            (legacyKeys.includes(previousKey) ||
+              mappedFamilyKey(productFamilyMappings, legacyKeys) === previousKey)
+          return {
+            hasSize: Boolean(productSize(item, sourceName)),
+            hasImage: Boolean(
+              text(pick(item, 'image', 'image_url', 'imageUrl')) ||
+              (sameProduct ? text(previous?.image_url) : ''),
+            ),
+          }
+        })
+      })
+    : []
+  // A targeted refresh does not need the entire XML catalogue when no product metadata is missing.
+  const feedProducts = shouldLoadMarketplaceFeed(Boolean(requestedExternalId), feedCoverage, true)
+    ? await productsFromPromFeed(Deno.env.get('PROM_PRODUCTS_FEED_URL'))
+    : { byOfferId: new Map(), byUniqueAlias: new Map() }
   let created = 0
   let updated = 0
   const skipped = skippedUnchanged
@@ -1654,24 +1680,21 @@ Deno.serve(async (request) => {
       const itemRows = await Promise.all(
         items.map(async (item, position) => {
           const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
-          const localizedName = await resolvedUkrainianProductName(
-            item,
-            sourceName,
-            promToken,
-            productNameCache,
-          )
+          const [localizedName, apiSize] = await Promise.all([
+            resolvedUkrainianProductName(item, sourceName, promToken, productNameCache),
+            resolvedProductSize(
+              item,
+              sourceName,
+              promToken,
+              feedProducts,
+              productDetailsCache,
+              Boolean(requestedExternalId),
+            ),
+          ])
           if (localizedName.retry) needsTranslationRetry = true
           const name = localizedName.name
           const quantity = number(pick(item, 'quantity', 'amount')) || 1
           const price = itemPrice(item)
-          const apiSize = await resolvedProductSize(
-            item,
-            sourceName,
-            promToken,
-            feedProducts,
-            productDetailsCache,
-            Boolean(requestedExternalId),
-          )
           const identity = familyIdentities[position]
           const legacyMarketplaceProductKey = promProductKey(item)
           const canonicalMarketplaceProductKey =
