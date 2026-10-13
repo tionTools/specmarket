@@ -5867,22 +5867,24 @@ function orderDateTime(order: Order) {
         </p>
       </section>
 
-      <section class="mt-4 flex flex-wrap gap-2">
+      <section
+        class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[0.58fr_1.04fr_1.19fr_1.05fr_minmax(0,0.85fr)]"
+      >
         <article
-          class="grid min-w-0 flex-1 basis-52 grid-cols-2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="col-span-2 text-sm font-medium text-slate-600">Заказы</p>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <p class="text-sm font-medium text-slate-600">Заказы</p>
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
             <p class="text-xl font-semibold leading-none">{{ summary.today.orders }}</p>
           </div>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
             <p class="text-xl font-semibold leading-none">{{ summary.period.orders }}</p>
           </div>
           <div
             v-if="isComparingPreviousPeriod"
-            class="col-span-full -mx-3 -mb-2 flex flex-wrap items-center justify-between gap-1 border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
             <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
@@ -5897,24 +5899,24 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid min-w-0 flex-1 basis-52 grid-cols-2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="col-span-2 text-sm font-medium text-slate-600">Оборот</p>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <p class="text-sm font-medium text-slate-600">Оборот</p>
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
-            <p class="break-words text-lg font-semibold leading-none">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.today.turnover) }}
             </p>
           </div>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
-            <p class="break-words text-lg font-semibold leading-none">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.turnover) }}
             </p>
           </div>
           <div
             v-if="isComparingPreviousPeriod"
-            class="col-span-full -mx-3 -mb-2 flex flex-wrap items-center justify-between gap-1 border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
             <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
@@ -5929,26 +5931,24 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid min-w-0 flex-1 basis-52 grid-cols-2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="col-span-2 text-sm font-medium leading-tight text-slate-600">
-            Плановая прибыль
-          </p>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">Плановая прибыль</p>
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">Сегодня</p>
-            <p class="break-words text-lg font-semibold leading-none">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.today.planned) }}
             </p>
           </div>
-          <div class="min-w-0 border-l border-slate-300 pl-2 text-left">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
-            <p class="break-words text-lg font-semibold leading-none">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.planned) }}
             </p>
           </div>
           <div
             v-if="isComparingPreviousPeriod"
-            class="col-span-full -mx-3 -mb-2 flex flex-wrap items-center justify-between gap-1 border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
             <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
@@ -5963,20 +5963,20 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
-          class="grid min-w-0 flex-1 basis-52 grid-cols-2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
-          <p class="col-span-2 text-sm font-medium leading-tight text-slate-600">
+          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">
             Фактическая прибыль
           </p>
-          <div class="col-span-2 min-w-0 border-l border-slate-300 pl-2 text-left">
+          <div class="border-l border-slate-300 pl-2 text-left">
             <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
-            <p class="break-words text-lg font-semibold leading-none">
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
               {{ formatMoney(summary.period.actual) }}
             </p>
           </div>
           <div
             v-if="isComparingPreviousPeriod"
-            class="col-span-full -mx-3 -mb-2 flex flex-wrap items-center justify-between gap-1 border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
           >
             <span>{{ previousOrderListRangeLabel }}</span>
             <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
@@ -5990,19 +5990,17 @@ function orderDateTime(order: Order) {
             </strong>
           </div>
         </article>
-        <article
-          class="min-w-0 flex-1 basis-52 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-        >
-          <p class="break-words text-lg font-semibold leading-none">
+        <article class="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <p class="text-lg font-semibold leading-none">
             {{ formatMoney(unpaidShipmentAmount) }}
-            <span class="block text-sm font-medium text-slate-600">В дороге</span>
+            <span class="mt-1 block text-sm font-medium text-slate-600">В дороге</span>
           </p>
           <p
             v-if="isComparingPreviousPeriod"
             class="mt-1 break-words text-xs font-semibold text-indigo-700"
           >
             {{ formatMoney(unpaidShipmentPlannedProfit) }}
-            <span class="ml-1">Плановая прибыль</span>
+            <span class="block">Плановая прибыль</span>
           </p>
         </article>
       </section>
