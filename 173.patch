@@ -1,0 +1,390 @@
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -320,7 +320,10 @@
+ const printRegistryMode = ref<'draft' | 'history' | null>(null)
+ const printRegistryOrderIds = ref<Array<string | number>>([])
+ const isUpdatingPrintRegistry = ref(false)
+-const isPreparingPrintRegistry = ref(false)
++const isPreparingPrintRegistry = ref(false)
++const isCheckingRegistryTtn = ref(false)
++const registryTtnProgress = ref({ checked: 0, total: 0 })
++const registryTtnMessage = ref('')
+ const returnEditorOrderId = ref<string | number | null>(null)
+ const returnDraftQuantities = ref<Record<string, string>>({})
+ const returnDraftDate = ref(new Date().toISOString().slice(0, 10))
+@@ -1756,94 +1759,178 @@
+   )
+ }
+ 
+-async function openPrintRegistry() {
+-  if (!supabase || isGuest.value || isPreparingPrintRegistry.value) return
+-  isPreparingPrintRegistry.value = true
+-  if (!(await waitForPendingSaves())) {
+-    isPreparingPrintRegistry.value = false
+-    return
+-  }
+-
+-  const ordersWithoutTtn = orders.value.filter(
+-    (order) =>
+-      !order.delivery.printedAt &&
+-      isOpenForPrintRegistry(order) &&
+-      !order.delivery.ttn.trim() &&
+-      Boolean(order.externalId) &&
+-      ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
+-  )
+-  let syncErrors = 0
+-  const changedOrderIds = new Set<string>()
+-  const functions = supabase.functions
+-  const syncConcurrency = 4
+-  for (let index = 0; index < ordersWithoutTtn.length; index += syncConcurrency) {
+-    const batch = ordersWithoutTtn.slice(index, index + syncConcurrency)
+-    const results = await Promise.all(
+-      batch.map(async (order) => {
+-        const functionName =
+-          order.platform === 'Пром'
+-            ? 'sync-prom-orders'
+-            : order.platform === 'Эпицентр'
+-              ? 'sync-epicentr-orders'
+-              : 'sync-kasta-orders'
+-        const body =
+-          order.platform === 'Каста'
+-            ? { externalId: order.externalId }
+-            : {
+-                externalId: order.externalId,
+-                manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
+-              }
+-        return functions.invoke(functionName, {
+-          method: 'POST',
+-          body,
+-        })
+-      }),
+-    )
+-    for (const { data, error } of results) {
+-      if (error || !data?.ok) {
+-        syncErrors += 1
+-        continue
+-      }
+-      for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
+-        if (typeof id === 'string') changedOrderIds.add(id)
+-    }
+-  }
+-  const registryRefreshIds = new Set(changedOrderIds)
+-  for (const order of ordersWithoutTtn) {
+-    if (order.remoteId) registryRefreshIds.add(order.remoteId)
+-  }
+-  if (registryRefreshIds.size) {
+-    const registryRefreshSucceeded = await refreshRemoteOrders([...registryRefreshIds])
+-    if (!registryRefreshSucceeded) {
+-      isPreparingPrintRegistry.value = false
+-      showSyncError(
+-        'Не удалось получить актуальные данные заказов перед формированием реестра. Реестр не сформирован.',
+-      )
+-      return
+-    }
+-  }
+-
+-  const registryOrders = orders.value.filter(
+-    (order) =>
+-      !order.delivery.printedAt &&
+-      isOpenForPrintRegistry(order) &&
+-      order.delivery.ttn.trim().length > 0,
+-  )
+-  printRegistryOrderIds.value = registryOrders.map((order) => order.id)
+-  const uncheckedOrders = registryOrders.filter((order) => !order.delivery.printCheckedAt)
+-  if (uncheckedOrders.length) {
+-    const printCheckedAt = new Date().toISOString()
+-    if (await savePrintState(uncheckedOrders.map((order) => ({ order, printCheckedAt })))) {
+-      for (const order of uncheckedOrders) order.delivery.printCheckedAt = printCheckedAt
+-      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
+-    }
+-  }
+-  isPreparingPrintRegistry.value = false
+-  printRegistryMode.value = 'draft'
+-  if (syncErrors)
+-    showSyncError(`Не удалось проверить заказов без ТТН: ${syncErrors}. Они не добавлены в реестр.`)
+-}
+-
++function eligiblePrintRegistryOrders() {
++  return orders.value.filter(
++    (order) =>
++      !order.delivery.printedAt &&
++      isOpenForPrintRegistry(order) &&
++      Boolean(order.delivery.ttn.trim()),
++  )
++}
++
++function missingPrintRegistryTtnOrders() {
++  return orders.value.filter(
++    (order) =>
++      !order.delivery.printedAt &&
++      isOpenForPrintRegistry(order) &&
++      !order.delivery.ttn.trim() &&
++      Boolean(order.externalId) &&
++      ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
++  )
++}
++
++const missingPrintRegistryTtnCount = computed(() => missingPrintRegistryTtnOrders().length)
++const hasNewPrintRegistryOrders = computed(() => {
++  const ids = new Set(printRegistryOrderIds.value.map(String))
++  return eligiblePrintRegistryOrders().some((order) => !ids.has(String(order.id)))
++})
++
++function openPrintRegistry() {
++  if (!supabase || isGuest.value || printRegistryMode.value !== null) return
++  printRegistryOrderIds.value = eligiblePrintRegistryOrders().map((order) => order.id)
++  registryTtnMessage.value = ''
++  printRegistryMode.value = 'draft'
++  void refreshPrintRegistry(false)
++}
++
++async function refreshPrintRegistry(includeNew: boolean) {
++  if (
++    !supabase ||
++    isGuest.value ||
++    isPreparingPrintRegistry.value ||
++    isCheckingRegistryTtn.value ||
++    isUpdatingPrintRegistry.value ||
++    printRegistryMode.value !== 'draft'
++  ) return
++  isPreparingPrintRegistry.value = true
++  try {
++    if (!(await waitForPendingSaves())) return
++    const ids = new Set(printRegistryOrderIds.value.map(String))
++    const selected = eligiblePrintRegistryOrders().filter(
++      (order) => includeNew || ids.has(String(order.id)),
++    )
++    const unchecked = selected.filter((order) => !order.delivery.printCheckedAt)
++    if (unchecked.length) {
++      const printCheckedAt = new Date().toISOString()
++      if (!(await savePrintState(unchecked.map((order) => ({ order, printCheckedAt }))))) {
++        registryTtnMessage.value = 'Не удалось сохранить отметки печати. Список не изменён.'
++        return
++      }
++      for (const order of unchecked) order.delivery.printCheckedAt = printCheckedAt
++      window.localStorage.setItem(storageKey, JSON.stringify(orders.value))
++    }
++    if (includeNew) {
++      printRegistryOrderIds.value = selected.map((order) => order.id)
++      registryTtnMessage.value = 'Реестр обновлён.'
++    }
++  } catch (error) {
++    registryTtnMessage.value = 'Ошибка подготовки реестра.'
++    showSyncError(error instanceof Error ? error.message : 'Ошибка подготовки реестра.')
++  } finally {
++    isPreparingPrintRegistry.value = false
++  }
++}
++
++async function checkPrintRegistryTtn() {
++  if (
++    !supabase ||
++    isGuest.value ||
++    isCheckingRegistryTtn.value ||
++    isPreparingPrintRegistry.value ||
++    isUpdatingPrintRegistry.value ||
++    printRegistryMode.value !== 'draft'
++  ) return
++  isCheckingRegistryTtn.value = true
++  registryTtnMessage.value = ''
++  registryTtnProgress.value = { checked: 0, total: 0 }
++  try {
++    if (!(await waitForPendingSaves())) return
++    const ordersWithoutTtn = orders.value.filter(
++      (order) =>
++        !order.delivery.printedAt &&
++        isOpenForPrintRegistry(order) &&
++        !order.delivery.ttn.trim() &&
++        Boolean(order.externalId) &&
++        ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
++    )
++    let syncErrors = 0
++    const started = Date.now()
++    registryTtnProgress.value = { checked: 0, total: ordersWithoutTtn.length }
++    const changedOrderIds = new Set<string>()
++    const functions = supabase.functions
++    const syncConcurrency = 4
++    for (let index = 0; index < ordersWithoutTtn.length; index += syncConcurrency) {
++      if (Date.now() - started >= 30_000) break
++      const batch = ordersWithoutTtn.slice(index, index + syncConcurrency)
++      const results = await Promise.all(
++        batch.map(async (order) => {
++          const functionName =
++            order.platform === 'Пром'
++              ? 'sync-prom-orders'
++              : order.platform === 'Эпицентр'
++                ? 'sync-epicentr-orders'
++                : 'sync-kasta-orders'
++          const body =
++            order.platform === 'Каста'
++              ? { externalId: order.externalId }
++              : {
++                  externalId: order.externalId,
++                  manual: orderSyncSnapshot(orderWithRegistryFinancialsRestored(order)),
++                }
++          try {
++            const { data, error } = await functions.invoke(functionName, {
++              method: 'POST',
++              body,
++              signal: AbortSignal.timeout(12_000),
++            })
++            return { data, error }
++          } catch {
++            return { data: null, error: true }
++          }
++        }),
++      )
++      registryTtnProgress.value = { checked: index + batch.length, total: ordersWithoutTtn.length }
++      for (const { data, error } of results) {
++        if (error || !data?.ok) {
++          syncErrors += 1
++          continue
++        }
++        for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
++          if (typeof id === 'string') changedOrderIds.add(id)
++      }
++    }
++    const registryRefreshIds = new Set(changedOrderIds)
++    for (const order of ordersWithoutTtn) {
++      if (order.remoteId) registryRefreshIds.add(order.remoteId)
++    }
++    if (registryRefreshIds.size) {
++      const registryRefreshSucceeded = await refreshRemoteOrders([...registryRefreshIds])
++      if (!registryRefreshSucceeded) {
++        showSyncError(
++          'Не удалось прочитать обновлённые ТТН. Повторите проверку.',
++        )
++        return
++      }
++    }
++  
++  
++    const remaining = registryTtnProgress.value.total - registryTtnProgress.value.checked
++    const messages = [
++      `Проверено ${registryTtnProgress.value.checked} из ${registryTtnProgress.value.total} заказов без ТТН.`,
++    ]
++    if (syncErrors) messages.push(`Ошибок: ${syncErrors}.`)
++    if (remaining) messages.push(`Не проверено: ${remaining}. Повторите проверку.`)
++    if (hasNewPrintRegistryOrders.value)
++      messages.push('Новые ТТН найдены. Нажмите «Обновить реестр».')
++    registryTtnMessage.value = messages.join(' ')
++  } catch (error) {
++    registryTtnMessage.value = 'Не удалось проверить ТТН. Попробуйте ещё раз.'
++    showSyncError(error instanceof Error ? error.message : 'Ошибка проверки ТТН.')
++  } finally {
++    isCheckingRegistryTtn.value = false
++  }
++}
++
+ function closePrintRegistry() {
+   printRegistryMode.value = null
+   printRegistryOrderIds.value = []
+@@ -5412,11 +5499,10 @@
+           <button
+             v-if="!isGuest"
+             class="whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+-            :disabled="isPreparingPrintRegistry"
+-            type="button"
+-            @click="openPrintRegistry"
+-          >
+-            {{ isPreparingPrintRegistry ? 'Проверяем ТТН…' : 'Реестр печати' }}
++            type="button"
++            @click="openPrintRegistry"
++          >
++            Реестр печати
+           </button>
+           <RouterLink
+             class="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
+@@ -7835,8 +7921,15 @@
+       v-if="printRegistryMode"
+       :orders="printRegistryOrders"
+       :mode="printRegistryMode"
+-      :busy="isUpdatingPrintRegistry"
+-      @close="closePrintRegistry"
++      :busy="isUpdatingPrintRegistry || isPreparingPrintRegistry || isCheckingRegistryTtn"
++      :checkingTtn="isCheckingRegistryTtn"
++      :ttnProgress="registryTtnProgress"
++      :ttnMessage="registryTtnMessage"
++      :missingTtnCount="missingPrintRegistryTtnCount"
++      :hasNewOrders="hasNewPrintRegistryOrders"
++      @checkTtn="checkPrintRegistryTtn"
++      @refreshOrders="refreshPrintRegistry(true)"
++      @close="closePrintRegistry"
+       @markPrinted="markPrintRegistryPrinted"
+       @showHistory="showPrintRegistryHistory"
+       @showDraft="showCurrentPrintRegistry"
+diff --git a/src/features/orders/PrintRegistry.vue b/src/features/orders/PrintRegistry.vue
+--- a/src/features/orders/PrintRegistry.vue
++++ b/src/features/orders/PrintRegistry.vue
+@@ -15,8 +15,13 @@
+ const props = defineProps<{
+   orders: Order[]
+   mode: 'draft' | 'history'
+-  busy: boolean
+-}>()
++  busy: boolean
++  checkingTtn: boolean
++  ttnProgress: { checked: number; total: number }
++  ttnMessage: string
++  missingTtnCount: number
++  hasNewOrders: boolean
++}>()
+ 
+ const emit = defineEmits<{
+   close: []
+@@ -26,8 +31,10 @@
+   checkedChange: [order: Order, checked: boolean]
+   checkAll: [checked: boolean]
+   restore: [order: Order]
+-  restoreUnchecked: []
+-}>()
++  restoreUnchecked: []
++  checkTtn: []
++  refreshOrders: []
++}>()
+ 
+ const checkedCount = computed(
+   () => props.orders.filter((order) => Boolean(order.delivery.printCheckedAt)).length,
+@@ -189,7 +196,40 @@
+             </button>
+           </div>
+         </div>
+-        <div class="mt-5 grid gap-3 sm:grid-cols-4">
++        <div
++          v-if="mode === 'draft'"
++          class="print-registry-actions mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
++        >
++          <p>
++            В реестре только заказы с ТТН. Без ТТН для проверки:
++            <strong>{{ missingTtnCount }}</strong>. Они не включены в этот список.
++          </p>
++          <div class="mt-2 flex flex-wrap items-center gap-2">
++            <button
++              class="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold disabled:opacity-50"
++              type="button"
++              :disabled="busy || !missingTtnCount"
++              @click="emit('checkTtn')"
++            >
++              {{ checkingTtn ? 'Проверяем ТТН…' : 'Проверить ТТН' }}
++            </button>
++            <button
++              v-if="hasNewOrders"
++              class="rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-2 font-semibold text-emerald-900 disabled:opacity-50"
++              type="button"
++              :disabled="busy"
++              @click="emit('refreshOrders')"
++            >
++              Обновить реестр
++            </button>
++            <span v-if="checkingTtn" role="status">
++              Проверено {{ ttnProgress.checked }} / {{ ttnProgress.total }}
++            </span>
++            <span v-else-if="busy">Сохраняем отметки печати…</span>
++          </div>
++          <p v-if="ttnMessage" class="mt-2" role="status">{{ ttnMessage }}</p>
++        </div>
++        <div class="mt-5 grid gap-3 sm:grid-cols-4">
+           <div class="rounded-xl bg-slate-100 px-4 py-3">
+             <p class="text-xs text-slate-500">Заказов</p>
+             <p class="mt-1 text-xl font-bold">{{ orders.length }}</p>
