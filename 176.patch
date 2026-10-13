@@ -27,7 +27,7 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +            hasSize: Boolean(productSize(item, sourceName)),
 +            hasImage: Boolean(
 +              text(pick(item, 'image', 'image_url', 'imageUrl')) ||
-+              text(previous?.image_url),
++              (previous?.product_name === sourceName ? text(previous.image_url) : ''),
 +            ),
 +          }
 +        })
@@ -146,7 +146,7 @@ diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/
 +          const previousItems = itemsByOrder.get(existing?.id) ?? []
 +          return itemRows(order).map((item, position) => {
 +            const previous = previousItems.find((saved) => Number(saved.position) === position)
-+            const sameProduct = previous?.marketplace_product_key === kastaProductKey(item)
++            const sameProduct = Boolean(kastaProductKey(item)) && previous?.marketplace_product_key === kastaProductKey(item)
 +            return { hasImage: Boolean(itemImage(item) || (sameProduct && previous?.image_url)) }
 +          })
 +        })
