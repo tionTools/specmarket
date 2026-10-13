@@ -1,17 +1,238 @@
+diff --git a/src/features/orders/targeted-marketplace-sync-performance_test.mjs b/src/features/orders/targeted-marketplace-sync-performance_test.mjs
+new file mode 100644
+index 0000000..aa139f2
+--- /dev/null
++++ b/src/features/orders/targeted-marketplace-sync-performance_test.mjs
+@@ -0,0 +1,124 @@
++import assert from 'node:assert/strict'
++import { readFileSync } from 'node:fs'
++import { runInNewContext } from 'node:vm'
++import ts from 'typescript'
++
++const root = new URL('../../../', import.meta.url)
++const source = readFileSync(
++  new URL('supabase/functions/_shared/targeted-feed-fast-path.ts', root),
++  'utf8',
++)
++const context = { exports: {} }
++runInNewContext(
++  ts.transpile(source, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }),
++  context,
++)
++const shouldLoad = context.exports.shouldLoadMarketplaceFeed
++assert.equal(typeof shouldLoad, 'function')
++assert.equal(shouldLoad(false, [], true), true, 'bulk Prom still fetches the feed')
++assert.equal(shouldLoad(false, [], false), true, 'bulk Kasta still fetches the feed')
++assert.equal(shouldLoad(true, [], true), false, 'empty targeted orders do not fetch catalogues')
++assert.equal(shouldLoad(true, [{ hasSize: true, hasImage: true }], true), false)
++assert.equal(shouldLoad(true, [{ hasSize: false, hasImage: true }], true), true)
++assert.equal(shouldLoad(true, [{ hasSize: true, hasImage: false }], true), true)
++assert.equal(shouldLoad(true, [{ hasImage: true }]), false, 'Kasta needs only an image')
++assert.equal(shouldLoad(true, [{ hasImage: false }]), true)
++assert.equal(shouldLoad(true, [{ hasImage: true }, { hasImage: false }]), true)
++
++const prom = readFileSync(new URL('supabase/functions/sync-prom-orders/index.ts', root), 'utf8')
++const epicentr = readFileSync(
++  new URL('supabase/functions/sync-epicentr-orders/index.ts', root),
++  'utf8',
++)
++const kasta = readFileSync(new URL('supabase/functions/sync-kasta-orders/index.ts', root), 'utf8')
++
++function actualFeedCoverage(source, bindings) {
++  const file = ts.createSourceFile('sync.ts', source, ts.ScriptTarget.Latest, true)
++  let expression
++  function visit(node) {
++    if (ts.isVariableDeclaration(node) && node.name.getText(file) === 'feedCoverage')
++      expression = node.initializer?.getText(file)
++    ts.forEachChild(node, visit)
++  }
++  visit(file)
++  assert.ok(expression, 'the actual handler must calculate feed coverage')
++  const scope = { exports: {}, ...bindings }
++  runInNewContext(
++    ts.transpile(`exports.coverage = ${expression}`, {
++      target: ts.ScriptTarget.ES2022,
++      module: ts.ModuleKind.CommonJS,
++    }),
++    scope,
++  )
++  return scope.exports.coverage
++}
++
++const text = (value) => String(value ?? '')
++const pick = (item, ...keys) => keys.map((key) => item[key]).find((value) => value !== undefined)
++const promItem = { key: 'same-product', size: 'M' }
++const promPrevious = {
++  position: 0,
++  marketplace_product_key: 'same-product',
++  image_url: 'saved.jpg',
++}
++const promBindings = {
++  requestedExternalId: '42',
++  candidates: [{ id: '42', items: [promItem] }],
++  existingByExternalId: new Map([['prom:42', { id: 'saved-order' }]]),
++  itemsByOrder: new Map([['saved-order', [promPrevious]]]),
++  sourceItems: (order) => order.items,
++  text,
++  pick,
++  productSize: (item) => item.size ?? '',
++  promLegacyProductKeys: (item) => [item.key],
++  mappedFamilyKey: () => '',
++  productFamilyMappings: new Map(),
++}
++assert.equal(shouldLoad(true, actualFeedCoverage(prom, promBindings), true), false)
++assert.equal(
++  shouldLoad(
++    true,
++    actualFeedCoverage(prom, {
++      ...promBindings,
++      candidates: [{ id: '42', items: [{ key: 'new-product', size: 'M' }] }],
++    }),
++    true,
++  ),
++  true,
++  'a changed Prom product without an image still needs the feed',
++)
++
++const kastaItem = { key: 'same-product' }
++const kastaBindings = {
++  targetOrderId: '42',
++  candidates: [{ id: '42', items: [kastaItem] }],
++  existingByExternalId: new Map([['kasta:42', { id: 'saved-order' }]]),
++  itemsByOrder: new Map([['saved-order', [promPrevious]]]),
++  itemRows: (order) => order.items,
++  text,
++  itemImage: (item) => item.image ?? '',
++  kastaProductKey: (item) => item.key,
++}
++assert.equal(shouldLoad(true, actualFeedCoverage(kasta, kastaBindings)), false)
++assert.equal(
++  shouldLoad(
++    true,
++    actualFeedCoverage(kasta, {
++      ...kastaBindings,
++      candidates: [{ id: '42', items: [{ key: 'new-product' }] }],
++    }),
++  ),
++  true,
++  'a changed Kasta product without an image still needs the feed',
++)
++assert.match(
++  prom,
++  /shouldLoadMarketplaceFeed\(Boolean\(requestedExternalId\), feedCoverage, true\)/,
++)
++assert.match(prom, /const \[localizedName, apiSize\] = await Promise\.all\(/)
++assert.match(kasta, /shouldLoadMarketplaceFeed\(Boolean\(targetOrderId\), feedCoverage\)/)
++assert.match(epicentr, /if \(!requestedExternalId\) \{\s*const detailResponse = await fetch\(/)
++assert.match(prom, /apply_crm_marketplace_order_snapshot/)
++assert.match(epicentr, /apply_crm_marketplace_order_snapshot/)
++assert.match(kasta, /apply_crm_marketplace_order_snapshot/)
++console.log('Targeted marketplace sync performance: Prom/Epicentr/Kasta fast paths PASS')
+diff --git a/supabase/functions/_shared/targeted-feed-fast-path.ts b/supabase/functions/_shared/targeted-feed-fast-path.ts
+new file mode 100644
+index 0000000..2dd94c3
+--- /dev/null
++++ b/supabase/functions/_shared/targeted-feed-fast-path.ts
+@@ -0,0 +1,14 @@
++export type TargetedFeedCoverage = {
++  hasImage: boolean
++  hasSize?: boolean
++}
++
++// Bulk sync retains full catalogue enrichment. Targeted sync only needs the feed for missing fields.
++export function shouldLoadMarketplaceFeed(
++  isTargeted: boolean,
++  items: TargetedFeedCoverage[],
++  requireSize = false,
++): boolean {
++  if (!isTargeted) return true
++  return items.some((item) => !item.hasImage || (requireSize && !item.hasSize))
++}
+diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
+index 4a2dfad..50f646c 100644
+--- a/supabase/functions/sync-epicentr-orders/index.ts
++++ b/supabase/functions/sync-epicentr-orders/index.ts
+@@ -666,17 +666,21 @@ Deno.serve(async (request) => {
+     if (currentMapping?.category_id) categoryByOffer.set(offerId, currentMapping.category_id)
+   }
+   for (const order of orders) {
+-    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
+-      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
+-    })
+-    if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
+-    const detailPayload: unknown = await detailResponse.json()
+-    const detail = extractOrder(detailPayload)
+-    const source: EpicentrOrder = {
+-      ...order,
+-      ...detail,
+-      address: detail.address ?? order.address,
+-      items: (detail.items ?? order.items) as EpicentrOrder['items'],
++    // The targeted endpoint already returns the full order. Keep detail fetches for bulk rows only.
++    let source: EpicentrOrder = order
++    if (!requestedExternalId) {
++      const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
++        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
++      })
++      if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
++      const detailPayload: unknown = await detailResponse.json()
++      const detail = extractOrder(detailPayload)
++      source = {
++        ...order,
++        ...detail,
++        address: detail.address ?? order.address,
++        items: (detail.items ?? order.items) as EpicentrOrder['items'],
++      }
+     }
+     const externalId = source.id
+     const existing = { data: existingByExternalId.get(externalId) ?? null }
+diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
+index 186da83..4f10376 100644
+--- a/supabase/functions/sync-kasta-orders/index.ts
++++ b/supabase/functions/sync-kasta-orders/index.ts
+@@ -4,6 +4,7 @@ import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderIt
+ import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
+ import { paymentDetails } from '../_shared/payment-details.ts'
+ import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
++import { shouldLoadMarketplaceFeed } from '../_shared/targeted-feed-fast-path.ts'
+ import {
+   loadMarketplaceSyncAccess,
+   marketplacePausedResponse,
+@@ -500,7 +501,21 @@ Deno.serve(async (request) => {
+     if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
+     const itemsByOrder = new Map<string, RecordValue[]>()
+     for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
+-    const feedImages = await getFeedImages()
++    const feedCoverage = targetOrderId
++      ? candidates.flatMap((order) => {
++          const existing = existingByExternalId.get(`kasta:${text(order.id)}`)
++          const previousItems = itemsByOrder.get(existing?.id) ?? []
++          return itemRows(order).map((item, position) => {
++            const previous = previousItems.find((saved) => Number(saved.position) === position)
++            const sameProduct = Boolean(kastaProductKey(item)) && previous?.marketplace_product_key === kastaProductKey(item)
++            return { hasImage: Boolean(itemImage(item) || (sameProduct && previous?.image_url)) }
++          })
++        })
++      : []
++    // Existing product images are preserved; a targeted request fetches the feed only for missing images.
++    const feedImages = shouldLoadMarketplaceFeed(Boolean(targetOrderId), feedCoverage)
++      ? await getFeedImages()
++      : new Map<string, string>()
+ 
+     for (const order of candidates) {
+       const kastaId = text(order.id)
 diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+index 1725cb9..b9c01e9 100644
 --- a/supabase/functions/sync-prom-orders/index.ts
 +++ b/supabase/functions/sync-prom-orders/index.ts
-@@ -32,7 +32,8 @@
-   resolvePromShipping,
+@@ -33,6 +33,7 @@ import {
    shouldWaivePromPromoShippingForUnclaimedReturn,
  } from '../_shared/prom-delivery.ts'
--import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
-+import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
+ import { excludeDeletedMarketplaceOrders } from '../_shared/deleted-marketplace-orders.ts'
 +import { shouldLoadMarketplaceFeed } from '../_shared/targeted-feed-fast-path.ts'
  import {
    acceptPromOrders,
    normalizePromExternalIds,
-@@ -1328,7 +1329,32 @@
+@@ -1328,7 +1329,32 @@ Deno.serve(async (request) => {
        { status: 500, headers: corsHeaders },
      )
    }
@@ -45,7 +266,7 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
    let created = 0
    let updated = 0
    const skipped = skippedUnchanged
-@@ -1654,24 +1675,21 @@
+@@ -1654,24 +1680,21 @@ Deno.serve(async (request) => {
        const itemRows = await Promise.all(
          items.map(async (item, position) => {
            const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
@@ -54,18 +275,6 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 -            sourceName,
 -            promToken,
 -            productNameCache,
--          )
--          if (localizedName.retry) needsTranslationRetry = true
--          const name = localizedName.name
--          const quantity = number(pick(item, 'quantity', 'amount')) || 1
--          const price = itemPrice(item)
--          const apiSize = await resolvedProductSize(
--            item,
--            sourceName,
--            promToken,
--            feedProducts,
--            productDetailsCache,
--            Boolean(requestedExternalId),
 -          )
 +          const [localizedName, apiSize] = await Promise.all([
 +            resolvedUkrainianProductName(item, sourceName, promToken, productNameCache),
@@ -78,149 +287,18 @@ diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/s
 +              Boolean(requestedExternalId),
 +            ),
 +          ])
-+          if (localizedName.retry) needsTranslationRetry = true
-+          const name = localizedName.name
-+          const quantity = number(pick(item, 'quantity', 'amount')) || 1
-+          const price = itemPrice(item)
+           if (localizedName.retry) needsTranslationRetry = true
+           const name = localizedName.name
+           const quantity = number(pick(item, 'quantity', 'amount')) || 1
+           const price = itemPrice(item)
+-          const apiSize = await resolvedProductSize(
+-            item,
+-            sourceName,
+-            promToken,
+-            feedProducts,
+-            productDetailsCache,
+-            Boolean(requestedExternalId),
+-          )
            const identity = familyIdentities[position]
            const legacyMarketplaceProductKey = promProductKey(item)
            const canonicalMarketplaceProductKey =
-diff --git a/supabase/functions/sync-epicentr-orders/index.ts b/supabase/functions/sync-epicentr-orders/index.ts
---- a/supabase/functions/sync-epicentr-orders/index.ts
-+++ b/supabase/functions/sync-epicentr-orders/index.ts
-@@ -665,19 +665,23 @@
-       .maybeSingle()
-     if (currentMapping?.category_id) categoryByOffer.set(offerId, currentMapping.category_id)
-   }
--  for (const order of orders) {
--    const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
--      headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
--    })
--    if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
--    const detailPayload: unknown = await detailResponse.json()
--    const detail = extractOrder(detailPayload)
--    const source: EpicentrOrder = {
--      ...order,
--      ...detail,
--      address: detail.address ?? order.address,
--      items: (detail.items ?? order.items) as EpicentrOrder['items'],
--    }
-+  for (const order of orders) {
-+    // The targeted endpoint already returns the full order. Keep detail fetches for bulk rows only.
-+    let source: EpicentrOrder = order
-+    if (!requestedExternalId) {
-+      const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
-+        headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
-+      })
-+      if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
-+      const detailPayload: unknown = await detailResponse.json()
-+      const detail = extractOrder(detailPayload)
-+      source = {
-+        ...order,
-+        ...detail,
-+        address: detail.address ?? order.address,
-+        items: (detail.items ?? order.items) as EpicentrOrder['items'],
-+      }
-+    }
-     const externalId = source.id
-     const existing = { data: existingByExternalId.get(externalId) ?? null }
-     // Массовая кнопка добавляет только отсутствующие заказы. Обновление
-diff --git a/supabase/functions/sync-kasta-orders/index.ts b/supabase/functions/sync-kasta-orders/index.ts
---- a/supabase/functions/sync-kasta-orders/index.ts
-+++ b/supabase/functions/sync-kasta-orders/index.ts
-@@ -3,7 +3,8 @@
- import { loadPlatformPriceCostSnapshots, promoteLegacyPriceLink, resolvedOrderItemCost } from '../_shared/price-cost.ts'
- import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from '../_shared/delivery-history.ts'
- import { paymentDetails } from '../_shared/payment-details.ts'
--import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
-+import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
-+import { shouldLoadMarketplaceFeed } from '../_shared/targeted-feed-fast-path.ts'
- import {
-   loadMarketplaceSyncAccess,
-   marketplacePausedResponse,
-@@ -500,9 +501,23 @@
-     if (itemsError) return Response.json({ ok: false, message: itemsError.message }, { status: 500, headers: corsHeaders })
-     const itemsByOrder = new Map<string, RecordValue[]>()
-     for (const item of existingItems ?? []) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item])
--    const feedImages = await getFeedImages()
--
--    for (const order of candidates) {
-+    const feedCoverage = targetOrderId
-+      ? candidates.flatMap((order) => {
-+          const existing = existingByExternalId.get(`kasta:${text(order.id)}`)
-+          const previousItems = itemsByOrder.get(existing?.id) ?? []
-+          return itemRows(order).map((item, position) => {
-+            const previous = previousItems.find((saved) => Number(saved.position) === position)
-+            const sameProduct = Boolean(kastaProductKey(item)) && previous?.marketplace_product_key === kastaProductKey(item)
-+            return { hasImage: Boolean(itemImage(item) || (sameProduct && previous?.image_url)) }
-+          })
-+        })
-+      : []
-+    // Existing product images are preserved; a targeted request fetches the feed only for missing images.
-+    const feedImages = shouldLoadMarketplaceFeed(Boolean(targetOrderId), feedCoverage)
-+      ? await getFeedImages()
-+      : new Map<string, string>()
-+
-+    for (const order of candidates) {
-       const kastaId = text(order.id)
-       if (!kastaId) continue
-       const externalId = `kasta:${kastaId}`
-diff --git a/supabase/functions/_shared/targeted-feed-fast-path.ts b/supabase/functions/_shared/targeted-feed-fast-path.ts
-new file mode 100644
---- /dev/null
-+++ b/supabase/functions/_shared/targeted-feed-fast-path.ts
-@@ -0,0 +1,14 @@
-+export type TargetedFeedCoverage = {
-+  hasImage: boolean
-+  hasSize?: boolean
-+}
-+
-+// Bulk sync retains full catalogue enrichment. Targeted sync only needs the feed for missing fields.
-+export function shouldLoadMarketplaceFeed(
-+  isTargeted: boolean,
-+  items: TargetedFeedCoverage[],
-+  requireSize = false,
-+): boolean {
-+  if (!isTargeted) return true
-+  return items.some((item) => !item.hasImage || (requireSize && !item.hasSize))
-+}
-diff --git a/src/features/orders/targeted-marketplace-sync-performance_test.mjs b/src/features/orders/targeted-marketplace-sync-performance_test.mjs
-new file mode 100644
---- /dev/null
-+++ b/src/features/orders/targeted-marketplace-sync-performance_test.mjs
-@@ -0,0 +1,35 @@
-+import assert from 'node:assert/strict'
-+import { readFileSync } from 'node:fs'
-+import { runInNewContext } from 'node:vm'
-+import ts from 'typescript'
-+
-+const root = new URL('../../../', import.meta.url)
-+const source = readFileSync(new URL('supabase/functions/_shared/targeted-feed-fast-path.ts', root), 'utf8')
-+const context = { exports: {} }
-+runInNewContext(
-+  ts.transpile(source, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }),
-+  context,
-+)
-+const shouldLoad = context.exports.shouldLoadMarketplaceFeed
-+assert.equal(typeof shouldLoad, 'function')
-+assert.equal(shouldLoad(false, [], true), true, 'bulk Prom still fetches the feed')
-+assert.equal(shouldLoad(false, [], false), true, 'bulk Kasta still fetches the feed')
-+assert.equal(shouldLoad(true, [], true), false, 'empty targeted orders do not fetch catalogues')
-+assert.equal(shouldLoad(true, [{ hasSize: true, hasImage: true }], true), false)
-+assert.equal(shouldLoad(true, [{ hasSize: false, hasImage: true }], true), true)
-+assert.equal(shouldLoad(true, [{ hasSize: true, hasImage: false }], true), true)
-+assert.equal(shouldLoad(true, [{ hasImage: true }]), false, 'Kasta needs only an image')
-+assert.equal(shouldLoad(true, [{ hasImage: false }]), true)
-+assert.equal(shouldLoad(true, [{ hasImage: true }, { hasImage: false }]), true)
-+
-+const prom = readFileSync(new URL('supabase/functions/sync-prom-orders/index.ts', root), 'utf8')
-+const epicentr = readFileSync(new URL('supabase/functions/sync-epicentr-orders/index.ts', root), 'utf8')
-+const kasta = readFileSync(new URL('supabase/functions/sync-kasta-orders/index.ts', root), 'utf8')
-+assert.match(prom, /shouldLoadMarketplaceFeed\(Boolean\(requestedExternalId\), feedCoverage, true\)/)
-+assert.match(prom, /const \[localizedName, apiSize\] = await Promise\.all\(/)
-+assert.match(kasta, /shouldLoadMarketplaceFeed\(Boolean\(targetOrderId\), feedCoverage\)/)
-+assert.match(epicentr, /if \(!requestedExternalId\) \{\s*const detailResponse = await fetch\(/)
-+assert.match(prom, /apply_crm_marketplace_order_snapshot/)
-+assert.match(epicentr, /apply_crm_marketplace_order_snapshot/)
-+assert.match(kasta, /apply_crm_marketplace_order_snapshot/)
-+console.log('Targeted marketplace sync performance: Prom/Epicentr/Kasta fast paths PASS')
