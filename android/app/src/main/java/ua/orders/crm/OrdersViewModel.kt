@@ -408,11 +408,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val result = repository.accept(route, requireNotNull(order.externalId))
-                message = when {
-                    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
-                    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
-                    else -> "Заказ принят."
-                }
+                message = acceptResultMessage(result)
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: RestException) {
                 message = if (error.statusCode == 409) "Статус заказа уже изменился. Данные обновлены."

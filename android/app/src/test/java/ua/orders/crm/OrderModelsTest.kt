@@ -16,6 +16,25 @@ class OrderModelsTest {
         for ((key, value) in values) put(key, value)
     }
 
+    @Test fun paused_marketplace_response_is_not_reported_as_accepted() {
+        val paused = Json.decodeFromString<AcceptResponse>(
+            """{"ok":true,"skipped":"paused","accepted":0,"changedOrderIds":[]}""",
+        )
+        assertTrue(paused.ok)
+        assertEquals("paused", paused.skipped)
+        assertEquals("Площадка на паузе. Заказ не принят.", acceptResultMessage(paused))
+
+        assertEquals("Заказ принят.", acceptResultMessage(AcceptResponse(ok = true, accepted = 1)))
+        assertEquals(
+            "Заказ уже принят.",
+            acceptResultMessage(AcceptResponse(ok = true, alreadyAccepted = listOf("prom:123"))),
+        )
+        assertEquals(
+            "Ошибка сервера",
+            acceptResultMessage(AcceptResponse(ok = false, message = "Ошибка сервера")),
+        )
+    }
+
     @Test fun new_statuses_are_blue_and_route_only_working_marketplace_acceptance() {
         for (status in listOf("Новий", "Новый", "new", "pending", " PENDING ")) {
             assertTrue(isNewStatus(status))

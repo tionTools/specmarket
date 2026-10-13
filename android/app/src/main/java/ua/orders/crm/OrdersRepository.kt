@@ -26,8 +26,16 @@ data class AcceptResponse(
     val accepted: Int = 0,
     val changedOrderIds: List<String> = emptyList(),
     val alreadyAccepted: List<String> = emptyList(),
+    val skipped: String? = null,
     val message: String? = null,
 )
+
+fun acceptResultMessage(result: AcceptResponse): String = when {
+    !result.ok -> result.message ?: "Заказ не принят. Обновите данные и проверьте статус."
+    !result.skipped.isNullOrBlank() -> "Площадка на паузе. Заказ не принят."
+    result.alreadyAccepted.isNotEmpty() -> "Заказ уже принят."
+    else -> "Заказ принят."
+}
 @Serializable
 data class PushDeviceResponse(val ok: Boolean = false, val message: String? = null)
 @Serializable
