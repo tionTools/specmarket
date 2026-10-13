@@ -57,6 +57,8 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
   const queued = []
   const removed = []
   const registered = []
+  const readSignals = []
+  const persistedSnapshots = []
   const deferredRemoteOrderIds = new Set()
   const remoteOrderVersions = new Map()
   const localRemoteOrderRevisions = new Map()
@@ -70,11 +72,18 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
           select() {
             return {
               in(_field, ids) {
-                if (table === 'crm_orders') return orderRowsPromise(ids)
-                if (table === 'crm_order_item_returns') {
-                  return Promise.resolve({ data: [], error: null })
-                }
-                throw new Error(`Unexpected table: ${table}`)
+                const result =
+                  table === 'crm_orders'
+                    ? orderRowsPromise(ids)
+                    : table === 'crm_order_item_returns'
+                      ? Promise.resolve({ data: [], error: null })
+                      : Promise.reject(new Error(`Unexpected table: ${table}`))
+                return Object.assign(result, {
+                  abortSignal(signal) {
+                    readSignals.push(signal)
+                    return result
+                  },
+                })
               },
             }
           },
@@ -104,7 +113,8 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
     reapplyRegistryPreview: () => {},
     sortOrders: () => {},
     reconcileLabelReminders: () => {},
-    persistRemoteOrdersSessionCache: () => {},
+    persistRemoteOrdersSessionCache: () =>
+      persistedSnapshots.push(orders.value.map((order) => order.remoteId)),
     bankBalancesCard: { value: { refreshDebt: () => {} } },
   }
 
@@ -121,6 +131,8 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
     requestedIds,
     queued,
     removed,
+    readSignals,
+    persistedSnapshots,
     registered,
     deferredRemoteOrderIds,
     remoteOrderVersions,
@@ -242,6 +254,63 @@ function createContext({ requestedIds, orderRowsPromise, busyIds = new Set(), in
   assert.equal(state.orders.value[0].customer, 'fresh-server')
   assert.equal(state.remoteOrderVersions.get('r1'), 'server-v2')
   assert.deepEqual(state.queued, [])
+}
+
+// Registry readback must preserve a locally known order when PostgREST omits it.
+{
+  const state = createContext({
+    requestedIds: ['r1', 'r2'],
+    initialOrders: [makeOrder('r1', 'kept'), makeOrder('r2', 'old')],
+    orderRowsPromise: () =>
+      Promise.resolve({
+        data: [{ id: 'r2', updated_at: 'server-v2', customer: 'fresh' }],
+        error: null,
+      }),
+  })
+  assert.equal(await state.context.refreshRemoteOrders(state.requestedIds, undefined, true), false)
+  assert.equal(state.orders.value.find((order) => order.remoteId === 'r1').customer, 'kept')
+  assert.equal(state.orders.value.find((order) => order.remoteId === 'r2').customer, 'fresh')
+  assert.deepEqual(state.removed, [])
+  assert.ok(state.persistedSnapshots.at(-1).includes('r1'), 'session cache retains missing order')
+}
+
+// A cancelled PostgREST readback must not apply a response that arrives late.
+{
+  const gate = deferred()
+  const controller = new AbortController()
+  const state = createContext({
+    requestedIds: ['r1'],
+    initialOrders: [makeOrder('r1', 'local')],
+    orderRowsPromise: () => gate.promise,
+  })
+  const refresh = state.context.refreshRemoteOrders(state.requestedIds, controller.signal, true)
+  await Promise.resolve()
+  controller.abort()
+  gate.resolve({ data: [{ id: 'r1', updated_at: 'late', customer: 'stale' }], error: null })
+  assert.equal(await refresh, false)
+  assert.equal(state.orders.value[0].customer, 'local')
+  assert.equal(state.remoteOrderVersions.has('r1'), false)
+  assert.deepEqual(state.removed, [])
+  assert.equal(state.readSignals[0], controller.signal)
+}
+
+// Other callers retain the previous deletion semantics by default.
+{
+  const state = createContext({
+    requestedIds: ['r1', 'r2'],
+    initialOrders: [makeOrder('r1', 'removed'), makeOrder('r2', 'old')],
+    orderRowsPromise: () =>
+      Promise.resolve({
+        data: [{ id: 'r2', updated_at: 'server-v2', customer: 'fresh' }],
+        error: null,
+      }),
+  })
+  assert.equal(await state.context.refreshRemoteOrders(state.requestedIds), true)
+  assert.equal(
+    state.orders.value.some((order) => order.remoteId === 'r1'),
+    false,
+  )
+  assert.deepEqual(state.removed, ['r1'])
 }
 
 console.log('Remote order refresh race guard: OK')

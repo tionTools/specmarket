@@ -16,6 +16,11 @@ const props = defineProps<{
   orders: Order[]
   mode: 'draft' | 'history'
   busy: boolean
+  checkingTtn: boolean
+  ttnProgress: { checked: number; total: number }
+  ttnMessage: string
+  missingTtnCount: number
+  hasNewOrders: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +32,8 @@ const emit = defineEmits<{
   checkAll: [checked: boolean]
   restore: [order: Order]
   restoreUnchecked: []
+  checkTtn: []
+  refreshOrders: []
 }>()
 
 const checkedCount = computed(
@@ -159,6 +166,7 @@ onUnmounted(() => {
               v-if="mode === 'draft'"
               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
               type="button"
+              :disabled="busy"
               @click="emit('showHistory')"
             >
               История
@@ -167,6 +175,7 @@ onUnmounted(() => {
               v-else
               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
               type="button"
+              :disabled="busy"
               @click="emit('showDraft')"
             >
               Текущий реестр
@@ -183,11 +192,46 @@ onUnmounted(() => {
             <button
               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
               type="button"
+              :disabled="busy && !checkingTtn"
               @click="emit('close')"
             >
               Закрыть
             </button>
           </div>
+        </div>
+        <div
+          v-if="mode === 'draft'"
+          class="print-registry-actions mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+        >
+          <p>
+            В реестре только заказы с ТТН. Без ТТН для проверки:
+            <strong>{{ missingTtnCount }}</strong
+            >. Они не включены в этот список.
+          </p>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              class="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold disabled:opacity-50"
+              type="button"
+              :disabled="busy || !missingTtnCount"
+              @click="emit('checkTtn')"
+            >
+              {{ checkingTtn ? 'Проверяем ТТН…' : 'Проверить ТТН' }}
+            </button>
+            <button
+              v-if="hasNewOrders"
+              class="rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-2 font-semibold text-emerald-900 disabled:opacity-50"
+              type="button"
+              :disabled="busy"
+              @click="emit('refreshOrders')"
+            >
+              Обновить реестр
+            </button>
+            <span v-if="checkingTtn" role="status">
+              Проверено {{ ttnProgress.checked }} / {{ ttnProgress.total }}
+            </span>
+            <span v-else-if="busy">Сохраняем отметки печати…</span>
+          </div>
+          <p v-if="ttnMessage" class="mt-2" role="status">{{ ttnMessage }}</p>
         </div>
         <div class="mt-5 grid gap-3 sm:grid-cols-4">
           <div class="rounded-xl bg-slate-100 px-4 py-3">
