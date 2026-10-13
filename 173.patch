@@ -39,7 +39,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
      (order) =>
        !order.delivery.printedAt &&
        isOpenForPrintRegistry(order) &&
-@@ -1772,79 +1779,198 @@
+@@ -1772,79 +1779,199 @@
        Boolean(order.externalId) &&
        ['Пром', 'Эпицентр', 'Каста'].includes(order.platform),
    )
@@ -198,6 +198,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +    const deadline = Date.now() + 30_000
 +    registryTtnProgress.value = { checked: 0, total: ordersWithoutTtn.length }
 +    const changedOrderIds = new Set<string>()
++    const confirmedOrderIds = new Set<string>()
 +    const functions = supabase.functions
 +    const syncConcurrency = 4
 +    for (let index = 0; index < ordersWithoutTtn.length; index += syncConcurrency) {
@@ -229,28 +230,26 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +                AbortSignal.timeout(Math.min(timeLeft, 12_000)),
 +              ]),
 +            })
-+            return { data, error }
++            return { order, data, error }
 +          } catch {
-+            return { data: null, error: true }
++            return { order, data: null, error: true }
 +          }
 +        }),
 +      )
 +      if (!active()) return
 +      registryTtnProgress.value = { checked: index + batch.length, total: ordersWithoutTtn.length }
-+      for (const { data, error } of results) {
++      for (const { order, data, error } of results) {
 +        if (error || !data?.ok) {
 +          syncErrors += 1
 +          continue
 +        }
++        if (order.remoteId) confirmedOrderIds.add(order.remoteId)
 +        for (const id of Array.isArray(data.changedOrderIds) ? data.changedOrderIds : [])
 +          if (typeof id === 'string') changedOrderIds.add(id)
 +      }
      }
 +    if (!active()) return
-+    const registryRefreshIds = new Set(changedOrderIds)
-+    for (const order of ordersWithoutTtn) {
-+      if (order.remoteId) registryRefreshIds.add(order.remoteId)
-+    }
++    const registryRefreshIds = new Set([...confirmedOrderIds, ...changedOrderIds])
 +    if (registryRefreshIds.size) {
 +      const readbackSignal = AbortSignal.any([
 +        controller.signal,
@@ -259,10 +258,12 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +      const registryRefreshSucceeded = await refreshRemoteOrders(
 +        [...registryRefreshIds],
 +        readbackSignal,
++        true,
 +      )
 +      if (!active()) return
 +      if (!registryRefreshSucceeded) {
-+        registryTtnMessage.value = 'Не удалось прочитать ТТН за 15 секунд. Повторите проверку.'
++        registryTtnMessage.value =
++          'Не удалось полностью обновить проверенные ТТН. Заказы сохранены; повторите проверку.'
 +        return
 +      }
 +    }
@@ -300,7 +301,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
    printRegistryMode.value = null
    printRegistryOrderIds.value = []
  }
-@@ -1863,6 +1989,7 @@
+@@ -1863,6 +1990,7 @@
      printCheckedAt?: string | null
      printedAt?: string | null
    }>,
@@ -308,7 +309,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
  ) {
    if (!supabase || isGuest.value || isUpdatingPrintRegistry.value) return false
    const missingRemoteOrder = updates.find((update) => !update.order.remoteId)
-@@ -1876,22 +2003,29 @@
+@@ -1876,22 +2004,29 @@
    }
  
    isUpdatingPrintRegistry.value = true
@@ -352,7 +353,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
  }
  
  async function handlePrintCheckedChange(order: Order, checked: boolean) {
-@@ -3229,7 +3363,10 @@
+@@ -3229,7 +3364,11 @@
    return focusedOrderCellOrder()?.remoteId === remoteId
  }
  
@@ -360,11 +361,12 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
 +async function refreshRemoteOrders(
 +  remoteIds: string[],
 +  signal?: AbortSignal,
++  preserveMissing = false,
 +): Promise<boolean> {
    if (!supabase) return false
    if (!remoteIds.length) return true
    const uniqueRemoteIds = [...new Set(remoteIds)]
-@@ -3246,20 +3383,28 @@
+@@ -3246,20 +3385,28 @@
    const remoteOrders: Array<Record<string, unknown>> = []
    const orderItemReturns: OrderItemReturnRow[] = []
    for (const remoteIdBatch of chunks(refreshableIds, targetedOrdersBatchSize)) {
@@ -395,7 +397,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
      if (returnsError) {
        console.error('Не удалось обновить возвраты изменённых заказов CRM:', returnsError)
        return false
-@@ -3274,6 +3419,7 @@
+@@ -3274,6 +3421,7 @@
        })),
      )
    }
@@ -403,15 +405,37 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
    const applicableIds = new Set(
      refreshableIds.filter((remoteId) => {
        const revisionUnchanged =
-@@ -3291,6 +3437,7 @@
+@@ -3291,9 +3439,14 @@
    const applicableRows = remoteOrders.filter((row) => applicableIds.has(String(row.id)))
    const applicableReturns = orderItemReturns.filter((row) => applicableIds.has(row.order_id))
    const refreshedOrders = mapRemoteOrders(applicableRows, applicableReturns)
 +  if (signal?.aborted) return false
    const refreshedIds = new Set(refreshedOrders.map((order) => order.remoteId))
-   for (const remoteId of applicableIds) {
-     if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
-@@ -5412,11 +5559,10 @@
+-  for (const remoteId of applicableIds) {
+-    if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
++  // The registry readback must never interpret an absent row as deletion.
++  const missingInReadback = [...applicableIds].some((remoteId) => !refreshedIds.has(remoteId))
++  if (!preserveMissing) {
++    for (const remoteId of applicableIds) {
++      if (!refreshedIds.has(remoteId)) removeRemoteOrder(remoteId)
++    }
+   }
+   for (const order of refreshedOrders) {
+     const index = orders.value.findIndex((item) => item.remoteId === order.remoteId)
+@@ -3323,7 +3476,11 @@
+     persistRemoteOrdersSessionCache()
+     void bankBalancesCard.value?.refreshDebt()
+   }
+-  return initiallyRefreshableAllRequestedOrders && applicableIds.size === refreshableIds.length
++  return (
++    initiallyRefreshableAllRequestedOrders &&
++    applicableIds.size === refreshableIds.length &&
++    (!preserveMissing || !missingInReadback)
++  )
+ }
+ 
+ function notifyNewOrder(order: Order) {
+@@ -5412,11 +5569,10 @@
            <button
              v-if="!isGuest"
              class="whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
@@ -424,7 +448,7 @@ diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
            </button>
            <RouterLink
              class="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
-@@ -7835,7 +7981,14 @@
+@@ -7835,7 +7991,14 @@
        v-if="printRegistryMode"
        :orders="printRegistryOrders"
        :mode="printRegistryMode"
