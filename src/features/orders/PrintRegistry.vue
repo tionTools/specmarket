@@ -80,6 +80,13 @@ function orderCostUsd(order: Order) {
   )
 }
 
+function orderCostOnlyUah(order: Order) {
+  return order.products.reduce(
+    (total, product) => total + ((product.costUsd ?? 0) <= 0 ? product.cost * product.quantity : 0),
+    0,
+  )
+}
+
 function orderCostUah(order: Order) {
   return order.products.reduce((total, product) => total + product.cost * product.quantity, 0)
 }
@@ -372,10 +379,15 @@ onUnmounted(() => {
                 )
               }}
             </p>
-            <p class="mt-3 text-xs font-semibold text-slate-500">Итого себест.</p>
-            <p v-if="orderCostUsd(order)" class="mt-1 text-lg font-bold text-emerald-800">
+            <p class="mt-3 text-xs font-semibold text-slate-500">Гривневые товары</p>
+            <p class="mt-1 text-lg font-bold text-rose-800">
+              {{ formatMoney(orderCostOnlyUah(order)) }}
+            </p>
+            <p class="mt-2 text-xs font-semibold text-slate-500">Долларовые товары</p>
+            <p class="mt-1 text-lg font-bold text-emerald-800">
               {{ formatUsd(orderCostUsd(order)) }}
             </p>
+            <p class="mt-2 text-xs font-semibold text-slate-500">Всего в гривнах</p>
             <p class="mt-1 text-lg font-bold text-rose-800">
               {{ formatMoney(orderCostUah(order)) }}
             </p>
