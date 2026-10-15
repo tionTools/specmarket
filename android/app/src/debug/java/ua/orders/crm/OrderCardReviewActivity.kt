@@ -26,7 +26,7 @@ class OrderCardReviewActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val scenario = intent.getStringExtra("scenario") ?: "long"
         setContent {
-            MaterialTheme(colorScheme = ordersColors(false)) {
+            MaterialTheme(colorScheme = ordersColors(false), typography = ordersTypography(false)) {
                 Column(
                     modifier = Modifier.fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
