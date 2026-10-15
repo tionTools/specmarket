@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -141,7 +140,7 @@ fun ProductThumbnail(imageUrl: String?, modifier: Modifier = Modifier, size: Dp 
                 contentScale = ContentScale.Fit,
             )
         } else {
-            Text("Нет фото", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp,
+            Text("Нет фото", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
