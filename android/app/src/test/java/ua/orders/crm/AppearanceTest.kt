@@ -20,9 +20,9 @@ class AppearanceTest {
         assertTrue(scheme.onSurfaceVariant.red > scheme.background.red)
     }
 
-    @Test fun lightBackgroundIsNearWhiteAndCardsStayWhite() {
+    @Test fun lightBackgroundAndWhiteCardsStayUnchanged() {
         val colors = ordersColors(false)
-        assertEquals(Color(0xFFF8F9FA), colors.background)
+        assertEquals(Color(0xFFEEF0F3), colors.background)
         assertEquals(Color.White, colors.surface)
     }
 
