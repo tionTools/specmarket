@@ -2,9 +2,11 @@ package ua.orders.crm
 
 import android.content.Context
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -44,7 +46,7 @@ fun ordersColors(dark: Boolean): ColorScheme = if (dark) {
         onPrimary = Color.White,
         secondary = Color(0xFFC026D3),
         tertiary = Color(0xFF0369A1),
-        background = Color(0xFFEEF0F3),
+        background = Color(0xFFF8F9FA),
         surface = Color.White,
         surfaceVariant = Color(0xFFF1F5F9),
         onSurface = Color.Black,
@@ -54,3 +56,13 @@ fun ordersColors(dark: Boolean): ColorScheme = if (dark) {
     )
 }
 
+// Make small body copy easier to read without increasing its font size or line height.
+fun ordersTypography(dark: Boolean): Typography {
+    val base = Typography()
+    if (dark) return base
+    return base.copy(
+        bodySmall = base.bodySmall.copy(fontWeight = FontWeight.Medium),
+        bodyMedium = base.bodyMedium.copy(fontWeight = FontWeight.Medium),
+        bodyLarge = base.bodyLarge.copy(fontWeight = FontWeight.Medium),
+    )
+}
