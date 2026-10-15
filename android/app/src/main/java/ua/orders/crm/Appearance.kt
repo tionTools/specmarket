@@ -47,9 +47,10 @@ fun ordersColors(dark: Boolean): ColorScheme = if (dark) {
         background = Color(0xFFEEF0F3),
         surface = Color.White,
         surfaceVariant = Color(0xFFF1F5F9),
-        onSurface = Color(0xFF0F172A),
-        onSurfaceVariant = Color(0xFF475569),
+        onSurface = Color.Black,
+        onSurfaceVariant = Color.Black,
         outline = Color(0xFF94A3B8),
         outlineVariant = Color(0xFFE2E8F0),
     )
 }
+
