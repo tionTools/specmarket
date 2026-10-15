@@ -86,7 +86,10 @@ class MainActivity : ComponentActivity() {
 private fun AppearanceHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
-    MaterialTheme(ordersColors(appearance.isDark(isSystemInDarkTheme()))) { content() }
+    MaterialTheme(
+        colorScheme = ordersColors(appearance.isDark(isSystemInDarkTheme())),
+        typography = ordersTypography(),
+    ) { content() }
 }
 
 private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
@@ -106,7 +109,7 @@ private fun PlatformLogo(platform: String?) {
         Text(
             value.display(),
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         return
     }
@@ -689,7 +692,7 @@ private fun OrderProductDetails(product: OrderItem?, moreProducts: Int) {
                     "Ещё $moreProducts ${extraProductsLabel(moreProducts)}",
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF475569),
+                    color = Color.Black,
                     maxLines = 1,
                 )
             }
@@ -849,7 +852,7 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
                             Text(
                                 ttnLine,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF475569),
+                                color = Color.Black,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
