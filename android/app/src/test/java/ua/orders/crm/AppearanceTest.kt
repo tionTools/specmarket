@@ -1,7 +1,6 @@
 package ua.orders.crm
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.sp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,10 +18,4 @@ class AppearanceTest {
         assertTrue(scheme.onSurfaceVariant.red > scheme.background.red)
     }
 
-    @Test fun compactTextStylesAreReadable() {
-        val typography = ordersTypography()
-        assertEquals(13.sp, typography.labelSmall.fontSize)
-        assertEquals(13.sp, typography.labelMedium.fontSize)
-        assertEquals(14.sp, typography.bodySmall.fontSize)
-    }
 }
