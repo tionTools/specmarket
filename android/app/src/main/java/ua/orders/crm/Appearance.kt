@@ -2,11 +2,9 @@ package ua.orders.crm
 
 import android.content.Context
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -56,10 +54,3 @@ fun ordersColors(dark: Boolean): ColorScheme = if (dark) {
     )
 }
 
-fun ordersTypography(): Typography = Typography().let { base ->
-    base.copy(
-        labelSmall = base.labelSmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
-        labelMedium = base.labelMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
-        bodySmall = base.bodySmall.copy(fontSize = 14.sp, lineHeight = 20.sp),
-    )
-}
