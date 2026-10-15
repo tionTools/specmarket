@@ -86,10 +86,7 @@ class MainActivity : ComponentActivity() {
 private fun AppearanceHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
-    MaterialTheme(
-        colorScheme = ordersColors(appearance.isDark(isSystemInDarkTheme())),
-        typography = ordersTypography(),
-    ) { content() }
+    MaterialTheme(ordersColors(appearance.isDark(isSystemInDarkTheme()))) { content() }
 }
 
 private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " грн"
