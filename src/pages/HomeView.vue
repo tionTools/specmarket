@@ -5666,7 +5666,7 @@ function orderDateTime(order: Order) {
               {{ isSyncingAllPlatforms ? 'Синхронизация…' : 'Полная синхронизация' }}
             </button>
             <button
-              class="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50"
+              class="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50 lg:hidden"
               :class="{
                 'absolute inset-x-0 top-full z-20 mt-1.5': !isGuest,
                 'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
@@ -6302,10 +6302,26 @@ function orderDateTime(order: Order) {
           </button>
         </div>
         <div
-          class="mt-3 hidden grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
+          class="mt-3 hidden gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid lg:grid-cols-[8rem_5rem_minmax(0,2fr)_5rem_5rem_5rem_minmax(0,1fr)_7.5rem] xl:grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem]"
         >
-          <span>Номер заказа</span><span>Статус<br />Площадка</span><span>Товары</span
-          ><span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
+          <span>Номер заказа</span><span>Статус<br />Площадка</span>
+          <div class="flex min-w-0 items-center justify-between gap-2">
+            <span>Товары</span>
+            <button
+              class="shrink-0 whitespace-nowrap rounded-lg border px-2 py-1 text-xs font-semibold normal-case tracking-normal transition disabled:opacity-50"
+              :class="{
+                'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
+                'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50':
+                  !isShowingNotInExcel,
+              }"
+              type="button"
+              :disabled="isPromRegistryView"
+              @click="toggleNotInExcel"
+            >
+              Не в Excel · {{ notInExcelOrdersCount }}
+            </button>
+          </div>
+          <span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
           ><span class="border-l border-slate-200 pl-3 text-right">Факт. прибыль</span
           ><span class="border-l border-slate-200 pl-3 text-right">План. прибыль</span
           ><span class="border-l border-slate-200 pl-3">Состояние отгрузки</span
@@ -6335,7 +6351,7 @@ function orderDateTime(order: Order) {
           "
         >
           <div
-            class="grid w-full gap-x-2 gap-y-3 px-5 py-4 text-left transition lg:grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] lg:items-center"
+            class="grid w-full gap-x-2 gap-y-3 px-5 py-4 text-left transition lg:grid-cols-[8rem_5rem_minmax(0,2fr)_5rem_5rem_5rem_minmax(0,1fr)_7.5rem] xl:grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] lg:items-center"
             :class="
               isOrderExpanded(order) ? 'bg-slate-200/80 hover:bg-slate-200' : 'hover:bg-slate-50'
             "
