@@ -5558,7 +5558,7 @@ function orderDateTime(order: Order) {
         <div class="shrink-0">
           <p class="text-xs font-bold tracking-[0.2em] text-slate-950">SPECMARKET CRM</p>
           <h1
-            class="mt-2 flex items-center gap-2 text-3xl font-semibold tracking-tight sm:text-4xl"
+            class="mt-2 flex items-center gap-2 text-sm font-semibold"
             :class="{
               'text-emerald-700': ordersRealtimeSubscribed,
               'text-red-700': !ordersRealtimeSubscribed,
@@ -5570,7 +5570,7 @@ function orderDateTime(order: Order) {
             "
           >
             <span
-              class="size-3 rounded-full"
+              class="size-2 rounded-full"
               :class="{
                 'bg-emerald-500': ordersRealtimeSubscribed,
                 'bg-red-500': !ordersRealtimeSubscribed,
