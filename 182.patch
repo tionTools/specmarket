@@ -1,5 +1,5 @@
 diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
-index 49c9779..a79755d 100644
+index 49c9779..37b9b91 100644
 --- a/src/pages/HomeView.vue
 +++ b/src/pages/HomeView.vue
 @@ -5666,7 +5666,7 @@
@@ -11,16 +11,16 @@ index 49c9779..a79755d 100644
                :class="{
                  'absolute inset-x-0 top-full z-20 mt-1.5': !isGuest,
                  'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
-@@ -6304,8 +6304,23 @@
+@@ -6304,8 +6304,24 @@
          <div
            class="mt-3 hidden grid-cols-[9rem_6.25rem_minmax(13.5rem,2fr)_5rem_5rem_5.5rem_minmax(9.5rem,1fr)_3.5rem] gap-x-2 gap-y-3 px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 lg:grid"
          >
 -          <span>Номер заказа</span><span>Статус<br />Площадка</span><span>Товары</span
 -          ><span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
-+          <span>Номер заказа</span><span>Статус<br />Площадка</span
-+          ><span class="flex min-w-0 items-center justify-between gap-2"
-+            ><span>Товары</span
-+            ><button
++          <span>Номер заказа</span><span>Статус<br />Площадка</span>
++          <div class="flex min-w-0 items-center justify-between gap-2">
++            <span>Товары</span>
++            <button
 +              class="shrink-0 whitespace-nowrap rounded-lg border px-2 py-1 text-xs font-semibold normal-case tracking-normal transition disabled:opacity-50"
 +              :class="{
 +                'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
@@ -32,8 +32,9 @@ index 49c9779..a79755d 100644
 +              @click="toggleNotInExcel"
 +            >
 +              Не в Excel · {{ notInExcelOrdersCount }}
-+            </button></span
-+          ><span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
++            </button>
++          </div>
++          <span class="border-l border-slate-200 pl-3 text-right">Сумма заказа</span
            ><span class="border-l border-slate-200 pl-3 text-right">Факт. прибыль</span
            ><span class="border-l border-slate-200 pl-3 text-right">План. прибыль</span
            ><span class="border-l border-slate-200 pl-3">Состояние отгрузки</span
