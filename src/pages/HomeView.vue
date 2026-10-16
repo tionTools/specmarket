@@ -5465,7 +5465,7 @@ function orderDateTime(order: Order) {
       class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl"
       @submit.prevent="signIn"
     >
-      <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
+      <p class="text-xs font-bold tracking-[0.2em] text-slate-950">SPECMARKET CRM</p>
       <h1 class="mt-3 text-3xl font-semibold">Вход в CRM</h1>
       <p class="mt-2 text-sm text-slate-500">
         Войди, чтобы увидеть общие заказы и цены на всех устройствах.
@@ -5556,10 +5556,9 @@ function orderDateTime(order: Order) {
     <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <header class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div class="shrink-0">
-          <p class="text-xs font-bold tracking-[0.2em] text-emerald-700">SPECMARKET CRM</p>
-          <h1 class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Заказы</h1>
-          <div
-            class="mt-2 inline-flex items-center gap-2 text-xs font-semibold"
+          <p class="text-xs font-bold tracking-[0.2em] text-slate-950">SPECMARKET CRM</p>
+          <h1
+            class="mt-2 flex items-center gap-2 text-3xl font-semibold tracking-tight sm:text-4xl"
             :class="{
               'text-emerald-700': ordersRealtimeSubscribed,
               'text-red-700': !ordersRealtimeSubscribed,
@@ -5571,15 +5570,15 @@ function orderDateTime(order: Order) {
             "
           >
             <span
-              class="size-2 rounded-full"
+              class="size-3 rounded-full"
               :class="{
                 'bg-emerald-500': ordersRealtimeSubscribed,
                 'bg-red-500': !ordersRealtimeSubscribed,
               }"
               aria-hidden="true"
             ></span>
-            {{ ordersRealtimeSubscribed ? 'Онлайн' : 'Нет обновления' }}
-          </div>
+            {{ ordersRealtimeSubscribed ? 'Онлайн' : 'Оффлайн' }}
+          </h1>
         </div>
         <div
           v-if="overdueLabelOrders.length"
