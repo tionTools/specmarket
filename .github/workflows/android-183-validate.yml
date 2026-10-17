@@ -27,6 +27,14 @@ jobs:
           set -o pipefail
           ./gradlew testDebugUnitTest lintDebug assembleDebug 2>&1 | tee "$RUNNER_TEMP/183-build.log"
         working-directory: android
+      - name: Attach debug APK to this verification run
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-183-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Record CI results (never deploy / publish)
         if: always()
         env:
