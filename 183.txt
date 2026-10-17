@@ -21,3 +21,20 @@ PREREQUISITES / STOP GATES:
 8. STOP and report failures or unsupported runtime. No SQL migration deploy, PR, merge, production, or APK release without explicit user permission.
 
 This draft patch is prepared for inspection. It has NOT been compiled or installed; do not report GREEN without actual test evidence.
+
+CARRIER STORAGE AUDIT — 2026-10-17 (NOT IMPLEMENTED):
+- Scope: four carriers currently recognized by sync-delivery-tracking: nova, ukrposhta, meest, rozetka.
+- Nova Poshta: autoreturn period is configurable PER SENDER via contract/business account. User's SpecMarket setting: 5 days, autoreturn on day 6. This must be treated as shipper-specific policy, NOT an all-merchant default. Extension/redirection can alter deadline. Official: https://novaposhta.ua/additional-services/auto-return/
+- Ukrposhta: contemporary Priority/Basic/Documents API lists urban 7 calendar days, rural 14, lockers 5; arrival day included, auto-return produced overnight after expiry. A per-parcel returnAfterStorageDays override may extend (up to 28 branch / 10 locker). The earlier Standard product/service may follow separate terms. Official: https://dev.ukrposhta.ua/uploads/API_documentation_06112025.pdf (section 4.11.1); https://www.ukrposhta.ua/ua/manage-parcels
+- Meest: 5 WORKING days free from the following day, paid extension up to additional 5 WORKING days; when applicable term ends (up to 10 workdays with extension), auto-return. Individual contractual conditions can override. Do not infer a definite auto-return from free-storage expiry alone. Official: https://meestposhta.com.ua/parcels-in-ukraine
+- ROZETKA Delivery (carrier, not marketplace general rules): 10 days from arrival in a ROZETKA store, deadline shown in shipment information. Official: https://help.rozetka.delivery/
+- CRITICAL: carrier policy is not enough without VERIFIED parcel pickup-arrival date and delivery type, current extension/override and return setting. Do not use trackingExpectedDeliveryAt (scheduled delivery) as warehouse arrival or deadline.
+- Current backend carrier adapters save trackingEventAt/trackingEvents and some scheduled-delivery data; there is no confirmed common field for per-TTN auto-return date and no unified facility for completed extensions.
+
+PATCH 183 MUST NOT BE RELEASED AS AN AUTOMATIC ALL-CARRIER IMPLEMENTATION:
+- Present draft requires manually entered deadline, and does NOT satisfy the newly clarified automatic per-carrier requirement.
+- Before reworking patch: implement carrier-specific certified deadline provenance (provider-specific explicit expiry/return date first; otherwise verified arrival event + service and shipper-specific policy where verified; else "deadline unknown" and optional manual override).
+- Preserve two stages (2 calendar days before end, last day), distinct acknowledgements, and filter in Android.
+- Correctly handle calendar-vs-working day counting, arrival-day included/excluded, locker-to-branch relocation, extension, returns, redirection, changed TTN and custom business rules.
+- No unverified date should result in messaging "last day" or "will be returned" as a certainty.
+- Supersedes the earlier draft's assumption that manual date entry is the normal path for all carriers.
