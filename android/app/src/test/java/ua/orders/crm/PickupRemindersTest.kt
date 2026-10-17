@@ -37,6 +37,18 @@ class PickupRemindersTest {
         assertNull(order().pendingPickupReminder(state(2).copy(deadline = "bad"), date))
     }
 
+    @Test fun arrivals_without_confirmed_deadline_are_actionable_in_reminder_filter() {
+        assertTrue(order().needsPickupDeadline(null))
+        assertFalse(order().needsPickupDeadline(state(2)))
+        assertTrue(order().needsPickupDeadline(state(2).copy(ttn = "old-ttn")))
+        assertFalse(order(ttn = "").needsPickupDeadline(null))
+        assertFalse(order(status = "Скасовано").needsPickupDeadline(null))
+        assertFalse(order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("trackingNormalizedStatus", "in_transit")
+        }).needsPickupDeadline(null))
+    }
+
     @Test fun ukranian_text_contains_products_number_ttn_and_deadline() {
         val message = order().pickupReminderText(PickupReminderStage.FIRST, state(2).deadline, date)
         assertTrue(message.contains("№123"))
