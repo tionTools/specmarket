@@ -433,6 +433,18 @@ diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/fun
    if (activeTtn) nextDelivery.ttn = activeTtn
    if (destination?.city) {
      nextDelivery.city = destination.city
+@@ -415,6 +423,10 @@
+   if (result.relatedShipments)
+     nextDelivery.trackingRelatedShipments = relatedShipmentsValue(result.relatedShipments)
+   if (result.events) nextDelivery.trackingEvents = result.events
+-  if (result.details) Object.assign(nextDelivery, result.details)
++  if (result.details) {
++    for (const [key, value] of Object.entries(result.details)) {
++      if (value !== undefined) nextDelivery[key] = value
++    }
++  }
+   return nextDelivery
+ }
 diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
 --- a/supabase/functions/sync-delivery-tracking/worker.ts
 +++ b/supabase/functions/sync-delivery-tracking/worker.ts
