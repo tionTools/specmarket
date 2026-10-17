@@ -1,0 +1,51 @@
+name: Android 183 validation (no publishing)
+on:
+  push:
+    branches:
+      - feature/android-pickup-reminders-183
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-183-validate.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - run: sdkmanager 'platform-tools' 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Android unit tests, lint and debug build
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest lintDebug assembleDebug 2>&1 | tee "$RUNNER_TEMP/183-build.log"
+        working-directory: android
+      - name: Record CI results (never deploy / publish)
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          mkdir -p validation
+          {
+            printf 'Android 183 validation\n'
+            printf 'commit: %s\n' "$GITHUB_SHA"
+            printf 'run: %s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf 'outcome: %s\n' "$BUILD_OUTCOME"
+            printf 'build log last 120 lines:\n'
+            tail -n 120 "$RUNNER_TEMP/183-build.log" 2>/dev/null || true
+          } > validation/183-android-build.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add validation/183-android-build.txt
+          git commit -m "Record Android 183 validation result [skip ci]" || true
+          git push origin HEAD:feature/android-pickup-reminders-183
+      - name: Fail job if build failed
+        if: steps.build.outcome != 'success'
+        run: exit 1
