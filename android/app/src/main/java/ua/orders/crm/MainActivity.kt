@@ -684,7 +684,17 @@ private fun OrdersScreen(
                         }
                     }
                     items(visibleOrders, key = { it.id }) { order ->
-                        OrderCard(order) {
+                        val stage = if (filter == OrderListFilter.REMIND)
+                            order.pendingPickupReminder(reminders[order.id], today) else null
+                        val label = when (stage) {
+                            PickupReminderStage.FIRST -> "Напомнить: осталось " +
+                                java.time.temporal.ChronoUnit.DAYS.between(
+                                    today, LocalDate.parse(reminders.getValue(order.id).deadline)
+                                ) + " дн."
+                            PickupReminderStage.LAST -> "Напомнить: последний день получения"
+                            null -> null
+                        }
+                        OrderCard(order, reminderLabel = label) {
                             val index = listState.firstVisibleItemIndex
                             val topId = visibleOrders.getOrNull(index)?.id
                             onOrderOpen(order.id, topId, index, listState.firstVisibleItemScrollOffset)
@@ -730,7 +740,7 @@ private fun OrderProductDetails(product: OrderItem?, moreProducts: Int) {
 }
 
 @Composable
-internal fun OrderCard(order: Order, onClick: () -> Unit) {
+internal fun OrderCard(order: Order, reminderLabel: String? = null, onClick: () -> Unit) {
     val product = order.items.minByOrNull { it.position ?: Int.MAX_VALUE }
     val moreProducts = (order.items.size - 1).coerceAtLeast(0)
     val shipment = order.cardDelivery()
@@ -748,6 +758,14 @@ internal fun OrderCard(order: Order, onClick: () -> Unit) {
             modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
+            if (reminderLabel != null) {
+                Text(
+                    reminderLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFB45309),
+                )
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
