@@ -8,9 +8,12 @@ function day(value: unknown): Date | null {
   const raw = value.trim()
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/)
   const local = raw.match(/^(\d{2})[.\/-](\d{2})[.\/-](\d{4})(?:[T\s].*)?$/)
-  const year = Number(iso?.[1] ?? local?.[3])
-  const month = Number(iso?.[2] ?? local?.[2])
-  const date = Number(iso?.[3] ?? local?.[1])
+  // Nova Poshta tracking sends pickup arrival as 'HH:mm DD.MM.YYYY'.
+  // Match the entire string and validate the clock; never infer a date from unrelated text.
+  const timeFirst = raw.match(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s+(\d{2})[.\/-](\d{2})[.\/-](\d{4})$/)
+  const year = Number(iso?.[1] ?? local?.[3] ?? timeFirst?.[3])
+  const month = Number(iso?.[2] ?? local?.[2] ?? timeFirst?.[2])
+  const date = Number(iso?.[3] ?? local?.[1] ?? timeFirst?.[1])
   if (!year || !month || !date) return null
   const result = new Date(Date.UTC(year, month - 1, date))
   return result.getUTCFullYear() === year && result.getUTCMonth() === month - 1

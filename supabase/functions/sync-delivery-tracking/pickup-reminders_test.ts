@@ -39,3 +39,19 @@ Deno.test('Ukrposhta free storage term is not a default auto-return date', () =>
     trackingVerifiedLastPickupAt: '2026-10-24',
     trackingVerifiedLastPickupSource: 'carrier_api' })?.date, '2026-10-24')
 })
+
+Deno.test('Nova Poshta HH:mm DD.MM.YYYY arrival is used for the deadline', () => {
+  assertEquals(automaticPickupDeadline({ ...base,
+    trackingPickupArrivedAt: '17:15 16.10.2026' })?.date, '2026-10-21')
+  assertEquals(automaticPickupDeadline({ ...base,
+    trackingPickupArrivedAt: '17:15:09 16.10.2026' })?.date, '2026-10-21')
+  assertEquals(automaticPickupDeadline({ ...base,
+    trackingPickupArrivedAt: '23:59 29.10.2026' })?.date, '2026-11-03')
+})
+Deno.test('reject malformed or impossible time-first dates, without falling back to ETA', () => {
+  for (const arrival of ['24:15 16.10.2026', '17:60 16.10.2026',
+    '17:15 31.02.2026', '17:15 16.13.2026', 'foo 17:15 16.10.2026']) {
+    assertEquals(automaticPickupDeadline({ ...base, trackingPickupArrivedAt: arrival,
+      trackingExpectedDeliveryAt: '2026-10-16' }), null)
+  }
+})
