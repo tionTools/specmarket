@@ -30,6 +30,10 @@ class PickupRemindersTest {
         assertNull(order("new").pendingPickupReminder(state(2), date))
         assertNull(order(status = "Скасовано").pendingPickupReminder(state(2), date))
         assertNull(order(status = "Виконано").pendingPickupReminder(state(2), date))
+        assertNull(order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("trackingNormalizedStatus", "in_transit")
+        }).pendingPickupReminder(state(2), date))
         assertNull(order().pendingPickupReminder(state(2).copy(deadline = "bad"), date))
     }
 
