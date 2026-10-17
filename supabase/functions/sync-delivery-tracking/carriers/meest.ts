@@ -200,6 +200,7 @@ async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationCountry: latest.country,
       trackingLocationDetails: latest.detail,
       trackingStatusCode: latest.code,
+      trackingPickupArrivedAt: base.normalizedStatus === 'ready_for_pickup' ? latest.at : undefined,
       trackingDeliveredAt: base.normalizedStatus === 'delivered' ? latest.at : '',
     },
   }
@@ -255,6 +256,8 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationCountry: text(record(latest?.eventCountryDescr).descrUA),
       trackingLocationDetails: text(record(latest?.eventDetailDescr).descrUA),
       trackingStatusCode: eventCode,
+      trackingPickupArrivedAt: base.normalizedStatus === 'ready_for_pickup'
+        ? text(latest?.eventDateTime) : undefined,
       trackingDeliveredAt: base.normalizedStatus === 'delivered' ? text(latest?.eventDateTime) : '',
     },
   }

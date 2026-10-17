@@ -14,6 +14,7 @@ import {
   shouldBulkTrackPlatform,
 } from './marketplace-pause.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
+import { automaticPickupDeadline } from './pickup-reminders.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
 const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
@@ -26,7 +27,7 @@ type TrackingOrderRow = {
   shipping: unknown
   delivery: unknown
 }
-type TrackingStateRow = { order_id: string; last_checked_at: unknown }
+type TrackingStateRow = { order_id: string; last_checked_at: unknown; details?: unknown }
 
 function currentKyiv() {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -110,7 +111,7 @@ export async function runTrackingWorker(
   )
   const ids = orderRows.map((row) => row.id)
   const { data: states, error: statesError } = ids.length
-    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)
+    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at, details').in('order_id', ids)
     : { data: [], error: null }
   if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
   const trackingStates = (states ?? []) as TrackingStateRow[]
@@ -188,19 +189,27 @@ export async function runTrackingWorker(
       }
       const result = outcome.result!
       try {
+        if (sameShipment(currentDelivery, delivery)
+          && (!result.destination?.address || text(result.destination.address) === text(currentDelivery.address))
+          && currentDelivery.trackingPickupArrivedAt
+          && result.details?.trackingPickupArrivedAt) {
+          // An additional scan in the pickup warehouse must not restart
+          // storage counting on each tracking poll.
+          result.details.trackingPickupArrivedAt = currentDelivery.trackingPickupArrivedAt
+        }
         const changed = trackingChanged(currentDelivery, result)
+        const nextDelivery = changed ? mergeTrackingDelivery(
+          currentDelivery,
+          result,
+          now.toISOString(),
+          text(row.external_id) ? 'marketplace' : 'manual',
+        ) : currentDelivery
         const state: TrackingStateUpdate = {
           order_id: row.id, last_checked_at: now.toISOString(), last_error: null,
           provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString(),
         }
         checked += 1
         if (changed) {
-          const nextDelivery = mergeTrackingDelivery(
-            currentDelivery,
-            result,
-            now.toISOString(),
-            text(row.external_id) ? 'marketplace' : 'manual',
-          )
           const waivePromoShipping = shouldWaivePromPromoShippingForUnclaimedReturn({
             platform: text(currentRow.platform),
             orderStatus: text(currentRow.status),
@@ -214,6 +223,21 @@ export async function runTrackingWorker(
           if (updateError) throw updateError
           updated += 1
         }
+        const computedDeadline = automaticPickupDeadline(nextDelivery)
+        const reminderKey = computedDeadline
+          ? [text(nextDelivery.ttn), computedDeadline.date, computedDeadline.basis].join(':')
+          : ''
+        const priorKey = text(record(stateByOrder.get(row.id)?.details).pickupReminderKey)
+        if (computedDeadline && priorKey !== reminderKey) {
+          const { error: reminderError } = await admin.rpc('crm_sync_pickup_reminder_auto', {
+            p_order_id: row.id,
+            p_ttn: text(nextDelivery.ttn),
+            p_deadline: computedDeadline.date,
+            p_carrier: computedDeadline.carrier,
+          })
+          if (reminderError) throw reminderError
+        }
+        state.details = { ...(result.details ?? {}), pickupReminderKey: reminderKey }
         pendingSuccessStates.push(state)
       } catch (error) {
         failed += 1

@@ -203,6 +203,8 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
     details: {
       trackingEventAt: eventAt,
       trackingAcceptedAt: text(shipment.DateCreated),
+      // Only the carrier's ready-for-pickup scan can anchor storage.
+      trackingPickupArrivedAt: base.normalizedStatus === 'ready_for_pickup' ? eventAt : undefined,
       trackingExpectedDeliveryAt: text(shipment.ScheduledDeliveryDate),
       trackingDeliveredAt: text(shipment.ActualDeliveryDate) || text(shipment.RecipientDateTime),
       trackingLocation: text(shipment.WarehouseRecipient),

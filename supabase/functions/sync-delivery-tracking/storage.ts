@@ -364,6 +364,14 @@ export function mergeTrackingDelivery(
     )
   }
 
+  if (ttnChanged || addressChanged) {
+    // Arrival from the previous consignment must not leak into a redirect
+    // or return shipment with a different TTN.
+    delete nextDelivery.trackingPickupArrivedAt
+    delete nextDelivery.trackingVerifiedLastPickupAt
+    delete nextDelivery.trackingVerifiedLastPickupSource
+    delete nextDelivery.trackingPickupLocationType
+  }
   if (activeTtn) nextDelivery.ttn = activeTtn
   if (destination?.city) {
     nextDelivery.city = destination.city
@@ -415,6 +423,10 @@ export function mergeTrackingDelivery(
   if (result.relatedShipments)
     nextDelivery.trackingRelatedShipments = relatedShipmentsValue(result.relatedShipments)
   if (result.events) nextDelivery.trackingEvents = result.events
-  if (result.details) Object.assign(nextDelivery, result.details)
+  if (result.details) {
+    for (const [key, value] of Object.entries(result.details)) {
+      if (value !== undefined) nextDelivery[key] = value
+    }
+  }
   return nextDelivery
 }
