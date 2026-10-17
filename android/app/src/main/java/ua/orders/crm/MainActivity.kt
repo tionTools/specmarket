@@ -2,6 +2,7 @@ package ua.orders.crm
 
 import android.Manifest
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -52,6 +53,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -136,6 +138,28 @@ private fun launchExternal(context: Context, uri: Uri): Boolean = try {
     true
 } catch (_: Exception) {
     false
+}
+
+private fun copyReminderAndOpenChat(context: Context, phone: String, channel: String, message: String): Boolean {
+    val normalized = normalizeCustomerPhone(phone) ?: return false
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("Нагадування", message))
+    val opened = if (channel == "viber") {
+        val uri = Uri.Builder().scheme("viber").authority("chat")
+            .appendQueryParameter("number", normalized).build()
+        launchExternal(context, uri)
+    } else {
+        // Text stays on the clipboard: tg://resolve cannot guarantee a specific private
+        // chat will accept an attached prefilled draft.
+        val uri = Uri.Builder().scheme("tg").authority("resolve")
+            .appendQueryParameter("phone", normalized).build()
+        launchExternal(context, uri)
+    }
+    Toast.makeText(context,
+        if (opened) "Текст скопирован. Вставьте его в чат и отправьте."
+        else "Текст скопирован. Откройте нужный чат вручную.",
+        Toast.LENGTH_LONG).show()
+    return opened
 }
 
 private fun openViber(context: Context, phone: String) {
@@ -511,6 +535,7 @@ private fun extraProductsLabel(count: Int): String = when {
 @Composable
 private fun OrderFilters(
     orders: List<Order>,
+    reminders: Map<String, PickupReminderState>,
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
 ) {
@@ -538,7 +563,7 @@ private fun OrderFilters(
                         contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         Text(
-                            orders.count { it.matchesListFilter(filter) }.toString(),
+                            orders.count { if (filter == OrderListFilter.REMIND) it.pendingPickupReminder(reminders[it.id]) != null else it.matchesListFilter(filter) }.toString(),
                             Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelLarge,
                         )
@@ -568,8 +593,14 @@ private fun OrdersScreen(
     onOrderOpen: (String, String?, Int, Int) -> Unit,
 ) {
     val orders = remember(vm.orders) { vm.orders.filter(::isOrderVisibleInMainList) }
-    val visibleOrders = remember(orders, searchQuery, filter) {
-        orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
+    val reminders = vm.pickupReminders
+    val today = pickupToday()
+    val visibleOrders = remember(orders, reminders, searchQuery, filter, today) {
+        orders.filter {
+            (if (filter == OrderListFilter.REMIND)
+                it.pendingPickupReminder(reminders[it.id], today) != null
+            else it.matchesListFilter(filter)) && it.matchesOrderSearch(searchQuery)
+        }
     }
     LaunchedEffect(restoreAnchorId, visibleOrders) {
         if (restoreAnchorId == null || visibleOrders.isEmpty()) return@LaunchedEffect
@@ -626,7 +657,7 @@ private fun OrdersScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OrderFilters(orders, filter, onFilterChange)
+            OrderFilters(orders, reminders, filter, onFilterChange)
             PullToRefreshBox(
                 isRefreshing = vm.loading,
                 onRefresh = { vm.manualRefresh() },
@@ -929,6 +960,29 @@ private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
+    var deadlineInput by rememberSaveable(order?.id) { mutableStateOf("") }
+    var editingDeadline by rememberSaveable(order?.id) { mutableStateOf(false) }
+    var sendConfirmation by remember(order?.id) { mutableStateOf<Pair<PickupReminderStage, String>?>(null) }
+    val reminder = order?.let { vm.pickupReminders[it.id] }
+    val pendingReminder = order?.pendingPickupReminder(reminder)
+    LaunchedEffect(reminder?.deadline, order?.id) {
+        if (!editingDeadline) deadlineInput = reminder?.deadline.orEmpty()
+    }
+    if (sendConfirmation != null && order != null) {
+        val (stage, channel) = sendConfirmation!!
+        AlertDialog(
+            onDismissRequest = { sendConfirmation = null },
+            title = { Text("Сообщение отправлено?") },
+            text = { Text("Подтвердите только после отправки в мессенджере.") },
+            confirmButton = {
+                Button(onClick = {
+                    sendConfirmation = null
+                    vm.confirmPickupSent(order, stage, channel)
+                }, enabled = !vm.pickupBusy) { Text("Да, отправлено") }
+            },
+            dismissButton = { TextButton(onClick = { sendConfirmation = null }) { Text("Нет") } },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -984,6 +1038,71 @@ private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item { DetailsHeader(order) }
+
+            if (order.deliveryValue("ttn").isNotBlank()
+                && !order.hasReturnSignal()
+                && !order.deliveryFlag("trackingBuyerReceived")
+                && normalizedStatus(order.deliveryValue("trackingNormalizedStatus")) !in
+                    setOf("delivered", "returned", "returning", "cancelled", "deleted")
+            ) {
+                item {
+                    SectionCard("Напоминание о получении") {
+                        val existingDeadline = reminder?.takeIf { it.ttn == order.deliveryValue("ttn").trim() }?.deadline
+                        Text(
+                            if (existingDeadline == null) "Укажите подтверждённую крайнюю дату получения."
+                            else "Крайний срок получения: $existingDeadline",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        if (editingDeadline) {
+                            OutlinedTextField(
+                                value = deadlineInput,
+                                onValueChange = { deadlineInput = it },
+                                label = { Text("Дата: ГГГГ-ММ-ДД") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            val validDeadline = runCatching { LocalDate.parse(deadlineInput) }.getOrNull()
+                            Button(
+                                onClick = { vm.savePickupDeadline(order, deadlineInput); editingDeadline = false },
+                                enabled = validDeadline != null && !vm.pickupBusy,
+                            ) { Text("Сохранить срок") }
+                        } else {
+                            OutlinedButton(onClick = { editingDeadline = true; deadlineInput = existingDeadline.orEmpty() }) {
+                                Text(if (existingDeadline == null) "Указать крайний срок" else "Изменить срок")
+                            }
+                        }
+                        if (pendingReminder != null && reminder != null) {
+                            Text(
+                                if (pendingReminder == PickupReminderStage.LAST) "Последний день получения"
+                                else "Необходимо напомнить покупателю",
+                                fontWeight = FontWeight.Bold,
+                            )
+                            val draft = order.pickupReminderText(pendingReminder, reminder.deadline)
+                            SelectionContainer { Text(draft) }
+                            val recipientNumber = order.deliveryValue("recipientPhone")
+                                .takeIf { normalizeCustomerPhone(it) != null } ?: order.phone.orEmpty()
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        copyReminderAndOpenChat(context, recipientNumber, "telegram", draft)
+                                        sendConfirmation = pendingReminder to "telegram"
+                                    },
+                                    enabled = normalizeCustomerPhone(recipientNumber) != null && !vm.pickupBusy,
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Telegram") }
+                                Button(
+                                    onClick = {
+                                        copyReminderAndOpenChat(context, recipientNumber, "viber", draft)
+                                        sendConfirmation = pendingReminder to "viber"
+                                    },
+                                    enabled = normalizeCustomerPhone(recipientNumber) != null && !vm.pickupBusy,
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Viber") }
+                            }
+                        }
+                    }
+                }
+            }
 
             item {
                 SectionCard("Покупатель") {
