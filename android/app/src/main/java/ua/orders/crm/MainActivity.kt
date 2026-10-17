@@ -687,10 +687,12 @@ private fun OrdersScreen(
                         val stage = if (filter == OrderListFilter.REMIND)
                             order.pendingPickupReminder(reminders[order.id], today) else null
                         val label = when (stage) {
-                            PickupReminderStage.FIRST -> "Напомнить: осталось " +
-                                java.time.temporal.ChronoUnit.DAYS.between(
+                            PickupReminderStage.FIRST -> {
+                                val days = java.time.temporal.ChronoUnit.DAYS.between(
                                     today, LocalDate.parse(reminders.getValue(order.id).deadline)
-                                ) + " дн."
+                                )
+                                "Напомнить: осталось ${if (days == 1L) "1 день" else "2 дня"}"
+                            }
                             PickupReminderStage.LAST -> "Напомнить: последний день получения"
                             null -> null
                         }
