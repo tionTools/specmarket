@@ -1,0 +1,69 @@
+name: Android 0.31 runtime launch smoke
+on:
+  push:
+    branches: [feature/android-pickup-reminders-183]
+    paths:
+      - '.github/workflows/android-031-launch-smoke.yml'
+      - 'android/**'
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=+android_emulator"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build debug package
+        working-directory: android
+        run: ./gradlew :app:assembleDebug
+      - name: Launch app on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -eu
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n ua.orders.crm/.MainActivity
+            sleep 8
+            mkdir -p validation
+            adb logcat -d -v time > validation/031-logcat.txt
+            adb shell dumpsys activity activities > validation/031-activities.txt
+            PID="$(adb shell pidof ua.orders.crm | tr -d '\r')"
+            echo "App PID after cold start: $PID"
+            if [ -z "$PID" ]; then
+              echo "APP_CRASH_OR_EXIT"
+              grep -A 35 -B 8 -E "FATAL EXCEPTION|Process: ua.orders.crm|AndroidRuntime|Fatal signal" validation/031-logcat.txt | tail -n 200 || true
+              exit 1
+            fi
+            adb shell input keyevent 3
+            sleep 2
+            adb shell am start -W -n ua.orders.crm/.MainActivity
+            sleep 5
+            if ! adb shell pidof ua.orders.crm; then
+              echo "APP_CRASH_ON_RESUME"
+              exit 1
+            fi
+            grep -A 28 -B 6 -E "FATAL EXCEPTION|Process: ua.orders.crm" validation/031-logcat.txt | tail -n 80 || true
+      - name: Upload runtime diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-031-runtime-diagnosis
+          path: validation/031-*.txt
+          retention-days: 7
