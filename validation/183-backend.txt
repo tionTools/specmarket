@@ -1,7 +1,7 @@
 Patch 183 backend validation
 base: 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e
-patch source commit: 837b6bb1d031f01edc9bc0044b0b91d6d9b80172
-run: https://github.com/tionTools/specmarket/actions/runs/39062395776
+patch source commit: 26a972aa201823d43589ecb58bfbdbbafddafbc3
+run: https://github.com/tionTools/specmarket/actions/runs/39062471203
 outcome: success
 log tail:
 [0m[32mDownload[0m https://jsr.io/@std/assert/meta.json
@@ -45,11 +45,11 @@ log tail:
 [0m[32mCheck[0m supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
 [0m[38;5;245mrunning 6 tests from ./supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts[0m
 SpecMarket confirmed NP day 1 starts after arrival; day 6 returns ... [0m[32mok[0m [0m[38;5;245m(1ms)[0m
-no arrival, or scheduled delivery estimate only, never infers deadline ... [0m[32mok[0m [0m[38;5;245m(115µs)[0m
-received and return-in-progress cannot be reminded ... [0m[32mok[0m [0m[38;5;245m(104µs)[0m
-ROZETKA store uses its separate ten-calendar-day policy ... [0m[32mok[0m [0m[38;5;245m(173µs)[0m
-Meest working days vary by verified depot type ... [0m[32mok[0m [0m[38;5;245m(253µs)[0m
-Ukrposhta free storage term is not a default auto-return date ... [0m[32mok[0m [0m[38;5;245m(167µs)[0m
+no arrival, or scheduled delivery estimate only, never infers deadline ... [0m[32mok[0m [0m[38;5;245m(126µs)[0m
+received and return-in-progress cannot be reminded ... [0m[32mok[0m [0m[38;5;245m(131µs)[0m
+ROZETKA store uses its separate ten-calendar-day policy ... [0m[32mok[0m [0m[38;5;245m(164µs)[0m
+Meest working days vary by verified depot type ... [0m[32mok[0m [0m[38;5;245m(217µs)[0m
+Ukrposhta free storage term is not a default auto-return date ... [0m[32mok[0m [0m[38;5;245m(204µs)[0m
 
 [0m[32mok[0m | 6 passed | 0 failed [0m[38;5;245m(4ms)[0m
 
@@ -99,10 +99,46 @@ Ukrposhta free storage term is not a default auto-return date ... [0m[32mok[0
 [0m[32mDownload[0m https://esm.sh/@supabase/auth-js@2.118.0/dist/module/lib/webauthn.errors.d.ts
 [0m[32mDownload[0m https://esm.sh/@supabase/phoenix@0.4.5/priv/static/types/constants.d.ts
 [0m[32mCheck[0m supabase/functions/sync-delivery-tracking/worker.ts
-\nSQL migration smoke outcome: failure\nCREATE ROLE
+\nSQL migration smoke outcome: success\nCREATE ROLE
 CREATE ROLE
 CREATE ROLE
 CREATE SCHEMA
-psql:/home/runner/work/_temp/183-sql-setup.sql:6: ERROR:  syntax error at or near "$"
-LINE 2:   $select nullif(current_setting('request.jwt.claim.sub',tru...
-          ^
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE TABLE
+INSERT 0 1
+CREATE TABLE
+ALTER TABLE
+REVOKE
+GRANT
+CREATE POLICY
+CREATE FUNCTION
+CREATE FUNCTION
+REVOKE
+REVOKE
+GRANT
+GRANT
+CREATE FUNCTION
+REVOKE
+GRANT
+SET
+SET
+SET
+ crm_set_pickup_reminder_deadline 
+----------------------------------
+ 
+(1 row)
+
+ crm_confirm_pickup_reminder 
+-----------------------------
+ 
+(1 row)
+
+RESET
+DO
+ crm_sync_pickup_reminder_auto 
+-------------------------------
+ 
+(1 row)
+
+DO
