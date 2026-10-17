@@ -14,9 +14,10 @@ PREREQUISITES / STOP GATES:
 1. Inspect exact main HEAD; verify patch against exact base from current checkout, not cached snapshots.
 2. Confirm table schema crm_orders.id is UUID, existing RLS/auth patterns, acceptable RPC privileges, and verify migration is additive.
 3. Apply to isolated clean worktree using git apply --check 183.patch; do not apply partially if any error.
-4. Run git diff --check; targeted Android JUnit tests, Android compile, and assemble debug APK.
-5. Manually test Android Viber/Telegram chat opening; both use clipboard fallback because targeting a particular chat with a prefilled message is not guaranteed.
-6. Verify list filtering, a stale TTN/deadline, late notification, claim already sent on another device, and tracking state changes.
-7. STOP and report failures or unsupported runtime. No SQL migration deploy, PR, merge, production, or APK release without explicit user permission.
+4. ChatGPT owns Android code and build verification. Do not delegate Android development to Codex. Android JUnit, Kotlin compile and APK assembly remain unverified in this environment; stop before claiming GREEN.
+5. Codex may be instructed only to validate/apply the approved CRM/backend migration portion after a separate user authorization.
+6. Manually test Android Viber/Telegram chat opening; both use clipboard fallback because targeting a particular chat with a prefilled message is not guaranteed.
+7. Verify list filtering, a stale TTN/deadline, late notification, claim already sent on another device, and tracking state changes.
+8. STOP and report failures or unsupported runtime. No SQL migration deploy, PR, merge, production, or APK release without explicit user permission.
 
 This draft patch is prepared for inspection. It has NOT been compiled or installed; do not report GREEN without actual test evidence.
