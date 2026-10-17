@@ -1,0 +1,22 @@
+Patch 183 — Android CRM: фильтр «Напомнить» и ручная отправка двух уведомлений покупателю.
+STATUS: DRAFT; NOT APPLIED / NOT TESTED / NOT DEPLOYED.
+Repository: tionTools/specmarket. Patch file: 183.patch on chatgpt-patches.
+Includes:
+- new RLS-protected crm_pickup_reminders table and two authenticated RPCs for deadline and acknowledgement;
+- Android filter REMIND replacing SENT; independent first (2 or 1 days before) and last (last day) stages;
+- customer message generator including number, products, sizes, quantities, TTN and confirmed date;
+- Android detail controls: set confirmed pickup deadline manually, copy prepared message and open Telegram/Viber, ask if sent;
+- tests for pure reminder/date/message logic.
+
+IMPORTANT LIMITATION: Existing tracking stores scheduled delivery date, NOT a verified last collection / automatic return deadline. No inferred date: manual confirmed deadline required for reminder eligibility. No push reminders.
+
+PREREQUISITES / STOP GATES:
+1. Inspect exact main HEAD; verify patch against exact base from current checkout, not cached snapshots.
+2. Confirm table schema crm_orders.id is UUID, existing RLS/auth patterns, acceptable RPC privileges, and verify migration is additive.
+3. Apply to isolated clean worktree using git apply --check 183.patch; do not apply partially if any error.
+4. Run git diff --check; targeted Android JUnit tests, Android compile, and assemble debug APK.
+5. Manually test Android Viber/Telegram chat opening; both use clipboard fallback because targeting a particular chat with a prefilled message is not guaranteed.
+6. Verify list filtering, a stale TTN/deadline, late notification, claim already sent on another device, and tracking state changes.
+7. STOP and report failures or unsupported runtime. No SQL migration deploy, PR, merge, production, or APK release without explicit user permission.
+
+This draft patch is prepared for inspection. It has NOT been compiled or installed; do not report GREEN without actual test evidence.
