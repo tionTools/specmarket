@@ -1,0 +1,103 @@
+name: Android 0.34 reminders validation (no publishing)
+on:
+  push:
+    branches:
+      - hotfix/android-stable-034
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-034-validate.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - run: sdkmanager 'platform-tools' 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Android unit tests, lint and debug build
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest lintDebug assembleDebug 2>&1 | tee "$RUNNER_TEMP/034-build.log"
+        working-directory: android
+      - name: Attach debug APK to this verification run
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-034-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Prepare signed update candidate (no publication)
+        id: release_signing
+        env:
+          ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
+          ORDERS_RELEASE_STORE_PASS: ${{ secrets.ORDERS_RELEASE_STORE_PASS }}
+          ORDERS_RELEASE_ALIAS: ${{ secrets.ORDERS_RELEASE_ALIAS }}
+          ORDERS_RELEASE_KEY_PASS: ${{ secrets.ORDERS_RELEASE_KEY_PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORDERS_RELEASE_STORE_B64"
+          test -n "$ORDERS_RELEASE_STORE_PASS"
+          test -n "$ORDERS_RELEASE_ALIAS"
+          test -n "$ORDERS_RELEASE_KEY_PASS"
+          printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=$ORDERS_RELEASE_ALIAS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=$ORDERS_RELEASE_KEY_PASS" >> "$GITHUB_ENV"
+      - name: Build and verify signed candidate APK
+        id: release
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd android
+            ./gradlew assembleRelease
+          ) 2>&1 | tee "$RUNNER_TEMP/034-release.log"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+      - name: Attach signed candidate APK (not published)
+        if: steps.release.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-034-signed-update-v0.34
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record CI results (never deploy / publish)
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          mkdir -p validation
+          {
+            printf 'Android 034 stable recovery validation\n'
+            printf 'commit: %s\n' "$GITHUB_SHA"
+            printf 'run: %s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf 'outcome: %s\n' "$BUILD_OUTCOME"
+            printf 'build log last 120 lines:\n'
+            tail -n 120 "$RUNNER_TEMP/034-build.log" 2>/dev/null || true
+          } > validation/034-android-build.txt
+          printf '\\nSigned candidate outcome: %s\\n' "${{ steps.release.outcome }}" >> validation/034-android-build.txt
+          tail -n 60 "$RUNNER_TEMP/034-release.log" >> validation/034-android-build.txt 2>/dev/null || true
+          echo "Build report generated; upload as artifact, do not push to source branch."
+      - name: Upload Android validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-034-build-report
+          path: validation/034-android-build.txt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Fail job if build failed
+        if: steps.build.outcome != 'success' || steps.release.outcome != 'success'
+        run: exit 1
