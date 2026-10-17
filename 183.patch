@@ -2,7 +2,7 @@ diff --git a/supabase/migrations/20261017190000_crm_pickup_reminders.sql b/supab
 new file mode 100644
 --- /dev/null
 +++ b/supabase/migrations/20261017190000_crm_pickup_reminders.sql
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,185 @@
 +-- Patch 183: explicit, verified pickup deadlines and two manual reminder acknowledgements.
 +-- No duration is inferred from paid-storage dates or an estimated delivery date.
 +create table if not exists public.crm_pickup_reminders (
@@ -98,8 +98,7 @@ new file mode 100644
 +    select 1 from public.crm_orders o
 +    where o.id = p_order_id
 +      and btrim(coalesce(o.delivery->>'ttn','')) = btrim(p_ttn)
-+      and lower(coalesce(o.delivery->>'trackingNormalizedStatus',''))
-+        not in ('delivered','returned','returning','cancelled','deleted')
++      and lower(coalesce(o.delivery->>'trackingNormalizedStatus','')) = 'ready_for_pickup'
 +      and coalesce(o.delivery->>'trackingBuyerReceived','false') <> 'true'
 +      and coalesce(o.delivery->>'trackingReturnInProgress','false') <> 'true'
 +  ) then
@@ -144,8 +143,7 @@ new file mode 100644
 +    select 1 from public.crm_orders o
 +    where o.id = p_order_id
 +      and btrim(coalesce(o.delivery->>'ttn', '')) = btrim(p_ttn)
-+      and lower(coalesce(o.delivery->>'trackingNormalizedStatus',''))
-+          not in ('delivered','returned','returning','cancelled','deleted')
++      and lower(coalesce(o.delivery->>'trackingNormalizedStatus','')) = 'ready_for_pickup'
 +      and coalesce(o.delivery->>'trackingBuyerReceived','false') <> 'true'
 +      and coalesce(o.delivery->>'trackingReturnInProgress','false') <> 'true'
 +      and lower(coalesce(o.status,'')) not in
@@ -241,7 +239,7 @@ new file mode 100644
 +export function automaticPickupDeadline(delivery: JsonRecord): PickupDeadline | null {
 +  const carrier = carrierKind(delivery)
 +  const status = text(delivery.trackingNormalizedStatus).toLowerCase()
-+  if (!carrier || ['delivered','returned','returning','cancelled','deleted'].includes(status)
++  if (!carrier || status !== 'ready_for_pickup'
 +    || delivery.trackingBuyerReceived === true || delivery.trackingReturnInProgress === true) return null
 +
 +  // Only tracking-derived pickup arrivals are acceptable; not the estimated
@@ -281,7 +279,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts 
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,41 @@
 +import { automaticPickupDeadline } from './pickup-reminders.ts'
 +import { assertEquals } from 'jsr:@std/assert@1'
 +
@@ -298,6 +296,7 @@ new file mode 100644
 +Deno.test('received and return-in-progress cannot be reminded', () => {
 +  assertEquals(automaticPickupDeadline({ ...base, trackingBuyerReceived: true }), null)
 +  assertEquals(automaticPickupDeadline({ ...base, trackingNormalizedStatus: 'returning' }), null)
++  assertEquals(automaticPickupDeadline({ ...base, trackingNormalizedStatus: 'in_transit' }), null)
 +})
 +Deno.test('ROZETKA store uses its separate ten-calendar-day policy', () => {
 +  assertEquals(automaticPickupDeadline({ ...base, carrier: 'ROZETKA Delivery',
