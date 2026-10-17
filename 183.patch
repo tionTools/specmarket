@@ -2445,7 +2445,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/fun
 diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/functions/sync-delivery-tracking/worker.ts
 --- a/supabase/functions/sync-delivery-tracking/worker.ts
 +++ b/supabase/functions/sync-delivery-tracking/worker.ts
-@@ -1,232 +1,250 @@
+@@ -1,232 +1,255 @@
 -import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 -import { carrierKind } from './carrier-detection.ts'
 -import { meestStatus } from './carriers/meest.ts'
@@ -2707,7 +2707,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
 +  shipping: unknown
 +  delivery: unknown
 +}
-+type TrackingStateRow = { order_id: string; last_checked_at: unknown }
++type TrackingStateRow = { order_id: string; last_checked_at: unknown; details?: unknown }
 +
 +function currentKyiv() {
 +  const parts = new Intl.DateTimeFormat('en-GB', {
@@ -2791,7 +2791,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
 +  )
 +  const ids = orderRows.map((row) => row.id)
 +  const { data: states, error: statesError } = ids.length
-+    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at').in('order_id', ids)
++    ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at, details').in('order_id', ids)
 +    : { data: [], error: null }
 +  if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
 +  const trackingStates = (states ?? []) as TrackingStateRow[]
@@ -2903,7 +2903,11 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
 +          updated += 1
 +        }
 +        const computedDeadline = automaticPickupDeadline(nextDelivery)
-+        if (computedDeadline) {
++        const reminderKey = computedDeadline
++          ? [text(nextDelivery.ttn), computedDeadline.date, computedDeadline.basis].join(':')
++          : ''
++        const priorKey = text(record(stateByOrder.get(row.id)?.details).pickupReminderKey)
++        if (computedDeadline && priorKey !== reminderKey) {
 +          const { error: reminderError } = await admin.rpc('crm_sync_pickup_reminder_auto', {
 +            p_order_id: row.id,
 +            p_ttn: text(nextDelivery.ttn),
@@ -2912,6 +2916,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
 +          })
 +          if (reminderError) throw reminderError
 +        }
++        state.details = { ...(result.details ?? {}), pickupReminderKey: reminderKey }
 +        pendingSuccessStates.push(state)
 +      } catch (error) {
 +        failed += 1
