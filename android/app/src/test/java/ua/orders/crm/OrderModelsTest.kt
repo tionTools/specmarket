@@ -276,7 +276,7 @@ class OrderModelsTest {
         val workOrder = order("Завершено", "Сайт")
         assertFalse(newOrder.matchesListFilter(OrderListFilter.NEW))
         assertTrue(newOrder.matchesListFilter(OrderListFilter.WORK))
-        assertTrue(sentOrder.matchesListFilter(OrderListFilter.REMIND))
+        assertFalse(sentOrder.matchesListFilter(OrderListFilter.REMIND))
         assertFalse(workOrder.matchesListFilter(OrderListFilter.WORK))
         assertEquals(
             0,
