@@ -1,0 +1,65 @@
+name: Patch 183 server validation (no deploy)
+on:
+  push:
+    branches:
+      - chatgpt-patches
+    paths:
+      - '183.patch'
+      - '.github/workflows/validate-backend-183.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt-patches
+          path: patches
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Validate patch and backend tests (no database modifications)
+        id: check
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            cd source
+            git apply --check ../patches/183.patch
+            git apply ../patches/183.patch
+            git diff --check
+            deno test -A supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
+            deno check supabase/functions/sync-delivery-tracking/pickup-reminders.ts
+            deno check supabase/functions/sync-delivery-tracking/worker.ts
+          } 2>&1 | tee "$RUNNER_TEMP/183-backend.log"
+      - name: Commit read-only verification report
+        if: always()
+        env:
+          VALIDATION_OUTCOME: ${{ steps.check.outcome }}
+        shell: bash
+        run: |
+          cd patches
+          mkdir -p validation
+          {
+            printf 'Patch 183 backend validation\n'
+            printf 'base: 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e\n'
+            printf 'patch source commit: %s\n' "$GITHUB_SHA"
+            printf 'run: %s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf 'outcome: %s\n' "$VALIDATION_OUTCOME"
+            printf 'log tail:\n'
+            tail -n 140 "$RUNNER_TEMP/183-backend.log" 2>/dev/null || true
+          } > validation/183-backend.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add validation/183-backend.txt
+          git commit -m "Record server Patch 183 validation [skip ci]" || true
+          git push origin HEAD:chatgpt-patches
+      - name: Fail if validation failed
+        if: steps.check.outcome != 'success'
+        run: exit 1
