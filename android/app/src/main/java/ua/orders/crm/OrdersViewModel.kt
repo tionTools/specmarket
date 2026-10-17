@@ -35,6 +35,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var selectedId by mutableStateOf<String?>(null); private set
     var detail by mutableStateOf<Order?>(null); private set
     var acceptingId by mutableStateOf<String?>(null); private set
+    var pickupReminders by mutableStateOf<Map<String, PickupReminderState>>(emptyMap()); private set
+    var pickupBusy by mutableStateOf(false); private set
 
     init {
         viewModelScope.launch {
@@ -261,6 +263,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         detail = null
         pendingNotificationIds.clear()
         initialLoadComplete = false
+        pickupReminders = emptyMap()
     }
 
     private fun merge(order: Order) {
@@ -314,6 +317,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             refreshed.filter { it.id !in knownIds }.distinctBy { it.id }
                         } else emptyList()
                         orders = mergeOrders(orders, refreshed)
+                        pickupReminders = repository.pickupReminders().associateBy { it.orderId }
                         initialLoadComplete = true
                         for (order in discovered) notifyOrQueue(order)
                         selectedId?.let { id ->
@@ -342,6 +346,44 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     refreshJob = null
                 }
             }
+        }
+    }
+
+    fun savePickupDeadline(order: Order, deadline: String) {
+        if (pickupBusy) return
+        val ttn = order.deliveryValue("ttn").trim()
+        if (ttn.isEmpty()) { message = "У заказа нет ТТН."; return }
+        pickupBusy = true
+        viewModelScope.launch {
+            try {
+                repository.setPickupDeadline(order.id, ttn, deadline)
+                pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                message = "Крайний срок сохранён."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { message = "Не удалось сохранить срок. Обновите заказ и повторите." }
+            finally { pickupBusy = false }
+        }
+    }
+
+    fun confirmPickupSent(order: Order, stage: PickupReminderStage, channel: String) {
+        if (pickupBusy) return
+        val reminder = pickupReminders[order.id] ?: return
+        if (order.pendingPickupReminder(reminder) != stage) {
+            message = "Напоминание устарело. Обновите заказ."
+            return
+        }
+        pickupBusy = true
+        viewModelScope.launch {
+            try {
+                repository.confirmPickupReminder(order.id, reminder.ttn, reminder.deadline, stage, channel)
+                pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                message = "Напоминание отмечено как отправленное."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                message = "Не удалось сохранить отправку. Обновите заказ и проверьте состояние."
+                try { pickupReminders = repository.pickupReminders().associateBy { it.orderId } }
+                catch (_: Exception) { }
+            } finally { pickupBusy = false }
         }
     }
 
