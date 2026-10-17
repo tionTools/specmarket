@@ -188,6 +188,11 @@ fun OrdersApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
+    LaunchedEffect(filterName, vm.email, vm.initializing) {
+        if (filterName == OrderListFilter.REMIND.name && vm.email != null && !vm.initializing) {
+            vm.loadPickupReminders()
+        }
+    }
     var confirmationId by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
@@ -509,14 +514,16 @@ private fun extraProductsLabel(count: Int): String = when {
 }
 
 @Composable
-private fun OrderFilters(
+internal fun OrderFilters(
     orders: List<Order>,
+    reminders: Map<String, PickupReminderState>,
+    remindersLoaded: Boolean,
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         items(OrderListFilter.entries) { filter ->
             val active = filter == selected
@@ -527,9 +534,9 @@ private fun OrderFilters(
                 contentColor = if (active) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
             ) {
                 Row(
-                    Modifier.padding(start = 14.dp, end = 9.dp, top = 9.dp, bottom = 9.dp),
+                    Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Text(filter.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
                     Surface(
@@ -538,8 +545,13 @@ private fun OrderFilters(
                         contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         Text(
-                            orders.count { it.matchesListFilter(filter) }.toString(),
-                            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            if (filter == OrderListFilter.REMIND && !remindersLoaded) "—"
+                            else orders.count {
+                                if (filter == OrderListFilter.REMIND) {
+                                    it.isPickupReminderDue(reminders[it.id])
+                                } else it.matchesListFilter(filter)
+                            }.toString(),
+                            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
@@ -569,7 +581,8 @@ private fun OrdersScreen(
 ) {
     val orders = remember(vm.orders) { vm.orders.filter(::isOrderVisibleInMainList) }
     val visibleOrders = remember(orders, searchQuery, filter) {
-        orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
+        if (filter == OrderListFilter.REMIND) emptyList()
+        else orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
     }
     LaunchedEffect(restoreAnchorId, visibleOrders) {
         if (restoreAnchorId == null || visibleOrders.isEmpty()) return@LaunchedEffect
@@ -626,8 +639,21 @@ private fun OrdersScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OrderFilters(orders, filter, onFilterChange)
-            PullToRefreshBox(
+            OrderFilters(
+                orders, vm.pickupReminders, vm.pickupLoaded, filter, onFilterChange,
+            )
+            if (filter == OrderListFilter.REMIND) {
+                PickupReminderContent(
+                    orders = orders.filter { it.matchesOrderSearch(searchQuery) },
+                    reminders = vm.pickupReminders,
+                    loading = vm.pickupLoading,
+                    busy = vm.pickupBusy,
+                    error = vm.pickupError,
+                    onRefresh = vm::loadPickupReminders,
+                    onSaveDeadline = vm::savePickupDeadline,
+                    onConfirmSent = vm::confirmPickupSent,
+                )
+            } else PullToRefreshBox(
                 isRefreshing = vm.loading,
                 onRefresh = { vm.manualRefresh() },
                 modifier = Modifier.weight(1f),
