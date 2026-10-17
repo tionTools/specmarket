@@ -38,8 +38,8 @@ FILES (backend patch only)
 - storage.ts, worker.ts
 
 VALIDATION CHECKS
-- Initial structural patch validation: 9 file hunks, lengths and old content matched main at SHA listed above.
-- git apply --check, git diff --check, SQL migration dry-run, deno tests, TypeScript check and carrier fixtures have NOT been executed in a checkout.
+- Structural verification: 9 file sections, all compact unified-diff hunks simulated against the fetched current main-file contents with PASS (this is NOT git apply --check).
+- Real git apply --check, git diff --check, SQL migration dry-run, Deno tests, TypeScript check, carrier fixtures and Android build have NOT been executed in a checkout. Android test referencing old SENT filter was updated on the feature branch.
 - Apply schema migration before deploying changed worker; otherwise the worker RPC will fail for eligible shipments.
 - Confirm actual DB order UUID, table/RLS names, tracker state.details schema, state collision behaviour, status events, transport contracts.
 - Verify SQL auth/guest restrictions, manual override race, duplicate acknowledgment, TTN change, destination redirection, receiver pickup, delivery extensions.
