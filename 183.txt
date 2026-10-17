@@ -54,4 +54,13 @@ VALIDATION CHECKS
 - Test only first stage on day -2/-1 and second stage on day 0.
 - Review mobile branch separately; do not delegate Android coding to Codex.
 
-STATUS: DRAFT / NOT GREEN. No Codex handoff and no deployment until missing policy/date provenance validated and user authorizes.
+VERIFICATION UPDATE — 2026-10-17:
+- Backend production code not deployed; migration not applied to production.
+- Actual clean-checkout git apply --check + git apply + git diff --check PASS on main SHA 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e.
+- Deno tests (6) PASS and deno check for worker + pickup reminder module PASS.
+- Separate disposable PostgreSQL 16 migration smoke PASS; manual deadline RPC, sending confirmation RPC, service-role auto RPC, and manual deadline override persistence verified.
+- Successful CI run for current backend patch version: https://github.com/tionTools/specmarket/actions/runs/39062549663
+- Android source in feature/android-pickup-reminders-183: tests, lint and debug compilation passed for earlier intermediate commit, with APK artifact; latest changes must still have successful CI verification. Android belongs to ChatGPT, never Codex.
+- Four-carrier condition remains FAIL-CLOSED: deadline automatically emitted only when reliable rule and actual arrival evidence exist; some Meest and Ukrposhta shipments therefore require manual deadline entry. Never claim four-carrier fully automatic coverage.
+NEXT HANDOFF: Codex applies backend 183.patch from chatgpt-patches in exact base checkout, runs tests, prepares PR only with user's permission, performs NO SQL deploy / Edge deploy / merge without explicit approval. Android remains separate.
+STATUS: BACKEND TEST GREEN / INTEGRATION NOT DEPLOYED / ANDROID LATEST APK PENDING. No production changes.
