@@ -522,8 +522,8 @@ internal fun OrderFilters(
     onSelected: (OrderListFilter) -> Unit,
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         items(OrderListFilter.entries) { filter ->
             val active = filter == selected
@@ -534,9 +534,9 @@ internal fun OrderFilters(
                 contentColor = if (active) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
             ) {
                 Row(
-                    Modifier.padding(start = 14.dp, end = 9.dp, top = 9.dp, bottom = 9.dp),
+                    Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Text(filter.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
                     Surface(
@@ -551,7 +551,7 @@ internal fun OrderFilters(
                                     it.isPickupReminderDue(reminders[it.id])
                                 } else it.matchesListFilter(filter)
                             }.toString(),
-                            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
