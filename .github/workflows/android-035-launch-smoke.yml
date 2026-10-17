@@ -1,7 +1,7 @@
 name: Android 0.35 reminders launch smoke
 on:
   push:
-    branches: [feature/android-pickup-safe-v035]
+    branches: [fix/android-035-legacy-kyiv-timezone]
     paths:
       - '.github/workflows/android-035-launch-smoke.yml'
       - 'android/**'

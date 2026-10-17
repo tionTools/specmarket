@@ -2,7 +2,7 @@ name: Android 0.35 reminders validation (no publishing)
 on:
   push:
     branches:
-      - feature/android-pickup-safe-v035
+      - fix/android-035-legacy-kyiv-timezone
     paths:
       - 'android/**'
       - '.github/workflows/android-035-validate.yml'
