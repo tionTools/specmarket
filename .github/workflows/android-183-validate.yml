@@ -49,11 +49,15 @@ jobs:
             printf 'build log last 120 lines:\n'
             tail -n 120 "$RUNNER_TEMP/183-build.log" 2>/dev/null || true
           } > validation/183-android-build.txt
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add validation/183-android-build.txt
-          git commit -m "Record Android 183 validation result [skip ci]" || true
-          git push origin HEAD:feature/android-pickup-reminders-183
+          echo "Build report generated; upload as artifact, do not push to source branch."
+      - name: Upload Android validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-183-build-report
+          path: validation/183-android-build.txt
+          retention-days: 7
+          if-no-files-found: error
       - name: Fail job if build failed
         if: steps.build.outcome != 'success'
         run: exit 1
