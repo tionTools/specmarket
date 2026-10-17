@@ -85,3 +85,12 @@ WINDOWS CODEX STOP REPORT — 2026-10-17
 - Diagnose process/sandbox vs cache before retry: PowerShell Get-Command deno, deno --version, deno info, choose a fresh writable DENO_DIR inside isolated worktree, deno test -A on the one test. Do not modify code, existing patches, global ACL, Windows Defender, tokens, production.
 - If OS access is still denied, report exact failing command, file/path, process mode, stderr/log and stop; no unsandboxed privilege escalation without separate user consent.
 - Backend deploy, merge, PR and Android install remain unauthorised.
+
+LOCAL CODEX VERIFICATION — PASS (2026-10-17)
+- Separate clean worktree at exact main SHA 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e; Patch 183 applied exactly once.
+- git apply --check PASS, git diff --check PASS.
+- Windows Deno test 6/6 PASS with DENO_DIR under the worktree, run outside Codex sandbox. Earlier os error 5 was sandbox access only; Windows ACL unchanged.
+- deno check for pickup-reminders.ts and worker.ts PASS.
+- READ-ONLY real-production SQL schema compatibility preflight: crm_orders and crm_delivery_tracking_state required columns/types present; auth roles/functions present, no RPC name conflicts.
+- SQL migration NOT run against production or the local DB; independent disposable PostgreSQL CI smoke PASS.
+- No PR, merge, production migration, Edge deploy, or Android installation. Next phase requires explicit user approval per project release policy.
