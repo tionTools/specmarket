@@ -116,7 +116,9 @@ class OrdersRepository {
     }.decodeList<Order>().firstOrNull()
 
     suspend fun pickupReminders(): List<PickupReminderState> =
-        client.from("crm_pickup_reminders").select().decodeList<PickupReminderState>()
+        client.from("crm_pickup_reminders")
+            .select(Columns.raw("order_id,ttn,deadline,first_sent_at,first_channel,last_sent_at,last_channel"))
+            .decodeList<PickupReminderState>()
 
     suspend fun setPickupDeadline(orderId: String, ttn: String, deadline: String) {
         check(client.auth.currentSessionOrNull() != null)
