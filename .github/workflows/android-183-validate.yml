@@ -35,6 +35,44 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
+      - name: Prepare signed update candidate (no publication)
+        id: release_signing
+        env:
+          ORDERS_RELEASE_STORE_B64: ${{ secrets.ORDERS_RELEASE_STORE_B64 }}
+          ORDERS_RELEASE_STORE_PASS: ${{ secrets.ORDERS_RELEASE_STORE_PASS }}
+          ORDERS_RELEASE_ALIAS: ${{ secrets.ORDERS_RELEASE_ALIAS }}
+          ORDERS_RELEASE_KEY_PASS: ${{ secrets.ORDERS_RELEASE_KEY_PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORDERS_RELEASE_STORE_B64"
+          test -n "$ORDERS_RELEASE_STORE_PASS"
+          test -n "$ORDERS_RELEASE_ALIAS"
+          test -n "$ORDERS_RELEASE_KEY_PASS"
+          printf '%s' "$ORDERS_RELEASE_STORE_B64" | base64 --decode > "$RUNNER_TEMP/orders-release.jks"
+          echo "ORDERS_RELEASE_STORE_FILE=$RUNNER_TEMP/orders-release.jks" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_STORE_PASS=$ORDERS_RELEASE_STORE_PASS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_ALIAS=$ORDERS_RELEASE_ALIAS" >> "$GITHUB_ENV"
+          echo "ORDERS_RELEASE_KEY_PASS=$ORDERS_RELEASE_KEY_PASS" >> "$GITHUB_ENV"
+      - name: Build and verify signed candidate APK
+        id: release
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd android
+            ./gradlew assembleRelease
+          ) 2>&1 | tee "$RUNNER_TEMP/183-release.log"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+      - name: Attach signed candidate APK (not published)
+        if: steps.release.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-183-signed-update-v0.30
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Record CI results (never deploy / publish)
         if: always()
         env:
@@ -49,6 +87,8 @@ jobs:
             printf 'build log last 120 lines:\n'
             tail -n 120 "$RUNNER_TEMP/183-build.log" 2>/dev/null || true
           } > validation/183-android-build.txt
+          printf '\\nSigned candidate outcome: %s\\n' "${{ steps.release.outcome }}" >> validation/183-android-build.txt
+          tail -n 60 "$RUNNER_TEMP/183-release.log" >> validation/183-android-build.txt 2>/dev/null || true
           echo "Build report generated; upload as artifact, do not push to source branch."
       - name: Upload Android validation report
         if: always()
@@ -59,5 +99,5 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - name: Fail job if build failed
-        if: steps.build.outcome != 'success'
+        if: steps.build.outcome != 'success' || steps.release.outcome != 'success'
         run: exit 1
