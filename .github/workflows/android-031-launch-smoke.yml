@@ -35,31 +35,7 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: |
-            set -eu
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c
-            adb shell am start -W -n ua.orders.crm/.MainActivity
-            sleep 8
-            mkdir -p validation
-            adb logcat -d -v time > validation/031-logcat.txt
-            adb shell dumpsys activity activities > validation/031-activities.txt
-            PID="$(adb shell pidof ua.orders.crm | tr -d '\r')"
-            echo "App PID after cold start: $PID"
-            if [ -z "$PID" ]; then
-              echo "APP_CRASH_OR_EXIT"
-              grep -A 35 -B 8 -E "FATAL EXCEPTION|Process: ua.orders.crm|AndroidRuntime|Fatal signal" validation/031-logcat.txt | tail -n 200 || true
-              exit 1
-            fi
-            adb shell input keyevent 3
-            sleep 2
-            adb shell am start -W -n ua.orders.crm/.MainActivity
-            sleep 5
-            if ! adb shell pidof ua.orders.crm; then
-              echo "APP_CRASH_ON_RESUME"
-              exit 1
-            fi
-            grep -A 28 -B 6 -E "FATAL EXCEPTION|Process: ua.orders.crm" validation/031-logcat.txt | tail -n 80 || true
+          script: bash android/ci/launch-smoke.sh
       - name: Upload runtime diagnosis
         if: always()
         uses: actions/upload-artifact@v4
