@@ -41,5 +41,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-034-runtime-diagnosis
-          path: validation/034-*.txt
+          path: |
+            validation/034-*.txt
+            validation/034-reminders.png
           retention-days: 7
