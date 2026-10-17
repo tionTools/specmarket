@@ -2,7 +2,7 @@ name: Android 0.36 reminders validation (no publishing)
 on:
   push:
     branches:
-      - fix/android-036-legacy-kyiv-timezone
+      - feature/android-reminder-filter-v036
     paths:
       - 'android/**'
       - '.github/workflows/android-036-validate.yml'

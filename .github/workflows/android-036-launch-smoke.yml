@@ -1,7 +1,7 @@
 name: Android 0.36 reminders launch smoke
 on:
   push:
-    branches: [fix/android-036-legacy-kyiv-timezone]
+    branches: [feature/android-reminder-filter-v036]
     paths:
       - '.github/workflows/android-036-launch-smoke.yml'
       - 'android/**'
