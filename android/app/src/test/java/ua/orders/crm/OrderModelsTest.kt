@@ -238,7 +238,7 @@ class OrderModelsTest {
             assertFalse(candidate.matchesListFilter(OrderListFilter.NEW))
             assertTrue(candidate.matchesListFilter(OrderListFilter.WORK))
         }
-        assertTrue(sent.matchesListFilter(OrderListFilter.SENT))
+        assertFalse(sent.matchesListFilter(OrderListFilter.REMIND))
         assertFalse(sent.matchesListFilter(OrderListFilter.NEW))
         assertFalse(sent.matchesListFilter(OrderListFilter.WORK))
         assertFalse(unrecognized.matchesListFilter(OrderListFilter.NEW))
@@ -276,7 +276,7 @@ class OrderModelsTest {
         val workOrder = order("Завершено", "Сайт")
         assertFalse(newOrder.matchesListFilter(OrderListFilter.NEW))
         assertTrue(newOrder.matchesListFilter(OrderListFilter.WORK))
-        assertTrue(sentOrder.matchesListFilter(OrderListFilter.SENT))
+        assertTrue(sentOrder.matchesListFilter(OrderListFilter.REMIND))
         assertFalse(workOrder.matchesListFilter(OrderListFilter.WORK))
         assertEquals(
             0,

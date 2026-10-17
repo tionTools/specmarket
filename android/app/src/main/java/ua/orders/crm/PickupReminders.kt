@@ -66,6 +66,11 @@ fun Order.isNovaPickupPoint(): Boolean {
     }
 }
 
+fun Order.isPickupReminderDue(
+    reminder: PickupReminderState?,
+    today: LocalDate = pickupToday(),
+): Boolean = pendingPickupReminder(reminder, today) != null
+
 fun Order.needsPickupDeadline(reminder: PickupReminderState?): Boolean {
     val ttn = deliveryValue("ttn").trim()
     if (ttn.isEmpty() || normalizedStatus(deliveryValue("trackingNormalizedStatus")) != "ready_for_pickup") return false

@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.*
+import androidx.compose.material3.Text
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -24,17 +27,25 @@ class PickupReminderPreviewActivity : ComponentActivity() {
         ).associateBy { it.orderId }
         setContent {
             MaterialTheme(colorScheme = ordersColors(false), typography = ordersTypography(false)) {
-                PickupReminderContent(
-                    orders = listOf(order, last, missing, sent),
-                    reminders = reminders,
-                    loading = false,
-                    busy = false,
-                    error = null,
-                    onBack = {},
-                    onRefresh = {},
-                    onSaveDeadline = { _, _ -> },
-                    onConfirmSent = { _, _, _ -> },
-                )
+                var selected by remember { mutableStateOf(OrderListFilter.REMIND) }
+                val all = listOf(order, last, missing, sent)
+                Column {
+                    OrderFilters(all, reminders, true, selected, { selected = it })
+                    if (selected == OrderListFilter.REMIND) {
+                        PickupReminderContent(
+                            orders = all,
+                            reminders = reminders,
+                            loading = false,
+                            busy = false,
+                            error = null,
+                            onRefresh = {},
+                            onSaveDeadline = { _, _ -> },
+                            onConfirmSent = { _, _, _ -> },
+                        )
+                    } else {
+                        Text("Пример обычного списка заказов")
+                    }
+                }
             }
         }
     }

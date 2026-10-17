@@ -38,6 +38,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     // Optional, lazy-loaded feature state. Core order refresh never touches it.
     var pickupReminders by mutableStateOf<Map<String, PickupReminderState>>(emptyMap()); private set
     var pickupLoading by mutableStateOf(false); private set
+    var pickupLoaded by mutableStateOf(false); private set
     var pickupBusy by mutableStateOf(false); private set
     var pickupError by mutableStateOf<String?>(null); private set
     private var pickupGeneration = 0L
@@ -272,6 +273,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupJob?.cancel()
         pickupJob = null
         pickupReminders = emptyMap()
+        pickupLoaded = false
         pickupLoading = false
         pickupBusy = false
         pickupError = null
@@ -367,16 +369,20 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         val generation = ++pickupGeneration
         pickupJob?.cancel()
         pickupLoading = true
+        pickupLoaded = false
+        pickupReminders = emptyMap()
         pickupError = null
         pickupJob = viewModelScope.launch {
             try {
                 val reminders = withTimeout(15_000) { repository.pickupReminders() }
                 if (email == account && generation == pickupGeneration) {
                     pickupReminders = reminders.associateBy { it.orderId }
+                    pickupLoaded = true
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) {
                 if (email == account && generation == pickupGeneration) {
+                    pickupLoaded = false
                     pickupError = "Не удалось загрузить напоминания. Заказы доступны как обычно."
                 }
             } finally {

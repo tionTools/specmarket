@@ -16,6 +16,21 @@ class PickupRemindersTest {
     private fun state(days: Long, first: String? = null, last: String? = null) =
         PickupReminderState("id", "20450000000000", date.plusDays(days).toString(), firstSentAt = first, lastSentAt = last)
 
+    @Test fun remind_filter_excludes_undated_sent_and_non_due_orders() {
+        assertTrue(order().isPickupReminderDue(state(2), date))
+        assertTrue(order().isPickupReminderDue(state(1), date))
+        assertTrue(order().isPickupReminderDue(state(0), date))
+        assertFalse(order().isPickupReminderDue(null, date))
+        assertFalse(order().isPickupReminderDue(state(3), date))
+        assertFalse(order().isPickupReminderDue(state(2, first = "sent"), date))
+        assertFalse(order().isPickupReminderDue(state(0, last = "sent"), date))
+        assertFalse(order(status = "Скасовано").isPickupReminderDue(state(2), date))
+        assertFalse(order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("trackingNormalizedStatus", "in_transit")
+        }).isPickupReminderDue(state(2), date))
+    }
+
     @Test fun reminders_due_on_two_days_and_final_day_independently() {
         assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(2), date))
         assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(1), date))

@@ -20,24 +20,6 @@ import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-// Separate, on-demand page: the proven v0.29 orders UI and refresh
-// remain untouched even if the optional reminder backend fails.
-@Composable
-fun PickupRemindersScreen(vm: OrdersViewModel, onBack: () -> Unit) {
-    LaunchedEffect(vm.email) { if (vm.email != null) vm.loadPickupReminders() }
-    PickupReminderContent(
-        orders = vm.orders,
-        reminders = vm.pickupReminders,
-        loading = vm.pickupLoading,
-        busy = vm.pickupBusy,
-        error = vm.pickupError,
-        onBack = onBack,
-        onRefresh = vm::loadPickupReminders,
-        onSaveDeadline = vm::savePickupDeadline,
-        onConfirmSent = vm::confirmPickupSent,
-    )
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PickupReminderContent(
@@ -46,7 +28,6 @@ internal fun PickupReminderContent(
     loading: Boolean,
     busy: Boolean,
     error: String?,
-    onBack: () -> Unit,
     onRefresh: () -> Unit,
     onSaveDeadline: (Order, String) -> Unit,
     onConfirmSent: (Order, PickupReminderStage, String) -> Unit,
@@ -58,26 +39,27 @@ internal fun PickupReminderContent(
     var sentConfirmation by remember { mutableStateOf<Triple<Order, PickupReminderStage, String>?>(null) }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
-            order.pendingPickupReminder(reminders[order.id], today) != null ||
-                order.needsPickupDeadline(reminders[order.id])
+            order.isPickupReminderDue(reminders[order.id], today)
         }
     }
 
-    Scaffold(
-        topBar = { TopAppBar(
-            title = { Text("Напоминания") },
-            navigationIcon = { TextButton(onBack) { Text("Назад") } },
-            actions = { TextButton(onRefresh, enabled = !loading && !busy) { Text("Обновить") } },
-        ) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Кому пора напомнить", style = MaterialTheme.typography.titleSmall)
+            TextButton(onRefresh, enabled = !loading && !busy) { Text("Обновить") }
+        }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error != null) {
                 Text(error, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
-            Text("Сроки из штатной синхронизации доставок. Сообщения отправляете вы.",
-                modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
+            Text("Сроки получены из штатной синхронизации. Сообщения отправляются вручную.",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
@@ -110,7 +92,7 @@ internal fun PickupReminderContent(
                                 PickupReminderStage.FIRST ->
                                     if (days == 1L) "Напомнить: остался 1 день" else "Напомнить: осталось 2 дня"
                                 PickupReminderStage.LAST -> "Напомнить: сегодня последний день"
-                                null -> "Уточнить крайний срок получения"
+                                null -> "Напоминание не требуется"
                             }
                             Text(caption, fontWeight = FontWeight.SemiBold)
                             if (reminder != null && reminder.ttn == order.deliveryValue("ttn").trim()) {
@@ -150,7 +132,6 @@ internal fun PickupReminderContent(
                     }
                 }
             }
-        }
     }
 
     if (edit != null) {
