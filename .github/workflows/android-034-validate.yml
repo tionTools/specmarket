@@ -2,7 +2,7 @@ name: Android 0.34 reminders validation (no publishing)
 on:
   push:
     branches:
-      - hotfix/android-stable-034
+      - feature/android-pickup-safe-v034
     paths:
       - 'android/**'
       - '.github/workflows/android-034-validate.yml'
