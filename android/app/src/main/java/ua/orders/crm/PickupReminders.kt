@@ -24,6 +24,18 @@ enum class PickupReminderStage(val databaseValue: String) {
 
 fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
 
+// Parcels with no reliable deadline must remain discoverable in the
+// reminder filter; otherwise the operator would have to search all orders.
+fun Order.needsPickupDeadline(reminder: PickupReminderState?): Boolean {
+    val ttn = deliveryValue("ttn").trim()
+    if (ttn.isEmpty() || normalizedStatus(deliveryValue("trackingNormalizedStatus")) != "ready_for_pickup") return false
+    if (deliveryFlag("trackingBuyerReceived") || deliveryFlag("trackingReturnInProgress") || hasReturnSignal()) return false
+    if (Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
+            .containsMatchIn(status.orEmpty())) return false
+    return reminder == null || reminder.ttn.trim() != ttn ||
+        runCatching { LocalDate.parse(reminder.deadline) }.isFailure
+}
+
 fun Order.pendingPickupReminder(
     reminder: PickupReminderState?,
     today: LocalDate = pickupToday(),
