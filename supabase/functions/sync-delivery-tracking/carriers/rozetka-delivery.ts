@@ -40,6 +40,12 @@ export async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
   const base = rozetkaReadableStatus(source, code)
   const finalDepartment = record(shipment.final_department)
   const finalDepartmentName = text(finalDepartment.public_name) || text(finalDepartment.name)
+  const readyEvents = events.filter((event) =>
+    /у\s+відділенн|готов.*до\s+видачі/i.test(text(event.name))
+    && text(event.date),
+  )
+  const arrivedAt = readyEvents.sort((a, b) =>
+    parseTrackingDate(a.date) - parseTrackingDate(b.date))[0]
   const trackingEvents = compactEvents(events.map((event) => ({
     at: text(event.date),
     status: text(event.name),
@@ -59,6 +65,9 @@ export async function rozetkaStatus(ttn: string): Promise<TrackingResult> {
       trackingEventAt: text(latest.date) || text(fallback.date) || text(shipment.last_status_date),
       trackingLocation: rozetkaLocation(latest) || rozetkaLocation(fallback) || finalDepartmentName,
       trackingStatusCode: code,
+      trackingPickupArrivedAt: arrivedAt ? text(arrivedAt.date)
+        : base.normalizedStatus === 'ready_for_pickup' ? text(latest.date) : undefined,
+      trackingPickupLocationType: finalDepartmentName ? 'rozetka_store' : undefined,
     },
   }
 }

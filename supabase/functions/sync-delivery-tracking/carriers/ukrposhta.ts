@@ -3,6 +3,9 @@ import type { TrackingDestination, TrackingResult } from '../types.ts'
 
 function ukrposhtaReadableStatus(source: string, code: string, reason: string) {
   if (code === '10100') return { status: 'Принято перевозчиком', final: false, normalizedStatus: 'accepted' }
+  if (code === '21700') return {
+    status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup',
+  }
   if (code === '31300') return { status: 'Переадресовано', final: false, normalizedStatus: 'forwarding' }
   if (code === '31200') return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
   if (code === '41000' && reason === '10') return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
@@ -51,6 +54,13 @@ export async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
     country: text(event.country),
   })))
   const wasForwarded = events.some((event) => text(event.event) === '31300')
+  // 21700 is an arrival at a branch, not a shipping ETA. The final branch
+  // index guards against transit through intermediate sorting branches.
+  const arrived = events
+    .filter((event) =>
+      text(event.event) === '21700' && text(event.index)
+        && text(event.index) === text(latest.index) && text(event.date))
+    .sort((a, b) => Date.parse(text(a.date)) - Date.parse(text(b.date)))[0]
   return {
     ...base,
     status: source || base.status,
@@ -67,6 +77,7 @@ export async function ukrposhtaStatus(ttn: string): Promise<TrackingResult> {
       trackingLocationCode: text(latest.index),
       trackingLocationCountry: text(latest.country),
       trackingStatusCode: eventCode,
+      trackingPickupArrivedAt: arrived ? text(arrived.date) : undefined,
       trackingDeliveredAt: deliveredAt,
     },
   }
