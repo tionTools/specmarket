@@ -10,6 +10,7 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order as SortOrder
 import io.github.jan.supabase.realtime.*
@@ -113,6 +114,31 @@ class OrdersRepository {
         filter { eq("id", id) }
         limit(1)
     }.decodeList<Order>().firstOrNull()
+
+    suspend fun pickupReminders(): List<PickupReminderState> =
+        client.from("crm_pickup_reminders").select().decodeList<PickupReminderState>()
+
+    suspend fun setPickupDeadline(orderId: String, ttn: String, deadline: String) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_set_pickup_reminder_deadline", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_deadline", deadline)
+        })
+    }
+
+    suspend fun confirmPickupReminder(
+        orderId: String, ttn: String, deadline: String, stage: PickupReminderStage, channel: String
+    ) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_confirm_pickup_reminder", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_deadline", deadline)
+            put("p_stage", stage.databaseValue)
+            put("p_channel", channel)
+        })
+    }
 
     suspend fun accept(route: AcceptRoute, externalId: String): AcceptResponse {
         check(client.auth.currentSessionOrNull() != null)
