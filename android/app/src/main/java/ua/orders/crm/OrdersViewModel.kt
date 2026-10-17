@@ -317,7 +317,15 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             refreshed.filter { it.id !in knownIds }.distinctBy { it.id }
                         } else emptyList()
                         orders = mergeOrders(orders, refreshed)
-                        pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                        // A missing/upgrading reminder table must not disable the core
+                        // orders screen or its cache. Never show stale reminders on failure.
+                        pickupReminders = try {
+                            repository.pickupReminders().associateBy { it.orderId }
+                        } catch (cancel: CancellationException) {
+                            throw cancel
+                        } catch (_: Exception) {
+                            emptyMap()
+                        }
                         initialLoadComplete = true
                         for (order in discovered) notifyOrQueue(order)
                         selectedId?.let { id ->

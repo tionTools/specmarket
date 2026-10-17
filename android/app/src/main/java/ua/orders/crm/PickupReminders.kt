@@ -27,27 +27,38 @@ fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
 // Parcels with no reliable deadline must remain discoverable in the
 // reminder filter; otherwise the operator would have to search all orders.
 
-// Explicit Nova Poshta pickup-point names only. Never classify a regular branch
-// or parcel locker from the carrier name or a generic "ready for pickup" state.
-private val novaPickupPointName = Regex(
-    """(?:пункт\s+(?:(?:приймання|прийому|приема|приёма)\s*(?:[-/]|та|и)\s*)?(?:видачі|видачи|выдачи)|parcel[\s-]*shop|(?<!\p{L})пвз(?!\p{L}))""",
-    RegexOption.IGNORE_CASE,
-)
+// This runs for every visible order card. Avoid eager static Regex
+// initialization: some Android platform regex engines behave differently
+// from the desktop JVM used by unit tests.
+private fun tokenIn(text: String, word: String): Boolean {
+    var from = 0
+    while (true) {
+        val at = text.indexOf(word, from)
+        if (at < 0) return false
+        val leftIsLetter = at > 0 && text[at - 1].isLetter()
+        val right = at + word.length
+        val rightIsLetter = right < text.length && text[right].isLetter()
+        if (!leftIsLetter && !rightIsLetter) return true
+        from = at + word.length
+    }
+}
 
 fun Order.isNovaPickupPoint(): Boolean {
     val carrier = normalizedStatus(deliveryValue("carrier"))
-    val nova = carrier.contains("nova") || carrier.contains("нова") ||
-        carrier.contains("новой") || carrier.contains("нової") ||
-        carrier.contains("novaposhta") || carrier.contains("новапошта") ||
-        Regex("""(?<!\p{L})нп(?!\p{L})""", RegexOption.IGNORE_CASE).containsMatchIn(carrier)
+    val nova = listOf("nova", "нова", "новой", "нової", "novaposhta", "новапошта")
+        .any(carrier::contains) || tokenIn(carrier, "нп")
     if (!nova || deliveryValue("ttn").isBlank()) return false
     return listOf(
         "trackingLocation", "trackingDestinationAddress", "address", "warehouseRecipient",
         "recipientAddress", "trackingPickupLocationDescription",
     ).any { field ->
-        val location = deliveryValue(field)
-        !Regex("поштомат|почтомат|постамат", RegexOption.IGNORE_CASE).containsMatchIn(location) &&
-            novaPickupPointName.containsMatchIn(location)
+        val location = normalizedStatus(deliveryValue(field))
+        if (listOf("поштомат", "почтомат", "постамат").any(location::contains)) return@any false
+        listOf(
+            "пункт видач", "пункт выдачи", "пункт приймання-видач",
+            "пункт приема-выдачи", "пункт приёма-выдачи",
+            "parcel shop", "parcel-shop",
+        ).any(location::contains) || tokenIn(location, "пвз")
     }
 }
 

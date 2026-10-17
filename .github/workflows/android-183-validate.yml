@@ -1,4 +1,4 @@
-name: Android 184 pickup-point validation (no publishing)
+name: Android 185 runtime safety validation (no publishing)
 on:
   push:
     branches:
@@ -69,7 +69,7 @@ jobs:
         if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-184-signed-update-v0.31
+          name: android-185-signed-update-v0.32
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7

@@ -46,6 +46,7 @@ class PickupRemindersTest {
             })
 
         assertTrue(shipment("Нова пошта", "Пункт приймання-видачі №5").isNovaPickupPoint())
+        assertFalse(shipment("Нова пошта", "Супервізор ПВЗx").isNovaPickupPoint())
         assertTrue(shipment("Nova Poshta", "Пункт видачі №12").isNovaPickupPoint())
         assertTrue(shipment("Новая Почта", "Пункт приема-выдачи №2").isNovaPickupPoint())
         assertTrue(shipment("novaposhta", "Parcel Shop №43").isNovaPickupPoint())
