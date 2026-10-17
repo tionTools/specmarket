@@ -31,7 +31,7 @@ fun Order.pendingPickupReminder(
     if (reminder == null || reminder.ttn != deliveryValue("ttn").trim() || reminder.ttn.isBlank()) return null
     val deadline = runCatching { LocalDate.parse(reminder.deadline) }.getOrNull() ?: return null
     val tracking = normalizedStatus(deliveryValue("trackingNormalizedStatus"))
-    if (tracking in setOf("delivered", "returned", "returning", "cancelled", "deleted")
+    if (tracking != "ready_for_pickup"
         || deliveryFlag("trackingBuyerReceived") || deliveryFlag("trackingReturnInProgress")
         || hasReturnSignal()
         || Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
