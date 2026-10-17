@@ -563,7 +563,12 @@ private fun OrderFilters(
                         contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         Text(
-                            orders.count { if (filter == OrderListFilter.REMIND) it.pendingPickupReminder(reminders[it.id]) != null else it.matchesListFilter(filter) }.toString(),
+                            orders.count {
+                                if (filter == OrderListFilter.REMIND)
+                                    it.pendingPickupReminder(reminders[it.id]) != null ||
+                                        it.needsPickupDeadline(reminders[it.id])
+                                else it.matchesListFilter(filter)
+                            }.toString(),
                             Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelLarge,
                         )
@@ -598,7 +603,8 @@ private fun OrdersScreen(
     val visibleOrders = remember(orders, reminders, searchQuery, filter, today) {
         orders.filter {
             (if (filter == OrderListFilter.REMIND)
-                it.pendingPickupReminder(reminders[it.id], today) != null
+                it.pendingPickupReminder(reminders[it.id], today) != null ||
+                    it.needsPickupDeadline(reminders[it.id])
             else it.matchesListFilter(filter)) && it.matchesOrderSearch(searchQuery)
         }
     }
@@ -694,7 +700,9 @@ private fun OrdersScreen(
                                 "Напомнить: осталось ${if (days == 1L) "1 день" else "2 дня"}"
                             }
                             PickupReminderStage.LAST -> "Напомнить: последний день получения"
-                            null -> null
+                            null -> if (filter == OrderListFilter.REMIND &&
+                                order.needsPickupDeadline(reminders[order.id]))
+                                "Уточнить крайний срок получения" else null
                         }
                         OrderCard(order, reminderLabel = label) {
                             val index = listState.firstVisibleItemIndex
