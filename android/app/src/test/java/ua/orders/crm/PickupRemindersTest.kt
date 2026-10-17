@@ -89,4 +89,17 @@ class PickupRemindersTest {
         assertTrue(order().pickupReminderText(PickupReminderStage.LAST, state(0).deadline, date)
             .contains("сьогодні останній день"))
     }
+
+    @Test fun messaging_uses_buyer_phone_when_prom_recipient_phone_is_missing() {
+        val prom = order().copy(platform = "Пром", phone = "+380501112233")
+        assertNotNull(prom.pickupContactPhone())
+        val recipient = prom.copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("recipientPhone", "+380671112233")
+        })
+        assertEquals(normalizeCustomerPhone("+380671112233"), recipient.pickupContactPhone())
+        val invalid = order().copy(platform = "Пром", phone = null)
+        assertNull(invalid.pickupContactPhone())
+    }
 }

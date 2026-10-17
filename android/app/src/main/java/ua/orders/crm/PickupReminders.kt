@@ -92,6 +92,11 @@ fun Order.pendingPickupReminder(
     }
 }
 
+// Prefer shipment recipient; fall back to buyer when marketplaces omit
+// recipientPhone (notably Prom). No valid phone means chat buttons stay disabled.
+fun Order.pickupContactPhone(): String? =
+    normalizeCustomerPhone(recipientPhone()) ?: normalizeCustomerPhone(phone.orEmpty())
+
 fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today: LocalDate = pickupToday()): String {
     val date = LocalDate.parse(deadline).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
     val days = ChronoUnit.DAYS.between(today, LocalDate.parse(deadline))

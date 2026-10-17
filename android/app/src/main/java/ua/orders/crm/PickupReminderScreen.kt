@@ -93,6 +93,7 @@ internal fun PickupReminderContent(
                 }
                 items(applicable, key = { it.id }) { order ->
                     val reminder = reminders[order.id]
+                    val contactPhone = order.pickupContactPhone()
                     val stage = order.pendingPickupReminder(reminder, today)
                     val days = reminder?.deadline?.let {
                         runCatching { ChronoUnit.DAYS.between(today, LocalDate.parse(it)) }.getOrNull()
@@ -130,9 +131,8 @@ internal fun PickupReminderContent(
                                     for (channel in listOf("telegram", "viber")) {
                                         Button(
                                             onClick = {
-                                                val phone = order.recipientPhone()
                                                 val draft = order.pickupReminderText(stage, reminder.deadline, today)
-                                                val launched = openPickupDraft(context, phone, channel, draft)
+                                                val launched = openPickupDraft(context, contactPhone.orEmpty(), channel, draft)
                                                 if (launched) {
                                                     sentConfirmation = Triple(order, stage, channel)
                                                 } else {
@@ -141,7 +141,7 @@ internal fun PickupReminderContent(
                                                     sentConfirmation = Triple(order, stage, channel)
                                                 }
                                             },
-                                            enabled = !busy && normalizeCustomerPhone(order.recipientPhone()) != null,
+                                            enabled = !busy && contactPhone != null,
                                         ) { Text(if (channel == "telegram") "Telegram" else "Viber") }
                                     }
                                 }
