@@ -40,6 +40,11 @@ if [[ -z "$PID" ]]; then
   grep -A 40 -B 8 'Process: ua.orders.crm' validation/034-logcat.txt | tail -n 160 || true
   exit 1
 fi
+adb shell dumpsys activity activities > validation/034-activities.txt
+if ! grep -q 'PickupReminderPreviewActivity' validation/034-activities.txt; then
+  echo "REMINDER_ACTIVITY_NOT_VISIBLE"
+  exit 1
+fi
 adb logcat -d -v time > validation/034-logcat.txt
 if grep -q 'Process: ua.orders.crm' validation/034-logcat.txt; then
   echo "REMINDER_VIEW_FATAL_CRASH"
