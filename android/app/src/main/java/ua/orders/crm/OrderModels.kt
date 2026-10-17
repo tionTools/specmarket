@@ -41,7 +41,7 @@ enum class OrderListFilter(val title: String) {
     ALL("Все"),
     NEW("Новые"),
     WORK("Принятые"),
-    SENT("С ТТН"),
+    REMIND("Напомнить"),
 }
 enum class AcceptRoute(val function: String) {
     PROM("sync-prom-orders"),
@@ -277,7 +277,7 @@ fun Order.matchesListFilter(filter: OrderListFilter): Boolean {
         OrderListFilter.NEW -> !hasTtn && isAwaitingAcceptance()
         OrderListFilter.WORK -> !hasTtn && !isAwaitingAcceptance() &&
             normalizedStatus(status) in acceptedStatuses && !hasReturnSignal()
-        OrderListFilter.SENT -> hasTtn
+        OrderListFilter.REMIND -> false
     }
 }
 
