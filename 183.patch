@@ -1,0 +1,246 @@
+diff --git a/supabase/migrations/20261017190000_crm_pickup_reminders.sql b/supabase/migrations/20261017190000_crm_pickup_reminders.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20261017190000_crm_pickup_reminders.sql
+@@ -0,0 +1,119 @@
++-- Patch 183: explicit, verified pickup deadlines and two manual reminder acknowledgements.
++-- No duration is inferred from paid-storage dates or an estimated delivery date.
++create table if not exists public.crm_pickup_reminders (
++  order_id uuid primary key references public.crm_orders(id) on delete cascade,
++  ttn text not null,
++  deadline date not null,
++  first_sent_at timestamptz,
++  first_channel text,
++  last_sent_at timestamptz,
++  last_channel text,
++  updated_at timestamptz not null default now(),
++  constraint crm_pickup_reminders_ttn_nonempty check (length(btrim(ttn)) > 0),
++  constraint crm_pickup_reminders_channels check (
++    (first_channel is null or first_channel in ('telegram', 'viber'))
++    and (last_channel is null or last_channel in ('telegram', 'viber'))
++  )
++);
++
++alter table public.crm_pickup_reminders enable row level security;
++revoke all on public.crm_pickup_reminders from public, anon;
++grant select on public.crm_pickup_reminders to authenticated;
++
++create policy crm_pickup_reminders_read on public.crm_pickup_reminders
++  for select to authenticated
++  using (auth.uid() is not null and lower(coalesce(auth.jwt()->>'email','')) <> 'guest@gmail.com');
++
++create or replace function public.crm_set_pickup_reminder_deadline(
++  p_order_id uuid, p_ttn text, p_deadline date
++) returns void
++language plpgsql security definer set search_path = ''
++as $$
++begin
++  if auth.uid() is null or lower(coalesce(auth.jwt()->>'email','')) = 'guest@gmail.com' then
++    raise exception 'CRM_AUTH_REQUIRED';
++  end if;
++  if p_order_id is null or p_deadline is null or nullif(btrim(p_ttn), '') is null
++     or not exists (
++       select 1 from public.crm_orders o
++       where o.id = p_order_id and btrim(coalesce(o.delivery->>'ttn','')) = btrim(p_ttn)
++     ) then
++    raise exception 'CRM_REMINDER_SHIPMENT_CHANGED';
++  end if;
++  insert into public.crm_pickup_reminders (order_id, ttn, deadline)
++  values (p_order_id, btrim(p_ttn), p_deadline)
++  on conflict (order_id) do update
++    set ttn = excluded.ttn,
++        deadline = excluded.deadline,
++        first_sent_at = case
++          when (public.crm_pickup_reminders.ttn, public.crm_pickup_reminders.deadline)
++            is distinct from (excluded.ttn, excluded.deadline) then null
++          else public.crm_pickup_reminders.first_sent_at end,
++        first_channel = case
++          when (public.crm_pickup_reminders.ttn, public.crm_pickup_reminders.deadline)
++            is distinct from (excluded.ttn, excluded.deadline) then null
++          else public.crm_pickup_reminders.first_channel end,
++        last_sent_at = case
++          when (public.crm_pickup_reminders.ttn, public.crm_pickup_reminders.deadline)
++            is distinct from (excluded.ttn, excluded.deadline) then null
++          else public.crm_pickup_reminders.last_sent_at end,
++        last_channel = case
++          when (public.crm_pickup_reminders.ttn, public.crm_pickup_reminders.deadline)
++            is distinct from (excluded.ttn, excluded.deadline) then null
++          else public.crm_pickup_reminders.last_channel end,
++        updated_at = now();
++end;
++$$;
++
++create or replace function public.crm_confirm_pickup_reminder(
++  p_order_id uuid, p_ttn text, p_deadline date, p_stage text, p_channel text
++) returns void
++language plpgsql security definer set search_path = ''
++as $$
++declare
++  v_updated uuid;
++  v_days integer;
++begin
++  if auth.uid() is null or lower(coalesce(auth.jwt()->>'email','')) = 'guest@gmail.com' then
++    raise exception 'CRM_AUTH_REQUIRED';
++  end if;
++  if p_stage not in ('first','last') or p_channel not in ('telegram','viber') then
++    raise exception 'CRM_REMINDER_INVALID_STAGE';
++  end if;
++  v_days := p_deadline - (now() at time zone 'Europe/Kyiv')::date;
++  if (p_stage = 'first' and v_days not between 1 and 2)
++     or (p_stage = 'last' and v_days <> 0) then
++    raise exception 'CRM_REMINDER_EXPIRED';
++  end if;
++  if not exists (
++    select 1 from public.crm_orders o
++    where o.id = p_order_id
++      and btrim(coalesce(o.delivery->>'ttn','')) = btrim(p_ttn)
++      and lower(coalesce(o.delivery->>'trackingNormalizedStatus',''))
++        not in ('delivered','returned','returning','cancelled','deleted')
++      and coalesce(o.delivery->>'trackingBuyerReceived','false') <> 'true'
++      and coalesce(o.delivery->>'trackingReturnInProgress','false') <> 'true'
++  ) then
++    raise exception 'CRM_REMINDER_SHIPMENT_CHANGED';
++  end if;
++  if p_stage = 'first' then
++    update public.crm_pickup_reminders
++       set first_sent_at = now(), first_channel = p_channel, updated_at = now()
++     where order_id = p_order_id and ttn = btrim(p_ttn) and deadline = p_deadline
++       and first_sent_at is null
++     returning order_id into v_updated;
++  else
++    update public.crm_pickup_reminders
++       set last_sent_at = now(), last_channel = p_channel, updated_at = now()
++     where order_id = p_order_id and ttn = btrim(p_ttn) and deadline = p_deadline
++       and last_sent_at is null
++     returning order_id into v_updated;
++  end if;
++  if v_updated is null then raise exception 'CRM_REMINDER_ALREADY_SENT_OR_CHANGED'; end if;
++end;
++$$;
++
++revoke all on function public.crm_set_pickup_reminder_deadline(uuid,text,date) from public,anon,authenticated;
++revoke all on function public.crm_confirm_pickup_reminder(uuid,text,date,text,text) from public,anon,authenticated;
++grant execute on function public.crm_set_pickup_reminder_deadline(uuid,text,date) to authenticated;
++grant execute on function public.crm_confirm_pickup_reminder(uuid,text,date,text,text) to authenticated;
+diff --git a/android/app/src/main/java/ua/orders/crm/PickupReminders.kt b/android/app/src/main/java/ua/orders/crm/PickupReminders.kt
+new file mode 100644
+--- /dev/null
++++ b/android/app/src/main/java/ua/orders/crm/PickupReminders.kt
+@@ -0,0 +1,66 @@
++package ua.orders.crm
++
++import java.time.LocalDate
++import java.time.ZoneId
++import java.time.format.DateTimeFormatter
++import java.time.temporal.ChronoUnit
++import kotlinx.serialization.SerialName
++import kotlinx.serialization.Serializable
++
++@Serializable
++data class PickupReminderState(
++    @SerialName("order_id") val orderId: String,
++    val ttn: String,
++    val deadline: String,
++    @SerialName("first_sent_at") val firstSentAt: String? = null,
++    @SerialName("first_channel") val firstChannel: String? = null,
++    @SerialName("last_sent_at") val lastSentAt: String? = null,
++    @SerialName("last_channel") val lastChannel: String? = null,
++)
++
++enum class PickupReminderStage(val databaseValue: String) {
++    FIRST("first"), LAST("last")
++}
++
++fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
++
++fun Order.pendingPickupReminder(
++    reminder: PickupReminderState?,
++    today: LocalDate = pickupToday(),
++): PickupReminderStage? {
++    if (reminder == null || reminder.ttn != deliveryValue("ttn").trim() || reminder.ttn.isBlank()) return null
++    val deadline = runCatching { LocalDate.parse(reminder.deadline) }.getOrNull() ?: return null
++    val tracking = normalizedStatus(deliveryValue("trackingNormalizedStatus"))
++    if (tracking in setOf("delivered", "returned", "returning", "cancelled", "deleted")
++        || deliveryFlag("trackingBuyerReceived") || deliveryFlag("trackingReturnInProgress")
++        || hasReturnSignal()
++        || Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
++            .containsMatchIn(status.orEmpty())
++    ) return null
++    return when (ChronoUnit.DAYS.between(today, deadline)) {
++        0L -> if (reminder.lastSentAt == null) PickupReminderStage.LAST else null
++        1L, 2L -> if (reminder.firstSentAt == null) PickupReminderStage.FIRST else null
++        else -> null
++    }
++}
++
++fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today: LocalDate = pickupToday()): String {
++    val date = LocalDate.parse(deadline).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
++    val days = ChronoUnit.DAYS.between(today, LocalDate.parse(deadline))
++    val products = items.sortedBy { it.position ?: Int.MAX_VALUE }.joinToString("\n") { item ->
++        val name = item.productName?.trim().orEmpty().ifBlank { "Товар" }
++        val size = item.size?.trim().orEmpty().takeIf(String::isNotBlank)?.let { ", розмір $it" }.orEmpty()
++        val count = item.quantity?.takeIf { it > 0 }?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
++        "• $name$size" + (count?.let { " — $it шт." } ?: "")
++    }.ifBlank { "Товари в замовленні" }
++    val intro = if (stage == PickupReminderStage.LAST)
++        "Нагадуємо, що сьогодні останній день отримання вашого замовлення №${number()}."
++    else "Нагадуємо, що ваше замовлення №${number()} очікує на отримання."
++    val time = if (stage == PickupReminderStage.LAST)
++        "Будь ласка, заберіть посилку сьогодні, щоб уникнути її повернення відправнику."
++    else {
++        val remaining = if (days == 1L) "1 день" else "2 дні"
++        "До завершення терміну отримання залишилося $remaining.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
++    }
++    return "Вітаємо!\n\n$intro\n\nВаше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n$time\n\nДякуємо!"
++}
+diff --git a/android/app/src/test/java/ua/orders/crm/PickupRemindersTest.kt b/android/app/src/test/java/ua/orders/crm/PickupRemindersTest.kt
+new file mode 100644
+--- /dev/null
++++ b/android/app/src/test/java/ua/orders/crm/PickupRemindersTest.kt
+@@ -0,0 +1,46 @@
++package ua.orders.crm
++
++import java.time.LocalDate
++import kotlinx.serialization.json.buildJsonObject
++import kotlinx.serialization.json.put
++import org.junit.Assert.*
++import org.junit.Test
++
++class PickupRemindersTest {
++    private val date = LocalDate.of(2026, 10, 17)
++    private fun order(ttn: String = "20450000000000", status: String = "В дороге") =
++        Order(id = "id", orderNumber = 123L, status = status, delivery = buildJsonObject {
++            put("ttn", ttn)
++            put("trackingNormalizedStatus", "ready_for_pickup")
++        }, items = listOf(OrderItem(productName = "Рукавички", size = "10", quantity = 2.0)))
++    private fun state(days: Long, first: String? = null, last: String? = null) =
++        PickupReminderState("id", "20450000000000", date.plusDays(days).toString(), firstSentAt = first, lastSentAt = last)
++
++    @Test fun reminders_due_on_two_days_and_final_day_independently() {
++        assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(2), date))
++        assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(1), date))
++        assertEquals(PickupReminderStage.LAST, order().pendingPickupReminder(state(0, first = "done"), date))
++        assertNull(order().pendingPickupReminder(state(2, first = "done"), date))
++        assertNull(order().pendingPickupReminder(state(0, last = "done"), date))
++        assertNull(order().pendingPickupReminder(state(3), date))
++        assertNull(order().pendingPickupReminder(state(-1), date))
++    }
++
++    @Test fun stale_ttn_and_returned_orders_never_trigger() {
++        assertNull(order("new").pendingPickupReminder(state(2), date))
++        assertNull(order(status = "Скасовано").pendingPickupReminder(state(2), date))
++        assertNull(order(status = "Виконано").pendingPickupReminder(state(2), date))
++        assertNull(order().pendingPickupReminder(state(2).copy(deadline = "bad"), date))
++    }
++
++    @Test fun ukranian_text_contains_products_number_ttn_and_deadline() {
++        val message = order().pickupReminderText(PickupReminderStage.FIRST, state(2).deadline, date)
++        assertTrue(message.contains("№123"))
++        assertTrue(message.contains("Рукавички, розмір 10 — 2 шт."))
++        assertTrue(message.contains("20450000000000"))
++        assertTrue(message.contains("19.10.2026"))
++        assertTrue(message.contains("2 дні"))
++        assertTrue(order().pickupReminderText(PickupReminderStage.LAST, state(0).deadline, date)
++            .contains("сьогодні останній день"))
++    }
++}
