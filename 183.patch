@@ -421,7 +421,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/fun
      )
    }
  
-+  if (ttnChanged) {
++  if (ttnChanged || addressChanged) {
 +    // Arrival from the previous consignment must not leak into a redirect
 +    // or return shipment with a different TTN.
 +    delete nextDelivery.trackingPickupArrivedAt
@@ -473,11 +473,12 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
      : { data: [], error: null }
    if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
    const trackingStates = (states ?? []) as TrackingStateRow[]
-@@ -188,7 +189,20 @@
+@@ -188,7 +189,21 @@
        }
        const result = outcome.result!
        try {
 +        if (sameShipment(currentDelivery, delivery)
++          && (!result.destination?.address || text(result.destination.address) === text(currentDelivery.address))
 +          && currentDelivery.trackingPickupArrivedAt
 +          && result.details?.trackingPickupArrivedAt) {
 +          // An additional scan in the pickup warehouse must not restart
@@ -494,7 +495,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
          const state: TrackingStateUpdate = {
            order_id: row.id, last_checked_at: now.toISOString(), last_error: null,
            provider: result.provider ?? carrier, details: result.details ?? null, updated_at: now.toISOString(),
-@@ -195,12 +209,6 @@
+@@ -195,12 +210,6 @@
          }
          checked += 1
          if (changed) {
@@ -507,7 +508,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/worker.ts b/supabase/func
            const waivePromoShipping = shouldWaivePromPromoShippingForUnclaimedReturn({
              platform: text(currentRow.platform),
              orderStatus: text(currentRow.status),
-@@ -214,6 +222,21 @@
+@@ -214,6 +223,21 @@
            if (updateError) throw updateError
            updated += 1
          }
