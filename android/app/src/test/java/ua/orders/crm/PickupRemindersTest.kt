@@ -37,6 +37,35 @@ class PickupRemindersTest {
         assertNull(order().pendingPickupReminder(state(2).copy(deadline = "bad"), date))
     }
 
+    @Test fun nova_pickup_point_is_highlighted_only_when_explicitly_named() {
+        fun shipment(carrier: String, destination: String, ttn: String = "20450000000000") =
+            order().copy(delivery = buildJsonObject {
+                put("carrier", carrier)
+                put("ttn", ttn)
+                put("trackingLocation", destination)
+            })
+
+        assertTrue(shipment("Нова пошта", "Пункт приймання-видачі №5").isNovaPickupPoint())
+        assertTrue(shipment("Nova Poshta", "Пункт видачі №12").isNovaPickupPoint())
+        assertTrue(shipment("Новая Почта", "Пункт приема-выдачи №2").isNovaPickupPoint())
+        assertTrue(shipment("novaposhta", "Parcel Shop №43").isNovaPickupPoint())
+        assertTrue(shipment("Нова пошта", "ПВЗ №9").isNovaPickupPoint())
+        assertFalse(shipment("Нова пошта", "Відділення №2").isNovaPickupPoint())
+        assertFalse(shipment("Нова пошта", "Поштомат №2").isNovaPickupPoint())
+        assertFalse(shipment("Нова пошта", "вул. Центральна, 3").isNovaPickupPoint())
+        assertFalse(shipment("Укрпошта", "Пункт видачі №12").isNovaPickupPoint())
+        assertFalse(shipment("Нова пошта", "Пункт видачі №12", "").isNovaPickupPoint())
+    }
+
+    @Test fun nova_pickup_point_can_be_identified_from_existing_destination_address() {
+        val parcel = order().copy(delivery = buildJsonObject {
+            put("carrier", "Нова пошта")
+            put("ttn", "20450000000000")
+            put("trackingDestinationAddress", "м. Харків, Пункт видачі №77")
+        })
+        assertTrue(parcel.isNovaPickupPoint())
+    }
+
     @Test fun arrivals_without_confirmed_deadline_are_actionable_in_reminder_filter() {
         assertTrue(order().needsPickupDeadline(null))
         assertFalse(order().needsPickupDeadline(state(2)))

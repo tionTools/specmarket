@@ -776,6 +776,14 @@ internal fun OrderCard(order: Order, reminderLabel: String? = null, onClick: () 
                     color = Color(0xFFB45309),
                 )
             }
+            if (order.isNovaPickupPoint()) {
+                Text(
+                    "Пункт выдачи НП",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFB45309),
+                )
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
@@ -1075,6 +1083,19 @@ private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -
             ) {
                 item {
                     SectionCard("Напоминание о получении") {
+                        if (order.isNovaPickupPoint()) {
+                            Text(
+                                "Пункт выдачи НП",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB45309),
+                            )
+                            Text(
+                                "Статус получения может обновляться с задержкой. " +
+                                    "Решение об отправке напоминания принимаете вы.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         val existingDeadline = reminder?.takeIf { it.ttn == order.deliveryValue("ttn").trim() }?.deadline
                         Text(
                             if (existingDeadline == null) "Укажите подтверждённую крайнюю дату получения."

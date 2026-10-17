@@ -26,6 +26,31 @@ fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
 
 // Parcels with no reliable deadline must remain discoverable in the
 // reminder filter; otherwise the operator would have to search all orders.
+
+// Explicit Nova Poshta pickup-point names only. Never classify a regular branch
+// or parcel locker from the carrier name or a generic "ready for pickup" state.
+private val novaPickupPointName = Regex(
+    """(?:пункт\s+(?:(?:приймання|прийому|приема|приёма)\s*(?:[-/]|та|и)\s*)?(?:видачі|видачи|выдачи)|parcel[\s-]*shop|(?<!\p{L})пвз(?!\p{L}))""",
+    RegexOption.IGNORE_CASE,
+)
+
+fun Order.isNovaPickupPoint(): Boolean {
+    val carrier = normalizedStatus(deliveryValue("carrier"))
+    val nova = carrier.contains("nova") || carrier.contains("нова") ||
+        carrier.contains("новой") || carrier.contains("нової") ||
+        carrier.contains("novaposhta") || carrier.contains("новапошта") ||
+        Regex("""(?<!\p{L})нп(?!\p{L})""", RegexOption.IGNORE_CASE).containsMatchIn(carrier)
+    if (!nova || deliveryValue("ttn").isBlank()) return false
+    return listOf(
+        "trackingLocation", "trackingDestinationAddress", "address", "warehouseRecipient",
+        "recipientAddress", "trackingPickupLocationDescription",
+    ).any { field ->
+        val location = deliveryValue(field)
+        !Regex("поштомат|почтомат|постамат", RegexOption.IGNORE_CASE).containsMatchIn(location) &&
+            novaPickupPointName.containsMatchIn(location)
+    }
+}
+
 fun Order.needsPickupDeadline(reminder: PickupReminderState?): Boolean {
     val ttn = deliveryValue("ttn").trim()
     if (ttn.isEmpty() || normalizedStatus(deliveryValue("trackingNormalizedStatus")) != "ready_for_pickup") return false

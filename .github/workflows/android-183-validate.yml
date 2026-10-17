@@ -1,4 +1,4 @@
-name: Android 183 validation (no publishing)
+name: Android 184 pickup-point validation (no publishing)
 on:
   push:
     branches:
@@ -31,7 +31,7 @@ jobs:
         if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-183-debug-apk
+          name: android-184-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
@@ -69,7 +69,7 @@ jobs:
         if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-183-signed-update-v0.30
+          name: android-184-signed-update-v0.31
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
@@ -94,7 +94,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-183-build-report
+          name: android-184-build-report
           path: validation/183-android-build.txt
           retention-days: 7
           if-no-files-found: error
