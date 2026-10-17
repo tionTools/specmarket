@@ -1,5 +1,10 @@
 Patch 183 — SpecMarket CRM / Supabase shipment pickup reminders.
 UPDATED: 2026-10-17, CRM-only patch in 183.patch. Android code is NOT in this patch.
+CODE REVIEW FIXES (2026-10-17):
+- Android branch: repository query now selects only serializer-known crm_pickup_reminders columns rather than SELECT *.
+- Backend patch: storage.ts ignores undefined carrier detail values rather than erasing an earlier verified trackingPickupArrivedAt.
+- Revalidated 9 patch sections against current main file contents using a unified-diff application simulation: PASS.
+- Actual checkout git apply --check, SQL migration execution, Deno tests and Android APK compilation still UNVERIFIED; STOP before release.
 
 BASE for backend patch:
 main SHA 2ef1b7741ca825f472a5f4e3928afbb5dbd44e6e
