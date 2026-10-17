@@ -194,7 +194,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/pickup-reminders.ts b/sup
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/pickup-reminders.ts
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,82 @@
 +import { carrierKind } from './carrier-detection.ts'
 +import type { CarrierKind, JsonRecord } from './types.ts'
 +
@@ -249,7 +249,8 @@ new file mode 100644
 +  const arrival = day(delivery.trackingPickupArrivedAt)
 +  if (!arrival) return null
 +  const explicit = day(delivery.trackingVerifiedLastPickupAt)
-+  if (explicit) return { date: isoDate(explicit), carrier, basis: 'carrier_explicit' }
++  if (explicit && delivery.trackingVerifiedLastPickupSource === 'carrier_api')
++    return { date: isoDate(explicit), carrier, basis: 'carrier_explicit' }
 +
 +  if (carrier === 'nova') {
 +    // This is an explicitly supplied SpecMarket business setting: 5 calendar
@@ -280,7 +281,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts 
 new file mode 100644
 --- /dev/null
 +++ b/supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,40 @@
 +import { automaticPickupDeadline } from './pickup-reminders.ts'
 +import { assertEquals } from 'jsr:@std/assert@1'
 +
@@ -316,7 +317,10 @@ new file mode 100644
 +  const ukr = { ...base, carrier: 'Укрпошта' }
 +  assertEquals(automaticPickupDeadline(ukr), null)
 +  assertEquals(automaticPickupDeadline({ ...ukr,
-+    trackingVerifiedLastPickupAt: '2026-10-24' })?.date, '2026-10-24')
++    trackingVerifiedLastPickupAt: '2026-10-24' }), null)
++  assertEquals(automaticPickupDeadline({ ...ukr,
++    trackingVerifiedLastPickupAt: '2026-10-24',
++    trackingVerifiedLastPickupSource: 'carrier_api' })?.date, '2026-10-24')
 +})
 diff --git a/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts b/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
 --- a/supabase/functions/sync-delivery-tracking/carriers/nova-poshta.ts
@@ -414,7 +418,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/carriers/ukrposhta.ts b/s
 diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/functions/sync-delivery-tracking/storage.ts
 --- a/supabase/functions/sync-delivery-tracking/storage.ts
 +++ b/supabase/functions/sync-delivery-tracking/storage.ts
-@@ -364,6 +364,13 @@
+@@ -364,6 +364,14 @@
      )
    }
  
@@ -423,6 +427,7 @@ diff --git a/supabase/functions/sync-delivery-tracking/storage.ts b/supabase/fun
 +    // or return shipment with a different TTN.
 +    delete nextDelivery.trackingPickupArrivedAt
 +    delete nextDelivery.trackingVerifiedLastPickupAt
++    delete nextDelivery.trackingVerifiedLastPickupSource
 +    delete nextDelivery.trackingPickupLocationType
 +  }
    if (activeTtn) nextDelivery.ttn = activeTtn
