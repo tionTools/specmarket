@@ -102,4 +102,13 @@ class PickupRemindersTest {
         val invalid = order().copy(platform = "Пром", phone = null)
         assertNull(invalid.pickupContactPhone())
     }
+    @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
+        assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
+        val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)
+        assertEquals("Europe/Kiev", zone.id)
+        assertEquals(
+            LocalDate.of(2026, 10, 18),
+            java.time.Instant.parse("2026-10-17T22:00:00Z").atZone(zone).toLocalDate()
+        )
+    }
 }

@@ -22,7 +22,11 @@ enum class PickupReminderStage(val databaseValue: String) {
     FIRST("first"), LAST("last")
 }
 
-fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+// Android devices with older system tzdata do not recognize the post-2022
+// IANA rename Europe/Kyiv, but Europe/Kiev represents the same Kyiv zone.
+// Keep the legacy zone key for compatibility; do not use the device timezone.
+internal const val PICKUP_KYIV_ZONE = "Europe/Kiev"
+fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of(PICKUP_KYIV_ZONE))
 
 // Parcels with no reliable deadline must remain discoverable in the
 // reminder filter; otherwise the operator would have to search all orders.
