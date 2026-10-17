@@ -94,3 +94,15 @@ LOCAL CODEX VERIFICATION — PASS (2026-10-17)
 - READ-ONLY real-production SQL schema compatibility preflight: crm_orders and crm_delivery_tracking_state required columns/types present; auth roles/functions present, no RPC name conflicts.
 - SQL migration NOT run against production or the local DB; independent disposable PostgreSQL CI smoke PASS.
 - No PR, merge, production migration, Edge deploy, or Android installation. Next phase requires explicit user approval per project release policy.
+
+2026-10-17 — APPROVED PRODUCTION ROLLOUT, PARTIAL:
+- Backend PR #87 merged from patch-183-pickup-reminders into main.
+- Merge SHA 270673a1b9ac066596ac77379bc266bfd8d0431e.
+- Main push triggers only web frontend deploy.yml, NOT Supabase SQL migrations and NOT Supabase Edge Functions.
+- STOP before Android installation until migration crm_pickup_reminders and RPCs have been applied to live Supabase, and sync-delivery-tracking Edge Function has been deployed from exact merged SHA, with smoke checks.
+- Current ChatGPT connector inventory has GitHub write, but no connected Supabase database/Edge write capability. The user's existing Codex Supabase token was previously intentionally READ ONLY. Do not claim backend production deployment has occurred. No permission escalation, production SQL, new token or deploy workflow workaround without explicit user connection.
+- Official free storage rules checked at 2026-10-17: Nova Poshta 5 calendar days beginning day after arrival (changed 2026-10-01), Meest 5 working days beginning next day, Ukrposhta 5 working days OF BRANCH before paid storage (often up to 14 calendar days total depending sender order; 7-day early return possible), Rozetka Delivery parcel held 10 days (specific storage fee not stated). Reminder countdown uses last confirmed recipient pickup day, not free storage.
+- Source URLs: https://novaposhta.ua/news/nova-poshta-zminiuie-termin-bezplatnoho-zberihannia-posylok/
+  https://www.ukrposhta.ua/doc/kutochok-spozhyvacha/terminy_zberihannia_poshtovykh_vidpravlen_ta_perekaziv.pdf
+  https://meestposhta.com.ua/parcels-in-ukraine
+  https://help.rozetka.delivery/
