@@ -121,8 +121,8 @@ fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today
     val time = if (stage == PickupReminderStage.LAST)
         "Будь ласка, заберіть посилку сьогодні, щоб уникнути її повернення відправнику."
     else {
-        val remaining = if (days == 1L) "1 день" else "2 дні"
-        "До завершення терміну отримання залишилося $remaining.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
+        val remaining = if (days == 1L) "залишився 1 день" else "залишилось 2 дні"
+        "До завершення терміну отримання $remaining.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
     }
     return "Вітаємо!\n\n$intro\n\nВаше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n$time\n\nДякуємо!"
 }

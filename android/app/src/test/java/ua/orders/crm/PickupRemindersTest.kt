@@ -100,7 +100,10 @@ class PickupRemindersTest {
         assertTrue(message.contains("Рукавички, розмір 10 — 2 шт."))
         assertTrue(message.contains("20450000000000"))
         assertTrue(message.contains("19.10.2026"))
-        assertTrue(message.contains("2 дні"))
+        assertTrue(message.contains("До завершення терміну отримання залишилось 2 дні."))
+        val oneDay = order().pickupReminderText(PickupReminderStage.FIRST, state(1).deadline, date)
+        assertTrue(oneDay.contains("До завершення терміну отримання залишився 1 день."))
+        assertFalse(oneDay.contains("залишилося 1 день"))
         assertTrue(order().pickupReminderText(PickupReminderStage.LAST, state(0).deadline, date)
             .contains("сьогодні останній день"))
     }
