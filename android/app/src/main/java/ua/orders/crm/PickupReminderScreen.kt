@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -144,6 +145,10 @@ internal fun PickupReminderContent(
                                                 enabled = !busy && contactPhone != null,
                                                 modifier = Modifier.weight(1f).height(44.dp),
                                                 contentPadding = PaddingValues(horizontal = 4.dp),
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = Color(0xFFEDE9FE),
+                                                    contentColor = Color(0xFF5B21B6),
+                                                ),
                                             ) { Text("Позвонить", style = MaterialTheme.typography.labelSmall) }
                                         } else {
                                             val channel = if (action == ContactAction.VIBER) "viber" else "telegram"
@@ -165,6 +170,11 @@ internal fun PickupReminderContent(
                                                 enabled = !busy && contactPhone != null,
                                                 modifier = Modifier.weight(1f).height(44.dp),
                                                 contentPadding = PaddingValues(horizontal = 4.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (action == ContactAction.VIBER)
+                                                        Color(0xFF7360F2) else Color(0xFF229ED9),
+                                                    contentColor = Color.White,
+                                                ),
                                             ) { Text(if (action == ContactAction.VIBER) "Viber" else "Telegram",
                                                 style = MaterialTheme.typography.labelSmall) }
                                         }
