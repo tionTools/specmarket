@@ -122,7 +122,7 @@ private fun PlatformLogo(platform: String?) {
     )
 }
 
-private fun openDialer(context: Context, phone: String) {
+internal fun openDialer(context: Context, phone: String) {
     val value = normalizeCustomerPhone(phone)
     if (value == null) {
         Toast.makeText(context, "Некорректный номер телефона.", Toast.LENGTH_SHORT).show()
@@ -365,6 +365,7 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
     val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -439,6 +440,27 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            item {
+                SectionCard("Связь") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Мессенджеры", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Показывать Viber и Telegram на этом телефоне. " +
+                                    "Если выключено — только кнопка «Позвонить».",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = messengersEnabled,
+                            onCheckedChange = { enabled ->
+                                scope.launch { context.saveMessengersEnabled(enabled) }
+                            },
+                        )
+                    }
                 }
             }
             item {
@@ -952,6 +974,7 @@ private fun DetailsHeader(order: Order) {
 private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
+    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
@@ -1031,42 +1054,46 @@ private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -
                     }
                     if (normalizeCustomerPhone(rawBuyerPhone) != null) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            FilledTonalButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openDialer(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1.12f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6),
-                                ),
-                            ) { Text("Позвонить", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openViber(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7360F2), contentColor = Color.White,
-                                ),
-                            ) { Text("Viber", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openTelegram(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1.12f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF229ED9), contentColor = Color.White,
-                                ),
-                            ) { Text("Telegram", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                            contactActions(messengersEnabled).forEach { action ->
+                                when (action) {
+                                    ContactAction.VIBER -> Button(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openViber(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF7360F2), contentColor = Color.White,
+                                        ),
+                                    ) { Text("Viber", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                    ContactAction.CALL -> FilledTonalButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openDialer(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1.12f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6),
+                                        ),
+                                    ) { Text("Позвонить", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                    ContactAction.TELEGRAM -> Button(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openTelegram(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1.12f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF229ED9), contentColor = Color.White,
+                                        ),
+                                    ) { Text("Telegram", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                }
+                            }
                         }
                     }
                 }
