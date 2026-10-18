@@ -6774,17 +6774,6 @@ function orderDateTime(order: Order) {
                       }}</strong></span
                     >
                   </div>
-                  <button
-                    type="button"
-                    class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    :class="{ 'bg-blue-100 text-blue-700': isInternalCommentVisible(order) }"
-                    :disabled="isGuest"
-                    title="Комментарий к заказу"
-                    aria-label="Комментарий к заказу"
-                    @click="toggleInternalComment(order)"
-                  >
-                    <MessageSquare class="size-4" aria-hidden="true" />
-                  </button>
                 </div>
               </section>
               <div
@@ -7053,6 +7042,17 @@ function orderDateTime(order: Order) {
                   ><strong class="mt-1 block text-base">{{
                     formatMoney(getNetOrderAmount(order))
                   }}</strong>
+                  <button
+                    type="button"
+                    class="mt-2 grid size-8 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    :class="{ 'bg-blue-100 text-blue-700': isInternalCommentVisible(order) }"
+                    :disabled="isGuest"
+                    title="Комментарий к заказу"
+                    aria-label="Комментарий к заказу"
+                    @click="toggleInternalComment(order)"
+                  >
+                    <MessageSquare class="size-4" aria-hidden="true" />
+                  </button>
                 </div>
                 <div>
                   <span class="text-slate-500">Итого с/с</span
