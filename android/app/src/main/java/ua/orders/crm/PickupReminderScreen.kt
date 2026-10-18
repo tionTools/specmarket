@@ -36,6 +36,7 @@ internal fun PickupReminderContent(
     onConfirmSent: (Order, PickupReminderStage, String) -> Unit,
 ) {
     val context = LocalContext.current
+    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     val today = pickupToday()
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
@@ -131,29 +132,42 @@ internal fun PickupReminderContent(
                                 }, enabled = !busy) { Text("Изменить срок") }
                             }
                             if (stage != null && reminder != null) {
-                                Text("Текст будет скопирован. Отправку подтвердите после сообщения.",
-                                    style = MaterialTheme.typography.bodySmall)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    for (channel in listOf("telegram", "viber")) {
-                                        Button(
-                                            onClick = {
-                                                val draft = order.pickupReminderText(stage, reminder.deadline, today)
-                                                pendingOrderId = order.id
-                                                pendingStageName = stage.name
-                                                pendingChannel = channel
-                                                awaitingMessengerReturn = true
-                                                showSentConfirmation = false
-                                                if (!openPickupDraft(context, contactPhone.orEmpty(), channel, draft)) {
-                                                    // No messenger handler: the user can still paste the copied text
-                                                    // and explicitly confirm later, without marking it sent now.
-                                                    awaitingMessengerReturn = false
-                                                    showSentConfirmation = true
-                                                    Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
-                                                        Toast.LENGTH_LONG).show()
-                                                }
-                                            },
-                                            enabled = !busy && contactPhone != null,
-                                        ) { Text(if (channel == "telegram") "Telegram" else "Viber") }
+                                if (messengersEnabled) {
+                                    Text("Текст будет скопирован. Отправку подтвердите после сообщения.",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    for (action in contactActions(messengersEnabled)) {
+                                        if (action == ContactAction.CALL) {
+                                            FilledTonalButton(
+                                                onClick = { openDialer(context, contactPhone.orEmpty()) },
+                                                enabled = !busy && contactPhone != null,
+                                                modifier = Modifier.weight(1f).height(44.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                            ) { Text("Позвонить", style = MaterialTheme.typography.labelSmall) }
+                                        } else {
+                                            val channel = if (action == ContactAction.VIBER) "viber" else "telegram"
+                                            Button(
+                                                onClick = {
+                                                    val draft = order.pickupReminderText(stage, reminder.deadline, today)
+                                                    pendingOrderId = order.id
+                                                    pendingStageName = stage.name
+                                                    pendingChannel = channel
+                                                    awaitingMessengerReturn = true
+                                                    showSentConfirmation = false
+                                                    if (!openPickupDraft(context, contactPhone.orEmpty(), channel, draft)) {
+                                                        awaitingMessengerReturn = false
+                                                        showSentConfirmation = true
+                                                        Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
+                                                            Toast.LENGTH_LONG).show()
+                                                    }
+                                                },
+                                                enabled = !busy && contactPhone != null,
+                                                modifier = Modifier.weight(1f).height(44.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                            ) { Text(if (action == ContactAction.VIBER) "Viber" else "Telegram",
+                                                style = MaterialTheme.typography.labelSmall) }
+                                        }
                                     }
                                 }
                                 if (pendingOrderId == order.id &&
