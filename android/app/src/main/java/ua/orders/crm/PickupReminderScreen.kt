@@ -12,11 +12,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -36,7 +39,28 @@ internal fun PickupReminderContent(
     val today = pickupToday()
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
-    var sentConfirmation by remember { mutableStateOf<Triple<Order, PickupReminderStage, String>?>(null) }
+    // Keep the pending send attempt in saved state *before* launching the messenger.
+    // The system may recreate our activity while Telegram/Viber is in front.
+    var pendingOrderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingStageName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingChannel by rememberSaveable { mutableStateOf<String?>(null) }
+    var awaitingMessengerReturn by rememberSaveable { mutableStateOf(false) }
+    var showSentConfirmation by rememberSaveable { mutableStateOf(false) }
+
+    fun clearPendingSend() {
+        pendingOrderId = null
+        pendingStageName = null
+        pendingChannel = null
+        awaitingMessengerReturn = false
+        showSentConfirmation = false
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (pendingOrderId != null && awaitingMessengerReturn) {
+            awaitingMessengerReturn = false
+            showSentConfirmation = true
+        }
+    }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
             order.isPickupReminderDue(reminders[order.id], today)
@@ -114,18 +138,30 @@ internal fun PickupReminderContent(
                                         Button(
                                             onClick = {
                                                 val draft = order.pickupReminderText(stage, reminder.deadline, today)
-                                                val launched = openPickupDraft(context, contactPhone.orEmpty(), channel, draft)
-                                                if (launched) {
-                                                    sentConfirmation = Triple(order, stage, channel)
-                                                } else {
+                                                pendingOrderId = order.id
+                                                pendingStageName = stage.name
+                                                pendingChannel = channel
+                                                awaitingMessengerReturn = true
+                                                showSentConfirmation = false
+                                                if (!openPickupDraft(context, contactPhone.orEmpty(), channel, draft)) {
+                                                    // No messenger handler: the user can still paste the copied text
+                                                    // and explicitly confirm later, without marking it sent now.
+                                                    awaitingMessengerReturn = false
+                                                    showSentConfirmation = true
                                                     Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
                                                         Toast.LENGTH_LONG).show()
-                                                    sentConfirmation = Triple(order, stage, channel)
                                                 }
                                             },
                                             enabled = !busy && contactPhone != null,
                                         ) { Text(if (channel == "telegram") "Telegram" else "Viber") }
                                     }
+                                }
+                                if (pendingOrderId == order.id &&
+                                    pendingStageName == stage.name && pendingChannel != null) {
+                                    TextButton(onClick = {
+                                        awaitingMessengerReturn = false
+                                        showSentConfirmation = true
+                                    }) { Text("Подтвердить отправку") }
                                 }
                             }
                         }
@@ -162,19 +198,23 @@ internal fun PickupReminderContent(
         )
     }
 
-    if (sentConfirmation != null) {
-        val (order, stage, channel) = sentConfirmation!!
+    val pendingOrder = orders.firstOrNull { it.id == pendingOrderId }
+    val pendingStage = pendingStageName?.let { name ->
+        PickupReminderStage.entries.firstOrNull { it.name == name }
+    }
+    val selectedChannel = pendingChannel
+    if (showSentConfirmation && pendingOrder != null && pendingStage != null && selectedChannel != null) {
         AlertDialog(
-            onDismissRequest = { sentConfirmation = null },
+            onDismissRequest = { clearPendingSend() },
             title = { Text("Сообщение отправлено?") },
             text = { Text("Подтверждайте только после отправки сообщения клиенту.") },
             confirmButton = {
                 Button(onClick = {
-                    onConfirmSent(order, stage, channel)
-                    sentConfirmation = null
+                    onConfirmSent(pendingOrder, pendingStage, selectedChannel)
+                    clearPendingSend()
                 }, enabled = !busy) { Text("Да, отправлено") }
             },
-            dismissButton = { TextButton(onClick = { sentConfirmation = null }) { Text("Нет") } },
+            dismissButton = { TextButton(onClick = { clearPendingSend() }) { Text("Нет") } },
         )
     }
 }
