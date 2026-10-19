@@ -7080,8 +7080,7 @@ function orderDateTime(order: Order) {
                   }}</strong>
                 </div>
                 <label class="text-slate-500"
-                  >{{ order.platform === 'Эпицентр' ? 'Расход доставки' : 'Доставка'
-                  }}<input
+                  >Доставка<input
                     :value="orderCellValue(`${order.id}-shipping`, order.shipping)"
                     :readonly="editingOrderCell !== `${order.id}-shipping`"
                     class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
@@ -7590,7 +7589,7 @@ function orderDateTime(order: Order) {
                     </div>
                     <div class="text-right">
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        {{ order.platform === 'Эпицентр' ? 'Цена доставки' : 'Доставка' }}
+                        Доставка
                       </dt>
                       <dd class="mt-1 whitespace-nowrap font-semibold">
                         {{
