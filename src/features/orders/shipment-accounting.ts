@@ -1,6 +1,9 @@
 import type { Order } from './types'
-import { getRemainingQuantity } from './financials'
-import { hasPhysicalShipmentMovement as deliveryHasPhysicalMovement } from '../../lib/physical-shipment'
+import { getNetOrderAmount, getRemainingQuantity } from './financials'
+import {
+  hasConfirmedCarrierMovement,
+  hasPhysicalShipmentMovement as deliveryHasPhysicalMovement,
+} from '../../lib/physical-shipment'
 
 export type OrderLifecycleState =
   | 'active'
@@ -13,7 +16,9 @@ const returnStatus = (status: string) =>
   /скас|отмен|cancel|повер|возврат|return|refund|відмов.*отрим/.test(status.toLowerCase())
 
 export function hasPhysicalShipmentMovement(order: Order) {
-  return deliveryHasPhysicalMovement(order.delivery)
+  return order.platform === 'Эпицентр'
+    ? hasConfirmedCarrierMovement(order.delivery)
+    : deliveryHasPhysicalMovement(order.delivery)
 }
 
 export function hasReturnSignal(order: Order, status: string) {
@@ -41,6 +46,22 @@ export function getOrderLifecycleState(order: Order, status: string): OrderLifec
   if (acceptedReturnQuantity <= 0) return 'return_pending'
   if (remainingQuantity <= 0) return 'return_completed'
   return 'return_partial'
+}
+
+export function isPreShipmentEpicentrCancellation(order: Order, status: string) {
+  return (
+    order.platform === 'Эпицентр' &&
+    getOrderLifecycleState(order, status) === 'cancelled_before_shipment'
+  )
+}
+
+export function hasActualFinancialResult(order: Order, status: string) {
+  if (isPreShipmentEpicentrCancellation(order, status)) return false
+  return (
+    (order.paymentAmount ?? 0) > 0 ||
+    (order.products.some((product) => (product.returnedQuantity ?? 0) > 0) &&
+      getNetOrderAmount(order) === 0)
+  )
 }
 
 export function isOrderVisibleInMainList(state: OrderLifecycleState) {

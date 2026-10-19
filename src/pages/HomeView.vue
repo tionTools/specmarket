@@ -24,10 +24,12 @@ import {
 } from '@vueuse/core'
 import {
   getOrderLifecycleState,
+  hasActualFinancialResult as hasActualShipmentFinancialResult,
   hasPhysicalShipmentMovement,
   includeInUnpaidShipment,
   includeInTurnoverReport,
   isOrderVisibleInMainList,
+  isPreShipmentEpicentrCancellation,
   isReturnLifecycleState,
 } from '../features/orders/shipment-accounting'
 import {
@@ -836,8 +838,10 @@ const getActualRevenue = (order: Order) => {
   const returnedAmount = getOrderAmount(order) - getNetOrderAmount(order)
   return Math.max(0, paymentAmount - returnedAmount)
 }
+const isEpicentrCancelledBeforeShipment = (order: Order) =>
+  isPreShipmentEpicentrCancellation(order, displayOrderStatus(order.status))
 const getPlannedProfit = (order: Order) =>
-  isFullyAcceptedReturn(order)
+  isFullyAcceptedReturn(order) || isEpicentrCancelledBeforeShipment(order)
     ? 0
     : getNetOrderAmount(order) * 0.983 -
       getNetOrderCost(order) -
@@ -848,7 +852,8 @@ const getPlannedProfit = (order: Order) =>
 // принятый возврат — исключение: его отрицательный результат уже состоялся,
 // даже если итоговая сумма оплаты стала нулевой.
 const isPaid = (order: Order) => (order.paymentAmount ?? 0) > 0
-const hasActualFinancialResult = (order: Order) => isPaid(order) || isFullyAcceptedReturn(order)
+const hasActualFinancialResult = (order: Order) =>
+  hasActualShipmentFinancialResult(order, displayOrderStatus(order.status))
 const getActualProfit = (order: Order) =>
   getActualRevenue(order) -
   getNetOrderCost(order) -
@@ -1717,9 +1722,10 @@ const matchingOrders = computed(() => {
         : isShowingCancellations.value
           ? lifecycleState === 'cancelled_before_shipment'
           : isShowingReturns.value
-            ? order.delivery.trackingReturnInProgress === true ||
-              isReturnArrivedDelivery(order.delivery) ||
-              isReturnLifecycleState(lifecycleState)
+            ? !isEpicentrCancelledBeforeShipment(order) &&
+              (order.delivery.trackingReturnInProgress === true ||
+                isReturnArrivedDelivery(order.delivery) ||
+                isReturnLifecycleState(lifecycleState))
             : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
@@ -2510,7 +2516,13 @@ function returnDraftQuantity(order: Order, product: OrderProduct) {
 }
 
 function openReturnEditor(order: Order) {
-  if (isGuest.value || !order.remoteId || !order.delivery.printedAt) return
+  if (
+    isGuest.value ||
+    !order.remoteId ||
+    !order.delivery.printedAt ||
+    !hasPhysicalShipmentMovement(order)
+  )
+    return
   if (isReturnEditorOpen(order)) {
     returnEditorOrderId.value = null
     return
@@ -2547,6 +2559,7 @@ async function saveAcceptedReturns(order: Order) {
     isSavingReturn.value ||
     !order.remoteId ||
     !order.delivery.printedAt ||
+    !hasPhysicalShipmentMovement(order) ||
     !order.products.length ||
     !returnDraftDate.value
   )

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { epicentrCancellationTtn } from './cancellation.ts'
 import { epicentrShipping } from './shipping.ts'
 import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
@@ -756,7 +757,8 @@ Deno.serve(async (request) => {
       previousIsFree: typeof previousDelivery.isFree === 'boolean' ? previousDelivery.isFree : undefined,
     })
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
-    const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
+    const ttnAfterCancellation = epicentrCancellationTtn(statusCode, readableText(shipment?.number), previousDelivery)
+    const deliveryTtn = ttnAfterCancellation.ttn
     const orderUsdRate = usdRateForDate(usdRateSchedule, formatOrderDate(source.createdAt))
     const data = {
       external_id: externalId,
@@ -787,7 +789,8 @@ Deno.serve(async (request) => {
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
         ...savedPayment,
         shippingSource,
-        ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn, { city, address }),
+        ...preserveTracking(previousDelivery, deliveryCarrier, ttnAfterCancellation.retired ? readableText(previousDelivery.ttn) : deliveryTtn, { city, address }),
+        ...(ttnAfterCancellation.retired ? { ttn: '', ttnHistory: ttnAfterCancellation.ttnHistory } : {}),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
         labelEmailSentAt:
