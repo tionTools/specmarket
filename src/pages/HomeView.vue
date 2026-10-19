@@ -5681,7 +5681,7 @@ function orderDateTime(order: Order) {
               class="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50 lg:hidden"
               :class="{
                 'absolute inset-x-0 top-full z-20 mt-1.5': !isGuest,
-                'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
+                'border-rose-500 bg-rose-50 text-rose-700': isShowingNotInExcel,
                 'border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50':
                   !isShowingNotInExcel,
               }"
@@ -6322,7 +6322,7 @@ function orderDateTime(order: Order) {
             <button
               class="shrink-0 whitespace-nowrap rounded-lg border px-2 py-1 text-xs font-semibold normal-case tracking-normal transition disabled:opacity-50"
               :class="{
-                'border-amber-500 bg-amber-50 text-amber-800': isShowingNotInExcel,
+                'border-rose-500 bg-rose-50 text-rose-700': isShowingNotInExcel,
                 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50':
                   !isShowingNotInExcel,
               }"
