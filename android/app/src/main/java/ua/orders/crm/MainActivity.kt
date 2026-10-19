@@ -19,7 +19,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -536,6 +535,58 @@ private fun extraProductsLabel(count: Int): String = when {
 }
 
 @Composable
+private fun OrderFilterChip(
+    filter: OrderListFilter,
+    count: String,
+    selected: Boolean,
+    modifier: Modifier,
+    onSelected: (OrderListFilter) -> Unit,
+) {
+    Surface(
+        modifier = modifier.clickable { onSelected(filter) },
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.surface,
+        contentColor = if (selected) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            @Composable
+            fun CountBadge() {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selected) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                ) {
+                    Text(
+                        count,
+                        Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                    )
+                }
+            }
+            if (filter == OrderListFilter.REMIND) {
+                CountBadge()
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                filter.title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            if (filter != OrderListFilter.REMIND) {
+                Spacer(Modifier.width(5.dp))
+                CountBadge()
+            }
+        }
+    }
+}
+
+@Composable
 internal fun OrderFilters(
     orders: List<Order>,
     reminders: Map<String, PickupReminderState>,
@@ -543,40 +594,48 @@ internal fun OrderFilters(
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(OrderListFilter.entries) { filter ->
-            val active = filter == selected
-            Surface(
-                modifier = Modifier.clickable { onSelected(filter) },
-                shape = RoundedCornerShape(18.dp),
-                color = if (active) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.surface,
-                contentColor = if (active) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
-            ) {
-                Row(
-                    Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(filter.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = if (active) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+    val filters = OrderListFilter.entries
+    fun count(filter: OrderListFilter): String =
+        if (filter == OrderListFilter.REMIND && !remindersLoaded) "—"
+        else orders.count {
+            if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id])
+            else it.matchesListFilter(filter)
+        }.toString()
+
+    // Do not hide the fourth filter off-screen: use two rows on phones.
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
+        if (maxWidth < 680.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                filters.chunked(2).forEach { pair ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text(
-                            if (filter == OrderListFilter.REMIND && !remindersLoaded) "—"
-                            else orders.count {
-                                if (filter == OrderListFilter.REMIND) {
-                                    it.isPickupReminderDue(reminders[it.id])
-                                } else it.matchesListFilter(filter)
-                            }.toString(),
-                            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                        )
+                        pair.forEach { filter ->
+                            OrderFilterChip(
+                                filter = filter,
+                                count = count(filter),
+                                selected = filter == selected,
+                                modifier = Modifier.weight(1f),
+                                onSelected = onSelected,
+                            )
+                        }
                     }
+                }
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                filters.forEach { filter ->
+                    OrderFilterChip(
+                        filter = filter,
+                        count = count(filter),
+                        selected = filter == selected,
+                        modifier = Modifier.weight(1f),
+                        onSelected = onSelected,
+                    )
                 }
             }
         }
