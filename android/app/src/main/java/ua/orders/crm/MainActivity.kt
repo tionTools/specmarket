@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -187,10 +188,10 @@ fun OrdersApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
-    LaunchedEffect(filterName, vm.email, vm.initializing) {
-        if (filterName == OrderListFilter.REMIND.name && vm.email != null && !vm.initializing) {
-            vm.loadPickupReminders()
-        }
+    // One lightweight read of saved deadlines when the CRM opens, regardless of filter.
+    // Reuse the same data on filter selection; never poll carriers or add a timer.
+    LaunchedEffect(vm.email, vm.initializing) {
+        if (vm.email != null && !vm.initializing) vm.ensurePickupReminderCount()
     }
     var confirmationId by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -549,7 +550,7 @@ private fun OrderFilterChip(
         contentColor = if (selected) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
@@ -593,51 +594,30 @@ internal fun OrderFilters(
     remindersLoaded: Boolean,
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
+    remindersFailed: Boolean = false,
 ) {
-    val filters = OrderListFilter.entries
-    fun count(filter: OrderListFilter): String =
-        if (filter == OrderListFilter.REMIND && !remindersLoaded) "—"
-        else orders.count {
-            if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id])
-            else it.matchesListFilter(filter)
-        }.toString()
-
-    // Do not hide the fourth filter off-screen: use two rows on phones.
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
-        if (maxWidth < 680.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                filters.chunked(2).forEach { pair ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        pair.forEach { filter ->
-                            OrderFilterChip(
-                                filter = filter,
-                                count = count(filter),
-                                selected = filter == selected,
-                                modifier = Modifier.weight(1f),
-                                onSelected = onSelected,
-                            )
-                        }
-                    }
-                }
+    // Single scrollable row: the due count comes BEFORE "Напомнить" so it
+    // stays visible even when the end of the fourth label is off-screen.
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        items(OrderListFilter.entries) { filter ->
+            val count = when {
+                filter == OrderListFilter.REMIND && !remindersLoaded ->
+                    if (remindersFailed) "!" else "…"
+                else -> orders.count {
+                    if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id])
+                    else it.matchesListFilter(filter)
+                }.toString()
             }
-        } else {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                filters.forEach { filter ->
-                    OrderFilterChip(
-                        filter = filter,
-                        count = count(filter),
-                        selected = filter == selected,
-                        modifier = Modifier.weight(1f),
-                        onSelected = onSelected,
-                    )
-                }
-            }
+            OrderFilterChip(
+                filter = filter,
+                count = count,
+                selected = selected == filter,
+                modifier = Modifier,
+                onSelected = onSelected,
+            )
         }
     }
 }
@@ -722,6 +702,7 @@ private fun OrdersScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             OrderFilters(
                 orders, vm.pickupReminders, vm.pickupLoaded, filter, onFilterChange,
+            remindersFailed = vm.pickupError != null,
             )
             if (filter == OrderListFilter.REMIND) {
                 PickupReminderContent(

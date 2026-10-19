@@ -42,6 +42,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var pickupBusy by mutableStateOf(false); private set
     var pickupError by mutableStateOf<String?>(null); private set
     private var pickupGeneration = 0L
+    private var pickupLoadedDay: java.time.LocalDate? = null
     private var pickupJob: Job? = null
 
     init {
@@ -98,6 +99,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (email != null) {
             retryConnection()
             syncPushRegistration()
+            ensurePickupReminderCount()
         }
     }
 
@@ -108,7 +110,10 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun networkRestored() {
-        if (visible && email != null) retryConnection()
+        if (visible && email != null) {
+            retryConnection()
+            ensurePickupReminderCount()
+        }
     }
 
     fun retryConnection() {
@@ -274,6 +279,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupJob = null
         pickupReminders = emptyMap()
         pickupLoaded = false
+        pickupLoadedDay = null
         pickupLoading = false
         pickupBusy = false
         pickupError = null
@@ -362,9 +368,17 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
 
-    // Loaded only when reminders UI is open: no new startup dependency,
-    // no additional query on routine order sync or realtime updates.
+    // At most one read per account per Kyiv calendar day. The optional
+    // count does not block order loading or schedule carrier requests.
+    fun ensurePickupReminderCount() {
+        if (email == null || pickupLoading ||
+            (pickupLoaded && pickupLoadedDay == pickupToday())) return
+        loadPickupReminders()
+    }
+
+    // User-triggered refresh uses the same read-only saved-reminders query.
     fun loadPickupReminders() {
+        if (pickupLoading) return
         val account = email ?: return
         val generation = ++pickupGeneration
         pickupJob?.cancel()
@@ -378,6 +392,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 if (email == account && generation == pickupGeneration) {
                     pickupReminders = reminders.associateBy { it.orderId }
                     pickupLoaded = true
+                    pickupLoadedDay = pickupToday()
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) {
