@@ -64,7 +64,6 @@ import {
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
-import { isEpicentrShippingUnconfirmed } from '@/features/orders/epicentrShipping'
 import {
   deliveryTtnForClipboard,
   displayCarrier,
@@ -7081,8 +7080,7 @@ function orderDateTime(order: Order) {
                   }}</strong>
                 </div>
                 <label class="text-slate-500"
-                  >{{ order.platform === 'Эпицентр' ? 'Расход доставки' : 'Доставка'
-                  }}<input
+                  >Доставка<input
                     :value="orderCellValue(`${order.id}-shipping`, order.shipping)"
                     :readonly="editingOrderCell !== `${order.id}-shipping`"
                     class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
@@ -7092,12 +7090,7 @@ function orderDateTime(order: Order) {
                     @blur="finishOrderCell(`${order.id}-shipping`)"
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)"
                   />
-                  <span
-                    v-if="isEpicentrShippingUnconfirmed(order)"
-                    class="mt-1 block text-[10px] leading-tight text-amber-700"
-                    >Не подтверждён</span
-                  ></label
-                >
+                </label>
                 <label class="text-slate-500"
                   >Сумма оплаты<input
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
@@ -7596,7 +7589,7 @@ function orderDateTime(order: Order) {
                     </div>
                     <div class="text-right">
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        {{ order.platform === 'Эпицентр' ? 'Цена доставки' : 'Доставка' }}
+                        Доставка
                       </dt>
                       <dd class="mt-1 whitespace-nowrap font-semibold">
                         {{
