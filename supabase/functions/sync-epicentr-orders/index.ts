@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { epicentrShipping } from './shipping.ts'
 import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import { findPlatformPriceCostSnapshot, loadPlatformPriceCostSnapshots, resolvedOrderItemCost } from '../_shared/price-cost.ts'
 import {
@@ -83,6 +84,7 @@ type EpicentrOrder = {
       settlementId?: string
       officeId?: string
       deliveryPrice?: number
+      isFree?: boolean
     }
   }
 }
@@ -745,8 +747,14 @@ Deno.serve(async (request) => {
       ? 'Получено'
       : apiDeliveryStatus ||
         (typeof previousDelivery.status === 'string' && previousDelivery.status !== status ? previousDelivery.status : 'Заплановано')
-    const hasManualShipping = previousDelivery.shippingSource === 'manual'
-    const hasShippingFromApi = shipment?.deliveryPrice !== undefined && shipment.deliveryPrice !== null
+    const { shipping, shippingSource, deliveryPrice, isFree } = epicentrShipping({
+      existingShipping: existing.data?.shipping,
+      existingSource: typeof previousDelivery.shippingSource === 'string' ? previousDelivery.shippingSource : undefined,
+      deliveryPrice: shipment?.deliveryPrice,
+      previousDeliveryPrice: typeof previousDelivery.deliveryPrice === 'number' ? previousDelivery.deliveryPrice : undefined,
+      isFree: shipment?.isFree,
+      previousIsFree: typeof previousDelivery.isFree === 'boolean' ? previousDelivery.isFree : undefined,
+    })
     const deliveryCarrier = readableText(shipment?.provider) || readableText(previousDelivery.carrier) || 'Эпицентр'
     const deliveryTtn = readableText(shipment?.number) || readableText(previousDelivery.ttn)
     const orderUsdRate = usdRateForDate(usdRateSchedule, formatOrderDate(source.createdAt))
@@ -761,13 +769,7 @@ Deno.serve(async (request) => {
       customer_comment: source.comment ?? null,
       platform: 'Эпицентр',
       status,
-      // Ручная корректировка в CRM имеет приоритет над данными площадки.
-      // Пока пользователь не менял сумму, берём фактическую стоимость доставки из API.
-      shipping: hasManualShipping
-        ? Number(existing.data?.shipping ?? 0)
-        : hasShippingFromApi
-          ? Number(shipment?.deliveryPrice)
-          : Number(existing.data?.shipping ?? 0),
+      shipping,
       // Эквайринг вводится в CRM, а API площадки его не возвращает.
       acquiring: manual.acquiring !== undefined ? Number(manual.acquiring) : Number(existing.data?.acquiring ?? 0),
       acquiring_percent: manual.acquiringPercent !== undefined ? (manual.acquiringPercent === null ? null : Number(manual.acquiringPercent)) : existing.data?.acquiring_percent ?? null,
@@ -779,10 +781,12 @@ Deno.serve(async (request) => {
         city,
         address,
         status: deliveryStatus,
-        payer: 'Не вказано',
+        payer: readableText(previousDelivery.payer) || 'Не вказано',
+        deliveryPrice,
+        isFree,
         isAlternateRecipient: source.address?.isAlternateRecipient ?? false,
         ...savedPayment,
-        shippingSource: hasManualShipping ? 'manual' : undefined,
+        shippingSource,
         ...preserveTracking(previousDelivery, deliveryCarrier, deliveryTtn, { city, address }),
         printCheckedAt: typeof previousDelivery.printCheckedAt === 'string' ? previousDelivery.printCheckedAt : undefined,
         printedAt: typeof previousDelivery.printedAt === 'string' ? previousDelivery.printedAt : undefined,
@@ -806,7 +810,8 @@ Deno.serve(async (request) => {
     if (orderId && orderChanged) {
       const { data: snapshotApplied, error } = await admin.rpc(
         'apply_crm_marketplace_order_snapshot',
-        { p_order_id: orderId, p_data: data },
+        // The RPC uses the current DB row for omitted fields, so a concurrent manual edit wins.
+        { p_order_id: orderId, p_data: { ...data, shipping: undefined } },
       )
       if (error || snapshotApplied !== true)
         return Response.json(

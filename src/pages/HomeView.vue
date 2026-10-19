@@ -62,6 +62,7 @@ import {
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
+import { isEpicentrShippingUnconfirmed } from '@/features/orders/epicentrShipping'
 import {
   deliveryTtnForClipboard,
   displayCarrier,
@@ -2155,6 +2156,15 @@ const summary = computed(() => {
     },
   }
 })
+
+const hasUnconfirmedShippingInProfit = computed(() =>
+  [
+    ...ordersForToday.value,
+    ...ordersForSelectedPeriod.value,
+    ...(isComparingPreviousPeriod.value ? ordersForPreviousPlatformSummary.value : []),
+    ...(isComparingPreviousPeriod.value ? unpaidShipmentOrders.value : []),
+  ].some(isEpicentrShippingUnconfirmed),
+)
 
 function platformOrderMetrics(platformOrders: Order[]) {
   return {
@@ -6004,6 +6014,10 @@ function orderDateTime(order: Order) {
         </article>
       </section>
 
+      <p v-if="hasUnconfirmedShippingInProfit" class="mt-2 text-xs font-medium text-amber-800">
+        Прибыль предварительная: у части заказов Эпицентра не подтверждён расход на доставку.
+      </p>
+
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <button
@@ -6465,7 +6479,10 @@ function orderDateTime(order: Order) {
             ><span
               v-if="hasActualFinancialResult(order)"
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="whitespace-nowrap">{{ formatMoney(getActualProfit(order)) }}</strong>
+              ><strong class="whitespace-nowrap"
+                >{{ isEpicentrShippingUnconfirmed(order) ? '≈ ' : ''
+                }}{{ formatMoney(getActualProfit(order)) }}</strong
+              >
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span
               ></span
@@ -6475,9 +6492,15 @@ function orderDateTime(order: Order) {
               >—</strong
             ><span
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="whitespace-nowrap">{{ formatMoney(getPlannedProfit(order)) }}</strong>
+              ><strong class="whitespace-nowrap"
+                >{{ isEpicentrShippingUnconfirmed(order) ? '≈ ' : ''
+                }}{{ formatMoney(getPlannedProfit(order)) }}</strong
+              >
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
+              >
+              <span v-if="isEpicentrShippingUnconfirmed(order)" class="text-[10px] text-amber-700"
+                >Предварительно</span
               ></span
             ><span
               class="flex w-fit flex-col items-start gap-1.5 lg:w-full lg:self-stretch lg:justify-center lg:border-l lg:border-slate-200 lg:pl-3"
@@ -7067,7 +7090,8 @@ function orderDateTime(order: Order) {
                   }}</strong>
                 </div>
                 <label class="text-slate-500"
-                  >Доставка<input
+                  >{{ order.platform === 'Эпицентр' ? 'Расход доставки' : 'Доставка'
+                  }}<input
                     :value="orderCellValue(`${order.id}-shipping`, order.shipping)"
                     :readonly="editingOrderCell !== `${order.id}-shipping`"
                     class="order-cell-edit mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-900"
@@ -7076,7 +7100,13 @@ function orderDateTime(order: Order) {
                     @input="updateOrderFinancial(order, 'shipping', `${order.id}-shipping`, $event)"
                     @blur="finishOrderCell(`${order.id}-shipping`)"
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)"
-                /></label>
+                  />
+                  <span
+                    v-if="isEpicentrShippingUnconfirmed(order)"
+                    class="mt-1 block text-[10px] leading-tight text-amber-700"
+                    >Не подтверждён</span
+                  ></label
+                >
                 <label class="text-slate-500"
                   >Сумма оплаты<input
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
@@ -7575,10 +7605,28 @@ function orderDateTime(order: Order) {
                     </div>
                     <div class="text-right">
                       <dt class="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                        Доставка
+                        {{ order.platform === 'Эпицентр' ? 'Цена доставки' : 'Доставка' }}
                       </dt>
                       <dd class="mt-1 whitespace-nowrap font-semibold">
-                        {{ formatMoney(order.shipping) }}
+                        {{
+                          order.platform === 'Эпицентр' &&
+                          order.delivery.deliveryPrice === undefined
+                            ? '—'
+                            : formatMoney(
+                                order.platform === 'Эпицентр'
+                                  ? (order.delivery.deliveryPrice ?? 0)
+                                  : order.shipping,
+                              )
+                        }}
+                      </dd>
+                      <dd v-if="order.platform === 'Эпицентр'" class="text-[11px] text-slate-500">
+                        {{
+                          order.delivery.isFree === true
+                            ? 'Бесплатно для покупателя'
+                            : order.delivery.isFree === false
+                              ? 'Платно для покупателя'
+                              : 'Оплата покупателем неизвестна'
+                        }}
                       </dd>
                     </div>
                   </div>

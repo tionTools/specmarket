@@ -54,6 +54,10 @@ export interface Delivery {
   addressHistory?: string[]
   status: string
   payer: string
+  /** Цена доставки из Epicentr API для отображения, не расход продавца. */
+  deliveryPrice?: number
+  /** Бесплатна ли доставка для покупателя по данным Epicentr. */
+  isFree?: boolean
   isAlternateRecipient?: boolean
   paymentAmount?: number
   paymentMethod?: string
@@ -64,7 +68,7 @@ export interface Delivery {
   rozetkaPayOperationIds?: string[]
   hasWebsiteCommission?: boolean
   isInstallmentPayment?: boolean
-  shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none'
+  shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none' | 'unconfirmed'
   /** Последний статус, полученный из tracking перевозчика. */
   trackingStatus?: string
   trackingNormalizedStatus?: string
