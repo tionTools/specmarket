@@ -6492,7 +6492,6 @@ function orderDateTime(order: Order) {
               ><strong class="whitespace-nowrap">{{ formatMoney(getPlannedProfit(order)) }}</strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
-              >
               ></span
             ><span
               class="flex w-fit flex-col items-start gap-1.5 lg:w-full lg:self-stretch lg:justify-center lg:border-l lg:border-slate-200 lg:pl-3"
