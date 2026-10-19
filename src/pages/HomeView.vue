@@ -64,7 +64,6 @@ import {
 import * as XLSX from 'xlsx'
 
 import { demoOrders } from '@/features/orders/demoOrders'
-import { isEpicentrShippingUnconfirmed } from '@/features/orders/epicentrShipping'
 import {
   deliveryTtnForClipboard,
   displayCarrier,
@@ -7092,12 +7091,7 @@ function orderDateTime(order: Order) {
                     @blur="finishOrderCell(`${order.id}-shipping`)"
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-shipping`, $event)"
                   />
-                  <span
-                    v-if="isEpicentrShippingUnconfirmed(order)"
-                    class="mt-1 block text-[10px] leading-tight text-amber-700"
-                    >Не подтверждён</span
-                  ></label
-                >
+                </label>
                 <label class="text-slate-500"
                   >Сумма оплаты<input
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
