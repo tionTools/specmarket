@@ -21,3 +21,8 @@ export function hasPhysicalShipmentMovement(delivery: PhysicalShipmentDelivery) 
   if (text(delivery.printedAt)) return true
   return physicalCarrierStatuses.has(normalizedStatus)
 }
+
+export function hasConfirmedCarrierMovement(delivery: PhysicalShipmentDelivery) {
+  const status = text(delivery.trackingNormalizedStatus).toLowerCase()
+  return physicalCarrierStatuses.has(status) || status === 'forwarding'
+}

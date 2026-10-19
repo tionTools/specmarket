@@ -1,6 +1,7 @@
 import { getNetOrderAmount } from '../../../src/features/orders/financials.ts'
 import {
   getOrderLifecycleState,
+  hasActualFinancialResult,
   hasPhysicalShipmentMovement,
   includeInUnpaidShipment,
   includeInTurnoverReport,
@@ -45,6 +46,51 @@ Deno.test('bare TTN does not turn pre-shipment cancellation into in-transit mone
   assert(state === 'cancelled_before_shipment')
   assert(!isOrderVisibleInMainList(state))
   assert(!isReturnLifecycleState(state))
+})
+
+Deno.test('Epicentr printed label without carrier handover is a pre-shipment cancellation', () => {
+  const cancelled = order({ printedAt: '2026-10-19', trackingNormalizedStatus: 'created' })
+  cancelled.platform = 'Эпицентр'
+  cancelled.products[0]!.price = 695
+  cancelled.products[0]!.cost = 432
+  cancelled.products[0]!.returnedQuantity = 1
+  cancelled.shipping = 38.48
+  assert(!hasPhysicalShipmentMovement(cancelled))
+  assert(getOrderLifecycleState(cancelled, cancelled.status) === 'cancelled_before_shipment')
+  assert(!includeInTurnoverReport(cancelled, cancelled.status))
+  assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
+  assert(!isReturnLifecycleState(getOrderLifecycleState(cancelled, cancelled.status)))
+  assert(
+    !hasActualFinancialResult(cancelled, cancelled.status),
+    'phantom return must not create -38.48 actual profit',
+  )
+  cancelled.products[0]!.returnedQuantity = 0
+  assert(getNetOrderAmount(cancelled) === 695, 'original item must remain intact')
+  assert(!includeInTurnoverReport(cancelled, cancelled.status), 'removing false return must not restore sale')
+  assert(!includeInUnpaidShipment(cancelled, cancelled.status, false))
+  assert(!hasActualFinancialResult(cancelled, cancelled.status))
+})
+
+Deno.test('Epicentr confirmed handover and genuine return keep the return lifecycle', () => {
+  const shipped = order({ printedAt: '2026-10-19', trackingNormalizedStatus: 'accepted' })
+  shipped.platform = 'Эпицентр'
+  assert(hasPhysicalShipmentMovement(shipped))
+  assert(getOrderLifecycleState(shipped, shipped.status) === 'return_pending')
+  assert(includeInTurnoverReport(shipped, shipped.status))
+  shipped.products[0]!.returnedQuantity = 1
+  assert(getOrderLifecycleState(shipped, shipped.status) === 'return_completed')
+  assert(
+    hasActualFinancialResult(shipped, shipped.status),
+    'genuine accepted return remains realized',
+  )
+  assert(!includeInUnpaidShipment(shipped, shipped.status, false))
+})
+
+Deno.test('Epicentr unknown carrier status does not turn printing into handover', () => {
+  const unknown = order({ printedAt: '2026-10-19', trackingNormalizedStatus: 'unknown' })
+  unknown.platform = 'Эпицентр'
+  assert(!hasPhysicalShipmentMovement(unknown))
+  assert(getOrderLifecycleState(unknown, unknown.status) === 'cancelled_before_shipment')
 })
 
 Deno.test('S5TSAE5 stays in turnover until return acceptance and then contributes zero', () => {
