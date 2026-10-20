@@ -40,7 +40,7 @@ def click(label, allow_scroll=False):
     for attempt in range(6 if allow_scroll else 3):
         root = hierarchy()
         node = match(root, label)
-        if node:
+        if node is not None:
             bounds = node.attrib.get("bounds", "")
             m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
             if not m:
