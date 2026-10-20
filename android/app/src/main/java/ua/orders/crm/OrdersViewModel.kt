@@ -438,9 +438,24 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 repository.confirmPickupReminder(order.id, reminder.ttn, reminder.deadline, stage, channel)
-                pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                // The RPC is authoritative. The subsequent read can fail, but a
+                // successful acknowledgement must disappear from the list immediately.
+                val at = java.time.Instant.now().toString()
+                val acknowledged = when (stage) {
+                    PickupReminderStage.FIRST -> reminder.copy(firstSentAt = at, firstChannel = channel)
+                    PickupReminderStage.LAST -> reminder.copy(lastSentAt = at, lastChannel = channel)
+                }
+                pickupReminders = pickupReminders + (order.id to acknowledged)
                 pickupError = null
                 message = "Отправка отмечена."
+                try {
+                    pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // Keep the verified local acknowledgement, not a stale due card.
+                    pickupError = "Отправка сохранена. Не удалось обновить список, попробуйте позже."
+                }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) {
                 message = "Не удалось подтвердить отправку. Проверьте статус."

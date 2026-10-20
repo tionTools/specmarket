@@ -19,8 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -46,22 +44,22 @@ internal fun PickupReminderContent(
     var pendingOrderId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingStageName by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingChannel by rememberSaveable { mutableStateOf<String?>(null) }
-    var awaitingMessengerReturn by rememberSaveable { mutableStateOf(false) }
     var showSentConfirmation by rememberSaveable { mutableStateOf(false) }
 
     fun clearPendingSend() {
         pendingOrderId = null
         pendingStageName = null
         pendingChannel = null
-        awaitingMessengerReturn = false
         showSentConfirmation = false
     }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (pendingOrderId != null && awaitingMessengerReturn) {
-            awaitingMessengerReturn = false
-            showSentConfirmation = true
-        }
+    fun askAboutSentMessage(order: Order, stage: PickupReminderStage, channel: String?) {
+        pendingOrderId = order.id
+        pendingStageName = stage.name
+        pendingChannel = channel
+        // Dialog is prepared before launching an external app. Returning from
+        // Telegram/Viber must not depend on Android delivering ON_RESUME.
+        showSentConfirmation = true
     }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
@@ -155,14 +153,8 @@ internal fun PickupReminderContent(
                                             Button(
                                                 onClick = {
                                                     val draft = order.pickupReminderText(stage, reminder.deadline, today)
-                                                    pendingOrderId = order.id
-                                                    pendingStageName = stage.name
-                                                    pendingChannel = channel
-                                                    awaitingMessengerReturn = true
-                                                    showSentConfirmation = false
+                                                    askAboutSentMessage(order, stage, channel)
                                                     if (!openPickupDraft(context, contactPhone.orEmpty(), channel, draft)) {
-                                                        awaitingMessengerReturn = false
-                                                        showSentConfirmation = true
                                                         Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
                                                             Toast.LENGTH_LONG).show()
                                                     }
@@ -180,13 +172,12 @@ internal fun PickupReminderContent(
                                         }
                                     }
                                 }
-                                if (pendingOrderId == order.id &&
-                                    pendingStageName == stage.name && pendingChannel != null) {
-                                    TextButton(onClick = {
-                                        awaitingMessengerReturn = false
-                                        showSentConfirmation = true
-                                    }) { Text("Подтвердить отправку") }
-                                }
+                                // Always available for a message sent outside the app,
+                                // even if the messenger never returned an activity result.
+                                TextButton(
+                                    onClick = { askAboutSentMessage(order, stage, null) },
+                                    enabled = !busy,
+                                ) { Text("Отметить отправленным") }
                             }
                         }
                     }
@@ -231,12 +222,27 @@ internal fun PickupReminderContent(
         AlertDialog(
             onDismissRequest = { clearPendingSend() },
             title = { Text("Сообщение отправлено?") },
-            text = { Text("Подтверждайте только после отправки сообщения клиенту.") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Подтверждайте только после фактической отправки сообщения клиенту.")
+                    Text("Где отправлено?")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("viber" to "Viber", "telegram" to "Telegram").forEach { (channel, title) ->
+                            FilterChip(
+                                selected = pendingChannel == channel,
+                                onClick = { pendingChannel = channel },
+                                label = { Text(title) },
+                            )
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 Button(onClick = {
-                    onConfirmSent(pendingOrder, pendingStage, selectedChannel)
+                    val channel = pendingChannel ?: return@Button
+                    onConfirmSent(pendingOrder, pendingStage, channel)
                     clearPendingSend()
-                }, enabled = !busy) { Text("Да, отправлено") }
+                }, enabled = !busy && selectedChannel != null) { Text("Да, отправлено") }
             },
             dismissButton = { TextButton(onClick = { clearPendingSend() }) { Text("Нет") } },
         )

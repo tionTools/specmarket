@@ -31,6 +31,14 @@ class PickupRemindersTest {
         }).isPickupReminderDue(state(2), date))
     }
 
+    @Test fun acknowledged_reminder_no_longer_due_and_final_stage_stays_independent() {
+        val sent = state(2).copy(firstSentAt = "2026-10-20T09:00:00Z", firstChannel = "telegram")
+        assertNull(order().pendingPickupReminder(sent, date))
+        val final = sent.copy(deadline = date.toString())
+        assertEquals(PickupReminderStage.LAST, order().pendingPickupReminder(final, date))
+        assertNull(order().pendingPickupReminder(final.copy(lastSentAt = "2026-10-20T09:30:00Z"), date))
+    }
+
     @Test fun reminders_due_on_two_days_and_final_day_independently() {
         assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(2), date))
         assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(1), date))
