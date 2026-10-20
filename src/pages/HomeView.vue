@@ -7667,6 +7667,7 @@ function orderDateTime(order: Order) {
     >
       <form
         class="flex h-full min-h-0 flex-col bg-slate-50"
+        autocomplete="off"
         novalidate
         @submit.prevent="saveOrderDraft"
       >
