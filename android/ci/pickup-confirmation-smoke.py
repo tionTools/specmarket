@@ -74,7 +74,6 @@ assert_visible("Сообщение отправлено?")
 assert_visible("Где отправлено?")
 assert_visible("Viber")
 assert_visible("Telegram")
-adb("exec-out", "screencap", "-p")  # Dialog remains visible until explicitly dismissed.
 click("Нет")
 assert_visible("Отметить отправленным")
 print("PASS: manual confirmation dialog and safe decline, no RPC or push triggered")
