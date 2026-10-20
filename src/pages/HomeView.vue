@@ -7662,18 +7662,18 @@ function orderDateTime(order: Order) {
 
     <dialog
       ref="orderDialog"
-      class="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-slate-200 p-0 shadow-2xl backdrop:bg-slate-950/35"
+      class="fixed inset-0 m-0 h-dvh max-h-none w-dvw max-w-none overflow-hidden rounded-none border-0 p-0 backdrop:bg-slate-950/35"
       @cancel.prevent="cancelOrderDraft"
     >
       <form
-        class="flex max-h-[calc(100dvh-2rem)] flex-col bg-slate-50"
+        class="flex h-full min-h-0 flex-col bg-slate-50"
         novalidate
         @submit.prevent="saveOrderDraft"
       >
         <div
-          class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4"
+          class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4"
         >
-          <div>
+          <div class="min-w-0">
             <h2 class="text-xl font-semibold text-slate-900">
               {{ editingManualOrderId === null ? 'Новый заказ' : 'Редактирование заказа' }}
             </h2>
@@ -7682,7 +7682,7 @@ function orderDateTime(order: Order) {
             </p>
           </div>
           <button
-            class="rounded-lg px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100"
+            class="shrink-0 rounded-lg px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100"
             type="button"
             aria-label="Закрыть"
             @click="cancelOrderDraft"
@@ -7691,7 +7691,7 @@ function orderDateTime(order: Order) {
           </button>
         </div>
 
-        <div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+        <div class="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 class="text-base font-semibold text-slate-900">Основные данные</h3>
             <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -7771,7 +7771,7 @@ function orderDateTime(order: Order) {
           </section>
 
           <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div class="flex items-center justify-between gap-4">
+            <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h3 class="text-base font-semibold text-slate-900">Товары</h3>
                 <p class="mt-1 text-xs text-slate-500">
@@ -7793,7 +7793,7 @@ function orderDateTime(order: Order) {
                 :key="product.id"
                 class="rounded-xl border border-slate-200 bg-slate-50 p-4"
               >
-                <div class="mb-3 flex items-center justify-between">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <span class="text-sm font-semibold text-slate-700"
                     >Товар {{ productIndex + 1 }}</span
                   >
@@ -7969,7 +7969,7 @@ function orderDateTime(order: Order) {
           </section>
         </div>
 
-        <div class="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+        <div class="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
           <p
             v-if="orderDraftError"
             class="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700"
