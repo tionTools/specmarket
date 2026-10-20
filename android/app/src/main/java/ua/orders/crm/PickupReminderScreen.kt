@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -20,12 +21,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
-
-private data class PendingSentDialog(
-    val order: Order,
-    val stage: PickupReminderStage,
-    val channel: String?,
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,13 +39,20 @@ internal fun PickupReminderContent(
     val today = pickupToday()
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
-    // A single transient dialog state, like the working "Изменить срок"
-    // dialog. Prepare it before leaving for a messenger; if Android kills
-    // this screen, the unconditional manual confirmation action remains.
-    var sentDialog by remember { mutableStateOf<PendingSentDialog?>(null) }
-
+    // Saved primitives survive Activity recreation while a messenger is in front.
+    // A manual confirmation works even when no messenger has been launched.
+    var pendingOrderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingStage by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingChannel by rememberSaveable { mutableStateOf<String?>(null) }
+    fun clearConfirmation() {
+        pendingOrderId = null
+        pendingStage = null
+        pendingChannel = null
+    }
     fun askAboutSentMessage(order: Order, stage: PickupReminderStage, channel: String?) {
-        sentDialog = PendingSentDialog(order, stage, channel)
+        pendingOrderId = order.id
+        pendingStage = stage.name
+        pendingChannel = channel
     }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
@@ -204,10 +206,13 @@ internal fun PickupReminderContent(
         )
     }
 
-    val dialog = sentDialog
-    if (dialog != null) {
+    val dialogOrder = orders.firstOrNull { it.id == pendingOrderId }
+    val dialogStage = pendingStage?.let { key ->
+        PickupReminderStage.entries.firstOrNull { it.name == key }
+    }
+    if (dialogOrder != null && dialogStage != null) {
         AlertDialog(
-            onDismissRequest = { sentDialog = null },
+            onDismissRequest = { clearConfirmation() },
             title = { Text("Сообщение отправлено?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -216,8 +221,8 @@ internal fun PickupReminderContent(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("viber" to "Viber", "telegram" to "Telegram").forEach { (channel, title) ->
                             FilterChip(
-                                selected = dialog.channel == channel,
-                                onClick = { sentDialog = dialog.copy(channel = channel) },
+                                selected = pendingChannel == channel,
+                                onClick = { pendingChannel = channel },
                                 label = { Text(title) },
                             )
                         }
@@ -226,12 +231,12 @@ internal fun PickupReminderContent(
             },
             confirmButton = {
                 Button(onClick = {
-                    val channel = dialog.channel ?: return@Button
-                    onConfirmSent(dialog.order, dialog.stage, channel)
-                    sentDialog = null
-                }, enabled = !busy && dialog.channel != null) { Text("Да, отправлено") }
+                    val channel = pendingChannel ?: return@Button
+                    onConfirmSent(dialogOrder, dialogStage, channel)
+                    clearConfirmation()
+                }, enabled = !busy && pendingChannel != null) { Text("Да, отправлено") }
             },
-            dismissButton = { TextButton(onClick = { sentDialog = null }) { Text("Нет") } },
+            dismissButton = { TextButton(onClick = { clearConfirmation() }) { Text("Нет") } },
         )
     }
 }
