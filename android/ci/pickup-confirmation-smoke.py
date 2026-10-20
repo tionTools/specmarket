@@ -47,6 +47,9 @@ def click(label, allow_scroll=False):
                 raise AssertionError(f"Unusable bounds for {label}: {bounds}")
             x1, y1, x2, y2 = map(int, m.groups())
             print(f"Tapped {label!r} at {((x1 + x2) // 2, (y1 + y2) // 2)}, bounds={bounds}", flush=True)
+            # Allow the standalone UIAutomator accessibility process to release
+            # touch injection before using adb input on the emulator.
+            time.sleep(2)
             adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
             time.sleep(1)
             return
@@ -70,6 +73,11 @@ def assert_visible(label):
     raise AssertionError(f"Expected label absent: {label}")
 
 
+# Control case: a known working deadline button must react to the same
+# accessibility-based tap method before we test the new manual button.
+click("Изменить срок", allow_scroll=True)
+assert_visible("Крайний срок получения")
+click("Отмена")
 click("Отметить отправленным", allow_scroll=True)
 # Keep concrete evidence if an Android release or emulator masks the dialog.
 from pathlib import Path
