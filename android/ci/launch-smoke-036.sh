@@ -51,4 +51,5 @@ if grep -q 'Process: ua.orders.crm' validation/036-logcat.txt; then
   exit 1
 fi
 adb exec-out screencap -p > validation/036-reminders.png
-echo "PASS: cold launch + resume + populated reminder screen"
+python3 android/ci/pickup-confirmation-smoke.py
+echo "PASS: cold launch + resume + populated reminder screen + manual confirmation"
