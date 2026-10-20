@@ -48,4 +48,6 @@ jobs:
           path: |
             validation/036-*.txt
             validation/036-reminders.png
+            validation/036-after-manual.png
+            validation/036-after-manual.xml
           retention-days: 7

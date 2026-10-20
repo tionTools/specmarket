@@ -32,7 +32,7 @@ def hierarchy():
 def match(root, label):
     return next((
         node for node in root.iter("node")
-        if node.attrib.get("text") == label or node.attrib.get("content-desc") == label
+        if label in node.attrib.get("text", "") or label in node.attrib.get("content-desc", "")
     ), None)
 
 
@@ -46,6 +46,7 @@ def click(label, allow_scroll=False):
             if not m:
                 raise AssertionError(f"Unusable bounds for {label}: {bounds}")
             x1, y1, x2, y2 = map(int, m.groups())
+            print(f"Tapped {label!r} at {((x1 + x2) // 2, (y1 + y2) // 2)}, bounds={bounds}", flush=True)
             adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
             time.sleep(1)
             return
@@ -70,6 +71,15 @@ def assert_visible(label):
 
 
 click("Отметить отправленным", allow_scroll=True)
+# Keep concrete evidence if an Android release or emulator masks the dialog.
+from pathlib import Path
+Path("validation").mkdir(exist_ok=True)
+with open("validation/036-after-manual.png", "wb") as f:
+    subprocess.run(["adb", "exec-out", "screencap", "-p"], stdout=f, check=True, timeout=25)
+dump = hierarchy()
+Path("validation/036-after-manual.xml").write_text(ET.tostring(dump, encoding="unicode"), encoding="utf-8")
+print("UI_AFTER_CLICK:", [(n.attrib.get("text"), n.attrib.get("content-desc"))
+    for n in dump.iter("node") if n.attrib.get("text") or n.attrib.get("content-desc")][-30:], flush=True)
 assert_visible("Сообщение отправлено?")
 assert_visible("Где отправлено?")
 assert_visible("Viber")
