@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -21,6 +20,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+
+private data class PendingSentDialog(
+    val order: Order,
+    val stage: PickupReminderStage,
+    val channel: String?,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,27 +44,13 @@ internal fun PickupReminderContent(
     val today = pickupToday()
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
-    // Keep the pending send attempt in saved state *before* launching the messenger.
-    // The system may recreate our activity while Telegram/Viber is in front.
-    var pendingOrderId by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingStageName by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingChannel by rememberSaveable { mutableStateOf<String?>(null) }
-    var showSentConfirmation by rememberSaveable { mutableStateOf(false) }
-
-    fun clearPendingSend() {
-        pendingOrderId = null
-        pendingStageName = null
-        pendingChannel = null
-        showSentConfirmation = false
-    }
+    // A single transient dialog state, like the working "Изменить срок"
+    // dialog. Prepare it before leaving for a messenger; if Android kills
+    // this screen, the unconditional manual confirmation action remains.
+    var sentDialog by remember { mutableStateOf<PendingSentDialog?>(null) }
 
     fun askAboutSentMessage(order: Order, stage: PickupReminderStage, channel: String?) {
-        pendingOrderId = order.id
-        pendingStageName = stage.name
-        pendingChannel = channel
-        // Dialog is prepared before launching an external app. Returning from
-        // Telegram/Viber must not depend on Android delivering ON_RESUME.
-        showSentConfirmation = true
+        sentDialog = PendingSentDialog(order, stage, channel)
     }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
@@ -213,14 +204,10 @@ internal fun PickupReminderContent(
         )
     }
 
-    val pendingOrder = orders.firstOrNull { it.id == pendingOrderId }
-    val pendingStage = pendingStageName?.let { name ->
-        PickupReminderStage.entries.firstOrNull { it.name == name }
-    }
-    val selectedChannel = pendingChannel
-    if (showSentConfirmation && pendingOrder != null && pendingStage != null && selectedChannel != null) {
+    val dialog = sentDialog
+    if (dialog != null) {
         AlertDialog(
-            onDismissRequest = { clearPendingSend() },
+            onDismissRequest = { sentDialog = null },
             title = { Text("Сообщение отправлено?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -229,8 +216,8 @@ internal fun PickupReminderContent(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("viber" to "Viber", "telegram" to "Telegram").forEach { (channel, title) ->
                             FilterChip(
-                                selected = pendingChannel == channel,
-                                onClick = { pendingChannel = channel },
+                                selected = dialog.channel == channel,
+                                onClick = { sentDialog = dialog.copy(channel = channel) },
                                 label = { Text(title) },
                             )
                         }
@@ -239,12 +226,12 @@ internal fun PickupReminderContent(
             },
             confirmButton = {
                 Button(onClick = {
-                    val channel = pendingChannel ?: return@Button
-                    onConfirmSent(pendingOrder, pendingStage, channel)
-                    clearPendingSend()
-                }, enabled = !busy && selectedChannel != null) { Text("Да, отправлено") }
+                    val channel = dialog.channel ?: return@Button
+                    onConfirmSent(dialog.order, dialog.stage, channel)
+                    sentDialog = null
+                }, enabled = !busy && dialog.channel != null) { Text("Да, отправлено") }
             },
-            dismissButton = { TextButton(onClick = { clearPendingSend() }) { Text("Нет") } },
+            dismissButton = { TextButton(onClick = { sentDialog = null }) { Text("Нет") } },
         )
     }
 }
