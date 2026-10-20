@@ -26,6 +26,31 @@ PRM-251996742
   assert(orderLabelMailText('rozetka', 'PRM-251996742') === 'Розетка PRM-251996742', 'Rozetka mail text')
 })
 
+Deno.test('Rozetka shop label matches the order TTN on its own line below the barcode', () => {
+  const labelText = `
+Магазини Rozetka
+Замовлення Bigl.ua 434759026
+Код пункту видачі 9796
+Телефон відправника +380671234567
+|||| |||| ||||
+201704739796
+Телефон отримувача 380501234567
+`
+  assert(
+    JSON.stringify(orderLabelTtns('rozetka', labelText, '201704739796')) === JSON.stringify(['201704739796']),
+    'Rozetka shop label must match the current order TTN',
+  )
+  assert(
+    !orderLabelTtns('rozetka', labelText, '201704739797').length,
+    'A different order TTN must reject the label before email is sent',
+  )
+  assert(
+    !orderLabelTtns('rozetka', 'Телефон 380501234567\nЗамовлення Bigl.ua 434759026', '380501234567').length,
+    'A phone number with a label must not be accepted as a standalone TTN',
+  )
+  assert(orderLabelMailText('rozetka', '201704739796') === 'Розетка 201704739796', 'Numeric TTN mail text')
+})
+
 Deno.test('Meest label ignores technical barcode and supports Epicentr aliases', () => {
   const labelText = `
 1 Рівне

@@ -27,15 +27,20 @@ export function canonicalOrderLabelTtn(carrier: OrderLabelCarrier, value: unknow
   return digits.length === 10 ? `${digits.slice(0, 3)}-${digits.slice(3)}` : source
 }
 
-export function orderLabelTtns(carrier: OrderLabelCarrier, text: string) {
+export function orderLabelTtns(carrier: OrderLabelCarrier, text: string, orderTtn = '') {
   const matches =
     carrier === 'rozetka'
-      ? text.match(/(?:^|[^A-Z0-9])(PRM-\d{6,12})(?![A-Z0-9])/gim) ?? []
+      ? [
+          ...(text.match(/(?:^|[^A-Z0-9])(PRM-\d{6,12})(?![A-Z0-9])/gim) ?? []),
+          ...(/^\d{12}$/.test(orderTtn) && text.split(/\r?\n/).some((line) => line.trim() === orderTtn)
+            ? [orderTtn]
+            : []),
+        ]
       : text.match(/(?:^|[^\d])(\d{3}-\d{7})(?!\d)/gm) ?? []
   const normalized = matches
     .map((match) =>
       carrier === 'rozetka'
-        ? match.match(/PRM-\d{6,12}/i)?.[0] ?? ''
+        ? match.match(/PRM-\d{6,12}|\d{12}(?!\d)/i)?.[0] ?? ''
         : match.match(/\d{3}-\d{7}/)?.[0] ?? '',
     )
     .map((value) => canonicalOrderLabelTtn(carrier, value))
