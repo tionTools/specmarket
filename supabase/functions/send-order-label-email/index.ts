@@ -182,7 +182,7 @@ Deno.serve(async (request) => {
     )
   }
 
-  const labelTtns = orderLabelTtns(carrier, extractedText)
+  const labelTtns = orderLabelTtns(carrier, extractedText, orderTtn)
   if (!labelTtns.length) {
     return Response.json(
       { ok: false, message: 'Не удалось определить ТТН в бирке. Отправка отменена.' },
