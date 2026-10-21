@@ -52,8 +52,9 @@ internal fun PickupReminderContent(
             it.orderNumber?.toString()?.contains(searchQuery.trim()) == true ||
             byId[it.orderId]?.matchesOrderSearch(searchQuery) == true
     }
-    val urgent = visible.filter { it.activeStage() != null }
-    val informational = visible.filter { it.activeStage() == null }
+    // Preserve server-defined urgency; sort the dates within each queue.
+    val urgent = sortPickupQueueByDeadline(visible.filter { it.activeStage() != null })
+    val informational = sortPickupQueueByDeadline(visible.filter { it.activeStage() == null })
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
     var pendingId by rememberSaveable { mutableStateOf<String?>(null) }

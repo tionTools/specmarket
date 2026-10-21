@@ -49,6 +49,18 @@ fun pickupUrgentCount(rows: List<PickupQueueRow>): Int = rows.count {
     it.category == "urgent" && it.activeStage() != null
 }
 
+// The backend's row order is not guaranteed. Nearest pickup deadlines first;
+// unknown or malformed dates are last; stable ties avoid reordering on refresh.
+fun sortPickupQueueByDeadline(rows: List<PickupQueueRow>): List<PickupQueueRow> =
+    rows.sortedWith(
+        compareBy<PickupQueueRow> {
+            it.deadline?.let { value -> runCatching { LocalDate.parse(value) }.getOrNull() }
+                ?: LocalDate.MAX
+        }.thenBy { it.orderNumber ?: Long.MAX_VALUE }
+            .thenBy { it.ttn }
+            .thenBy { it.orderId },
+    )
+
 @Serializable
 data class PickupManualLog(
     @SerialName("order_id") val orderId: String,

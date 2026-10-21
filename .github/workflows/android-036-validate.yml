@@ -74,7 +74,7 @@ jobs:
         if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-051-signed-update-v0.51
+          name: android-052-signed-update-v0.52
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7

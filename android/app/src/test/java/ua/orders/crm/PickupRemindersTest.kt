@@ -16,6 +16,28 @@ class PickupRemindersTest {
     private fun state(days: Long, first: String? = null, last: String? = null) =
         PickupReminderState("id", "20450000000000", date.plusDays(days).toString(), firstSentAt = first, lastSentAt = last)
 
+    @Test fun pickup_queues_sort_by_deadline_with_unknowns_last() {
+        fun row(id: String, deadline: String?, category: String = "informational", stage: String? = null) =
+            PickupQueueRow(orderId = id, orderNumber = 9L, ttn = id,
+                deadline = deadline, category = category, stage = stage)
+        // Backend order is intentionally shuffled.
+        val rows = listOf(
+            row("unknown", null),
+            row("far", "2026-10-29"),
+            row("tomorrow", "2026-10-22", "urgent", "first"),
+            row("bad-date", "not-a-date"),
+            row("today", "2026-10-21", "urgent", "last"),
+            row("near", "2026-10-26"),
+            row("empty", ""),
+            row("overdue", "2026-10-20"),
+        )
+        val urgent = sortPickupQueueByDeadline(rows.filter { it.activeStage() != null })
+        assertEquals(listOf("today", "tomorrow"), urgent.map { it.orderId })
+        val informational = sortPickupQueueByDeadline(rows.filter { it.activeStage() == null })
+        assertEquals(listOf("overdue", "near", "far", "bad-date", "empty", "unknown"),
+            informational.map { it.orderId })
+    }
+
     @Test fun remind_filter_excludes_undated_sent_and_non_due_orders() {
         assertFalse(order().isPickupReminderDue(state(2), date))
         assertTrue(order().isPickupReminderDue(state(1), date))
