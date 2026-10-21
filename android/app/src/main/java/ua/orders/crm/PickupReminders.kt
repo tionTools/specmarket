@@ -1,6 +1,8 @@
 package ua.orders.crm
 
+import java.time.Duration
 import java.time.LocalDate
+import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -96,7 +98,7 @@ fun Order.pendingPickupReminder(
     ) return null
     return when (ChronoUnit.DAYS.between(today, deadline)) {
         0L -> if (reminder.lastSentAt == null) PickupReminderStage.LAST else null
-        1L, 2L -> if (reminder.firstSentAt == null) PickupReminderStage.FIRST else null
+        1L -> if (reminder.firstSentAt == null) PickupReminderStage.FIRST else null
         else -> null
     }
 }
@@ -108,7 +110,6 @@ fun Order.pickupContactPhone(): String? =
 
 fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today: LocalDate = pickupToday()): String {
     val date = LocalDate.parse(deadline).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
-    val days = ChronoUnit.DAYS.between(today, LocalDate.parse(deadline))
     val products = items.sortedBy { it.position ?: Int.MAX_VALUE }.joinToString("\n") { item ->
         val name = item.productName?.trim().orEmpty().ifBlank { "Товар" }
         val size = item.size?.trim().orEmpty().takeIf(String::isNotBlank)?.let { ", розмір $it" }.orEmpty()
@@ -120,9 +121,20 @@ fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today
     else "Нагадуємо, що ваше замовлення №${number()} очікує на отримання."
     val time = if (stage == PickupReminderStage.LAST)
         "Будь ласка, заберіть посилку сьогодні, щоб уникнути її повернення відправнику."
-    else {
-        val remaining = if (days == 1L) "залишився 1 день" else "залишилось 2 дні"
-        "До завершення терміну отримання $remaining.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
-    }
+    else "До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
     return "Вітаємо!\n\n$intro\n\nВаше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n$time\n\nДякуємо!"
+}
+
+// Calendar-day midnight drives UI refresh; at most one notification after 08:00 Kyiv time.
+internal fun millisUntilNextPickupDay(now: ZonedDateTime = ZonedDateTime.now(ZoneId.of(PICKUP_KYIV_ZONE))): Long {
+    val kyiv = now.withZoneSameInstant(ZoneId.of(PICKUP_KYIV_ZONE))
+    return Duration.between(kyiv, kyiv.toLocalDate().plusDays(1).atStartOfDay(kyiv.zone))
+        .toMillis().coerceAtLeast(1_000L)
+}
+
+internal fun millisUntilPickupMorning(now: ZonedDateTime, nextDay: Boolean = false): Long {
+    val kyiv = now.withZoneSameInstant(ZoneId.of(PICKUP_KYIV_ZONE))
+    val date = if (nextDay || kyiv.hour >= 21) kyiv.toLocalDate().plusDays(1) else kyiv.toLocalDate()
+    return Duration.between(kyiv, date.atTime(8, 0).atZone(kyiv.zone))
+        .toMillis().coerceAtLeast(0L)
 }

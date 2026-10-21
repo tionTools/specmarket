@@ -76,6 +76,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                         initializing = false
                     }
                     getApplication<Application>().savePushSessionActive(true)
+                    getApplication<Application>().schedulePickupReminderCheck()
                     syncPushRegistration()
                 } else if (session is SessionStatus.NotAuthenticated) {
                     initializing = false
@@ -84,6 +85,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     pushRegistrationJob?.cancel()
                     pushRegistrationJob = null
                     getApplication<Application>().savePushSessionActive(false)
+                    getApplication<Application>().cancelPickupReminderChecks()
                     clearOrders()
                 }
             }

@@ -17,14 +17,14 @@ class PickupRemindersTest {
         PickupReminderState("id", "20450000000000", date.plusDays(days).toString(), firstSentAt = first, lastSentAt = last)
 
     @Test fun remind_filter_excludes_undated_sent_and_non_due_orders() {
-        assertTrue(order().isPickupReminderDue(state(2), date))
+        assertFalse(order().isPickupReminderDue(state(2), date))
         assertTrue(order().isPickupReminderDue(state(1), date))
         assertTrue(order().isPickupReminderDue(state(0), date))
         assertFalse(order().isPickupReminderDue(null, date))
         assertFalse(order().isPickupReminderDue(state(3), date))
-        assertFalse(order().isPickupReminderDue(state(2, first = "sent"), date))
+        assertFalse(order().isPickupReminderDue(state(1, first = "sent"), date))
         assertFalse(order().isPickupReminderDue(state(0, last = "sent"), date))
-        assertFalse(order(status = "Скасовано").isPickupReminderDue(state(2), date))
+        assertFalse(order(status = "Скасовано").isPickupReminderDue(state(1), date))
         assertFalse(order().copy(delivery = buildJsonObject {
             put("ttn", "20450000000000")
             put("trackingNormalizedStatus", "in_transit")
@@ -32,7 +32,7 @@ class PickupRemindersTest {
     }
 
     @Test fun acknowledged_reminder_no_longer_due_and_final_stage_stays_independent() {
-        val sent = state(2).copy(firstSentAt = "2026-10-20T09:00:00Z", firstChannel = "telegram")
+        val sent = state(1).copy(firstSentAt = "2026-10-20T09:00:00Z", firstChannel = "telegram")
         assertNull(order().pendingPickupReminder(sent, date))
         val final = sent.copy(deadline = date.toString())
         assertEquals(PickupReminderStage.LAST, order().pendingPickupReminder(final, date))
@@ -40,10 +40,10 @@ class PickupRemindersTest {
     }
 
     @Test fun reminders_due_on_two_days_and_final_day_independently() {
-        assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(2), date))
+        assertNull(order().pendingPickupReminder(state(2), date))
         assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(state(1), date))
         assertEquals(PickupReminderStage.LAST, order().pendingPickupReminder(state(0, first = "done"), date))
-        assertNull(order().pendingPickupReminder(state(2, first = "done"), date))
+        assertNull(order().pendingPickupReminder(state(1, first = "done"), date))
         assertNull(order().pendingPickupReminder(state(0, last = "done"), date))
         assertNull(order().pendingPickupReminder(state(3), date))
         assertNull(order().pendingPickupReminder(state(-1), date))
@@ -108,9 +108,9 @@ class PickupRemindersTest {
         assertTrue(message.contains("Рукавички, розмір 10 — 2 шт."))
         assertTrue(message.contains("20450000000000"))
         assertTrue(message.contains("19.10.2026"))
-        assertTrue(message.contains("До завершення терміну отримання залишилось 2 дні."))
+        assertTrue(message.contains("До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра."))
         val oneDay = order().pickupReminderText(PickupReminderStage.FIRST, state(1).deadline, date)
-        assertTrue(oneDay.contains("До завершення терміну отримання залишився 1 день."))
+        assertTrue(oneDay.contains("До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра."))
         assertFalse(oneDay.contains("залишилося 1 день"))
         assertTrue(order().pickupReminderText(PickupReminderStage.LAST, state(0).deadline, date)
             .contains("сьогодні останній день"))
@@ -128,6 +128,25 @@ class PickupRemindersTest {
         val invalid = order().copy(platform = "Пром", phone = null)
         assertNull(invalid.pickupContactPhone())
     }
+    @Test fun deadline_october_22_shows_october_21_and_22_only() {
+        val today = LocalDate.of(2026, 10, 20)
+        val reminder = PickupReminderState("id", "20450000000000", "2026-10-22")
+        assertNull(order().pendingPickupReminder(reminder, today))
+        assertEquals(PickupReminderStage.FIRST, order().pendingPickupReminder(reminder, today.plusDays(1)))
+        assertEquals(PickupReminderStage.LAST,
+            order().pendingPickupReminder(reminder.copy(firstSentAt = "2026-10-21T09:00:00Z"), today.plusDays(2)))
+        assertNull(order().pendingPickupReminder(reminder, today.plusDays(3)))
+    }
+
+    @Test fun morning_notification_window_never_starts_before_eight() {
+        val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)
+        val date = LocalDate.of(2026, 10, 21)
+        assertEquals(30 * 60 * 1000L, millisUntilPickupMorning(date.atTime(7, 30).atZone(zone)))
+        assertEquals(0L, millisUntilPickupMorning(date.atTime(8, 0).atZone(zone)))
+        assertEquals(11 * 60 * 60 * 1000L, millisUntilPickupMorning(date.atTime(21, 0).atZone(zone)))
+        assertEquals(24 * 60 * 60 * 1000L, millisUntilPickupMorning(date.atTime(8, 0).atZone(zone), nextDay = true))
+    }
+
     @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
         assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
         val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)

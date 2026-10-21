@@ -52,19 +52,25 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var requestedOrderId by mutableStateOf<String?>(null)
+    private var requestedReminders by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+        requestedReminders = intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)
         setContent {
             AppearanceHost {
                 OrdersApp(
                     openOrderId = requestedOrderId,
                     onOrderOpened = ::clearRequestedOrder,
+                    openReminders = requestedReminders,
+                    onRemindersOpened = ::clearRequestedReminders,
                 )
             }
         }
@@ -74,11 +80,17 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+        requestedReminders = intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)
     }
 
     private fun clearRequestedOrder() {
         requestedOrderId = null
         intent.removeExtra(EXTRA_OPEN_ORDER_ID)
+    }
+
+    private fun clearRequestedReminders() {
+        requestedReminders = false
+        intent.removeExtra(EXTRA_OPEN_REMINDERS)
     }
 }
 
@@ -167,6 +179,8 @@ fun OrdersApp(
     vm: OrdersViewModel = viewModel(),
     openOrderId: String? = null,
     onOrderOpened: () -> Unit = {},
+    openReminders: Boolean = false,
+    onRemindersOpened: () -> Unit = {},
 ) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
@@ -188,9 +202,15 @@ fun OrdersApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
+    val pickupDay by produceState(initialValue = pickupToday()) {
+        while (true) {
+            delay(millisUntilNextPickupDay())
+            value = pickupToday()
+        }
+    }
     // One lightweight read of saved deadlines when the CRM opens, regardless of filter.
     // Reuse the same data on filter selection; never poll carriers or add a timer.
-    LaunchedEffect(vm.email, vm.initializing) {
+    LaunchedEffect(vm.email, vm.initializing, pickupDay) {
         if (vm.email != null && !vm.initializing) vm.ensurePickupReminderCount()
     }
     var confirmationId by remember { mutableStateOf<String?>(null) }
@@ -204,6 +224,15 @@ fun OrdersApp(
             confirmationId = null
             returnAnchorId = null
             restoringFromDetail = false
+        }
+    }
+    LaunchedEffect(openReminders, vm.email, vm.initializing) {
+        if (openReminders && vm.email != null && !vm.initializing) {
+            settings = false
+            vm.closeDetail()
+            filterName = OrderListFilter.REMIND.name
+            vm.loadPickupReminders()
+            onRemindersOpened()
         }
     }
     LaunchedEffect(openOrderId, vm.email, vm.initializing) {
@@ -236,6 +265,7 @@ fun OrdersApp(
                 )
                 else -> OrdersScreen(
                     vm = vm,
+                    pickupDay = pickupDay,
                     onSettings = { settings = true },
                     listState = ordersListState,
                     searchOpen = searchOpen,
@@ -342,14 +372,15 @@ private fun NotificationPermissionGate(vm: OrdersViewModel) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
     val context = LocalContext.current
     val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val pickupPushEnabled by context.pickupNotificationsEnabled().collectAsState(initial = true)
     val permissionAsked by context.notificationPermissionAsked().collectAsState(initial = false)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { vm.notificationsPermissionChanged() }
 
-    LaunchedEffect(vm.email, notificationsEnabled, permissionAsked) {
+    LaunchedEffect(vm.email, notificationsEnabled, pickupPushEnabled, permissionAsked) {
         if (
-            vm.email != null && notificationsEnabled && !permissionAsked &&
+            vm.email != null && (notificationsEnabled || pickupPushEnabled) && !permissionAsked &&
             !context.canPostOrderNotifications()
         ) {
             context.saveNotificationPermissionAsked(true)
@@ -365,6 +396,7 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
     val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val pickupPushEnabled by context.pickupNotificationsEnabled().collectAsState(initial = true)
     val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -433,6 +465,26 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
                                 }
                             },
                         )
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Напоминания о получении", style = MaterialTheme.typography.titleMedium)
+                            Text("Одно сводное уведомление после 08:00 по Киеву. Ночью — без звука.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = pickupPushEnabled, onCheckedChange = { enabled ->
+                            scope.launch {
+                                context.savePickupNotificationsEnabled(enabled)
+                                if (enabled) context.schedulePickupReminderCheck()
+                                else context.cancelPickupReminderChecks()
+                            }
+                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                !context.canPostOrderNotifications()) {
+                                scope.launch { context.saveNotificationPermissionAsked(true) }
+                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        })
                     }
                     Text(
                         "Фоновое уведомление работает, пока Android не остановил процесс приложения. " +
@@ -595,6 +647,7 @@ internal fun OrderFilters(
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
     remindersFailed: Boolean = false,
+    today: LocalDate = pickupToday(),
 ) {
     // Single scrollable row: the due count comes BEFORE "Напомнить" so it
     // stays visible even when the end of the fourth label is off-screen.
@@ -607,7 +660,7 @@ internal fun OrderFilters(
                 filter == OrderListFilter.REMIND && !remindersLoaded ->
                     if (remindersFailed) "!" else "…"
                 else -> orders.count {
-                    if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id])
+                    if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id], today)
                     else it.matchesListFilter(filter)
                 }.toString()
             }
@@ -626,6 +679,7 @@ internal fun OrderFilters(
 @Composable
 private fun OrdersScreen(
     vm: OrdersViewModel,
+    pickupDay: LocalDate,
     onSettings: () -> Unit,
     listState: LazyListState,
     searchOpen: Boolean,
@@ -702,7 +756,8 @@ private fun OrdersScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             OrderFilters(
                 orders, vm.pickupReminders, vm.pickupLoaded, filter, onFilterChange,
-            remindersFailed = vm.pickupError != null,
+                remindersFailed = vm.pickupError != null,
+                today = pickupDay,
             )
             if (filter == OrderListFilter.REMIND) {
                 PickupReminderContent(
@@ -714,6 +769,7 @@ private fun OrdersScreen(
                     onRefresh = vm::loadPickupReminders,
                     onSaveDeadline = vm::savePickupDeadline,
                     onConfirmSent = vm::confirmPickupSent,
+                    today = pickupDay,
                 )
             } else PullToRefreshBox(
                 isRefreshing = vm.loading,

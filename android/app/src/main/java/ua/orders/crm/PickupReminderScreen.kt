@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,10 +32,10 @@ internal fun PickupReminderContent(
     onRefresh: () -> Unit,
     onSaveDeadline: (Order, String) -> Unit,
     onConfirmSent: (Order, PickupReminderStage, String) -> Unit,
+    today: LocalDate = pickupToday(),
 ) {
     val context = LocalContext.current
     val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
-    val today = pickupToday()
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
     // Saved primitives survive Activity recreation while a messenger is in front.
@@ -94,9 +93,6 @@ internal fun PickupReminderContent(
                     val reminder = reminders[order.id]
                     val contactPhone = order.pickupContactPhone()
                     val stage = order.pendingPickupReminder(reminder, today)
-                    val days = reminder?.deadline?.let {
-                        runCatching { ChronoUnit.DAYS.between(today, LocalDate.parse(it)) }.getOrNull()
-                    }
                     Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                             Text("Заказ №${order.number()}", fontWeight = FontWeight.SemiBold)
@@ -106,8 +102,7 @@ internal fun PickupReminderContent(
                                 Text("Пункт выдачи НП", color = MaterialTheme.colorScheme.primary)
                             }
                             val caption = when (stage) {
-                                PickupReminderStage.FIRST ->
-                                    if (days == 1L) "Напомнить: остался 1 день" else "Напомнить: осталось 2 дня"
+                                PickupReminderStage.FIRST -> "Напомнить: два календарных дня"
                                 PickupReminderStage.LAST -> "Напомнить: сегодня последний день"
                                 null -> "Напоминание не требуется"
                             }

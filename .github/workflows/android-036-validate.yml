@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/android-reminder-filter-v036
+      - feature/android-pickup-reminders-v046
     paths:
       - 'android/**'
       - '.github/workflows/android-036-validate.yml'
@@ -69,7 +70,7 @@ jobs:
         if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-036-signed-update-v0.36
+          name: android-046-signed-update-v0.46
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
