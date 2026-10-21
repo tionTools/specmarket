@@ -36,7 +36,12 @@ internal fun PickupReminderContent(
     onConfirmManualSent: (PickupQueueRow, String) -> Unit,
     searchQuery: String = "",
 ) {
-    val byId = remember(orders) { orders.associateBy { it.id } }
+    val byId = remember(orders, queue) {
+        orders.filter { order ->
+            queue.any { row -> row.orderId == order.id &&
+                row.ttn == order.deliveryValue("ttn").trim() }
+        }.associateBy { it.id }
+    }
     val messengersEnabled by LocalContext.current.messengersEnabled().collectAsState(initial = true)
     val visible = queue.filter {
         searchQuery.isBlank() || it.ttn.contains(searchQuery.trim(), true) ||

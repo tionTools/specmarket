@@ -71,10 +71,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             initialLoadComplete = true
                         }
                         initializing = false
-                        if (visible) {
-                            startRealtime()
-                            refresh()
-                        }
+                        if (visible) foreground(true)
                     } else {
                         initializing = false
                     }
@@ -416,6 +413,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupJob?.cancel()
         pickupLoading = true
         pickupLoaded = false
+        pickupOrders = emptyList()
         pickupError = null
         pickupJob = viewModelScope.launch {
             try {
