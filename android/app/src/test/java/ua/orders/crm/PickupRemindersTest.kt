@@ -256,8 +256,9 @@ class PickupRemindersTest {
     @Test fun shared_confirmation_removes_first_stage_but_leaves_last_day_independent() {
         val day = LocalDate.of(2026, 10, 21)
         val source = listOf(order())
-        val sent = state(1, first = "2026-10-21T09:00:00Z")
-        assertEquals(1, duePickupOrders(source, mapOf("id" to state(1)), day).size)
+        val due = PickupReminderState("id", "20450000000000", day.plusDays(1).toString())
+        val sent = due.copy(firstSentAt = "2026-10-21T09:00:00Z")
+        assertEquals(1, duePickupOrders(source, mapOf("id" to due), day).size)
         assertTrue(duePickupOrders(source, mapOf("id" to sent), day).isEmpty())
         assertEquals(1, duePickupOrders(source, mapOf("id" to sent), day.plusDays(1)).size)
     }
