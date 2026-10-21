@@ -106,7 +106,7 @@ private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).t
 private fun amount(value: Double?) = value?.let { BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() } ?: "—"
 
 @Composable
-private fun PlatformLogo(platform: String?) {
+internal fun PlatformLogo(platform: String?) {
     val value = platform.orEmpty().trim()
     val key = normalizedStatus(value)
     val resource = when (key) {
