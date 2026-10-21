@@ -147,6 +147,33 @@ class PickupRemindersTest {
         assertEquals(24 * 60 * 60 * 1000L, millisUntilPickupMorning(date.atTime(8, 0).atZone(zone), nextDay = true))
     }
 
+    @Test fun missing_server_row_recovers_nova_deadline_from_arrival() {
+        val nova = order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "13:37 17.10.2026")
+        })
+        val oct20 = LocalDate.of(2026, 10, 20)
+        assertEquals("2026-10-22", nova.effectivePickupReminder(null)?.deadline)
+        assertNull(nova.pendingPickupReminder(null, oct20))
+        assertEquals(PickupReminderStage.FIRST, nova.pendingPickupReminder(null, oct20.plusDays(1)))
+        assertEquals(PickupReminderStage.LAST, nova.pendingPickupReminder(null, oct20.plusDays(2)))
+        assertFalse(nova.needsPickupDeadline(null))
+        val manual = PickupReminderState(nova.id, "20450000000000", "2026-10-24")
+        assertEquals(manual, nova.effectivePickupReminder(manual))
+    }
+
+    @Test fun no_arrival_appears_as_unknown_not_false_alarm() {
+        val noArrival = order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+        })
+        assertTrue(noArrival.needsPickupDeadline(null))
+        assertNull(noArrival.pendingPickupReminder(null, LocalDate.of(2026, 10, 21)))
+    }
+
     @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
         assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
         val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)

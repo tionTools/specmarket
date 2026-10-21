@@ -110,16 +110,10 @@ class PickupReminderWorker(context: Context, params: WorkerParameters) : Corouti
             val today = pickupToday()
             if (app.checkedPickupDay(account, today)) return Result.success()
             val reminders = withTimeout(20_000) { repo.pickupReminders() }
-            val candidates = reminders.filter { reminder ->
-                val deadline = runCatching { LocalDate.parse(reminder.deadline) }.getOrNull()
-                (deadline == today && reminder.lastSentAt == null) ||
-                    (deadline == today.plusDays(1) && reminder.firstSentAt == null)
-            }
-            // Re-read each live order; delivered and returning parcels never trigger notifications.
-            val count = withTimeout(90_000) {
-                candidates.count { reminder ->
-                    repo.order(reminder.orderId)?.isPickupReminderDue(reminder, today) == true
-                }
+            val orders = withTimeout(60_000) { repo.pickupCandidateOrders() }
+            val byId = reminders.associateBy { it.orderId }
+            val count = orders.count { order ->
+                order.isPickupReminderDue(byId[order.id], today)
             }
             if (count > 0) app.postPickupReminderNotification(count)
             app.markPickupDayChecked(account, today)

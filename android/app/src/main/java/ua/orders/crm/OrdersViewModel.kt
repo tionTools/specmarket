@@ -431,14 +431,24 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
 
     fun confirmPickupSent(order: Order, stage: PickupReminderStage, channel: String) {
         if (pickupBusy || email == null) return
-        val reminder = pickupReminders[order.id] ?: return
-        if (order.pendingPickupReminder(reminder) != stage) {
+        val stored = pickupReminders[order.id]
+        val reminder = order.effectivePickupReminder(stored) ?: return
+        if (order.pendingPickupReminder(stored) != stage) {
             message = "Напоминание устарело. Обновите данные."
             return
         }
         pickupBusy = true
         viewModelScope.launch {
             try {
+                if (stored == null || stored.ttn.trim() != reminder.ttn || stored.deadline != reminder.deadline) {
+                    val latest = repository.pickupReminders().firstOrNull { it.orderId == order.id }
+                    if (latest != null && latest.ttn.trim() == reminder.ttn &&
+                        latest.deadline != reminder.deadline) {
+                        message = "Срок изменён на другом устройстве. Обновите список."
+                        return@launch
+                    }
+                    repository.setPickupDeadline(order.id, reminder.ttn, reminder.deadline)
+                }
                 repository.confirmPickupReminder(order.id, reminder.ttn, reminder.deadline, stage, channel)
                 // The RPC is authoritative. The subsequent read can fail, but a
                 // successful acknowledgement must disappear from the list immediately.

@@ -55,7 +55,7 @@ internal fun PickupReminderContent(
     }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
-            order.isPickupReminderDue(reminders[order.id], today)
+            order.isPickupReminderDue(reminders[order.id], today) || order.needsPickupDeadline(reminders[order.id])
         }
     }
 
@@ -73,7 +73,7 @@ internal fun PickupReminderContent(
                 Text(error, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
-            Text("Сроки получены из штатной синхронизации. Сообщения отправляются вручную.",
+            Text("Если сервер пропустил срок, он рассчитывается по дате прибытия Новой почты. Проверьте его перед отправкой.",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall)
             LazyColumn(
@@ -90,7 +90,8 @@ internal fun PickupReminderContent(
                     ) }
                 }
                 items(applicable, key = { it.id }) { order ->
-                    val reminder = reminders[order.id]
+                    val saved = reminders[order.id]
+                    val reminder = order.effectivePickupReminder(saved)
                     val contactPhone = order.pickupContactPhone()
                     val stage = order.pendingPickupReminder(reminder, today)
                     Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -104,18 +105,17 @@ internal fun PickupReminderContent(
                             val caption = when (stage) {
                                 PickupReminderStage.FIRST -> "Напомнить: два календарных дня"
                                 PickupReminderStage.LAST -> "Напомнить: сегодня последний день"
-                                null -> "Напоминание не требуется"
+                                null -> "Срок неизвестен — укажите дату получения"
                             }
                             Text(caption, fontWeight = FontWeight.SemiBold)
-                            if (reminder != null && reminder.ttn == order.deliveryValue("ttn").trim()) {
-                                Text("Крайний срок: ${reminder.deadline}")
+                            if (reminder != null) {
+                                val calculated = saved == null || saved.ttn.trim() != reminder.ttn || saved.deadline != reminder.deadline
+                                Text((if (calculated) "Расчётный срок: " else "Крайний срок: ") + reminder.deadline)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = {
                                     edit = order
-                                    deadlineInput = reminder?.takeIf {
-                                        it.ttn == order.deliveryValue("ttn").trim()
-                                    }?.deadline.orEmpty()
+                                    deadlineInput = reminder?.deadline.orEmpty()
                                 }, enabled = !busy) { Text("Изменить срок") }
                             }
                             if (stage != null && reminder != null) {

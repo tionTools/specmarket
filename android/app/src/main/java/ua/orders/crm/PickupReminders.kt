@@ -68,37 +68,59 @@ fun Order.isNovaPickupPoint(): Boolean {
     }
 }
 
+
+private fun pickupArrivalDate(input: String): LocalDate? {
+    val source = input.trim()
+    val timeFirst = Regex("""^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s+(\d{2})[.\/-](\d{2})[.\/-](\d{4})$""").matchEntire(source)
+    val dateFirst = Regex("""^(\d{2})[.\/-](\d{2})[.\/-](\d{4})(?:\s+(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?$""").matchEntire(source)
+    val iso = Regex("""^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$""").matchEntire(source)
+    val yy = iso?.groupValues?.get(1) ?: timeFirst?.groupValues?.get(3) ?: dateFirst?.groupValues?.get(3)
+    val mm = iso?.groupValues?.get(2) ?: timeFirst?.groupValues?.get(2) ?: dateFirst?.groupValues?.get(2)
+    val dd = iso?.groupValues?.get(3) ?: timeFirst?.groupValues?.get(1) ?: dateFirst?.groupValues?.get(1)
+    return if (yy == null || mm == null || dd == null) null
+        else runCatching { LocalDate.of(yy.toInt(), mm.toInt(), dd.toInt()) }.getOrNull()
+}
+
+private fun Order.activePickup(): Boolean =
+    deliveryValue("ttn").isNotBlank() &&
+    normalizedStatus(deliveryValue("trackingNormalizedStatus")) == "ready_for_pickup" &&
+    !deliveryFlag("trackingBuyerReceived") && !deliveryFlag("trackingReturnInProgress") &&
+    !hasReturnSignal() &&
+    !Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
+        .containsMatchIn(status.orEmpty())
+
+// Manual server deadlines take precedence. If tracking saved the arrival but
+// the reminder row was missed, use the same Nova five-day rule as the worker.
+fun Order.effectivePickupReminder(saved: PickupReminderState?): PickupReminderState? {
+    if (!activePickup()) return null
+    val ttn = deliveryValue("ttn").trim()
+    if (saved != null && saved.ttn.trim() == ttn &&
+        runCatching { LocalDate.parse(saved.deadline) }.isSuccess) return saved
+    val carrier = normalizedStatus(deliveryValue("carrier"))
+    val provider = normalizedStatus(deliveryValue("trackingProvider"))
+    if (!listOf("nova", "нова", "novaposhta", "новапошта").any(carrier::contains) &&
+        !provider.contains("nova_poshta")) return null
+    val arrival = pickupArrivalDate(deliveryValue("trackingPickupArrivedAt")) ?: return null
+    return PickupReminderState(id, ttn, arrival.plusDays(5).toString())
+}
+
 fun Order.isPickupReminderDue(
     reminder: PickupReminderState?,
     today: LocalDate = pickupToday(),
 ): Boolean = pendingPickupReminder(reminder, today) != null
 
-fun Order.needsPickupDeadline(reminder: PickupReminderState?): Boolean {
-    val ttn = deliveryValue("ttn").trim()
-    if (ttn.isEmpty() || normalizedStatus(deliveryValue("trackingNormalizedStatus")) != "ready_for_pickup") return false
-    if (deliveryFlag("trackingBuyerReceived") || deliveryFlag("trackingReturnInProgress") || hasReturnSignal()) return false
-    if (Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
-            .containsMatchIn(status.orEmpty())) return false
-    return reminder == null || reminder.ttn.trim() != ttn ||
-        runCatching { LocalDate.parse(reminder.deadline) }.isFailure
-}
+fun Order.needsPickupDeadline(reminder: PickupReminderState?): Boolean =
+    activePickup() && effectivePickupReminder(reminder) == null
 
 fun Order.pendingPickupReminder(
     reminder: PickupReminderState?,
     today: LocalDate = pickupToday(),
 ): PickupReminderStage? {
-    if (reminder == null || reminder.ttn != deliveryValue("ttn").trim() || reminder.ttn.isBlank()) return null
-    val deadline = runCatching { LocalDate.parse(reminder.deadline) }.getOrNull() ?: return null
-    val tracking = normalizedStatus(deliveryValue("trackingNormalizedStatus"))
-    if (tracking != "ready_for_pickup"
-        || deliveryFlag("trackingBuyerReceived") || deliveryFlag("trackingReturnInProgress")
-        || hasReturnSignal()
-        || Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
-            .containsMatchIn(status.orEmpty())
-    ) return null
+    val effective = effectivePickupReminder(reminder) ?: return null
+    val deadline = LocalDate.parse(effective.deadline)
     return when (ChronoUnit.DAYS.between(today, deadline)) {
-        0L -> if (reminder.lastSentAt == null) PickupReminderStage.LAST else null
-        1L -> if (reminder.firstSentAt == null) PickupReminderStage.FIRST else null
+        0L -> if (effective.lastSentAt == null) PickupReminderStage.LAST else null
+        1L -> if (effective.firstSentAt == null) PickupReminderStage.FIRST else null
         else -> null
     }
 }

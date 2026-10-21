@@ -273,7 +273,13 @@ fun OrdersApp(
                     filter = OrderListFilter.entries.find { it.name == filterName } ?: OrderListFilter.ALL,
                     onSearchOpenChange = { searchOpen = it },
                     onSearchQueryChange = { searchQuery = it },
-                    onFilterChange = { filterName = it.name },
+                    onFilterChange = {
+                        filterName = it.name
+                        if (it == OrderListFilter.REMIND) {
+                            vm.manualRefresh()
+                            vm.loadPickupReminders()
+                        }
+                    },
                     restoreAnchorId = returnAnchorId.takeIf { restoringFromDetail },
                     restoreAnchorIndex = returnAnchorIndex,
                     restoreAnchorOffset = returnAnchorOffset,
@@ -660,7 +666,8 @@ internal fun OrderFilters(
                 filter == OrderListFilter.REMIND && !remindersLoaded ->
                     if (remindersFailed) "!" else "…"
                 else -> orders.count {
-                    if (filter == OrderListFilter.REMIND) it.isPickupReminderDue(reminders[it.id], today)
+                    if (filter == OrderListFilter.REMIND)
+                        it.isPickupReminderDue(reminders[it.id], today) || it.needsPickupDeadline(reminders[it.id])
                     else it.matchesListFilter(filter)
                 }.toString()
             }
@@ -766,7 +773,7 @@ private fun OrdersScreen(
                     loading = vm.pickupLoading,
                     busy = vm.pickupBusy,
                     error = vm.pickupError,
-                    onRefresh = vm::loadPickupReminders,
+                    onRefresh = { vm.manualRefresh(); vm.loadPickupReminders() },
                     onSaveDeadline = vm::savePickupDeadline,
                     onConfirmSent = vm::confirmPickupSent,
                     today = pickupDay,

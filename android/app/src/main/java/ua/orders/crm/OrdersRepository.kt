@@ -116,6 +116,21 @@ class OrdersRepository {
     }.decodeList<Order>().firstOrNull()
 
 
+    suspend fun pickupCandidateOrders(): List<Order> {
+        val result = mutableListOf<Order>()
+        var offset = 0L
+        do {
+            val batch = client.from("crm_orders").select(columns) {
+                filter { eq("delivery->>trackingNormalizedStatus", "ready_for_pickup") }
+                order("created_at", SortOrder.DESCENDING)
+                range(offset..offset + 199)
+            }.decodeList<Order>()
+            result += batch
+            offset += batch.size
+        } while (batch.size == 200)
+        return result
+    }
+
     suspend fun pickupReminders(): List<PickupReminderState> =
         client.from("crm_pickup_reminders")
             .select(Columns.raw("order_id,ttn,deadline,first_sent_at,first_channel,last_sent_at,last_channel"))
