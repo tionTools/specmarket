@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'supabase/functions/sync-delivery-tracking/**'
+      - 'supabase/migrations/20261021130000_crm_pickup_reminder_first_day.sql'
+      - 'supabase/tests/pickup_reminder_first_day.sql'
       - '.github/workflows/pickup-reminders-regression.yml'
 
 permissions:
@@ -29,3 +31,25 @@ jobs:
             supabase/functions/sync-delivery-tracking/storage_return_test.ts
       - name: Check pickup reminder types
         run: deno check supabase/functions/sync-delivery-tracking/worker.ts
+
+  pickup-rpc-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test pickup reminder RPC migration
+        run: |
+          docker run --rm --network host -v "$PWD":/repo -w /repo -e PGPASSWORD=test postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f supabase/tests/pickup_reminder_first_day.sql

@@ -13,6 +13,7 @@ Deno.test('no arrival, or scheduled delivery estimate only, never infers deadlin
 })
 Deno.test('received and return-in-progress cannot be reminded', () => {
   assertEquals(automaticPickupDeadline({ ...base, trackingBuyerReceived: true }), null)
+  assertEquals(automaticPickupDeadline({ ...base, trackingReturnInProgress: true }), null)
   assertEquals(automaticPickupDeadline({ ...base, trackingNormalizedStatus: 'returning' }), null)
   assertEquals(automaticPickupDeadline({ ...base, trackingNormalizedStatus: 'in_transit' }), null)
 })

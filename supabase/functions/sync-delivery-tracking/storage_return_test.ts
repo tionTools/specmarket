@@ -253,3 +253,31 @@ Deno.test('a previously misread waiting status cannot keep buyer received sticky
   assert(updated.trackingDeliveredAt === '', 'obsolete recipient date was not cleared')
   assert(updated.trackingNormalizedStatus === 'ready_for_pickup', 'real ready status was lost')
 })
+
+Deno.test('a fresh parcel-locker scan clears a stale recipient timestamp without losing real receipts', () => {
+  const stored: JsonRecord = {
+    ttn: '20451562102796', carrier: 'Нова Пошта',
+    trackingStatus: 'Прибув до поштомату',
+    trackingNormalizedStatus: 'ready_for_pickup',
+    trackingBuyerReceived: false,
+    trackingReturnInProgress: false,
+    trackingDeliveredAt: '2026-10-17 18:40:00',
+  }
+  const ready: TrackingResult = {
+    status: 'Прибув до поштомату', normalizedStatus: 'ready_for_pickup', final: false,
+    provider: 'nova_poshta_api',
+    details: { trackingDeliveredAt: '', trackingPickupArrivedAt: '18:40 17.10.2026' },
+  }
+  assert(trackingChanged(stored, ready), 'stale recipient date must trigger an update')
+  const corrected = mergeTrackingDelivery(stored, ready, '2026-10-21T09:00:00Z')
+  assert(corrected.trackingDeliveredAt === '', 'stale recipient date was not cleared')
+  assert(corrected.trackingBuyerReceived === false, 'ready parcel became received')
+  const received: TrackingResult = {
+    status: 'Отримано', normalizedStatus: 'delivered', final: true,
+    provider: 'nova_poshta_api',
+    details: { trackingDeliveredAt: '2026-10-22 10:00:00' },
+  }
+  const delivered = mergeTrackingDelivery(corrected, received, '2026-10-22T07:00:00Z')
+  assert(delivered.trackingBuyerReceived === true, 'real receipt was lost')
+  assert(delivered.trackingDeliveredAt === '2026-10-22 10:00:00', 'real receipt time was lost')
+})
