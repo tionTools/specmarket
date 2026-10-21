@@ -117,6 +117,9 @@ Deno.test('targeted tracking does not require an enabled marketplace setting', a
       if (table === 'crm_delivery_tracking_state') {
         return { select: () => ({ in: async () => ({ data: [], error: null }) }) }
       }
+      if (table === 'crm_pickup_reminders') {
+        return { select: () => ({ in: async () => ({ data: [], error: null }) }) }
+      }
       throw new Error(`Unexpected query ${table}`)
     },
   } as unknown as SupabaseClient

@@ -19,6 +19,13 @@ export function readableStatus(source: string, code = ''): TrackingResult {
   if (/видален|удален|deleted/.test(normalized)) return { status: value || 'Удалено', final: true, normalizedStatus: 'deleted' }
   if (/return|повернен|41010|31200/.test(normalized)) return { status: 'Возвращено', final: true, normalizedStatus: 'returned' }
   if (/cancel|скасован|відмінен|10600|10602|102|103/.test(normalized)) return { status: 'Отменено', final: true, normalizedStatus: 'cancelled' }
+  // 'Очікує на отримання' contains 'отриман', but means NOT received.
+  // Nova's parcel-locker arrival is likewise ready for pickup, even when
+  // the carrier response has no numeric code 7/8.
+  const pickupText = /очіку(?:є|ють)\s+(?:на\s+)?отриман|ожида(?:ет|ют)\s+получен|(?:прибув|прибул|прибы|поступил|знаходиться).{0,100}(?:поштомат|почтомат|постамат)/.test(value.toLowerCase())
+  const receivedCode = /^(?:9|10|11|41000|48000)$/.test(code.trim())
+  if (pickupText && !receivedCode)
+    return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
   if (/receivedwarehouse|received|отриман|получен|вручено|доставлено|41000|\b9\b|\b10\b|\b11\b/.test(normalized)) return { status: 'Получено', final: true, normalizedStatus: 'delivered' }
   if (/arriv.*recipient|прибул.*відділен|готов.*видач|очіку.*отрим|arrived|21700|\b7\b|\b8\b/.test(normalized)) return { status: 'Готово к выдаче', final: false, normalizedStatus: 'ready_for_pickup' }
   if (/createid|оформив|заплан|10100|\b1\b/.test(normalized)) return { status: 'Запланировано', final: false, normalizedStatus: 'created' }
