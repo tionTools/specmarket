@@ -76,7 +76,7 @@ def assert_visible(label):
 # Control case: a known working deadline button must react to the same
 # accessibility-based tap method before we test the new manual button.
 click("Изменить срок", allow_scroll=True)
-assert_visible("Крайний срок получения")
+assert_visible("Проверенный срок получения")
 click("Отмена")
 click("Отметить отправленным", allow_scroll=True)
 # Keep concrete evidence if an Android release or emulator masks the dialog.
