@@ -22,13 +22,19 @@ Deno.test('ROZETKA store uses its separate ten-calendar-day policy', () => {
   assertEquals(automaticPickupDeadline({ ...base, carrier: 'ROZETKA Delivery',
     trackingPickupLocationType: '' }), null)
 })
-Deno.test('Meest working days vary by verified depot type', () => {
+Deno.test('Meest reminders use five calendar days for all delivery point types', () => {
   const meest = { ...base, carrier: 'Meest', trackingPickupArrivedAt: '2026-10-16' }
-  assertEquals(automaticPickupDeadline(meest), null)
-  assertEquals(automaticPickupDeadline({ ...meest,
-    trackingPickupLocationType: 'meest_apt' })?.date, '2026-10-23')
-  assertEquals(automaticPickupDeadline({ ...meest,
-    trackingPickupLocationType: 'meest_warehouse' })?.date, '2026-10-30')
+  for (const type of [undefined, 'meest_apt', 'meest_warehouse', 'meest_parcel_locker']) {
+    const result = automaticPickupDeadline({ ...meest, trackingPickupLocationType: type })
+    assertEquals(result?.date, '2026-10-21')
+    assertEquals(result?.basis, 'specmarket_meest_five_calendar_day_reminder')
+  }
+  const explicit = automaticPickupDeadline({ ...meest,
+    trackingVerifiedLastPickupAt: '2026-10-30', trackingVerifiedLastPickupSource: 'carrier_api' })
+  assertEquals(explicit?.date, '2026-10-30')
+  assertEquals(explicit?.basis, 'carrier_explicit')
+  assertEquals(automaticPickupDeadline({ ...meest, trackingPickupArrivedAt: undefined }), null)
+  assertEquals(automaticPickupDeadline({ ...meest, trackingNormalizedStatus: 'delivered' }), null)
 })
 Deno.test('Ukrposhta free storage term is not a default auto-return date', () => {
   const ukr = { ...base, carrier: 'Укрпошта' }

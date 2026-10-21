@@ -28,15 +28,6 @@ function addDays(start: Date, days: number) {
   return value
 }
 
-function addWeekdays(start: Date, days: number) {
-  let current = new Date(start.getTime())
-  for (let count = 0; count < days;) {
-    current = addDays(current, 1)
-    if (current.getUTCDay() !== 0 && current.getUTCDay() !== 6) count++
-  }
-  return current
-}
-
 function text(value: unknown) { return typeof value === 'string' ? value.trim() : '' }
 
 export type PickupDeadline = { date: string; carrier: CarrierKind; basis: string }
@@ -70,13 +61,11 @@ export function automaticPickupDeadline(delivery: JsonRecord): PickupDeadline | 
     return { date: isoDate(addDays(arrival, 9)), carrier, basis: 'rozetka_store_ten_days' }
   }
   if (carrier === 'meest') {
-    // Meest differentiates APT/<=10 kg from warehouse/<=30 kg. Do not choose
-    // a duration from the carrier name alone; service type must be verified.
-    const depot = text(delivery.trackingPickupLocationType)
-    if (depot === 'meest_apt')
-      return { date: isoDate(addWeekdays(arrival, 5)), carrier, basis: 'meest_apt_five_workdays' }
-    if (depot === 'meest_warehouse')
-      return { date: isoDate(addWeekdays(arrival, 10)), carrier, basis: 'meest_warehouse_ten_workdays' }
+    // SpecMarket operator-defined reminder date: five calendar days after
+    // confirmed arrival, regardless of branch, APT or parcel locker.
+    // This is NOT Meest's contractual auto-return deadline: their free
+    // storage period is usually five WORKING days, with possible extension.
+    return { date: isoDate(addDays(arrival, 5)), carrier, basis: 'specmarket_meest_five_calendar_day_reminder' }
   }
   // Ukrposhta 7 urban / 14 rural days specify the FREE interval, not a
   // universal auto-return deadline. Their policy needs a verified per-parcel
