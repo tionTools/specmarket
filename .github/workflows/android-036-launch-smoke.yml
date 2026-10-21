@@ -1,7 +1,7 @@
 name: Android 0.36 reminders launch smoke
 on:
   push:
-    branches: [feature/android-reminder-filter-v036, feature/android-pickup-reminders-v048, feature/android-pickup-reminders-v049]
+    branches: [feature/android-reminder-filter-v036, feature/android-pickup-reminders-v048, feature/android-pickup-reminders-v049, feature/android-pickup-reminders-v050]
     paths:
       - '.github/workflows/android-036-launch-smoke.yml'
       - 'android/**'

@@ -7,6 +7,7 @@ on:
       - feature/android-pickup-reminders-v047
       - feature/android-pickup-reminders-v048
       - feature/android-pickup-reminders-v049
+      - feature/android-pickup-reminders-v050
     paths:
       - 'android/**'
       - '.github/workflows/android-036-validate.yml'
@@ -73,7 +74,7 @@ jobs:
         if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: android-049-signed-update-v0.49
+          name: android-050-signed-update-v0.50
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7

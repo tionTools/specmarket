@@ -109,10 +109,8 @@ class PickupReminderWorker(context: Context, params: WorkerParameters) : Corouti
 
             val today = pickupToday()
             if (app.checkedPickupDay(account, today)) return Result.success()
-            val reminders = withTimeout(20_000) { repo.pickupReminders() }
-            val orders = withTimeout(60_000) { repo.pickupCandidateOrders() }
-            val byId = reminders.associateBy { it.orderId }
-            val count = duePickupOrders(orders, byId, today).size
+            val queue = withTimeout(20_000) { repo.pickupQueue() }
+            val count = pickupUrgentCount(queue)
             if (count > 0) app.postPickupReminderNotification(count)
             app.markPickupDayChecked(account, today)
         } catch (cancel: CancellationException) {

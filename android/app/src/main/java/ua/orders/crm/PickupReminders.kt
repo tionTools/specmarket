@@ -20,6 +20,35 @@ data class PickupReminderState(
     @SerialName("last_channel") val lastChannel: String? = null,
 )
 
+/** Server RPC is authoritative for both queues; never derive urgency from cached orders. */
+@Serializable
+data class PickupQueueRow(
+    @SerialName("order_id") val orderId: String,
+    @SerialName("order_number") val orderNumber: Long? = null,
+    val ttn: String,
+    val carrier: String? = null,
+    @SerialName("tracking_status") val trackingStatus: String? = null,
+    val deadline: String? = null,
+    val source: String? = null,
+    @SerialName("days_left") val daysLeft: Int? = null,
+    val category: String,
+    val stage: String? = null,
+    @SerialName("first_sent_at") val firstSentAt: String? = null,
+    @SerialName("first_channel") val firstChannel: String? = null,
+    @SerialName("last_sent_at") val lastSentAt: String? = null,
+    @SerialName("last_channel") val lastChannel: String? = null,
+) {
+    fun activeStage(): PickupReminderStage? = when {
+        category != "urgent" || deadline.isNullOrBlank() -> null
+        stage == "first" -> PickupReminderStage.FIRST
+        stage == "last" -> PickupReminderStage.LAST
+        else -> null
+    }
+}
+fun pickupUrgentCount(rows: List<PickupQueueRow>): Int = rows.count {
+    it.category == "urgent" && it.activeStage() != null
+}
+
 enum class PickupReminderStage(val databaseValue: String) {
     FIRST("first"), LAST("last")
 }
@@ -168,6 +197,21 @@ fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today
         else -> "До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
     }
     return "Вітаємо!\n\n$intro\n\nВаше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n$time\n\nДякуємо!"
+}
+
+// A neutral note for early/late manual outreach. Never assert a carrier return day.
+fun Order.pickupManualReminderText(): String {
+    val products = items.sortedBy { it.position ?: Int.MAX_VALUE }.joinToString("\n") { item ->
+        val name = item.productName?.trim().orEmpty().ifBlank { "Товар" }
+        val size = item.size?.trim().orEmpty().takeIf(String::isNotBlank)?.let { ", розмір $it" }.orEmpty()
+        val count = item.quantity?.takeIf { it > 0 }?.let {
+            java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString()
+        }
+        "• $name$size" + (count?.let { " — $it шт." } ?: "")
+    }.ifBlank { "Товари в замовленні" }
+    return "Вітаємо!\n\nНагадуємо, що ваше замовлення №${number()} очікує на отримання.\n\n" +
+        "Ваше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n" +
+        "Будь ласка, заберіть посилку найближчим часом. Точний термін зберігання можна уточнити у перевізника.\n\nДякуємо!"
 }
 
 // Calendar-day midnight drives UI refresh; at most one notification after 08:00 Kyiv time.

@@ -131,6 +131,22 @@ class OrdersRepository {
         return result
     }
 
+    /** Server-side categories and stage are the only source of the reminder badge. */
+    suspend fun pickupQueue(): List<PickupQueueRow> {
+        check(client.auth.currentSessionOrNull() != null)
+        return client.postgrest.rpc("crm_list_pickup_reminders").decodeList<PickupQueueRow>()
+    }
+
+    /** Backend companion RPC to be added before distributing manual reminders. */
+    suspend fun confirmManualPickupReminder(orderId: String, ttn: String, channel: String) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_confirm_pickup_reminder_manual", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_channel", channel)
+        })
+    }
+
     suspend fun pickupReminders(): List<PickupReminderState> =
         client.from("crm_pickup_reminders")
             .select(Columns.raw("order_id,ttn,deadline,first_sent_at,first_channel,last_sent_at,last_channel"))
