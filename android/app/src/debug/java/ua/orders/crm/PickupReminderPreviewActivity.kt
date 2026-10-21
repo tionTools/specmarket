@@ -20,27 +20,37 @@ class PickupReminderPreviewActivity : ComponentActivity() {
         val last = reviewPickupOrder("fixture-last", "Нова Пошта")
         val missing = reviewPickupOrder("fixture-missing", "Нова Пошта")
         val sent = reviewPickupOrder("fixture-sent", "Нова Пошта")
-        val reminders = listOf(
-            PickupReminderState(order.id, "20450000000000", now.plusDays(2).toString()),
-            PickupReminderState(last.id, "20450000000000", now.toString(), firstSentAt = "2026-10-16T08:00:00Z"),
-            PickupReminderState(sent.id, "20450000000000", now.plusDays(1).toString(), firstSentAt = "2026-10-16T08:00:00Z"),
-        ).associateBy { it.orderId }
+        val queue = listOf(
+            PickupQueueRow(order.id, 950123L, "20450000000000", carrier = "Нова Пошта",
+                deadline = now.plusDays(1).toString(), daysLeft = 1,
+                category = "urgent", stage = "first"),
+            PickupQueueRow(last.id, 950124L, "20450000000000", carrier = "Нова Пошта",
+                deadline = now.toString(), daysLeft = 0, category = "urgent", stage = "last",
+                firstSentAt = "2026-10-20T07:17:00Z"),
+            PickupQueueRow(missing.id, 950125L, "20450000000000",
+                carrier = "Нова Пошта", category = "informational"),
+            PickupQueueRow(sent.id, 950126L, "20450000000000",
+                carrier = "Нова Пошта", deadline = now.plusDays(1).toString(),
+                daysLeft = 1, category = "informational", firstSentAt = "2026-10-20T07:17:00Z"),
+        )
         setContent {
             MaterialTheme(colorScheme = ordersColors(false), typography = ordersTypography(false)) {
                 var selected by remember { mutableStateOf(OrderListFilter.REMIND) }
                 val all = listOf(order, last, missing, sent)
                 Column {
-                    OrderFilters(all, reminders, true, selected, { selected = it })
+                    OrderFilters(all, queue, true, selected, { selected = it })
                     if (selected == OrderListFilter.REMIND) {
                         PickupReminderContent(
                             orders = all,
-                            reminders = reminders,
+                            queue = queue,
+                            manualHistory = emptyMap(),
                             loading = false,
                             busy = false,
                             error = null,
                             onRefresh = {},
                             onSaveDeadline = { _, _ -> },
                             onConfirmSent = { _, _, _ -> },
+                            onConfirmManualSent = { _, _ -> },
                         )
                     } else {
                         Text("Пример обычного списка заказов")
