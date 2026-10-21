@@ -49,6 +49,17 @@ fun pickupUrgentCount(rows: List<PickupQueueRow>): Int = rows.count {
     it.category == "urgent" && it.activeStage() != null
 }
 
+@Serializable
+data class PickupManualLog(
+    @SerialName("order_id") val orderId: String,
+    val ttn: String,
+    val stage: String,
+    val channel: String? = null,
+    @SerialName("acknowledged_at") val acknowledgedAt: String,
+) {
+    fun key() = orderId + "|" + ttn
+}
+
 enum class PickupReminderStage(val databaseValue: String) {
     FIRST("first"), LAST("last")
 }

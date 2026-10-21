@@ -763,6 +763,7 @@ private fun OrdersScreen(
                 PickupReminderContent(
                     orders = vm.pickupOrders,
                     queue = vm.pickupQueue,
+                    manualHistory = vm.pickupManualHistory,
                     loading = vm.pickupLoading,
                     busy = vm.pickupBusy,
                     error = vm.pickupError,

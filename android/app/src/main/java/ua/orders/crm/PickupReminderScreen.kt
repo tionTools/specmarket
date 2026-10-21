@@ -27,6 +27,7 @@ import java.time.LocalDate
 internal fun PickupReminderContent(
     orders: List<Order>,
     queue: List<PickupQueueRow>,
+    manualHistory: Map<String, PickupManualLog>,
     loading: Boolean,
     busy: Boolean,
     error: String?,
@@ -93,6 +94,7 @@ internal fun PickupReminderContent(
             }
             items(urgent, key = { "urgent-" + it.orderId }) { row ->
                 PickupReminderCard(row, byId[row.orderId], busy, messengersEnabled,
+                    manualLog = manualHistory[row.orderId + "|" + row.ttn],
                     onEdit = { order ->
                         edit = order
                         deadlineInput = row.deadline.orEmpty()
@@ -110,6 +112,7 @@ internal fun PickupReminderContent(
             }
             items(informational, key = { "info-" + it.orderId }) { row ->
                 PickupReminderCard(row, byId[row.orderId], busy, messengersEnabled,
+                    manualLog = manualHistory[row.orderId + "|" + row.ttn],
                     onEdit = { order ->
                         edit = order
                         deadlineInput = row.deadline.orEmpty()
@@ -175,6 +178,7 @@ private fun PickupReminderCard(
     order: Order?,
     busy: Boolean,
     messengersEnabled: Boolean,
+    manualLog: PickupManualLog?,
     onEdit: (Order) -> Unit,
     onAskSent: (PickupQueueRow, PickupReminderStage?, String?) -> Unit,
 ) {
@@ -209,6 +213,15 @@ private fun PickupReminderCard(
                 row.source == "manual" -> "Проверенный срок: " + row.deadline
                 else -> "Расчётный срок: " + row.deadline
             }, style = MaterialTheme.typography.bodyMedium)
+            if (manualLog != null) {
+                val clock = runCatching {
+                    java.time.Instant.parse(manualLog.acknowledgedAt)
+                        .atZone(java.time.ZoneId.of(PICKUP_KYIV_ZONE))
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))
+                }.getOrDefault(manualLog.acknowledgedAt)
+                Text("Последнее ручное напоминание: " + clock + " · " +
+                    manualLog.channel.orEmpty(), style = MaterialTheme.typography.bodySmall)
+            }
             if (stage == null && row.firstSentAt != null && row.lastSentAt == null)
                 Text("Первое напоминание отмечено. Второе появится в день срока.",
                     style = MaterialTheme.typography.bodySmall)

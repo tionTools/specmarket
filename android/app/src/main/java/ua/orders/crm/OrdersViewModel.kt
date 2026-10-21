@@ -37,6 +37,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var acceptingId by mutableStateOf<String?>(null); private set
     // Optional, lazy-loaded feature state. Core order refresh never touches it.
     var pickupQueue by mutableStateOf<List<PickupQueueRow>>(emptyList()); private set
+    var pickupManualHistory by mutableStateOf<Map<String, PickupManualLog>>(emptyMap()); private set
     // Authoritative live orders for the reminder queue; never derive the badge from OrdersCache.
     var pickupOrders by mutableStateOf<List<Order>>(emptyList()); private set
     var pickupLoading by mutableStateOf(false); private set
@@ -112,6 +113,11 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             try {
                                 val snapshot = withTimeout(15_000) { repository.pickupQueue() }
                                 pickupQueue = snapshot
+                                try {
+                                    pickupManualHistory = repository.pickupManualHistory()
+                                        .distinctBy { it.key() }.associateBy { it.key() }
+                                } catch (cancel: CancellationException) { throw cancel }
+                                catch (_: Exception) { /* Queue still authoritative. */ }
                                 pickupLoaded = true
                                 pickupLoadedDay = pickupToday()
                                 pickupError = null
@@ -305,6 +311,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupPollingJob?.cancel()
         pickupPollingJob = null
         pickupQueue = emptyList()
+        pickupManualHistory = emptyMap()
         pickupOrders = emptyList()
         pickupLoaded = false
         pickupLoadedDay = null
@@ -422,6 +429,11 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                 pickupQueue = queue
                 pickupLoaded = true
                 pickupLoadedDay = pickupToday()
+                try {
+                    pickupManualHistory = repository.pickupManualHistory()
+                        .distinctBy { it.key() }.associateBy { it.key() }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { pickupManualHistory = emptyMap() }
                 // No order enrichment failure may hide a server-authoritative entry.
                 val details = try {
                     withTimeout(30_000) { repository.pickupCandidateOrders() }

@@ -137,6 +137,15 @@ class OrdersRepository {
         return client.postgrest.rpc("crm_list_pickup_reminders").decodeList<PickupQueueRow>()
     }
 
+    suspend fun pickupManualHistory(): List<PickupManualLog> =
+        client.from("crm_pickup_reminder_log").select(
+            Columns.raw("order_id,ttn,stage,channel,acknowledged_at")
+        ) {
+            filter { eq("stage", "manual") }
+            order("acknowledged_at", SortOrder.DESCENDING)
+            range(0L..199L)
+        }.decodeList<PickupManualLog>()
+
     /** Backend companion RPC to be added before distributing manual reminders. */
     suspend fun confirmManualPickupReminder(orderId: String, ttn: String, channel: String) {
         check(client.auth.currentSessionOrNull() != null)
