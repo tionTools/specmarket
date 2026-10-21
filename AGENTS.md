@@ -29,45 +29,45 @@
 - Keep privileged operations and secrets in Supabase Edge Functions or another server-side layer. Do not implement them in Vue code.
 - Keep schemas, migrations, and policies reviewable and reproducible in repository files. Do not rely on undocumented dashboard-only changes.
 
-## Supabase CLI for Codex — mandatory, project-specific
+## Supabase CLI and the established migration boundary — mandatory for Codex
 
-This is a standing rule for every Codex run that touches Supabase in SpecMarket. Read this before invoking any CLI command. Production project ref: `rtkhgldaswsclkorlyxx`. Read-only Supabase MCP does not grant CLI write privileges.
+**Read this before any SpecMarket Supabase operation.** Production project ref: `rtkhgldaswsclkorlyxx`. The read-only Supabase MCP is for inspection, not SQL/Edge deployment rights.
 
-**Use `pnpm dlx supabase@2.113.0` consistently for this project.** This is the first stable release containing both relevant upstream fixes:
-- CLI **2.111.0** links successfully but still has the **mixed 8-digit/14-digit migration ordering bug**: an existing `20260821_reconciliation.sql` version can falsely appear missing when a `20260821120000_*.sql` migration is also present. Upstream [#6036](https://github.com/supabase/cli/issues/6036), fixed by [#6038](https://github.com/supabase/cli/pull/6038) in v2.112.0.
-- CLI **2.112.0** fixes migration sorting but breaks `supabase link` when API-key `inserted_at` has a numeric timezone offset (`LegacyLinkApiKeysNetworkError`). Upstream [#6115](https://github.com/supabase/cli/issues/6115), fixed by [#6117](https://github.com/supabase/cli/pull/6117) in v2.113.0.
-- Stable v2.113.0 release notes: https://github.com/supabase/cli/releases/tag/v2.113.0. Upstream fixes are verified by release notes, but compatibility with **this project's** linked production database still needs the following read-only verification.
+### Never reopen the legacy migration boundary
 
-From the repository root in Windows PowerShell:
+This is a **standing user decision from 17–19 September 2026**, not a new migration defect to fix on every release:
+- **Twelve legacy Epicentr/Kasta SQL files were intentionally excluded** when a September bank migration was deployed from a *temporary Supabase workdir*. The original repository and historical migrations stayed unchanged; the bank migration was successfully applied. Do **not** go back to run, repair, backfill, rename, re-mark, or reconcile those historical SQL files during unrelated work.
+- On **19 September**, `20260919150000_prom_completion_dismissal.sql` was executed **directly** as targeted SQL; the column was verified in production, while history reconciliation was expressly forbidden. Missing history rows for such previously executed scripts do **not** prove schema changes are missing.
+- Production includes active NovaPay cron and existing NovaPay SQL functions. The old `20260918170000_prepare_novapay_sync_schedule.sql` includes a command to **disable** the NovaPay cron. Never run it simply because it looks pending.
+- Source files include duplicate legacy version prefixes (e.g., several `20260808_*.sql`, `20260810_*.sql`, `20260811_*.sql`). Treat the full legacy migration list as **known historical debt**, not as an open task or release prerequisite. The `20260821_reconciliation.sql` file and its remote `20260821` version both exist.
 
-```powershell
-pnpm dlx supabase@2.113.0 --version
-pnpm dlx supabase@2.113.0 link --project-ref rtkhgldaswsclkorlyxx
-pnpm dlx supabase@2.113.0 migration list
-pnpm dlx supabase@2.113.0 db push --dry-run
-```
+**Absolute operational rule:** A new feature must only touch **its own explicitly approved SQL** and named Edge Function. Do not scan/reconcile/fix all old migrations or suggest a blanket `db push`. Never run `migration repair`, `db reset`, `--include-all`, or `--include-seed` against production. Never execute a stale SQL file to "fill a gap." This supersedes any generic instruction that the *entire* migration history must be clean before an unrelated feature can be released.
 
-Use the existing local authentication. Do not change tokens, PAT scope, MCP permissions, or password settings merely because a previously buggy CLI version failed. Never print credentials or request that secrets be pasted in chat.
+### CLI version, authentication
 
-**Migrations are a separate safety gate, even on a fixed CLI:** the tracked `20260821_reconciliation.sql` **does exist**; do not remove/revert its remote history based on the old version-ordering bug. The repository also contains `20260918170000_prepare_novapay_sync_schedule.sql` (can disable NovaPay scheduled job) and `20260919150000_prom_completion_dismissal.sql`. If `migration list` still reports them pending, check their real remote migration history and schema state via read-only access; these are unrelated to reminder feature. Never auto-apply, mark applied, mark reverted, or change migration file names to suppress a mismatch.
+Use explicit **`pnpm dlx supabase@2.113.0`** for CLI commands instead of an unpinned/global executable:
+- v2.111.0 has a mixed 8/14-digit migration sorting bug ([#6036](https://github.com/supabase/cli/issues/6036); fix [#6038](https://github.com/supabase/cli/pull/6038)).
+- v2.112.0 fixes sorting but has the `inserted_at` API-key validation error on `link` ([#6115](https://github.com/supabase/cli/issues/6115); fix [#6117](https://github.com/supabase/cli/pull/6117)).
+- v2.113.0 includes both upstream fixes; it was successfully linked to **this project** on 21 October 2026.
 
-**Confirmed production migration-history debt (2026-10-21):** With CLI v2.113.0 linked successfully, the remote migration history still differs from the repository. Early source files reuse the same version numbers (3 files with `20260808`, 2 with `20260810`, 3 with `20260811`), which cannot be represented as independent applied records in ordinary version-keyed history. Additional local versions including `20260809`, `20260812`, `20260813`, `20260815`, `20260820`, `20260918170000`, `20260919150000`, and `20260919160000` are not in remote history. A remote `20260821` entry **does** correspond to `20260821_reconciliation.sql`; CLI can display its local/remote rows separately. Verified by read-only production inspection: NovaPay's relevant SQL functions exist, cron is **active**, HTTP timeout `180000` is set, and `crm_orders.prom_completion_dismissed_at` exists despite absent migration records. Importantly, migration `20260918170000` contains an explicit call to **disable the NovaPay cron**. Do not apply this or any other older missing migration as a blanket catch-up action, and do not infer an absent schema object solely from an absent history row.
+Do not rotate credentials, request PATs in chat, alter auth/MCP scopes, or try alternate versions to work around the **known legacy-history discrepancy**.
 
-**Release strategy while legacy history is unreconciled:** Don't repeatedly retry `db push`, `migration repair`, or upgrade/downgrade CLI to force it through. A feature-specific production release may instead be designed as a **separately authorized, targeted SQL execution**, preserving unrelated schema/history, with explicit read-only preflight of all target dependencies and actual `supabase_migrations.schema_migrations` table structure. Its matching migration-version record may be inserted **only if both the approved SQL and version registration can succeed atomically in one transaction**; otherwise STOP before any write. Do not claim such atomic execution is already available or approved. The exact transaction must be reviewed, no other versions changed, and the existing NovaPay cron must remain active and unchanged. The broader historical reconciliation should be a separate project after this feature's rollout. Standard `db push` is blocked by this known history debt until reconciliation, regardless of CLI version.
+### How to release a new SQL migration
 
-Only after an explicit production authorization and a **successful dry-run showing exactly the approved migrations**, may Codex run:
+1. Work in a clean checkout pinned to the approved commit. Verify **only the new SQL** and its exact dependencies against production **read-only**. Preserve current data, privileges, existing cron and known migration boundaries.
+2. Reuse the **successful 17 September pattern** when suitable: a separate temporary workdir, with source migration history excluded and only the specifically necessary known-applied baseline and approved new SQL staged for inspection. Never edit or delete old files in the original repository. Merely reducing the folder content must **not** be mistaken for permission to write, and must never accidentally replay old SQL.
+3. If CLI `db push --dry-run` (against that isolated workdir) can be proven to propose **only** the current approved SQL and no other work, proceed with that ordinary migration route **only under explicit production approval**. If it cannot, prefer a separately reviewed **single-target SQL execution strategy**, with matching migration-version registration only when atomicity and safe privileges are verified and specifically authorized. Do not auto-insert or auto-repair entries in `supabase_migrations.schema_migrations`.
+4. After success, read back actual schema/function/grants, preserve legacy records, and verify only the affected orders. A green web deploy does **not** deploy Supabase SQL or Edge Functions.
 
-```powershell
-pnpm dlx supabase@2.113.0 db push
-```
+**Failure behavior:** STOP for unverified prerequisites of the **current migration**, privileges, unexpected production state, or unsafe write plan. Do not STOP merely because the known old migration list is inconsistent; likewise do not use that inconsistency as grounds to execute those files. If safe targeted execution cannot be proven, report precisely the missing proof and await authorization. Do not turn it into an audit of all old migrations.
 
-For an explicitly approved Edge rollout, verify the exact code SHA, then deploy only the named function:
+For an explicitly approved Edge rollout, verify the exact code SHA first and deploy only the named function; e.g.:
 
 ```powershell
 pnpm dlx supabase@2.113.0 functions deploy sync-delivery-tracking --project-ref rtkhgldaswsclkorlyxx
 ```
 
-Do not change `verify_jwt`, settings, authentication, secrets, cron, or other functions. Never use `db reset`, `migration repair`, `--include-all`, `--include-seed`, an unpinned CLI, or blind `db push` against production. On unknown pending migrations, true history drift, missing permissions, unsuccessful dry-run, or unexpected schema differences: **STOP**, retain data, and report the exact outstanding versions and read-only evidence. Neither a successful `supabase link` nor a successful frontend deploy proves that SQL/Edge rollout has happened.
+Do not change `verify_jwt`, settings, authentication, secrets, cron or other Edge Functions. Any additional production modification needs explicit permission.
 
 ## Project workflow
 
