@@ -624,20 +624,18 @@ private fun OrderFilterChip(
                     )
                 }
             }
-            if (filter == OrderListFilter.REMIND) {
-                CountBadge()
+            // The ALL filter is a compact number-only chip to leave room for
+            // the reminder filter. All other chips keep the same label/count style.
+            if (filter != OrderListFilter.ALL) {
+                Text(
+                    filter.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
                 Spacer(Modifier.width(5.dp))
             }
-            Text(
-                filter.title,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-            if (filter != OrderListFilter.REMIND) {
-                Spacer(Modifier.width(5.dp))
-                CountBadge()
-            }
+            CountBadge()
         }
     }
 }
@@ -651,8 +649,8 @@ internal fun OrderFilters(
     onSelected: (OrderListFilter) -> Unit,
     remindersFailed: Boolean = false,
 ) {
-    // Single scrollable row: the due count comes BEFORE "Напомнить" so it
-    // stays visible even when the end of the fourth label is off-screen.
+    // One compact scrollable row: ALL shows only its count; reminder uses
+    // the same label/count arrangement and colors as NEW and WORK.
     LazyRow(
         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
