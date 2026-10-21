@@ -30,8 +30,8 @@ enum class PickupReminderStage(val databaseValue: String) {
 internal const val PICKUP_KYIV_ZONE = "Europe/Kiev"
 fun pickupToday(): LocalDate = LocalDate.now(ZoneId.of(PICKUP_KYIV_ZONE))
 
-// Parcels with no reliable deadline must remain discoverable in the
-// reminder filter; otherwise the operator would have to search all orders.
+// Orders without a reliable deadline must never enter the active reminder queue.
+// They can still be diagnosed separately; do not mix undated historical shipments into today's list.
 
 // This runs for every visible order card. Avoid eager static Regex
 // initialization: some Android platform regex engines behave differently
@@ -85,8 +85,8 @@ private fun Order.activePickup(): Boolean =
     deliveryValue("ttn").isNotBlank() &&
     normalizedStatus(deliveryValue("trackingNormalizedStatus")) == "ready_for_pickup" &&
     !deliveryFlag("trackingBuyerReceived") && !deliveryFlag("trackingReturnInProgress") &&
-    !hasReturnSignal() &&
-    !Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished", RegexOption.IGNORE_CASE)
+    deliveryValue("trackingDeliveredAt").isBlank() && !hasReturnSignal() &&
+    !Regex("скас|отмен|cancel|закр|closed|заверш|виконан|completed|finished|получено|отримано|вручено", RegexOption.IGNORE_CASE)
         .containsMatchIn(status.orEmpty())
 
 // Manual server deadlines take precedence. If tracking saved the arrival but

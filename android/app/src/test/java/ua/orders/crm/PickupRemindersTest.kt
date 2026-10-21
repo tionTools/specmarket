@@ -174,6 +174,67 @@ class PickupRemindersTest {
         assertNull(noArrival.pendingPickupReminder(null, LocalDate.of(2026, 10, 21)))
     }
 
+
+    @Test fun historic_ready_for_pickup_without_deadline_never_enters_reminder_queue() {
+        val today = LocalDate.of(2026, 10, 21)
+        val stale = order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+        })
+        assertTrue(stale.needsPickupDeadline(null))
+        assertFalse(stale.isPickupReminderDue(null, today))
+        assertNull(stale.pendingPickupReminder(null, today))
+    }
+
+    @Test fun old_arrivals_from_october_7_and_10_never_reappear_as_due() {
+        val today = LocalDate.of(2026, 10, 21)
+        for (arrival in listOf("07.10.2026", "10.10.2026")) {
+            val old = order().copy(delivery = buildJsonObject {
+                put("ttn", "20450000000000")
+                put("carrier", "Нова пошта")
+                put("trackingNormalizedStatus", "ready_for_pickup")
+                put("trackingPickupArrivedAt", arrival)
+            })
+            assertNotNull(old.effectivePickupReminder(null))
+            assertFalse(old.isPickupReminderDue(null, today))
+        }
+    }
+
+    @Test fun received_or_returned_shipments_cannot_create_reminders_even_with_stale_ready_flag() {
+        val today = LocalDate.of(2026, 10, 21)
+        val active = order().copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "17.10.2026")
+        })
+        assertTrue(active.isPickupReminderDue(null, today))
+        assertFalse(active.copy(status = "Получено").isPickupReminderDue(null, today))
+        assertFalse(active.copy(status = "Отримано").isPickupReminderDue(null, today))
+        assertFalse(active.copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "17.10.2026")
+            put("trackingDeliveredAt", "20.10.2026")
+        }).isPickupReminderDue(null, today))
+        assertFalse(active.copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "17.10.2026")
+            put("trackingBuyerReceived", true)
+        }).isPickupReminderDue(null, today))
+        assertFalse(active.copy(delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "17.10.2026")
+            put("trackingReturnInProgress", true)
+        }).isPickupReminderDue(null, today))
+    }
+
     @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
         assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
         val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)

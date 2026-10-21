@@ -667,7 +667,7 @@ internal fun OrderFilters(
                     if (remindersFailed) "!" else "…"
                 else -> orders.count {
                     if (filter == OrderListFilter.REMIND)
-                        it.isPickupReminderDue(reminders[it.id], today) || it.needsPickupDeadline(reminders[it.id])
+                        it.isPickupReminderDue(reminders[it.id], today)
                     else it.matchesListFilter(filter)
                 }.toString()
             }

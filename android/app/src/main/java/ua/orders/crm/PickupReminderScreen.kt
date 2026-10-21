@@ -55,7 +55,7 @@ internal fun PickupReminderContent(
     }
     val applicable = remember(orders, reminders, today) {
         orders.filter(::isOrderVisibleInMainList).filter { order ->
-            order.isPickupReminderDue(reminders[order.id], today) || order.needsPickupDeadline(reminders[order.id])
+            order.isPickupReminderDue(reminders[order.id], today)
         }
     }
 
@@ -73,7 +73,7 @@ internal fun PickupReminderContent(
                 Text(error, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
-            Text("Если сервер пропустил срок, он рассчитывается по дате прибытия Новой почты. Проверьте его перед отправкой.",
+            Text("Только посылки с истекающим сроком хранения. Дату, рассчитанную из прибытия, проверьте перед отправкой.",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall)
             LazyColumn(
@@ -105,7 +105,7 @@ internal fun PickupReminderContent(
                             val caption = when (stage) {
                                 PickupReminderStage.FIRST -> "Напомнить: два календарных дня"
                                 PickupReminderStage.LAST -> "Напомнить: сегодня последний день"
-                                null -> "Срок неизвестен — укажите дату получения"
+                                null -> "Напоминание не требуется"
                             }
                             Text(caption, fontWeight = FontWeight.SemiBold)
                             if (reminder != null) {
