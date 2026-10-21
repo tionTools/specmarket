@@ -3,8 +3,8 @@ create table public.crm_pickup_reminder_log (
   id bigint generated always as identity primary key,
   order_id uuid not null,
   ttn text not null,
-  deadline date not null,
-  stage text not null check (stage in ('first', 'last')),
+  deadline date,
+  stage text not null check (stage in ('first', 'last', 'manual')),
   channel text check (channel in ('telegram', 'viber')),
   acknowledged_at timestamptz not null,
   actor_uid uuid,
@@ -83,6 +83,49 @@ $$;
 revoke all on function public.crm_confirm_pickup_reminder(uuid,text,date,text,text)
   from public, anon, authenticated;
 grant execute on function public.crm_confirm_pickup_reminder(uuid,text,date,text,text)
+  to authenticated;
+
+-- Manual acknowledgements are allowed outside FIRST/LAST windows and may not
+-- have a verified deadline. They never change the scheduled stage markers.
+create function public.crm_confirm_pickup_reminder_manual(
+  p_order_id uuid, p_ttn text, p_channel text
+) returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_deadline date;
+begin
+  if auth.uid() is null or lower(coalesce(auth.jwt()->>'email','')) = 'guest@gmail.com' then
+    raise exception 'CRM_AUTH_REQUIRED';
+  end if;
+  if p_channel is null or p_channel not in ('telegram','viber') then
+    raise exception 'CRM_REMINDER_INVALID_CHANNEL';
+  end if;
+  select r.deadline into v_deadline
+  from public.crm_orders o
+  left join public.crm_pickup_reminders r
+    on r.order_id = o.id and r.ttn = btrim(p_ttn)
+  where o.id = p_order_id
+    and nullif(btrim(p_ttn), '') is not null
+    and btrim(coalesce(o.delivery->>'ttn','')) = btrim(p_ttn)
+    and lower(coalesce(o.delivery->>'trackingNormalizedStatus','')) = 'ready_for_pickup'
+    and coalesce(o.delivery->>'trackingBuyerReceived','false') <> 'true'
+    and coalesce(o.delivery->>'trackingReturnInProgress','false') <> 'true'
+    and coalesce(o.delivery->>'trackingReturnArrived','false') <> 'true'
+    and lower(coalesce(o.status,'')) not in
+      ('canceled','cancelled','completed','delivered','returned','скасовано','виконано','возврат')
+  for update of o;
+  if not found then raise exception 'CRM_REMINDER_SHIPMENT_CHANGED'; end if;
+
+  insert into public.crm_pickup_reminder_log
+    (order_id, ttn, deadline, stage, channel, acknowledged_at, actor_uid, origin)
+  values (p_order_id, btrim(p_ttn), v_deadline, 'manual', p_channel, now(), auth.uid(), 'rpc');
+end;
+$$;
+
+revoke all on function public.crm_confirm_pickup_reminder_manual(uuid,text,text)
+  from public, anon, authenticated;
+grant execute on function public.crm_confirm_pickup_reminder_manual(uuid,text,text)
   to authenticated;
 
 -- One server-side list for every phone: actionable deadlines and all other
