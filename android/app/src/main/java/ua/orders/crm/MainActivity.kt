@@ -605,7 +605,7 @@ private fun OrderFilterChip(
         contentColor = if (selected) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
@@ -618,24 +618,32 @@ private fun OrderFilterChip(
                 ) {
                     Text(
                         count,
-                        Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelLarge,
                         maxLines = 1,
                     )
                 }
             }
-            // The ALL filter is a compact number-only chip to leave room for
-            // the reminder filter. All other chips keep the same label/count style.
-            if (filter != OrderListFilter.ALL) {
+            // Keep ALL compact so the other three chips fit narrow screens.
+            // REMIND shares exactly the same label/badge styling as NEW and WORK.
+            if (filter == OrderListFilter.ALL) {
+                Text(
+                    count,
+                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            } else {
                 Text(
                     filter.title,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(4.dp))
+                CountBadge()
             }
-            CountBadge()
         }
     }
 }
