@@ -91,7 +91,7 @@ function nextBuyerReceived(delivery: JsonRecord, result: TrackingResult) {
   // carrier poll says the parcel is still ready for pickup.
   const previous = text(delivery.trackingStatus).toLowerCase()
   const formerWaitingMisclassification =
-    /очіку(?:є|ють)\\s+(?:на\\s+)?отриман|ожида(?:ет|ют)\\s+получен/.test(previous)
+    /очіку(?:є|ють)\s+(?:на\s+)?отриман|ожида(?:ет|ют)\s+получен/.test(previous)
   if (formerWaitingMisclassification && result.normalizedStatus === 'ready_for_pickup')
     return false
   return (
