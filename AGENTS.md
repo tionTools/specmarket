@@ -29,6 +29,39 @@
 - Keep privileged operations and secrets in Supabase Edge Functions or another server-side layer. Do not implement them in Vue code.
 - Keep schemas, migrations, and policies reviewable and reproducible in repository files. Do not rely on undocumented dashboard-only changes.
 
+## Supabase CLI for Codex — mandatory, project-specific
+
+This section is a standing instruction for every Codex run that touches Supabase in SpecMarket, including production operations. Read it **before invoking any Supabase CLI command**. Project ref: `rtkhgldaswsclkorlyxx`. A registered, read-only Supabase MCP does **not** grant CLI access or deployment rights.
+
+**Known CLI regression (do not rediscover on every task):** Supabase CLI **v2.112.0** can fail during `supabase link` / API-key retrieval with `LegacyLinkApiKeysNetworkError`, `SchemaError`, and a malformed `inserted_at` timestamp. This is the CLI's API response schema validation defect, **not evidence of a bad PAT, network, or project permissions**. Official upstream: [issue #6115](https://github.com/supabase/cli/issues/6115), [fix PR #6117](https://github.com/supabase/cli/pull/6117). v2.111.0 is the documented workaround. Until a replacement version has been *explicitly tested with this project* and this file updated, **always invoke the pinned v2.111.0 for Supabase commands**. Never silently use globally installed `supabase`, `latest`, or unpinned `pnpm dlx supabase`.
+
+From the **repository root** in Windows PowerShell (one consistent executable for every step):
+
+```powershell
+pnpm dlx supabase@2.111.0 --version
+pnpm dlx supabase@2.111.0 link --project-ref rtkhgldaswsclkorlyxx
+pnpm dlx supabase@2.111.0 migration list
+pnpm dlx supabase@2.111.0 db push --dry-run
+```
+
+The first invocation may install the pinned CLI into pnpm's temporary cache. Use the existing locally configured authentication; only perform `pnpm dlx supabase@2.111.0 login` if authentication is genuinely absent and user interaction is authorized. Never print credentials or ask the user to paste PATs or database passwords into chat.
+
+Only **after** an explicit production authorization, a successful `migration list`, and a `db push --dry-run` showing *exactly* the user-approved migration(s), may Codex invoke:
+
+```powershell
+pnpm dlx supabase@2.111.0 db push
+```
+
+For an explicitly approved Edge-function rollout, verify the exact code SHA first, then deploy only the named function, e.g.:
+
+```powershell
+pnpm dlx supabase@2.111.0 functions deploy sync-delivery-tracking --project-ref rtkhgldaswsclkorlyxx
+```
+
+Do not change `verify_jwt`, project settings, auth scopes, secrets, cron schedules, or unrelated functions. Do **not** run `db reset`, `migration repair`, `--include-all`, `--include-seed`, or blind `db push` against production. On missing permissions, a different auth error, unexpected pending migrations, history drift, or a dry-run that cannot be verified, **STOP** and report the precise blocker. Do not auto-apply a workaround that changes database state. A successful web frontend deploy is *not* proof of a Supabase SQL migration or Edge deploy.
+
+If the known `inserted_at` validation error reappears, first show the **actual CLI version used** and retry using the pinned invocation above. Do not burn time on repeated token reauthorization, MCP reconfiguration, DNS/network changes, or repeated failing `supabase link` commands. This version workaround addresses the specific timestamp-schema bug; it does **not** guarantee that the currently configured account has write permissions.
+
 ## Project workflow
 
 - Use `pnpm`; do not use npm or yarn in this repository.
