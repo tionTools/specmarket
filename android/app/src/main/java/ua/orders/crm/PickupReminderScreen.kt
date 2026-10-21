@@ -54,9 +54,7 @@ internal fun PickupReminderContent(
         pendingChannel = channel
     }
     val applicable = remember(orders, reminders, today) {
-        orders.filter(::isOrderVisibleInMainList).filter { order ->
-            order.isPickupReminderDue(reminders[order.id], today)
-        }
+        duePickupOrders(orders, reminders, today)
     }
 
     Column(Modifier.fillMaxSize()) {

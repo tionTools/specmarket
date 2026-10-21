@@ -37,6 +37,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var acceptingId by mutableStateOf<String?>(null); private set
     // Optional, lazy-loaded feature state. Core order refresh never touches it.
     var pickupReminders by mutableStateOf<Map<String, PickupReminderState>>(emptyMap()); private set
+    // Authoritative live orders for the reminder queue; never derive the badge from OrdersCache.
+    var pickupOrders by mutableStateOf<List<Order>>(emptyList()); private set
     var pickupLoading by mutableStateOf(false); private set
     var pickupLoaded by mutableStateOf(false); private set
     var pickupBusy by mutableStateOf(false); private set
@@ -101,7 +103,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (email != null) {
             retryConnection()
             syncPushRegistration()
-            ensurePickupReminderCount()
+            loadPickupReminders()
         }
     }
 
@@ -114,7 +116,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     fun networkRestored() {
         if (visible && email != null) {
             retryConnection()
-            ensurePickupReminderCount()
+            loadPickupReminders()
         }
     }
 
@@ -128,6 +130,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (email == null) return
         startRealtime(forceRestart = true)
         refresh(force = true, reconcileRecent = true)
+        loadPickupReminders()
     }
 
     private fun syncPushRegistration(enabledOverride: Boolean? = null) {
@@ -280,6 +283,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupJob?.cancel()
         pickupJob = null
         pickupReminders = emptyMap()
+        pickupOrders = emptyList()
         pickupLoaded = false
         pickupLoadedDay = null
         pickupLoading = false
@@ -370,15 +374,15 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
 
-    // At most one read per account per Kyiv calendar day. The optional
-    // count does not block order loading or schedule carrier requests.
+    // The badge and the reminder screen share a live server snapshot independent
+    // of device-local OrdersCache. Refresh on resume, manual refresh and day rollover.
     fun ensurePickupReminderCount() {
         if (email == null || pickupLoading ||
             (pickupLoaded && pickupLoadedDay == pickupToday())) return
         loadPickupReminders()
     }
 
-    // User-triggered refresh uses the same read-only saved-reminders query.
+    // Snapshot contains fresh server orders + confirmations, not cached general orders.
     fun loadPickupReminders() {
         if (pickupLoading) return
         val account = email ?: return
@@ -387,12 +391,20 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         pickupLoading = true
         pickupLoaded = false
         pickupReminders = emptyMap()
+        pickupOrders = emptyList()
         pickupError = null
         pickupJob = viewModelScope.launch {
             try {
-                val reminders = withTimeout(15_000) { repository.pickupReminders() }
+                val snapshot = withTimeout(30_000) {
+                    coroutineScope {
+                        val ordersTask = async { repository.pickupCandidateOrders() }
+                        val remindersTask = async { repository.pickupReminders() }
+                        ordersTask.await() to remindersTask.await()
+                    }
+                }
                 if (email == account && generation == pickupGeneration) {
-                    pickupReminders = reminders.associateBy { it.orderId }
+                    pickupOrders = snapshot.first
+                    pickupReminders = snapshot.second.associateBy { it.orderId }
                     pickupLoaded = true
                     pickupLoadedDay = pickupToday()
                 }
@@ -400,7 +412,8 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
             catch (_: Exception) {
                 if (email == account && generation == pickupGeneration) {
                     pickupLoaded = false
-                    pickupError = "Не удалось загрузить напоминания. Заказы доступны как обычно."
+                    pickupOrders = emptyList()
+                    pickupError = "Не удалось загрузить актуальный список с сервера. Заказы доступны как обычно."
                 }
             } finally {
                 if (generation == pickupGeneration) {

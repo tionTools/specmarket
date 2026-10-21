@@ -104,6 +104,13 @@ fun Order.effectivePickupReminder(saved: PickupReminderState?): PickupReminderSt
     return PickupReminderState(id, ttn, arrival.plusDays(5).toString())
 }
 
+fun duePickupOrders(
+    source: List<Order>,
+    reminders: Map<String, PickupReminderState>,
+    today: LocalDate = pickupToday(),
+): List<Order> = source.filter(::isOrderVisibleInMainList)
+    .filter { order -> order.isPickupReminderDue(reminders[order.id], today) }
+
 fun Order.isPickupReminderDue(
     reminder: PickupReminderState?,
     today: LocalDate = pickupToday(),

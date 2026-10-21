@@ -235,6 +235,33 @@ class PickupRemindersTest {
         }).isPickupReminderDue(null, today))
     }
 
+    @Test fun badge_and_reminder_list_use_same_fresh_server_snapshot() {
+        val day = LocalDate.of(2026, 10, 21)
+        val confirmed = order().copy(id = "due", delivery = buildJsonObject {
+            put("ttn", "20450000000000")
+            put("carrier", "Нова пошта")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingPickupArrivedAt", "17.10.2026")
+        })
+        val stale = confirmed.copy(id = "old", status = "Отримано")
+        val recentServer = listOf(confirmed)
+        val reminders = emptyMap<String, PickupReminderState>()
+        assertEquals(listOf("due"), duePickupOrders(recentServer, reminders, day).map { it.id })
+        assertEquals(1, duePickupOrders(recentServer, reminders, day).size)
+        // An extra stale order in one phone's local cache must not alter the remote count.
+        assertEquals(2, listOf(confirmed, stale).size)
+        assertEquals(1, duePickupOrders(recentServer, reminders, day).size)
+    }
+
+    @Test fun shared_confirmation_removes_first_stage_but_leaves_last_day_independent() {
+        val day = LocalDate.of(2026, 10, 21)
+        val source = listOf(order())
+        val sent = state(1, first = "2026-10-21T09:00:00Z")
+        assertEquals(1, duePickupOrders(source, mapOf("id" to state(1)), day).size)
+        assertTrue(duePickupOrders(source, mapOf("id" to sent), day).isEmpty())
+        assertEquals(1, duePickupOrders(source, mapOf("id" to sent), day.plusDays(1)).size)
+    }
+
     @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
         assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
         val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)

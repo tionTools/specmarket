@@ -275,10 +275,7 @@ fun OrdersApp(
                     onSearchQueryChange = { searchQuery = it },
                     onFilterChange = {
                         filterName = it.name
-                        if (it == OrderListFilter.REMIND) {
-                            vm.manualRefresh()
-                            vm.loadPickupReminders()
-                        }
+                        if (it == OrderListFilter.REMIND) vm.loadPickupReminders()
                     },
                     restoreAnchorId = returnAnchorId.takeIf { restoringFromDetail },
                     restoreAnchorIndex = returnAnchorIndex,
@@ -654,6 +651,7 @@ internal fun OrderFilters(
     onSelected: (OrderListFilter) -> Unit,
     remindersFailed: Boolean = false,
     today: LocalDate = pickupToday(),
+    pickupOrders: List<Order> = orders,
 ) {
     // Single scrollable row: the due count comes BEFORE "Напомнить" so it
     // stays visible even when the end of the fourth label is off-screen.
@@ -665,11 +663,9 @@ internal fun OrderFilters(
             val count = when {
                 filter == OrderListFilter.REMIND && !remindersLoaded ->
                     if (remindersFailed) "!" else "…"
-                else -> orders.count {
-                    if (filter == OrderListFilter.REMIND)
-                        it.isPickupReminderDue(reminders[it.id], today)
-                    else it.matchesListFilter(filter)
-                }.toString()
+                filter == OrderListFilter.REMIND ->
+                    duePickupOrders(pickupOrders, reminders, today).size.toString()
+                else -> orders.count { it.matchesListFilter(filter) }.toString()
             }
             OrderFilterChip(
                 filter = filter,
@@ -765,15 +761,16 @@ private fun OrdersScreen(
                 orders, vm.pickupReminders, vm.pickupLoaded, filter, onFilterChange,
                 remindersFailed = vm.pickupError != null,
                 today = pickupDay,
+                pickupOrders = vm.pickupOrders,
             )
             if (filter == OrderListFilter.REMIND) {
                 PickupReminderContent(
-                    orders = orders.filter { it.matchesOrderSearch(searchQuery) },
+                    orders = vm.pickupOrders.filter { it.matchesOrderSearch(searchQuery) },
                     reminders = vm.pickupReminders,
                     loading = vm.pickupLoading,
                     busy = vm.pickupBusy,
                     error = vm.pickupError,
-                    onRefresh = { vm.manualRefresh(); vm.loadPickupReminders() },
+                    onRefresh = vm::loadPickupReminders,
                     onSaveDeadline = vm::savePickupDeadline,
                     onConfirmSent = vm::confirmPickupSent,
                     today = pickupDay,
