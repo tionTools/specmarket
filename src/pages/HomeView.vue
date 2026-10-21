@@ -6505,7 +6505,7 @@ function orderDateTime(order: Order) {
                   >{{ deliveryStatusForOrder(order) }}</span
                 ><span
                   v-if="order.delivery.trackingStatus?.trim() && order.delivery.trackingEventAt"
-                  class="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-none tabular-nums text-slate-400"
+                  class="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 whitespace-nowrap text-center text-[10px] leading-none tabular-nums text-black"
                   >{{ formatDeliveryStatusEventAt(order.delivery.trackingEventAt) }}</span
                 ></span
               ></span
