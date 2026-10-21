@@ -645,13 +645,11 @@ private fun OrderFilterChip(
 @Composable
 internal fun OrderFilters(
     orders: List<Order>,
-    reminders: Map<String, PickupReminderState>,
+    queue: List<PickupQueueRow>,
     remindersLoaded: Boolean,
     selected: OrderListFilter,
     onSelected: (OrderListFilter) -> Unit,
     remindersFailed: Boolean = false,
-    today: LocalDate = pickupToday(),
-    pickupOrders: List<Order> = orders,
 ) {
     // Single scrollable row: the due count comes BEFORE "Напомнить" so it
     // stays visible even when the end of the fourth label is off-screen.
@@ -664,7 +662,7 @@ internal fun OrderFilters(
                 filter == OrderListFilter.REMIND && !remindersLoaded ->
                     if (remindersFailed) "!" else "…"
                 filter == OrderListFilter.REMIND ->
-                    duePickupOrders(pickupOrders, reminders, today).size.toString()
+                    pickupUrgentCount(queue).toString()
                 else -> orders.count { it.matchesListFilter(filter) }.toString()
             }
             OrderFilterChip(
@@ -758,21 +756,21 @@ private fun OrdersScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             OrderFilters(
-                orders, vm.pickupReminders, vm.pickupLoaded, filter, onFilterChange,
+                orders, vm.pickupQueue, vm.pickupLoaded, filter, onFilterChange,
                 remindersFailed = vm.pickupError != null,
-                today = pickupDay,
-                pickupOrders = vm.pickupOrders,
             )
             if (filter == OrderListFilter.REMIND) {
                 PickupReminderContent(
-                    orders = vm.pickupOrders.filter { it.matchesOrderSearch(searchQuery) },
-                    reminders = vm.pickupReminders,
+                    orders = vm.pickupOrders,
+                    queue = vm.pickupQueue,
                     loading = vm.pickupLoading,
                     busy = vm.pickupBusy,
                     error = vm.pickupError,
                     onRefresh = vm::loadPickupReminders,
                     onSaveDeadline = vm::savePickupDeadline,
                     onConfirmSent = vm::confirmPickupSent,
+                    onConfirmManualSent = vm::confirmPickupManualSent,
+                    searchQuery = searchQuery,
                     today = pickupDay,
                 )
             } else PullToRefreshBox(
