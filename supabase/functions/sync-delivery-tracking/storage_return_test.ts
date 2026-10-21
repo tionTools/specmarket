@@ -234,3 +234,22 @@ Deno.test('buyer receipt remains remembered when a later return shipment appears
   assert(next.trackingReturnInProgress === true, 'later return was not recognized')
   assert(next.trackingBuyerReceived === true, 'later return erased the earlier buyer receipt')
 })
+
+Deno.test('a previously misread waiting status cannot keep buyer received sticky', () => {
+  const stored = {
+    ttn: '20451562102796', carrier: 'Нова пошта',
+    trackingStatus: 'Очікує на отримання',
+    trackingNormalizedStatus: 'delivered', trackingBuyerReceived: true,
+    trackingDeliveredAt: '22.10.2026 18:40:00',
+  }
+  const carrierResult = {
+    status: 'Прибув у поштомат', normalizedStatus: 'ready_for_pickup' as const, final: false,
+    provider: 'nova_poshta_api' as const,
+    details: { trackingPickupArrivedAt: '17.10.2026 18:40:00', trackingDeliveredAt: '' },
+  }
+  assert(trackingChanged(stored, carrierResult), 'misread old receipt must be corrected')
+  const updated = mergeTrackingDelivery(stored, carrierResult, '2026-10-21T09:00:00Z')
+  assert(updated.trackingBuyerReceived === false, 'false buyer receipt remained sticky')
+  assert(updated.trackingDeliveredAt === '', 'obsolete recipient date was not cleared')
+  assert(updated.trackingNormalizedStatus === 'ready_for_pickup', 'real ready status was lost')
+})

@@ -86,6 +86,14 @@ function nextReturnInProgress(delivery: JsonRecord, result: TrackingResult) {
 }
 
 function nextBuyerReceived(delivery: JsonRecord, result: TrackingResult) {
+  // A former typo-level classification of "Очікує на отримання" as delivered
+  // must not permanently set buyer_received=true when a newer authoritative
+  // carrier poll says the parcel is still ready for pickup.
+  const previous = text(delivery.trackingStatus).toLowerCase()
+  const formerWaitingMisclassification =
+    /очіку(?:є|ють)\\s+(?:на\\s+)?отриман|ожида(?:ет|ют)\\s+получен/.test(previous)
+  if (formerWaitingMisclassification && result.normalizedStatus === 'ready_for_pickup')
+    return false
   return (
     delivery.trackingBuyerReceived === true ||
     (result.normalizedStatus === 'delivered' && !resultIsReturnShipment(delivery, result))

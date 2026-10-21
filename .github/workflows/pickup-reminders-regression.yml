@@ -25,6 +25,7 @@ jobs:
           deno test --allow-env --allow-net \
             supabase/functions/sync-delivery-tracking/normalize_test.ts \
             supabase/functions/sync-delivery-tracking/carriers/nova-poshta_test.ts \
-            supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
+            supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts \
+            supabase/functions/sync-delivery-tracking/storage_return_test.ts
       - name: Check pickup reminder types
         run: deno check supabase/functions/sync-delivery-tracking/worker.ts

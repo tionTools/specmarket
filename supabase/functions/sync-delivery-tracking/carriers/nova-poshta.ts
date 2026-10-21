@@ -206,7 +206,10 @@ export async function novaStatus(ttn: string, redirectCircuit?: NovaRedirectCirc
       // Only the carrier's ready-for-pickup scan can anchor storage.
       trackingPickupArrivedAt: base.normalizedStatus === 'ready_for_pickup' ? eventAt : undefined,
       trackingExpectedDeliveryAt: text(shipment.ScheduledDeliveryDate),
-      trackingDeliveredAt: text(shipment.ActualDeliveryDate) || text(shipment.RecipientDateTime),
+      // RecipientDateTime is not proof of receipt while Nova still reports
+      // a ready-to-collect parcel. Clear any obsolete timestamp on tracking refresh.
+      trackingDeliveredAt: base.normalizedStatus === 'delivered'
+        ? text(shipment.ActualDeliveryDate) || text(shipment.RecipientDateTime) : '',
       trackingLocation: text(shipment.WarehouseRecipient),
       trackingLocationCity: text(shipment.CityRecipient),
       trackingOrigin: text(shipment.WarehouseSender),
