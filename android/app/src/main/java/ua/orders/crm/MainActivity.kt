@@ -772,7 +772,6 @@ private fun OrdersScreen(
                     onConfirmSent = vm::confirmPickupSent,
                     onConfirmManualSent = vm::confirmPickupManualSent,
                     searchQuery = searchQuery,
-                    today = pickupDay,
                 )
             } else PullToRefreshBox(
                 isRefreshing = vm.loading,
