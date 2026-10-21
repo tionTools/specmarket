@@ -240,7 +240,7 @@ export async function runTrackingWorker(
           ? [text(nextDelivery.ttn), computedDeadline.date, computedDeadline.basis].join(':')
           : ''
         const priorKey = text(record(stateByOrder.get(row.id)?.details).pickupReminderKey)
-        if (shouldSyncAutomaticPickupReminder(
+        if (computedDeadline && shouldSyncAutomaticPickupReminder(
           computedDeadline, text(nextDelivery.ttn), priorKey, savedReminderByOrder.get(row.id),
         )) {
           const { error: reminderError } = await admin.rpc('crm_sync_pickup_reminder_auto', {
