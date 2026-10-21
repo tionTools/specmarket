@@ -137,6 +137,14 @@ fun Order.pendingPickupReminder(
 fun Order.pickupContactPhone(): String? =
     normalizeCustomerPhone(recipientPhone()) ?: normalizeCustomerPhone(phone.orEmpty())
 
+fun Order.isMeestShipment(): Boolean {
+    val carrier = normalizedStatus(deliveryValue("carrier"))
+    val provider = normalizedStatus(deliveryValue("trackingProvider"))
+    return listOf("meest", "міст", "cvz_epicentr", "parcel_box_epicentr").any(carrier::contains) ||
+        provider.contains("meest") ||
+        Regex("""^722-\d+$""").matches(deliveryValue("ttn").trim())
+}
+
 fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today: LocalDate = pickupToday()): String {
     val date = LocalDate.parse(deadline).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
     val products = items.sortedBy { it.position ?: Int.MAX_VALUE }.joinToString("\n") { item ->
@@ -145,12 +153,20 @@ fun Order.pickupReminderText(stage: PickupReminderStage, deadline: String, today
         val count = item.quantity?.takeIf { it > 0 }?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
         "• $name$size" + (count?.let { " — $it шт." } ?: "")
     }.ifBlank { "Товари в замовленні" }
-    val intro = if (stage == PickupReminderStage.LAST)
-        "Нагадуємо, що сьогодні останній день отримання вашого замовлення №${number()}."
-    else "Нагадуємо, що ваше замовлення №${number()} очікує на отримання."
-    val time = if (stage == PickupReminderStage.LAST)
-        "Будь ласка, заберіть посилку сьогодні, щоб уникнути її повернення відправнику."
-    else "До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
+    val meest = isMeestShipment()
+    val intro = when {
+        meest && stage == PickupReminderStage.LAST ->
+            "Повторно нагадуємо, що ваше замовлення №${number()} все ще очікує на отримання."
+        stage == PickupReminderStage.LAST ->
+            "Нагадуємо, що сьогодні останній день отримання вашого замовлення №${number()}."
+        else -> "Нагадуємо, що ваше замовлення №${number()} очікує на отримання."
+    }
+    val time = when {
+        meest -> "Будь ласка, заберіть посилку найближчим часом. Точний термін зберігання можна уточнити у Meest."
+        stage == PickupReminderStage.LAST ->
+            "Будь ласка, заберіть посилку сьогодні, щоб уникнути її повернення відправнику."
+        else -> "До завершення терміну отримання залишилось 2 календарні дні: сьогодні та завтра.\n\nБудь ласка, заберіть ваше замовлення до $date, щоб уникнути його повернення відправнику."
+    }
     return "Вітаємо!\n\n$intro\n\nВаше замовлення:\n$products\n\n📦 ТТН: ${deliveryValue("ttn").trim()}\n\n$time\n\nДякуємо!"
 }
 

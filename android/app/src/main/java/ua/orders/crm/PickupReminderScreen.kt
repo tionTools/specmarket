@@ -101,14 +101,22 @@ internal fun PickupReminderContent(
                                 Text("Пункт выдачи НП", color = MaterialTheme.colorScheme.primary)
                             }
                             val caption = when (stage) {
-                                PickupReminderStage.FIRST -> "Напомнить: два календарных дня"
-                                PickupReminderStage.LAST -> "Напомнить: сегодня последний день"
+                                PickupReminderStage.FIRST -> if (order.isMeestShipment())
+                                    "Напомнить: контрольный срок" else "Напомнить: два календарных дня"
+                                PickupReminderStage.LAST -> if (order.isMeestShipment())
+                                    "Напомнить повторно: контрольный срок" else "Напомнить: сегодня последний день"
                                 null -> "Напоминание не требуется"
                             }
                             Text(caption, fontWeight = FontWeight.SemiBold)
                             if (reminder != null) {
                                 val calculated = saved == null || saved.ttn.trim() != reminder.ttn || saved.deadline != reminder.deadline
-                                Text((if (calculated) "Расчётный срок: " else "Крайний срок: ") + reminder.deadline)
+                                val label = when {
+                                    order.isMeestShipment() && calculated -> "Расчётная дата напоминания: "
+                                    order.isMeestShipment() -> "Дата напоминания: "
+                                    calculated -> "Расчётный срок: "
+                                    else -> "Крайний срок: "
+                                }
+                                Text(label + reminder.deadline)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = {

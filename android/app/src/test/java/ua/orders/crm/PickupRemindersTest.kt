@@ -263,6 +263,21 @@ class PickupRemindersTest {
         assertEquals(1, duePickupOrders(source, mapOf("id" to sent), day.plusDays(1)).size)
     }
 
+    @Test fun meest_message_does_not_claim_internal_reminder_date_is_auto_return_day() {
+        val meest = order().copy(delivery = buildJsonObject {
+            put("ttn", "722-0000000")
+            put("carrier", "Meest")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+        })
+        assertTrue(meest.isMeestShipment())
+        val first = meest.pickupReminderText(PickupReminderStage.FIRST, "2026-10-22", LocalDate.of(2026, 10, 21))
+        val last = meest.pickupReminderText(PickupReminderStage.LAST, "2026-10-22", LocalDate.of(2026, 10, 22))
+        assertFalse(first.contains("залишилось 2 календарні дні"))
+        assertFalse(last.contains("останній день"))
+        assertFalse(last.contains("повернення відправнику"))
+        assertTrue(last.contains("Точний термін зберігання можна уточнити у Meest"))
+    }
+
     @Test fun kyiv_service_date_uses_legacy_android_timezone_id() {
         assertEquals("Europe/Kiev", PICKUP_KYIV_ZONE)
         val zone = java.time.ZoneId.of(PICKUP_KYIV_ZONE)
