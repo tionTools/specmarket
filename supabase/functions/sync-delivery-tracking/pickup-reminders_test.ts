@@ -1,4 +1,4 @@
-import { automaticPickupDeadline } from './pickup-reminders.ts'
+import { automaticPickupDeadline, shouldSyncAutomaticPickupReminder } from './pickup-reminders.ts'
 import { assertEquals } from 'jsr:@std/assert@1'
 
 const base = { carrier: 'Нова пошта', ttn: '20450000000000',
@@ -54,4 +54,17 @@ Deno.test('reject malformed or impossible time-first dates, without falling back
     assertEquals(automaticPickupDeadline({ ...base, trackingPickupArrivedAt: arrival,
       trackingExpectedDeliveryAt: '2026-10-16' }), null)
   }
+})
+
+Deno.test('previous tracking key does not hide a missing reminder database row', () => {
+  const computed = automaticPickupDeadline(base)
+  const key = '20450000000000:2026-10-22:specmarket_five_day_auto_return'
+  assertEquals(shouldSyncAutomaticPickupReminder(computed, base.ttn, key, undefined), true)
+  assertEquals(shouldSyncAutomaticPickupReminder(computed, base.ttn, key,
+    { ttn: base.ttn, deadline: '2026-10-22', source: 'carrier_rule' }), false)
+  assertEquals(shouldSyncAutomaticPickupReminder(computed, base.ttn, key,
+    { ttn: base.ttn, deadline: '2026-10-21', source: 'carrier_rule' }), true)
+  assertEquals(shouldSyncAutomaticPickupReminder(computed, base.ttn, key,
+    { ttn: base.ttn, deadline: '2026-10-24', source: 'manual' }), false)
+  assertEquals(shouldSyncAutomaticPickupReminder(null, base.ttn, key, undefined), false)
 })

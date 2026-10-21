@@ -83,3 +83,19 @@ export function automaticPickupDeadline(delivery: JsonRecord): PickupDeadline | 
   // return-after-storage option, represented by trackingVerifiedLastPickupAt.
   return null
 }
+
+export type PersistedPickupReminder = { ttn: string; deadline: string; source: string }
+
+export function shouldSyncAutomaticPickupReminder(
+  computed: PickupDeadline | null,
+  ttn: string,
+  priorKey: string,
+  saved: PersistedPickupReminder | undefined,
+): boolean {
+  if (!computed) return false
+  const reminderKey = [ttn.trim(), computed.date, computed.basis].join(':')
+  if (priorKey !== reminderKey || !saved || saved.ttn.trim() !== ttn.trim()) return true
+  // A manually verified date wins for the same parcel; an automatic row
+  // can be repaired when a carrier-date correction arrives.
+  return saved.source !== 'manual' && saved.deadline !== computed.date
+}

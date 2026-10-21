@@ -1,4 +1,5 @@
 import { novaStatus } from './nova-poshta.ts'
+import { automaticPickupDeadline } from '../pickup-reminders.ts'
 
 type NovaPayload = { status?: number; body?: unknown; error?: Error }
 
@@ -132,5 +133,30 @@ Deno.test('LightReturnNumber remains a return relation', async () => {
     const result = await novaStatus('B')
     assert(result.relation === 'return', 'LightReturnNumber was classified as redirect')
     assert(result.relatedShipments?.some((shipment) => shipment.relation === 'return'), 'return relation missing')
+  })
+})
+
+Deno.test('Nova parcel locker shipment 20451562102796 reaches the 21 Oct reminder window', async () => {
+  await withNovaResponses([
+    payload({
+      Status: 'Прибув у поштомат',
+      StatusCode: '',
+      DateScan: '17.10.2026 18:40:00',
+      WarehouseRecipient: 'Поштомат №44071',
+      CityRecipient: 'Буча',
+    }),
+    payload([]),
+  ], async () => {
+    const result = await novaStatus('20451562102796')
+    assert(result.normalizedStatus === 'ready_for_pickup', 'parcel locker is not ready for pickup')
+    assert(result.final === false, 'parcel locker status was misclassified as delivered')
+    assert(result.details?.trackingPickupArrivedAt === '17.10.2026 18:40:00', 'missing pickup scan')
+    const deadline = automaticPickupDeadline({
+      carrier: 'Нова пошта',
+      ttn: '20451562102796',
+      trackingNormalizedStatus: result.normalizedStatus,
+      trackingPickupArrivedAt: result.details?.trackingPickupArrivedAt,
+    })
+    assert(deadline?.date === '2026-10-22', 'expected last collection date Oct 22')
   })
 })

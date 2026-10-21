@@ -14,7 +14,7 @@ import {
   shouldBulkTrackPlatform,
 } from './marketplace-pause.ts'
 import { mergeTrackingDelivery, sameShipment, trackingChanged } from './storage.ts'
-import { automaticPickupDeadline } from './pickup-reminders.ts'
+import { automaticPickupDeadline, shouldSyncAutomaticPickupReminder, type PersistedPickupReminder } from './pickup-reminders.ts'
 import type { CarrierKind, JsonRecord, TrackingResult, WorkerResult } from './types.ts'
 
 const finalOrderStatuses = '(Виконано,Закрыт,Закрито,Скасовано,Возврат,MoneyRefundSuccess,canceled,completed,delivered)'
@@ -114,6 +114,18 @@ export async function runTrackingWorker(
     ? await admin.from('crm_delivery_tracking_state').select('order_id, last_checked_at, details').in('order_id', ids)
     : { data: [], error: null }
   if (statesError) return { status: 500, body: { ok: false, message: statesError.message } }
+  const { data: existingReminders, error: reminderReadError } = ids.length
+    ? await admin.from('crm_pickup_reminders')
+      .select('order_id,ttn,deadline,source').in('order_id', ids)
+    : { data: [], error: null }
+  if (reminderReadError)
+    return { status: 500, body: { ok: false, message: reminderReadError.message } }
+  const savedReminderByOrder = new Map<string, PersistedPickupReminder>(
+    (existingReminders ?? []).map((row) => [
+      String(row.order_id),
+      { ttn: text(row.ttn), deadline: text(row.deadline), source: text(row.source) },
+    ]),
+  )
   const trackingStates = (states ?? []) as TrackingStateRow[]
   const stateByOrder = new Map(trackingStates.map((state) => [state.order_id, state]))
   let checked = 0
@@ -228,7 +240,9 @@ export async function runTrackingWorker(
           ? [text(nextDelivery.ttn), computedDeadline.date, computedDeadline.basis].join(':')
           : ''
         const priorKey = text(record(stateByOrder.get(row.id)?.details).pickupReminderKey)
-        if (computedDeadline && priorKey !== reminderKey) {
+        if (shouldSyncAutomaticPickupReminder(
+          computedDeadline, text(nextDelivery.ttn), priorKey, savedReminderByOrder.get(row.id),
+        )) {
           const { error: reminderError } = await admin.rpc('crm_sync_pickup_reminder_auto', {
             p_order_id: row.id,
             p_ttn: text(nextDelivery.ttn),

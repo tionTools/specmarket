@@ -34,3 +34,20 @@ Deno.test('carrier Удалено status is also a deleted TTN', () => {
   const result = readableStatus('Удалено')
   assert(result.normalizedStatus === 'deleted', 'Russian deleted TTN wording was not recognized')
 })
+
+Deno.test('Nova Post parcel locker arrival is ready for pickup without a numeric status code', () => {
+  const result = readableStatus('Прибув у поштомат', '')
+  assert(result.normalizedStatus === 'ready_for_pickup', 'parcel locker arrival was not recognized')
+  assert(result.final === false, 'parcel locker arrival must not be delivered')
+})
+
+Deno.test('waiting for receipt cannot be mistaken for recipient receipt', () => {
+  for (const status of ['Очікує на отримання', 'Очікує на отримання у поштоматі']) {
+    const result = readableStatus(status)
+    assert(result.normalizedStatus === 'ready_for_pickup', status + ' was falsely delivered')
+  }
+  const received = readableStatus('Отримано', '9')
+  assert(received.normalizedStatus === 'delivered', 'recipient receipt must remain final')
+  const contradictoryCode = readableStatus('Прибув у поштомат', '9')
+  assert(contradictoryCode.normalizedStatus === 'delivered', 'confirmed final code must win')
+})
