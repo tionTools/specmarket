@@ -287,4 +287,59 @@ class PickupRemindersTest {
             java.time.Instant.parse("2026-10-17T22:00:00Z").atZone(zone).toLocalDate()
         )
     }
+    @Test fun server_queue_is_only_source_of_urgent_badge() {
+        val urgent = PickupQueueRow(
+            orderId = "parcel-locker", orderNumber = 433964208L,
+            ttn = "20451562102796", carrier = "Нова пошта",
+            trackingStatus = "Прибув до поштомату", deadline = "2026-10-22",
+            daysLeft = 1, category = "urgent", stage = "first",
+        )
+        val unknown = PickupQueueRow(
+            orderId = "unknown", ttn = "333", category = "informational", stage = null,
+        )
+        assertEquals(PickupReminderStage.FIRST, urgent.activeStage())
+        assertEquals(1, pickupUrgentCount(listOf(urgent, unknown)))
+        assertEquals(0, pickupUrgentCount(listOf(urgent.copy(
+            category = "informational", stage = null, firstSentAt = "2026-10-20T07:17:00Z"
+        ), unknown)))
+        assertNull(unknown.activeStage())
+    }
+
+    @Test fun historic_first_confirmation_does_not_block_final_stage() {
+        val day22 = PickupQueueRow(
+            orderId = "id", ttn = "20451562102796", deadline = "2026-10-22",
+            category = "urgent", stage = "last", daysLeft = 0,
+            firstSentAt = "2026-10-20T07:17:00Z", firstChannel = "viber",
+        )
+        assertEquals(PickupReminderStage.LAST, day22.activeStage())
+        assertEquals(1, pickupUrgentCount(listOf(day22)))
+        assertEquals(0, pickupUrgentCount(listOf(day22.copy(
+            category = "informational", stage = null, lastSentAt = "2026-10-22T08:00:00Z"
+        ))))
+    }
+
+    @Test fun a_local_false_delivery_timestamp_must_not_override_server_stage() {
+        val order = order().copy(delivery = buildJsonObject {
+            put("ttn", "20451562102796")
+            put("trackingNormalizedStatus", "ready_for_pickup")
+            put("trackingDeliveredAt", "2026-10-17T18:40:00")
+            put("trackingBuyerReceived", false)
+        })
+        val queue = listOf(PickupQueueRow(
+            orderId = order.id, ttn = "20451562102796",
+            deadline = "2026-10-22", category = "urgent", stage = "first",
+        ))
+        assertFalse(order.isPickupReminderDue(null, LocalDate.of(2026, 10, 21)))
+        assertEquals(1, pickupUrgentCount(queue))
+    }
+
+    @Test fun manual_message_never_claims_a_return_deadline() {
+        val draft = order().pickupManualReminderText()
+        assertTrue(draft.contains("№123"))
+        assertTrue(draft.contains("Рукавички"))
+        assertFalse(draft.contains("останній день"))
+        assertFalse(draft.contains("2 календарні дні"))
+        assertTrue(draft.contains("Точний термін зберігання"))
+    }
+
 }
