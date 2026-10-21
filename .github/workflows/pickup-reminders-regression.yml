@@ -1,0 +1,30 @@
+name: Pickup reminders regression
+
+on:
+  push:
+    branches:
+      - fix/nova-poshtomat-pickup-status
+  pull_request:
+    paths:
+      - 'supabase/functions/sync-delivery-tracking/**'
+      - '.github/workflows/pickup-reminders-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pickup-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Run targeted delivery and pickup reminder tests
+        run: |
+          deno test --allow-env --allow-net \
+            supabase/functions/sync-delivery-tracking/normalize_test.ts \
+            supabase/functions/sync-delivery-tracking/carriers/nova-poshta_test.ts \
+            supabase/functions/sync-delivery-tracking/pickup-reminders_test.ts
+      - name: Check pickup reminder types
+        run: deno check supabase/functions/sync-delivery-tracking/worker.ts
