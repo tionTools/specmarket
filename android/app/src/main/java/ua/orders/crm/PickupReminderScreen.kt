@@ -21,224 +21,241 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PickupReminderContent(
     orders: List<Order>,
-    reminders: Map<String, PickupReminderState>,
+    queue: List<PickupQueueRow>,
     loading: Boolean,
     busy: Boolean,
     error: String?,
     onRefresh: () -> Unit,
     onSaveDeadline: (Order, String) -> Unit,
-    onConfirmSent: (Order, PickupReminderStage, String) -> Unit,
-    today: LocalDate = pickupToday(),
+    onConfirmSent: (PickupQueueRow, PickupReminderStage, String) -> Unit,
+    onConfirmManualSent: (PickupQueueRow, String) -> Unit,
+    searchQuery: String = "",
 ) {
-    val context = LocalContext.current
-    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
+    val byId = remember(orders) { orders.associateBy { it.id } }
+    val messengersEnabled by LocalContext.current.messengersEnabled().collectAsState(initial = true)
+    val visible = queue.filter {
+        searchQuery.isBlank() || it.ttn.contains(searchQuery.trim(), true) ||
+            it.orderNumber?.toString()?.contains(searchQuery.trim()) == true ||
+            byId[it.orderId]?.matchesOrderSearch(searchQuery) == true
+    }
+    val urgent = visible.filter { it.activeStage() != null }
+    val informational = visible.filter { it.activeStage() == null }
     var edit by remember { mutableStateOf<Order?>(null) }
     var deadlineInput by remember { mutableStateOf("") }
-    // Saved primitives survive Activity recreation while a messenger is in front.
-    // A manual confirmation works even when no messenger has been launched.
-    var pendingOrderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingTtn by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingStage by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingChannel by rememberSaveable { mutableStateOf<String?>(null) }
-    fun clearConfirmation() {
-        pendingOrderId = null
+    fun clear() {
+        pendingId = null
+        pendingTtn = null
         pendingStage = null
         pendingChannel = null
     }
-    fun askAboutSentMessage(order: Order, stage: PickupReminderStage, channel: String?) {
-        pendingOrderId = order.id
-        pendingStage = stage.name
+    fun beginSend(row: PickupQueueRow, stage: PickupReminderStage?, channel: String?) {
+        pendingId = row.orderId
+        pendingTtn = row.ttn
+        pendingStage = stage?.databaseValue ?: "manual"
         pendingChannel = channel
-    }
-    val applicable = remember(orders, reminders, today) {
-        duePickupOrders(orders, reminders, today)
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Кому пора напомнить", style = MaterialTheme.typography.titleSmall)
-            TextButton(onRefresh, enabled = !loading && !busy) { Text("Обновить") }
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Напомнить", style = MaterialTheme.typography.titleSmall)
+            TextButton(onClick = onRefresh, enabled = !loading && !busy) { Text("Обновить") }
         }
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (error != null) {
-                Text(error, color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (error != null) Text(error, color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        LazyColumn(Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item(key = "urgent_title") {
+                Text("Первая очередь — пора напомнить (" + urgent.size + ")",
+                    style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 6.dp))
             }
-            Text("Только посылки с истекающим сроком хранения. Дату, рассчитанную из прибытия, проверьте перед отправкой.",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.bodySmall)
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (applicable.isEmpty()) {
-                    item { Text(
-                        if (loading) "Загружаем напоминания…"
-                        else if (error != null) "Не удалось проверить напоминания."
-                        else "Сейчас нет заказов, требующих напоминания.",
-                        Modifier.padding(16.dp),
-                    ) }
-                }
-                items(applicable, key = { it.id }) { order ->
-                    val saved = reminders[order.id]
-                    val reminder = order.effectivePickupReminder(saved)
-                    val contactPhone = order.pickupContactPhone()
-                    val stage = order.pendingPickupReminder(reminder, today)
-                    Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            Text("Заказ №${order.number()}", fontWeight = FontWeight.SemiBold)
-                            Text(order.recipientName(), style = MaterialTheme.typography.bodyMedium)
-                            Text("ТТН: ${order.deliveryValue("ttn")}", style = MaterialTheme.typography.bodySmall)
-                            if (order.isNovaPickupPoint()) {
-                                Text("Пункт выдачи НП", color = MaterialTheme.colorScheme.primary)
-                            }
-                            val caption = when (stage) {
-                                PickupReminderStage.FIRST -> if (order.isMeestShipment())
-                                    "Напомнить: контрольный срок" else "Напомнить: два календарных дня"
-                                PickupReminderStage.LAST -> if (order.isMeestShipment())
-                                    "Напомнить повторно: контрольный срок" else "Напомнить: сегодня последний день"
-                                null -> "Напоминание не требуется"
-                            }
-                            Text(caption, fontWeight = FontWeight.SemiBold)
-                            if (reminder != null) {
-                                val calculated = saved == null || saved.ttn.trim() != reminder.ttn || saved.deadline != reminder.deadline
-                                val label = when {
-                                    order.isMeestShipment() && calculated -> "Расчётная дата напоминания: "
-                                    order.isMeestShipment() -> "Дата напоминания: "
-                                    calculated -> "Расчётный срок: "
-                                    else -> "Крайний срок: "
-                                }
-                                Text(label + reminder.deadline)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = {
-                                    edit = order
-                                    deadlineInput = reminder?.deadline.orEmpty()
-                                }, enabled = !busy) { Text("Изменить срок") }
-                            }
-                            if (stage != null && reminder != null) {
-                                if (messengersEnabled) {
-                                    Text("Текст будет скопирован. Отправку подтвердите после сообщения.",
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    for (action in contactActions(messengersEnabled)) {
-                                        if (action == ContactAction.CALL) {
-                                            FilledTonalButton(
-                                                onClick = { openDialer(context, contactPhone.orEmpty()) },
-                                                enabled = !busy && contactPhone != null,
-                                                modifier = Modifier.weight(1f).height(44.dp),
-                                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                                colors = ButtonDefaults.filledTonalButtonColors(
-                                                    containerColor = Color(0xFFEDE9FE),
-                                                    contentColor = Color(0xFF5B21B6),
-                                                ),
-                                            ) { Text("Позвонить", style = MaterialTheme.typography.labelSmall) }
-                                        } else {
-                                            val channel = if (action == ContactAction.VIBER) "viber" else "telegram"
-                                            Button(
-                                                onClick = {
-                                                    val draft = order.pickupReminderText(stage, reminder.deadline, today)
-                                                    askAboutSentMessage(order, stage, channel)
-                                                    if (!openPickupDraft(context, contactPhone.orEmpty(), channel, draft)) {
-                                                        Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
-                                                            Toast.LENGTH_LONG).show()
-                                                    }
-                                                },
-                                                enabled = !busy && contactPhone != null,
-                                                modifier = Modifier.weight(1f).height(44.dp),
-                                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = if (action == ContactAction.VIBER)
-                                                        Color(0xFF7360F2) else Color(0xFF229ED9),
-                                                    contentColor = Color.White,
-                                                ),
-                                            ) { Text(if (action == ContactAction.VIBER) "Viber" else "Telegram",
-                                                style = MaterialTheme.typography.labelSmall) }
-                                        }
-                                    }
-                                }
-                                // Always available for a message sent outside the app,
-                                // even if the messenger never returned an activity result.
-                                TextButton(
-                                    onClick = { askAboutSentMessage(order, stage, null) },
-                                    enabled = !busy,
-                                ) { Text("Отметить отправленным") }
-                            }
-                        }
-                    }
-                }
+            if (urgent.isEmpty()) item(key = "urgent_empty") {
+                Text(if (loading) "Загрузка…" else if (error != null && queue.isEmpty())
+                    "Список недоступен." else "Срочных напоминаний нет.",
+                    modifier = Modifier.padding(vertical = 8.dp))
             }
+            items(urgent, key = { "urgent-" + it.orderId }) { row ->
+                PickupReminderCard(row, byId[row.orderId], busy, messengersEnabled,
+                    onEdit = { order ->
+                        edit = order
+                        deadlineInput = row.deadline.orEmpty()
+                    }, onAskSent = ::beginSend)
+            }
+            item(key = "separator") { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item(key = "info_title") {
+                Text("Вторая очередь — информационно (" + informational.size + ")",
+                    style = MaterialTheme.typography.titleSmall)
+            }
+            if (informational.isEmpty()) item(key = "info_empty") {
+                Text(if (loading) "Загрузка…" else if (error != null && queue.isEmpty())
+                    "Список недоступен." else "Других посылок на получении нет.",
+                    modifier = Modifier.padding(vertical = 8.dp))
+            }
+            items(informational, key = { "info-" + it.orderId }) { row ->
+                PickupReminderCard(row, byId[row.orderId], busy, messengersEnabled,
+                    onEdit = { order ->
+                        edit = order
+                        deadlineInput = row.deadline.orEmpty()
+                    }, onAskSent = ::beginSend)
+            }
+        }
     }
-
     if (edit != null) {
         val order = edit!!
-        val valid = runCatching { LocalDate.parse(deadlineInput) }.getOrNull()
         AlertDialog(
             onDismissRequest = { edit = null },
-            title = { Text("Крайний срок получения") },
-            text = {
-                Column {
-                    Text("Укажите проверенный срок в формате ГГГГ-ММ-ДД.")
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = deadlineInput,
-                        onValueChange = { deadlineInput = it },
-                        singleLine = true,
-                        label = { Text("ГГГГ-ММ-ДД") },
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    onSaveDeadline(order, deadlineInput)
-                    edit = null
-                }, enabled = valid != null && !busy) { Text("Сохранить") }
-            },
+            title = { Text("Проверенный срок получения") },
+            text = { Column {
+                Text("Укажите проверенный срок в формате ГГГГ-ММ-ДД.")
+                OutlinedTextField(deadlineInput, { deadlineInput = it },
+                    label = { Text("ГГГГ-ММ-ДД") }, singleLine = true)
+            } },
+            confirmButton = { Button(onClick = {
+                onSaveDeadline(order, deadlineInput)
+                edit = null
+            }, enabled = !busy && runCatching { LocalDate.parse(deadlineInput) }.isSuccess) {
+                Text("Сохранить")
+            } },
             dismissButton = { TextButton(onClick = { edit = null }) { Text("Отмена") } },
         )
     }
-
-    val dialogOrder = orders.firstOrNull { it.id == pendingOrderId }
-    val dialogStage = pendingStage?.let { key ->
-        PickupReminderStage.entries.firstOrNull { it.name == key }
+    val current = queue.firstOrNull { it.orderId == pendingId && it.ttn == pendingTtn }
+    val stage = when (pendingStage) {
+        "first" -> PickupReminderStage.FIRST
+        "last" -> PickupReminderStage.LAST
+        else -> null
     }
-    if (dialogOrder != null && dialogStage != null) {
+    if (current != null && pendingStage != null) {
         AlertDialog(
-            onDismissRequest = { clearConfirmation() },
+            onDismissRequest = ::clear,
             title = { Text("Сообщение отправлено?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Подтверждайте только после фактической отправки сообщения клиенту.")
-                    Text("Где отправлено?")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("viber" to "Viber", "telegram" to "Telegram").forEach { (channel, title) ->
-                            FilterChip(
-                                selected = pendingChannel == channel,
-                                onClick = { pendingChannel = channel },
-                                label = { Text(title) },
-                            )
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Подтверждайте только после фактической отправки клиенту.")
+                Text("Где отправлено?")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("viber" to "Viber", "telegram" to "Telegram").forEach { (channel, title) ->
+                        FilterChip(selected = pendingChannel == channel, onClick = {
+                            pendingChannel = channel
+                        }, label = { Text(title) })
+                    }
+                }
+            } },
+            confirmButton = { Button(onClick = {
+                val channel = pendingChannel ?: return@Button
+                if (stage == null) onConfirmManualSent(current, channel)
+                else onConfirmSent(current, stage, channel)
+                clear()
+            }, enabled = !busy && pendingChannel != null &&
+                (stage == null || current.activeStage() == stage)) { Text("Да, отправлено") } },
+            dismissButton = { TextButton(onClick = ::clear) { Text("Нет") } },
+        )
+    }
+}
+
+@Composable
+private fun PickupReminderCard(
+    row: PickupQueueRow,
+    order: Order?,
+    busy: Boolean,
+    messengersEnabled: Boolean,
+    onEdit: (Order) -> Unit,
+    onAskSent: (PickupQueueRow, PickupReminderStage?, String?) -> Unit,
+) {
+    val context = LocalContext.current
+    val stage = row.activeStage()
+    val phone = order?.pickupContactPhone()
+    val meest = order?.isMeestShipment() == true ||
+        row.carrier.orEmpty().lowercase().contains("meest")
+    Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("Заказ №" + (row.orderNumber?.toString() ?: order?.number() ?: "—"),
+                fontWeight = FontWeight.SemiBold)
+            if (order != null) Text(order.recipientName(), style = MaterialTheme.typography.bodyMedium)
+            Text("ТТН: " + row.ttn, style = MaterialTheme.typography.bodySmall)
+            if (!row.carrier.isNullOrBlank())
+                Text("Перевозчик: " + row.carrier, style = MaterialTheme.typography.bodySmall)
+            if (!row.trackingStatus.isNullOrBlank())
+                Text("Статус: " + row.trackingStatus, style = MaterialTheme.typography.bodySmall)
+            if (order?.isNovaPickupPoint() == true) Text("Пункт выдачи НП",
+                color = MaterialTheme.colorScheme.primary)
+            val arrival = order?.deliveryValue("trackingPickupArrivedAt").orEmpty()
+            if (arrival.isNotBlank()) Text("Прибытие: " + arrival,
+                style = MaterialTheme.typography.bodySmall)
+            Text(when (stage) {
+                PickupReminderStage.FIRST -> "Первое напоминание"
+                PickupReminderStage.LAST -> "Повторное напоминание"
+                null -> "Посылка ожидает получения"
+            }, fontWeight = FontWeight.SemiBold)
+            Text(when {
+                row.deadline.isNullOrBlank() -> "Срок хранения неизвестен"
+                meest -> "Контрольная дата напоминания: " + row.deadline
+                row.source == "manual" -> "Проверенный срок: " + row.deadline
+                else -> "Расчётный срок: " + row.deadline
+            }, style = MaterialTheme.typography.bodyMedium)
+            if (stage == null && row.firstSentAt != null && row.lastSentAt == null)
+                Text("Первое напоминание отмечено. Второе появится в день срока.",
+                    style = MaterialTheme.typography.bodySmall)
+            if (order != null) TextButton(onClick = { onEdit(order) }, enabled = !busy) {
+                Text("Изменить срок")
+            } else Text("Контакты не загружены. Обновите список.",
+                style = MaterialTheme.typography.bodySmall)
+            if (stage == null) Text("Можно напомнить вручную без утверждения о сроке возврата.",
+                style = MaterialTheme.typography.bodySmall)
+            else if (messengersEnabled) Text("Текст будет скопирован. После отправки подтвердите.",
+                style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                for (action in contactActions(messengersEnabled)) {
+                    if (action == ContactAction.CALL) {
+                        FilledTonalButton(onClick = { openDialer(context, phone.orEmpty()) },
+                            enabled = !busy && phone != null,
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFFEDE9FE),
+                                contentColor = Color(0xFF5B21B6))) {
+                            Text("Позвонить", style = MaterialTheme.typography.labelSmall)
+                        }
+                    } else {
+                        val channel = if (action == ContactAction.VIBER) "viber" else "telegram"
+                        Button(onClick = {
+                            if (order != null) {
+                                val draft = if (stage == null || row.deadline.isNullOrBlank())
+                                    order.pickupManualReminderText()
+                                else order.pickupReminderText(stage, row.deadline)
+                                onAskSent(row, stage, channel)
+                                if (!openPickupDraft(context, phone.orEmpty(), channel, draft))
+                                    Toast.makeText(context, "Текст скопирован, чат можно открыть вручную.",
+                                        Toast.LENGTH_LONG).show()
+                            }
+                        }, enabled = !busy && phone != null,
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (action == ContactAction.VIBER)
+                                    Color(0xFF7360F2) else Color(0xFF229ED9),
+                                contentColor = Color.White)) {
+                            Text(if (action == ContactAction.VIBER) "Viber" else "Telegram",
+                                style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val channel = pendingChannel ?: return@Button
-                    onConfirmSent(dialogOrder, dialogStage, channel)
-                    clearConfirmation()
-                }, enabled = !busy && pendingChannel != null) { Text("Да, отправлено") }
-            },
-            dismissButton = { TextButton(onClick = { clearConfirmation() }) { Text("Нет") } },
-        )
+            }
+            TextButton(onClick = { onAskSent(row, stage, null) }, enabled = !busy && order != null) {
+                Text(if (stage == null) "Отметить ручную отправку" else "Отметить отправленным")
+            }
+        }
     }
 }
 
