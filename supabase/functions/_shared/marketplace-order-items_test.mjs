@@ -15,6 +15,7 @@ function harness(platform, targeted) {
   const externalId = isProm ? 'prom:42' : '42'
   const tables = { crm_orders: [], crm_order_items: [], crm_marketplace_order_sync_state: [] }
   const writes = []
+  const requests = []
   let handler
   let responseOrders
   let detailOrder
@@ -129,6 +130,7 @@ function harness(platform, targeted) {
           },
         },
         fetch: async (url) => {
+          requests.push(String(url))
           if (invalidJson)
             return new Response('{', { headers: { 'Content-Type': 'application/json' } })
           if (String(url).includes('/orders/list?') || String(url).endsWith('/v4/oms/orders'))
@@ -180,6 +182,7 @@ function harness(platform, targeted) {
   return {
     tables,
     writes,
+    requests,
     line,
     order,
     orderWrites,
@@ -313,6 +316,15 @@ for (const platform of ['Prom', 'Epicentr']) {
       assert.equal((await f.run([item])).body.ok, true)
       assert.equal(f.tables.crm_order_items[0].price, 0)
     })
+
+    test(`${platform} ${mode}: optional total does not override valid unit price`, async () => {
+      const f = harness(platform, targeted)
+      for (const total of [undefined, null, 0]) {
+        const item = { ...f.line('A'), [platform === 'Prom' ? 'total_price' : 'subtotal']: total }
+        assert.equal((await f.run([item])).body.ok, true)
+        assert.equal(f.tables.crm_order_items[0].price, 100)
+      }
+    })
   }
 
   test(`${platform}: non-finite numbers are rejected before JSON encoding`, () => {
@@ -361,15 +373,44 @@ test('Epicentr scheduled: earlier safe writes survive a later invalid order', as
   assert.equal(f.tables.crm_marketplace_order_sync_state[0].external_id, '42')
 })
 
-test('Epicentr scheduled: cached malformed list still requires valid detail composition', async () => {
+test('Epicentr scheduled: incomplete list respects cache TTL and validates refreshed details', async () => {
   const f = harness('Epicentr', false)
   const list = [f.order(undefined)]
   assert.equal((await f.run([f.line('A')], { orders: list })).body.ok, true)
-  const before = copy(f.tables)
   f.writes.length = 0
+  f.requests.length = 0
+  assert.equal((await f.run(undefined, { orders: list })).body.ok, true)
+  assert.equal(f.requests.filter((url) => url.endsWith('/orders/42')).length, 0)
+  assert.equal(f.orderWrites().length, 0)
+  f.tables.crm_marketplace_order_sync_state[0].synced_at = '2000-01-01T00:00:00Z'
+  const before = copy(f.tables)
   const result = await f.run(undefined, { orders: list })
   assert.equal(result.status, 502)
+  assert.equal(f.requests.filter((url) => url.endsWith('/orders/42')).length, 1)
   assert.equal(result.body.code, 'INVALID_ORDER_ITEMS')
   assert.equal(f.orderWrites().length, 0)
   assert.deepEqual(f.tables, before)
+})
+
+test('Prom scheduled: invalid order is isolated and partial failure remains visible on repeat', async () => {
+  const f = harness('Prom', false)
+  assert.equal((await f.run([f.line('saved')])).body.ok, true)
+  const saved = copy(f.tables)
+  const invalid = f.order(undefined)
+  const valid = { ...f.order([f.line('B')]), id: 43 }
+  for (const orders of [[invalid, valid], [valid, invalid]]) {
+    f.writes.length = 0
+    const result = await f.run(undefined, { orders })
+    assert.equal(result.status, 502)
+    assert.equal(result.body.ok, false)
+    assert.equal(result.body.code, 'INVALID_ORDER_ITEMS')
+    assert.equal(result.body.failed, 1)
+    assert.equal(result.body.errors[0].externalId, 'prom:42')
+    assert.equal(f.tables.crm_orders.length, 2)
+    assert.equal(f.tables.crm_order_items.length, 2)
+    assert.equal(f.tables.crm_marketplace_order_sync_state.length, 2)
+    for (const table of Object.keys(saved)) assert.deepEqual(f.tables[table][0], saved[table][0])
+    assert.equal(f.tables.crm_order_items[1].product_name, 'B')
+  }
+  assert.equal(f.orderWrites().length, 0)
 })

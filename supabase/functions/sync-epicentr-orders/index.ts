@@ -574,12 +574,6 @@ Deno.serve(async (request) => {
   const final = (order: EpicentrOrder) => terminalStatusCodes.has(String(order.statusCode).toLowerCase())
   orders = importableOrders.filter((order) => {
     if (requestedExternalId || fullSync) return true
-    // A previously cached malformed list row still needs a validated detail response.
-    try {
-      validatedOrderItems(asRecord(order), 'Epicentr')
-    } catch {
-      return true
-    }
     const state = stateByExternalId.get(order.id)
     return !state || state.source_hash !== hashes.get(order.id) || (!final(order) && Date.now() - Date.parse(state.synced_at) >= ttlMs)
   })

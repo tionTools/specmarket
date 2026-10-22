@@ -76,7 +76,6 @@ export function validatedOrderItems(
       platform === 'Prom'
         ? firstPresent(item.total_price, item.subtotal, item.sum)
         : firstPresent(item.subtotal, item.total, item.amount)
-    if (total !== undefined) numeric(total, `${field}, сумма`)
     const price =
       directPrice !== undefined
         ? numeric(directPrice, `${field}, цена`)

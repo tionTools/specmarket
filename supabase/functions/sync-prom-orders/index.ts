@@ -1254,21 +1254,31 @@ Deno.serve(async (request) => {
     (order) => `prom:${text(order.id)}`,
   )
   const validatedItemsByOrder = new Map<string, ReturnType<typeof validatedOrderItems>>()
+  const errors: { externalId: string; message: string }[] = []
   for (const order of importableOrders) {
     try {
       validatedItemsByOrder.set(`prom:${text(order.id)}`, validatedOrderItems(order, 'Prom'))
     } catch (error) {
-      return Response.json(
-        {
-          ok: false,
-          code: 'INVALID_ORDER_ITEMS',
-          externalId: `prom:${text(order.id)}`,
-          message: `Prom: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        { status: 502, headers: corsHeaders },
-      )
+      const failure = {
+        externalId: `prom:${text(order.id)}`,
+        message: `Prom: ${error instanceof Error ? error.message : String(error)}`,
+      }
+      if (requestedExternalId)
+        return Response.json(
+          { ok: false, code: 'INVALID_ORDER_ITEMS', ...failure },
+          { status: 502, headers: corsHeaders },
+        )
+      errors.push(failure)
     }
   }
+  const validationFailure = errors.length
+    ? {
+        code: 'INVALID_ORDER_ITEMS',
+        message: 'Prom: часть заказов отклонена',
+        failed: errors.length,
+        errors,
+      }
+    : {}
   const hashes = new Map<string, string>(
     await Promise.all(
       importableOrders.map(
@@ -1278,16 +1288,18 @@ Deno.serve(async (request) => {
   )
   const candidates = importableOrders.filter(
     (order) =>
-      requestedExternalId ||
-      fullSync ||
-      stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
-        hashes.get(`prom:${text(order.id)}`),
+      validatedItemsByOrder.has(`prom:${text(order.id)}`) &&
+      (requestedExternalId ||
+        fullSync ||
+        stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
+          hashes.get(`prom:${text(order.id)}`)),
   )
-  const skippedUnchanged = importableOrders.length - candidates.length
+  const skippedUnchanged = importableOrders.length - errors.length - candidates.length
   if (!candidates.length)
     return Response.json(
       {
-        ok: true,
+        ok: errors.length === 0,
+        ...validationFailure,
         received: orders.length,
         created: 0,
         updated: 0,
@@ -1296,7 +1308,7 @@ Deno.serve(async (request) => {
         deletedSkipped,
         changedOrderIds: [],
       },
-      { headers: corsHeaders },
+      { status: errors.length ? 502 : 200, headers: corsHeaders },
     )
   const candidateExternalIds = candidates.map((order) => `prom:${text(order.id)}`)
   const { data: existingRows, error: existingError } = await admin
@@ -1846,7 +1858,8 @@ Deno.serve(async (request) => {
   }
   return Response.json(
     {
-      ok: true,
+      ok: errors.length === 0,
+      ...validationFailure,
       received: orders.length,
       created,
       updated,
@@ -1855,6 +1868,6 @@ Deno.serve(async (request) => {
       deletedSkipped,
       changedOrderIds: [...new Set(changedOrderIds)],
     },
-    { headers: corsHeaders },
+    { status: errors.length ? 502 : 200, headers: corsHeaders },
   )
 })
