@@ -5,8 +5,8 @@ import {
 } from './novapay-soap-timeout.ts'
 
 Deno.test('NovaPay authentication has its own longer timeout', () => {
-  if (novaPaySoapTimeoutMs('UserAuthenticationJWT') !== 60_000) {
-    throw new Error('Authentication SOAP timeout must be 60 seconds')
+  if (novaPaySoapTimeoutMs('UserAuthenticationJWT') !== 90_000) {
+    throw new Error('Authentication SOAP timeout must be 90 seconds')
   }
   if (NOVAPAY_AUTH_SOAP_TIMEOUT_MS >= 120_000) {
     throw new Error('Authentication SOAP timeout must leave room within the 120-second lock')
