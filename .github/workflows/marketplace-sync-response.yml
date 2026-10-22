@@ -1,0 +1,37 @@
+name: Marketplace sync response regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/HomeView.vue'
+      - 'src/features/marketplaces/sync-response_test.mjs'
+      - '.github/workflows/marketplace-sync-response.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v5
+      - name: Setup Node.js 25
+        uses: actions/setup-node@v6
+        with:
+          node-version: 25
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Marketplace sync response regression
+        run: node src/features/marketplaces/sync-response_test.mjs
+      - name: Type-check
+        run: pnpm type-check
+      - name: Scoped lint
+        run: |
+          pnpm exec oxlint src/pages/HomeView.vue
+          pnpm exec eslint src/pages/HomeView.vue
+      - name: Production build
+        run: pnpm build
