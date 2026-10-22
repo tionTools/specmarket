@@ -1,4 +1,4 @@
-export const NOVAPAY_AUTH_SOAP_TIMEOUT_MS = 60_000
+export const NOVAPAY_AUTH_SOAP_TIMEOUT_MS = 90_000
 export const NOVAPAY_DATA_SOAP_TIMEOUT_MS = 30_000
 
 export function novaPaySoapTimeoutMs(method: string): number {
