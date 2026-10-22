@@ -8,6 +8,9 @@ function rozetkaLocation(value: JsonRecord) {
 }
 
 function rozetkaReadableStatus(source: string, code: string) {
+  if (source.trim().toLowerCase() === 'видано') {
+    return { status: source, final: true, normalizedStatus: 'delivered' }
+  }
   if (/поверта(?:ється|вся)|returning/i.test(source)) {
     return { status: 'Возвращается отправителю', final: false, normalizedStatus: 'returning' }
   }
