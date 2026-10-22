@@ -3143,8 +3143,8 @@ async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unkno
   const ids = Array.isArray(data.changedOrderIds)
     ? data.changedOrderIds.filter((id): id is string => typeof id === 'string')
     : null
-  if (ids === null) await reconcileRemoteOrders(true)
-  else if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
+  if (ids === null || !ids.length) await reconcileRemoteOrders(true)
+  else await refreshRemoteOrders(ids)
   await refreshLinkedPriceProductKeys()
   reapplyRegistryPreview(
     isPromRegistryDraft.value,
