@@ -10,7 +10,7 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
-import { FunctionsHttpError, type RealtimeChannel, type User } from '@supabase/supabase-js'
+import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import {
   useClipboard,
@@ -2709,31 +2709,6 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingProm.value = false
-  if (
-    error instanceof FunctionsHttpError &&
-    error.context instanceof Response &&
-    error.context.status === 502
-  ) {
-    const partial = await Promise.resolve()
-      .then(() => error.context.clone().json())
-      .catch(() => null)
-    if (
-      partial?.ok === false &&
-      partial.code === 'INVALID_ORDER_ITEMS' &&
-      Number.isSafeInteger(partial.failed) &&
-      partial.failed > 0 &&
-      Array.isArray(partial.changedOrderIds) &&
-      partial.changedOrderIds.length > 0 &&
-      partial.changedOrderIds.every((id: unknown) => typeof id === 'string' && id.trim().length > 0)
-    ) {
-      const changedOrderIds = [...new Set<string>(partial.changedOrderIds)]
-      const message = `Prom: ошибка — частичная синхронизация: успешно изменено ${changedOrderIds.length}, отклонено ${partial.failed}.`
-      await refreshOrdersAfterMarketplaceSync({ changedOrderIds })
-      if (fullSyncResults) fullSyncResults.push(message)
-      else showSyncError(message)
-      return
-    }
-  }
   if (error || !data?.ok || data?.skipped) {
     const errorMessage = data?.skipped
       ? 'Prom: синхронизация пропущена, площадка на паузе.'
