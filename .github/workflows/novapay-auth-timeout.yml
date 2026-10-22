@@ -20,4 +20,4 @@ jobs:
       - name: Check timeout module
         run: deno check supabase/functions/_shared/novapay-soap-timeout.ts
       - name: Test timeout and auth guard
-        run: deno test supabase/functions/_shared/novapay-soap-timeout_test.ts supabase/functions/_shared/novapay-auth_test.ts
+        run: deno test --node-modules-dir=auto supabase/functions/_shared/novapay-soap-timeout_test.ts supabase/functions/_shared/novapay-auth_test.ts
