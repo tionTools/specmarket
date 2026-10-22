@@ -2680,8 +2680,8 @@ async function syncEpicentrOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingEpicentr.value = false
-  if (error || !data?.ok || data?.skipped) {
-    const errorMessage = data?.skipped
+  if (error || !data?.ok || data?.skipped === 'paused') {
+    const errorMessage = data?.skipped === 'paused'
       ? 'Эпицентр: синхронизация пропущена, площадка на паузе.'
       : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Эпицентра.')
     if (fullSyncResults) fullSyncResults.push(`Эпицентр: ошибка — ${errorMessage}`)
@@ -2709,8 +2709,8 @@ async function syncPromOrders(full = false, fullSyncResults?: string[]) {
     body: full ? { full: true } : undefined,
   })
   isSyncingProm.value = false
-  if (error || !data?.ok || data?.skipped) {
-    const errorMessage = data?.skipped
+  if (error || !data?.ok || data?.skipped === 'paused') {
+    const errorMessage = data?.skipped === 'paused'
       ? 'Prom: синхронизация пропущена, площадка на паузе.'
       : (data?.message ?? error?.message ?? 'Не удалось обновить заказы Prom.')
     if (fullSyncResults) fullSyncResults.push(`Prom: ошибка — ${errorMessage}`)
@@ -3143,8 +3143,8 @@ async function refreshOrdersAfterMarketplaceSync(data: { changedOrderIds?: unkno
   const ids = Array.isArray(data.changedOrderIds)
     ? data.changedOrderIds.filter((id): id is string => typeof id === 'string')
     : null
-  if (ids === null) await reconcileRemoteOrders(true)
-  else if (!ordersRealtimeSubscribed.value && ids.length) await refreshRemoteOrders(ids)
+  if (ids === null || !ids.length) await reconcileRemoteOrders(true)
+  else await refreshRemoteOrders(ids)
   await refreshLinkedPriceProductKeys()
   reapplyRegistryPreview(
     isPromRegistryDraft.value,
