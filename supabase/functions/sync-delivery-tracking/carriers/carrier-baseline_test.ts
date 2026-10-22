@@ -317,3 +317,23 @@ Deno.test('Rozetka Delivery maps У відділенні to ready for pickup', a
     assert(result.status === 'У відділенні', 'Rozetka source status should stay visible')
   })
 })
+
+Deno.test('Rozetka Delivery maps only exact Видано to delivered', async () => {
+  for (const [source, normalizedStatus, final] of [
+    ['Видано', 'delivered', true],
+    ['  вИдАнО  ', 'delivered', true],
+    ["Видано кур'єру", 'unknown', false],
+    ['У відділенні', 'ready_for_pickup', false],
+  ] as const) {
+    await withCarrierResponse({}, { data: {
+      last_status: { id: 'status', name: source, date: '2026-10-21 12:00:00' }, status_groups: [],
+    } }, async () => {
+      const result = await rozetkaStatus('PRM-574562219')
+      assert(result.normalizedStatus === normalizedStatus, `${source}: wrong normalized status`)
+      assert(result.final === final, `${source}: wrong final flag`)
+      const delivery = mergeTrackingDelivery({ ttn: 'PRM-574562219' }, result, '2026-10-21T12:00:00Z', 'manual')
+      assert(delivery.trackingStatus === source.trim(), `${source}: source status was not preserved`)
+      assert(delivery.trackingNormalizedStatus === normalizedStatus, `${source}: normalized status was not stored`)
+    })
+  }
+})
