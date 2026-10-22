@@ -10,6 +10,7 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order as SortOrder
 import io.github.jan.supabase.realtime.*
@@ -113,6 +114,74 @@ class OrdersRepository {
         filter { eq("id", id) }
         limit(1)
     }.decodeList<Order>().firstOrNull()
+
+
+    suspend fun pickupCandidateOrders(): List<Order> {
+        val result = mutableListOf<Order>()
+        var offset = 0L
+        do {
+            val batch = client.from("crm_orders").select(columns) {
+                filter { eq("delivery->>trackingNormalizedStatus", "ready_for_pickup") }
+                order("created_at", SortOrder.DESCENDING)
+                range(offset..offset + 199)
+            }.decodeList<Order>()
+            result += batch
+            offset += batch.size
+        } while (batch.size == 200)
+        return result
+    }
+
+    /** Server-side categories and stage are the only source of the reminder badge. */
+    suspend fun pickupQueue(): List<PickupQueueRow> {
+        check(client.auth.currentSessionOrNull() != null)
+        return client.postgrest.rpc("crm_list_pickup_reminders").decodeList<PickupQueueRow>()
+    }
+
+    suspend fun pickupManualHistory(): List<PickupManualLog> =
+        client.from("crm_pickup_reminder_log").select(
+            Columns.raw("order_id,ttn,stage,channel,acknowledged_at")
+        ) {
+            filter { eq("stage", "manual") }
+            order("acknowledged_at", SortOrder.DESCENDING)
+            range(0L..199L)
+        }.decodeList<PickupManualLog>()
+
+    /** Backend companion RPC to be added before distributing manual reminders. */
+    suspend fun confirmManualPickupReminder(orderId: String, ttn: String, channel: String) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_confirm_pickup_reminder_manual", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_channel", channel)
+        })
+    }
+
+    suspend fun pickupReminders(): List<PickupReminderState> =
+        client.from("crm_pickup_reminders")
+            .select(Columns.raw("order_id,ttn,deadline,first_sent_at,first_channel,last_sent_at,last_channel"))
+            .decodeList<PickupReminderState>()
+
+    suspend fun setPickupDeadline(orderId: String, ttn: String, deadline: String) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_set_pickup_reminder_deadline", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_deadline", deadline)
+        })
+    }
+
+    suspend fun confirmPickupReminder(
+        orderId: String, ttn: String, deadline: String, stage: PickupReminderStage, channel: String
+    ) {
+        check(client.auth.currentSessionOrNull() != null)
+        client.postgrest.rpc("crm_confirm_pickup_reminder", buildJsonObject {
+            put("p_order_id", orderId)
+            put("p_ttn", ttn)
+            put("p_deadline", deadline)
+            put("p_stage", stage.databaseValue)
+            put("p_channel", channel)
+        })
+    }
 
     suspend fun accept(route: AcceptRoute, externalId: String): AcceptResponse {
         check(client.auth.currentSessionOrNull() != null)

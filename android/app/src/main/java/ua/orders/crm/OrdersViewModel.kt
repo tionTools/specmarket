@@ -35,6 +35,19 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var selectedId by mutableStateOf<String?>(null); private set
     var detail by mutableStateOf<Order?>(null); private set
     var acceptingId by mutableStateOf<String?>(null); private set
+    // Optional, lazy-loaded feature state. Core order refresh never touches it.
+    var pickupQueue by mutableStateOf<List<PickupQueueRow>>(emptyList()); private set
+    var pickupManualHistory by mutableStateOf<Map<String, PickupManualLog>>(emptyMap()); private set
+    // Authoritative live orders for the reminder queue; never derive the badge from OrdersCache.
+    var pickupOrders by mutableStateOf<List<Order>>(emptyList()); private set
+    var pickupLoading by mutableStateOf(false); private set
+    var pickupLoaded by mutableStateOf(false); private set
+    var pickupBusy by mutableStateOf(false); private set
+    var pickupError by mutableStateOf<String?>(null); private set
+    private var pickupGeneration = 0L
+    private var pickupLoadedDay: java.time.LocalDate? = null
+    private var pickupJob: Job? = null
+    private var pickupPollingJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -59,14 +72,12 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                             initialLoadComplete = true
                         }
                         initializing = false
-                        if (visible) {
-                            startRealtime()
-                            refresh()
-                        }
+                        if (visible) foreground(true)
                     } else {
                         initializing = false
                     }
                     getApplication<Application>().savePushSessionActive(true)
+                    getApplication<Application>().schedulePickupReminderCheck()
                     syncPushRegistration()
                 } else if (session is SessionStatus.NotAuthenticated) {
                     initializing = false
@@ -75,6 +86,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     pushRegistrationJob?.cancel()
                     pushRegistrationJob = null
                     getApplication<Application>().savePushSessionActive(false)
+                    getApplication<Application>().cancelPickupReminderChecks()
                     clearOrders()
                 }
             }
@@ -85,11 +97,39 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         visible = active
         if (!active) {
             stopRealtime()
+            pickupPollingJob?.cancel()
+            pickupPollingJob = null
             return
         }
         if (email != null) {
             retryConnection()
             syncPushRegistration()
+            loadPickupReminders()
+            if (pickupPollingJob?.isActive != true) {
+                pickupPollingJob = viewModelScope.launch {
+                    while (isActive && visible && email != null) {
+                        delay(20_000)
+                        if (!pickupLoading && !pickupBusy) {
+                            try {
+                                val snapshot = withTimeout(15_000) { repository.pickupQueue() }
+                                pickupQueue = snapshot
+                                try {
+                                    pickupManualHistory = repository.pickupManualHistory()
+                                        .distinctBy { it.key() }.associateBy { it.key() }
+                                } catch (cancel: CancellationException) { throw cancel }
+                                catch (_: Exception) { /* Queue still authoritative. */ }
+                                pickupLoaded = true
+                                pickupLoadedDay = pickupToday()
+                                pickupError = null
+                            } catch (cancel: CancellationException) { throw cancel }
+                            catch (_: Exception) {
+                                pickupLoaded = false
+                                pickupError = "Не удалось обновить напоминания. Нажмите «Обновить»."
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -100,7 +140,10 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun networkRestored() {
-        if (visible && email != null) retryConnection()
+        if (visible && email != null) {
+            retryConnection()
+            loadPickupReminders()
+        }
     }
 
     fun retryConnection() {
@@ -113,6 +156,7 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         if (email == null) return
         startRealtime(forceRestart = true)
         refresh(force = true, reconcileRecent = true)
+        loadPickupReminders()
     }
 
     private fun syncPushRegistration(enabledOverride: Boolean? = null) {
@@ -261,6 +305,19 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         detail = null
         pendingNotificationIds.clear()
         initialLoadComplete = false
+        ++pickupGeneration
+        pickupJob?.cancel()
+        pickupJob = null
+        pickupPollingJob?.cancel()
+        pickupPollingJob = null
+        pickupQueue = emptyList()
+        pickupManualHistory = emptyMap()
+        pickupOrders = emptyList()
+        pickupLoaded = false
+        pickupLoadedDay = null
+        pickupLoading = false
+        pickupBusy = false
+        pickupError = null
     }
 
     private fun merge(order: Order) {
@@ -341,6 +398,141 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     loading = false
                     refreshJob = null
                 }
+            }
+        }
+    }
+
+
+    // The badge and the reminder screen share a live server snapshot independent
+    // of device-local OrdersCache. Refresh on resume, manual refresh and day rollover.
+    fun ensurePickupReminderCount() {
+        if (email == null || pickupLoading ||
+            (pickupLoaded && pickupLoadedDay == pickupToday())) return
+        loadPickupReminders()
+    }
+
+    // A single server RPC defines both the badge and both queues.
+    // Detailed order data is only optional enrichment for contact actions.
+    fun loadPickupReminders() {
+        if (pickupLoading) return
+        val account = email ?: return
+        val generation = ++pickupGeneration
+        pickupJob?.cancel()
+        pickupLoading = true
+        pickupLoaded = false
+        pickupOrders = emptyList()
+        pickupError = null
+        pickupJob = viewModelScope.launch {
+            try {
+                val queue = withTimeout(20_000) { repository.pickupQueue() }
+                if (email != account || generation != pickupGeneration) return@launch
+                pickupQueue = queue
+                pickupLoaded = true
+                pickupLoadedDay = pickupToday()
+                try {
+                    pickupManualHistory = repository.pickupManualHistory()
+                        .distinctBy { it.key() }.associateBy { it.key() }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { pickupManualHistory = emptyMap() }
+                // No order enrichment failure may hide a server-authoritative entry.
+                val details = try {
+                    withTimeout(30_000) { repository.pickupCandidateOrders() }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) {
+                    pickupError = "Список получен. Контактные данные временно недоступны."
+                    emptyList()
+                }
+                if (email == account && generation == pickupGeneration) pickupOrders = details
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                if (email == account && generation == pickupGeneration) {
+                    pickupLoaded = false
+                    pickupQueue = emptyList()
+                    pickupOrders = emptyList()
+                    pickupError = "Серверный список недоступен. Проверить напоминания не удалось."
+                }
+            } finally {
+                if (generation == pickupGeneration) {
+                    pickupLoading = false
+                    pickupJob = null
+                }
+            }
+        }
+    }
+
+    fun savePickupDeadline(order: Order, deadline: String) {
+        if (pickupBusy || email == null) return
+        val ttn = order.deliveryValue("ttn").trim()
+        if (ttn.isBlank()) { message = "У заказа нет ТТН."; return }
+        pickupBusy = true
+        viewModelScope.launch {
+            var changed = false
+            try {
+                repository.setPickupDeadline(order.id, ttn, deadline)
+                changed = true
+                message = "Срок сохранён."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { message = "Не удалось сохранить срок. Повторите позже." }
+            finally {
+                pickupBusy = false
+                if (changed) loadPickupReminders()
+            }
+        }
+    }
+
+    fun confirmPickupSent(row: PickupQueueRow, stage: PickupReminderStage, channel: String) {
+        if (pickupBusy || email == null) return
+        if (pickupQueue.firstOrNull { it.orderId == row.orderId && it.ttn == row.ttn }?.activeStage() != stage ||
+            row.deadline.isNullOrBlank()) {
+            message = "Напоминание устарело. Обновите данные."
+            return
+        }
+        pickupBusy = true
+        viewModelScope.launch {
+            var confirmed = false
+            try {
+                repository.confirmPickupReminder(row.orderId, row.ttn, row.deadline, stage, channel)
+                confirmed = true
+                // The server has accepted the confirmation. Never leave a due badge
+                // while the follow-up fetch is pending or another device is offline.
+                pickupQueue = pickupQueue.map {
+                    if (it.orderId != row.orderId || it.ttn != row.ttn) it
+                    else if (stage == PickupReminderStage.FIRST)
+                        it.copy(firstSentAt = java.time.Instant.now().toString(), firstChannel = channel,
+                            category = "informational", stage = null)
+                    else it.copy(lastSentAt = java.time.Instant.now().toString(), lastChannel = channel,
+                        category = "informational", stage = null)
+                }
+                message = "Отправка отмечена."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                message = "Не удалось подтвердить отправку. Проверьте статус."
+            } finally {
+                pickupBusy = false
+                if (confirmed) loadPickupReminders()
+            }
+        }
+    }
+
+    fun confirmPickupManualSent(row: PickupQueueRow, channel: String) {
+        if (pickupBusy || email == null) return
+        if (pickupQueue.none { it.orderId == row.orderId && it.ttn == row.ttn && it.category == "informational" }) {
+            message = "Данные изменились. Обновите список."
+            return
+        }
+        pickupBusy = true
+        viewModelScope.launch {
+            var confirmed = false
+            try {
+                repository.confirmManualPickupReminder(row.orderId, row.ttn, channel)
+                confirmed = true
+                message = "Ручная отправка сохранена в общем журнале."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                message = "Не удалось записать ручную отправку на сервере."
+            } finally {
+                pickupBusy = false
+                if (confirmed) loadPickupReminders()
             }
         }
     }
