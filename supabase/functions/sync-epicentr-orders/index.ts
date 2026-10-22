@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { validatedOrderItems } from '../_shared/marketplace-order-items.ts'
 import { epicentrCancellationTtn } from './cancellation.ts'
 import { epicentrShipping } from './shipping.ts'
 import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
@@ -186,13 +187,6 @@ function itemSize(item: Record<string, unknown>) {
   return title.match(/(?:^|[\s,])((?:XXS|XS|S|M|L|XL|XXL|XXXL|4XL|5XL|\d{1,3})(?=\s*(?:\(|$)))/i)?.[1] ?? ''
 }
 
-function apiNumber(value: unknown) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
-  if (typeof value !== 'string') return 0
-  const normalized = value.replace(/\s/g, '').replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]
-  return normalized ? Number(normalized) : 0
-}
-
 const epicentrRoyaltyRates: Array<{ category: string; percent: number }> = [
   { category: 'наколінники будівельні', percent: 13 },
   { category: 'рукавиці робочі', percent: 13 },
@@ -235,8 +229,6 @@ function categoryRoyaltyPercent(item: Record<string, unknown>) {
   return detectedRoyaltyCategory(item)?.percent
 }
 
-type NormalizedItem = { title: string; quantity: number; price: number; raw: Record<string, unknown> }
-
 function epicentrOfferId(item: Record<string, unknown>) {
   return readableText(item.offerId ?? item.offer_id ?? item.productId ?? item.product_id)
 }
@@ -246,20 +238,20 @@ function epicentrProductKey(item: Record<string, unknown>) {
   return identity.familyKey || identity.legacyKeys[0] || ''
 }
 
-function normalizeItems(order: unknown): NormalizedItem[] {
+function catalogueItems(order: unknown) {
+  // List metadata is only used for category lookup, never as the replacement order composition.
   const source = asRecord(order)
   const nestedOrder = asRecord(source.order)
-  const candidates = [source.items, source.products, source.orderItems, nestedOrder.items, nestedOrder.products]
+  const candidates = [
+    source.items, source.products, source.orderItems, nestedOrder.items, nestedOrder.products,
+  ]
   const rawItems = candidates.find(Array.isArray) as unknown[] | undefined
   return (rawItems ?? []).map((raw) => {
     const item = asRecord(raw)
-    const quantity = apiNumber(item.quantity ?? item.qty ?? item.count ?? 1) || 1
-    const subtotal = apiNumber(item.subtotal ?? item.total ?? item.amount)
-    const directPrice = apiNumber(item.price ?? item.unitPrice ?? item.unit_price)
     return {
-      title: readableText(item.title) || readableText(item.name) || readableText(item.productName) || readableText(asRecord(item.product).title),
-      quantity,
-      price: directPrice || (subtotal ? subtotal / quantity : 0),
+      title:
+        readableText(item.title) || readableText(item.name) ||
+        readableText(item.productName) || readableText(asRecord(item.product).title),
       raw: item,
     }
   }).filter((item) => Boolean(item.title))
@@ -536,9 +528,9 @@ Deno.serve(async (request) => {
     if (!response.ok) {
       return Response.json({ ok: false, message: 'Эпицентр не отдал этот заказ.', status: response.status }, { status: 502, headers: corsHeaders })
     }
-    const payload: unknown = await response.json()
+    const payload: unknown = await response.json().catch(() => null)
     const item = extractOrder(payload)
-    orders = [{ ...item, id: readableText(item.id) || requestedExternalId, items: (item.items as EpicentrOrder['items']) ?? [] } as EpicentrOrder]
+    orders = [{ ...item, id: readableText(item.id) || requestedExternalId } as EpicentrOrder]
   } else {
     const response = await fetch('https://merchant-api.epicentrm.com.ua/v4/oms/orders', {
       headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
@@ -547,8 +539,13 @@ Deno.serve(async (request) => {
       return Response.json({ ok: false, message: 'Эпицентр не отдал заказы.', status: response.status }, { status: 502, headers: corsHeaders })
     }
 
-    const payload = await response.json() as { items?: EpicentrOrder[] }
-    orders = payload.items ?? []
+    const payload = asRecord(await response.json().catch(() => null))
+    if (!Array.isArray(payload.items))
+      return Response.json(
+        { ok: false, code: 'INVALID_ORDER_ITEMS', message: 'Эпицентр: отсутствует массив заказов.' },
+        { status: 502, headers: corsHeaders },
+      )
+    orders = payload.items as EpicentrOrder[]
   }
   const listOrders = orders
   const externalIds = listOrders.map((order) => order.id).filter(Boolean)
@@ -607,7 +604,7 @@ Deno.serve(async (request) => {
   let updated = 0
   const skipped = skippedUnchanged
   const changedOrderIds: string[] = []
-  const offerRows = orders.flatMap((order) => normalizeItems(order).map((item) => ({
+  const offerRows = orders.flatMap((order) => catalogueItems(order).map((item) => ({
     offer_id: epicentrOfferId(item.raw),
     product_title: item.title,
   }))).filter((item) => item.offer_id)
@@ -671,19 +668,35 @@ Deno.serve(async (request) => {
   for (const order of orders) {
     // The targeted endpoint already returns the full order. Keep detail fetches for bulk rows only.
     let source: EpicentrOrder = order
+    let itemsSource = asRecord(order)
     if (!requestedExternalId) {
       const detailResponse = await fetch(`https://merchant-api.epicentrm.com.ua/v6/oms/orders/${order.id}`, {
         headers: { Authorization: `Bearer ${epicentrToken}`, Accept: 'application/json' },
       })
       if (!detailResponse.ok) return Response.json({ ok: false, message: `Эпицентр не отдал детали заказа ${order.id}.` }, { status: 502, headers: corsHeaders })
-      const detailPayload: unknown = await detailResponse.json()
+      const detailPayload: unknown = await detailResponse.json().catch(() => null)
       const detail = extractOrder(detailPayload)
+      itemsSource = detail
       source = {
         ...order,
         ...detail,
         address: detail.address ?? order.address,
-        items: (detail.items ?? order.items) as EpicentrOrder['items'],
+        items: detail.items as EpicentrOrder['items'],
       }
+    }
+    let validItems: ReturnType<typeof validatedOrderItems>
+    try {
+      validItems = validatedOrderItems(itemsSource, 'Epicentr')
+    } catch (error) {
+      return Response.json(
+        {
+          ok: false,
+          code: 'INVALID_ORDER_ITEMS',
+          externalId: order.id,
+          message: `Эпицентр: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        { status: 502, headers: corsHeaders },
+      )
     }
     const externalId = source.id
     const existing = { data: existingByExternalId.get(externalId) ?? null }
@@ -845,11 +858,6 @@ Deno.serve(async (request) => {
       (currentItems ?? []).map((item) => [item.product_name, item]),
     )
 
-    // Неполный ответ API не должен очищать уже сохранённые позиции заказа.
-    // Заменяем их только если для каждой позиции есть название, цена и количество.
-    const validItems = normalizeItems(source).filter((item) =>
-      Boolean(item.title.trim()) && Number.isFinite(item.price) && Number.isFinite(item.quantity),
-    )
     if (validItems.length) {
       for (const item of validItems) await ensureDetectedCategory(item.raw)
       const familyIdentities = validItems.map((item) => epicentrFamilyIdentity(item.raw))

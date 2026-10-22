@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { validatedOrderItems } from '../_shared/marketplace-order-items.ts'
 import { loadUsdRateSchedule, usdRateForDate } from '../_shared/currency-rate.ts'
 import {
   findPlatformPriceCostSnapshot,
@@ -183,13 +184,6 @@ const promStatusNames: Record<string, string> = {
   delivered: 'Виконано',
   canceled: 'Скасовано',
   cancelled: 'Скасовано',
-}
-const firstNumber = (...values: unknown[]) => {
-  for (const value of values) {
-    const parsed = number(value)
-    if (parsed !== 0) return parsed
-  }
-  return 0
 }
 function readable(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number') return String(value)
@@ -1229,7 +1223,12 @@ Deno.serve(async (request) => {
       { status: 502, headers: corsHeaders },
     )
 
-  const payload = asRecord(await response.json())
+  const payload = asRecord(await response.json().catch(() => null))
+  if (!requestedExternalId && !Array.isArray(payload.orders))
+    return Response.json(
+      { ok: false, code: 'INVALID_ORDER_ITEMS', message: 'Prom: отсутствует массив заказов.' },
+      { status: 502, headers: corsHeaders },
+    )
   const orders = requestedExternalId
     ? [asRecord(payload.order ?? payload)]
     : Array.isArray(payload.orders)
@@ -1254,6 +1253,32 @@ Deno.serve(async (request) => {
     deletedExternalIds,
     (order) => `prom:${text(order.id)}`,
   )
+  const validatedItemsByOrder = new Map<string, ReturnType<typeof validatedOrderItems>>()
+  const errors: { externalId: string; message: string }[] = []
+  for (const order of importableOrders) {
+    try {
+      validatedItemsByOrder.set(`prom:${text(order.id)}`, validatedOrderItems(order, 'Prom'))
+    } catch (error) {
+      const failure = {
+        externalId: `prom:${text(order.id)}`,
+        message: `Prom: ${error instanceof Error ? error.message : String(error)}`,
+      }
+      if (requestedExternalId)
+        return Response.json(
+          { ok: false, code: 'INVALID_ORDER_ITEMS', ...failure },
+          { status: 502, headers: corsHeaders },
+        )
+      errors.push(failure)
+    }
+  }
+  const validationFailure = errors.length
+    ? {
+        code: 'INVALID_ORDER_ITEMS',
+        message: 'Prom: часть заказов отклонена',
+        failed: errors.length,
+        errors,
+      }
+    : {}
   const hashes = new Map<string, string>(
     await Promise.all(
       importableOrders.map(
@@ -1263,16 +1288,18 @@ Deno.serve(async (request) => {
   )
   const candidates = importableOrders.filter(
     (order) =>
-      requestedExternalId ||
-      fullSync ||
-      stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
-        hashes.get(`prom:${text(order.id)}`),
+      validatedItemsByOrder.has(`prom:${text(order.id)}`) &&
+      (requestedExternalId ||
+        fullSync ||
+        stateByExternalId.get(`prom:${text(order.id)}`)?.source_hash !==
+          hashes.get(`prom:${text(order.id)}`)),
   )
-  const skippedUnchanged = importableOrders.length - candidates.length
+  const skippedUnchanged = importableOrders.length - errors.length - candidates.length
   if (!candidates.length)
     return Response.json(
       {
-        ok: true,
+        ok: errors.length === 0,
+        ...validationFailure,
         received: orders.length,
         created: 0,
         updated: 0,
@@ -1281,7 +1308,7 @@ Deno.serve(async (request) => {
         deletedSkipped,
         changedOrderIds: [],
       },
-      { headers: corsHeaders },
+      { status: errors.length ? 502 : 200, headers: corsHeaders },
     )
   const candidateExternalIds = candidates.map((order) => `prom:${text(order.id)}`)
   const { data: existingRows, error: existingError } = await admin
@@ -1334,7 +1361,7 @@ Deno.serve(async (request) => {
         const existing = existingByExternalId.get(`prom:${text(order.id)}`)
         const previousItems = itemsByOrder.get(existing?.id) ?? []
         return sourceItems(order).map((item, position) => {
-          const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+          const sourceName = text(item.name) || text(item.product_name)
           const previous = previousItems.find((saved) => Number(saved.position) === position)
           const previousKey = text(previous?.marketplace_product_key)
           const legacyKeys = promLegacyProductKeys(item)
@@ -1623,16 +1650,10 @@ Deno.serve(async (request) => {
         )
         .filter(([key]) => Boolean(key)),
     )
-    const items = sourceItems(order)
-    const itemPrice = (item: RecordValue) => {
-      const quantity = number(pick(item, 'quantity', 'amount')) || 1
-      return firstNumber(
-        pick(item, 'price', 'price_uah', 'priceUAH', 'unit_price', 'base_price', 'cost'),
-        number(pick(item, 'total_price', 'subtotal', 'sum')) / quantity,
-      )
-    }
-    const itemsAmount = items.reduce(
-      (total, item) => total + itemPrice(item) * (number(pick(item, 'quantity', 'amount')) || 1),
+    const validatedItems = validatedItemsByOrder.get(externalId)!
+    const items = validatedItems.map((item) => item.raw)
+    const itemsAmount = validatedItems.reduce(
+      (total, item) => total + item.price * item.quantity,
       0,
     )
     const orderCommission = number(asRecord(order.cpa_commission).amount)
@@ -1663,8 +1684,7 @@ Deno.serve(async (request) => {
           (identity) => identity.familyKey === familyKey,
         )
         const representative = items[representativePosition]
-        const representativeName =
-          text(representative?.name) || text(representative?.product_name) || 'Товар Prom'
+        const representativeName = validatedItems[representativePosition]!.title
         const promotion = await promoteFamilyPriceLink(
           admin,
           'Пром',
@@ -1679,7 +1699,7 @@ Deno.serve(async (request) => {
 
       const itemRows = await Promise.all(
         items.map(async (item, position) => {
-          const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
+          const sourceName = validatedItems[position]!.title
           const [localizedName, apiSize] = await Promise.all([
             resolvedUkrainianProductName(item, sourceName, promToken, productNameCache),
             resolvedProductSize(
@@ -1693,8 +1713,7 @@ Deno.serve(async (request) => {
           ])
           if (localizedName.retry) needsTranslationRetry = true
           const name = localizedName.name
-          const quantity = number(pick(item, 'quantity', 'amount')) || 1
-          const price = itemPrice(item)
+          const { quantity, price } = validatedItems[position]!
           const identity = familyIdentities[position]
           const legacyMarketplaceProductKey = promProductKey(item)
           const canonicalMarketplaceProductKey =
@@ -1839,7 +1858,8 @@ Deno.serve(async (request) => {
   }
   return Response.json(
     {
-      ok: true,
+      ok: errors.length === 0,
+      ...validationFailure,
       received: orders.length,
       created,
       updated,
@@ -1848,6 +1868,6 @@ Deno.serve(async (request) => {
       deletedSkipped,
       changedOrderIds: [...new Set(changedOrderIds)],
     },
-    { headers: corsHeaders },
+    { status: errors.length ? 502 : 200, headers: corsHeaders },
   )
 })
