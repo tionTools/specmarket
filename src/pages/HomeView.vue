@@ -583,7 +583,7 @@ function unregisterRemoteOrder(remoteId: string) {
 
 function isUnopenedNewOrder(order: Order) {
   return (
-    newOrderNotificationPlatforms.includes(order.platform) &&
+    platformOptions.includes(order.platform) &&
     !(order.delivery.ttn ?? '').trim() &&
     !isCancelledOrReturned(order)
   )
