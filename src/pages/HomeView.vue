@@ -362,7 +362,6 @@ let lastReconciliationAt = 0
 let realtimeReconnectAttempt = 0
 const realtimeReconnectDelays = [5_000, 10_000, 20_000, 30_000] as const
 const pendingRemoteOrderIds = new Set<string>()
-const pendingNewOrderIds = new Set<string>()
 const newOrderToasts = ref<Array<{ id: number; text: string }>>([])
 const newOrderNotificationsEnabled = ref(
   window.localStorage.getItem(newOrderNotificationsStorageKey) !== 'false',
@@ -3310,7 +3309,6 @@ function startAutomaticOrdersRefresh() {
       if (!event.order_id) return
       if (event.operation === 'DELETE') removeRemoteOrder(event.order_id)
       else {
-        if (event.operation === 'INSERT') pendingNewOrderIds.add(event.order_id)
         queueRemoteOrderRefresh(event.order_id)
       }
     })
@@ -3507,7 +3505,7 @@ async function refreshRemoteOrders(
     const index = orders.value.findIndex((item) => item.remoteId === order.remoteId)
     if (index === -1) {
       orders.value.push(order)
-      if (pendingNewOrderIds.delete(order.remoteId)) notifyNewOrder(order)
+      if (hasRemoteOrderBaseline && !knownRemoteOrderIds.has(order.remoteId)) notifyNewOrder(order)
     } else orders.value[index] = order
   }
   registerRefreshedRemoteOrders(
