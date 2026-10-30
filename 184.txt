@@ -1,0 +1,49 @@
+Patch 184 — SpecMarket CRM: sound + top toast on first appearance of a new order in CRM.
+
+REPO: tionTools/specmarket
+BASE MAIN SHA: 30ab924db08561830d66ed14e31d7d752f23755f
+PATCH SOURCE: origin/chatgpt-patches:184.patch
+TASK FILE: origin/chatgpt-patches:184.txt
+SCOPE: src/pages/HomeView.vue ONLY.
+
+BUSINESS RULES
+- On first arrival of an order previously unknown in CRM's tracked order IDs (any platform), show top new-order toast and sound once, irrespective of TTN, status, payment, or processing on the marketplace.
+- Existing orders updated later must never trigger a new-order alert.
+- Preserve the initial-load baseline: do not produce bulk notifications for the existing database on first startup. Do not replay alerts on refresh/reload for already-known orders.
+- Preserve the existing enable/disable switch for notifications.
+- Purple «НОВЫЙ ЗАКАЗ» badge is SEPARATE and must remain unchanged: show only when no TTN and not cancelled/returned, for all five platforms.
+- Manual order creation performed locally in the CRM is not a newly *synced* order; this patch changes only notifications from incoming CRM reads. Do not alter manual order save flows.
+
+ROOT CAUSE (CONFIRMED IN MAIN)
+- Realtime INSERT fills pendingNewOrderIds. notifyNewOrder() runs only if this pending ID was present when a row was inserted into local orders.
+- Normal reconciliation, manual sync, tab-focus refresh and recovery can add rows with no preceding INSERT event, producing no toast/sound.
+
+EXACT PATCH
+- Remove obsolete pendingNewOrderIds set and INSERT recording.
+- In refreshRemoteOrders(), on index === -1, after the newly fetched order is added to orders.value, notify only when hasRemoteOrderBaseline && !knownRemoteOrderIds.has(order.remoteId).
+- registerRefreshedRemoteOrders() subsequently adds this ID to knownRemoteOrderIds, so subsequent refreshes of the same order are silent.
+- Do not touch badge, notification message, sound, readback safety, orders RLS, Supabase tables, Edge functions, or any synchronizations.
+
+CODEX EXECUTION STEPS
+1. Read AGENTS.md and .agents/skills/frontend/SKILL.md.
+2. Obtain origin/main and origin/chatgpt-patches. Verify current main equals the exact Base SHA; if it advanced, STOP and report before applying.
+3. Use a NEW CLEAN worktree from that base SHA. Never clean/reset/stash/change the user's existing checkout.
+4. Retrieve 184.patch and 184.txt directly from the ROOT of origin/chatgpt-patches; do not search for local copies. Verify patch bytes/content against the branch and ensure diff only changes src/pages/HomeView.vue.
+5. Run git apply --check 184.patch, then git apply 184.patch; at any failure STOP. Do not use --reject, --unidiff-zero or alternative implementation.
+6. Run git diff --check, pnpm type-check, scoped Oxlint and ESLint, pnpm build. Do not run repository-wide auto-fix/format.
+7. Regression tests required:
+   (a) New Prom order with TTN and completed status, read via ordinary reconciliation without INSERT -> exactly one top toast/sound, purple badge absent.
+   (b) New Epicentr order without TTN -> exactly one toast/sound, purple badge present.
+   (c) New order from any other supported platform, appearing through incoming read -> once.
+   (d) INSERT plus reconciliation overlap -> once.
+   (e) Updates to TTN/status/payment on known order -> zero new alerts.
+   (f) Reload/cache restoration/initial baseline of existing orders -> no bulk alerts.
+   (g) Notifications switch disabled -> no toast/sound.
+   (h) Existing badge predicate remains unchanged.
+8. Report exact diff, base SHA, test results and any blocker. If a required test fails, STOP and return diagnostic; do NOT redesign the patch yourself.
+9. STOP after validation. NO PR, merge, deployment or production changes without explicit user authorization.
+
+VALIDATION STATUS AT AUTHORING
+- Source text of main at above SHA was inspected and all three target snippets matched exactly once.
+- Patch built as a standard three-hunk unified diff against main with 1 changed file, 2 removed lines and 1 replacement (3 removed + 1 added total).
+- Full checkout git apply --check, type-check, lint, build, browser/runtime tests remain to be completed by Codex; do not report these as PASS before executing them.
