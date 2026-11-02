@@ -3687,7 +3687,6 @@ onMounted(async () => {
   initializeLabelReminders()
   labelReminderInterval = window.setInterval(checkLabelReminderThresholds, 15_000)
   startAutomaticOrdersRefresh()
-  await bankingMonitor.start()
   const returnOrder = typeof route.query.returnOrder === 'string' ? route.query.returnOrder : ''
   const returnSearch = route.query.returnSearch
   const hasManualDraftCheckpoint = Boolean(
@@ -3698,15 +3697,6 @@ onMounted(async () => {
     restoreManualOrderDraftFromPriceSelection()
   if (route.query.returnRegistry === '1') restoreRegistryDraftNavigation()
   if (typeof returnSearch === 'string') searchQuery.value = returnSearch
-  if (restoreManualDraft) {
-    await nextTick()
-    orderDialog.value?.showModal()
-  }
-  if (returnOrder && orders.value.some((order) => String(order.id) === returnOrder)) {
-    expandedOrderId.value = returnOrder
-    await nextTick()
-    document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
-  }
   // This is a one-time return from the price list, not a permanent open-order state.
   if (
     route.query.returnOrder ||
@@ -3715,6 +3705,17 @@ onMounted(async () => {
     route.query.returnManualDraft
   )
     await router.replace({ query: {} })
+  if (restoreManualDraft) {
+    await nextTick()
+    orderDialog.value?.showModal()
+  }
+  const returnedOrder = orders.value.find((order) => String(order.id) === returnOrder)
+  if (returnedOrder) {
+    expandedOrderId.value = returnedOrder.id
+    await nextTick()
+    document.getElementById(`order-${returnOrder}`)?.scrollIntoView({ block: 'center' })
+  }
+  await bankingMonitor.start()
 })
 
 onScopeDispose(() => {

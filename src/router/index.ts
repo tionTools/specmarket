@@ -4,7 +4,10 @@ import MainLayout from '@/layouts/MainLayout.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  scrollBehavior(to, _from, savedPosition) {
+  scrollBehavior(to, from, savedPosition) {
+    // The order page scrolls after restoring the card and clearing the return query.
+    if (to.path === '/' && (to.query.returnOrder || (from.path === '/' && from.query.returnOrder)))
+      return false
     if (to.hash === '#banking') return { top: 0 }
     if (savedPosition) return savedPosition
     if (to.hash) return { el: to.hash, top: 16 }

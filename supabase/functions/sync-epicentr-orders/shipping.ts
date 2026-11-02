@@ -6,10 +6,14 @@ export function epicentrShipping(input: {
   isFree?: boolean | null
   previousIsFree?: boolean | null
 }) {
+  const deliveryPrice = input.deliveryPrice ?? input.previousDeliveryPrice
+  const isFree = input.isFree ?? input.previousIsFree
+  const sellerPays = input.existingSource !== 'manual' && isFree === true &&
+    typeof deliveryPrice === 'number' && Number.isFinite(deliveryPrice) && deliveryPrice >= 0
   return {
-    shipping: Number(input.existingShipping ?? 0),
-    shippingSource: input.existingSource ?? (input.existingShipping == null ? 'unconfirmed' : undefined),
-    deliveryPrice: input.deliveryPrice ?? input.previousDeliveryPrice,
-    isFree: input.isFree ?? input.previousIsFree,
+    shipping: sellerPays ? deliveryPrice : Number(input.existingShipping ?? 0),
+    shippingSource: sellerPays ? 'seller-api' : input.existingSource ?? (input.existingShipping == null ? 'unconfirmed' : undefined),
+    deliveryPrice,
+    isFree,
   }
 }
