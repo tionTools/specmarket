@@ -191,6 +191,56 @@ const isShowingNotInExcel = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
 const deletingOrderId = ref<string | number | null>(null)
 const user = ref<User | null>(null)
+const kytUsdRate = ref<number | null>(null)
+const kytUsdFetchedAt = ref<string | null>(null)
+const kytUsdError = ref('')
+const isUpdatingKytUsdRate = ref(false)
+const kytUsdUpdatedLabel = computed(() =>
+  kytUsdFetchedAt.value
+    ? new Intl.DateTimeFormat('ru-RU', {
+        timeZone: 'Europe/Kyiv',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(kytUsdFetchedAt.value)).replace(',', '')
+    : '',
+)
+
+async function loadKytUsdRate() {
+  if (!supabase || !user.value) return
+  const { data, error } = await supabase
+    .from('crm_kyt_usd_rate')
+    .select('sell_rate,fetched_at')
+    .eq('id', 'USD/UAH')
+    .maybeSingle()
+  if (error) {
+    kytUsdError.value = 'Не удалось загрузить сохранённый курс КИТ Обмін.'
+    return
+  }
+  kytUsdRate.value = data ? Number(data.sell_rate) : null
+  kytUsdFetchedAt.value = data?.fetched_at ?? null
+  kytUsdError.value = ''
+}
+
+async function updateKytUsdRate() {
+  if (!supabase || !user.value || isGuest.value || isUpdatingKytUsdRate.value) return
+  isUpdatingKytUsdRate.value = true
+  kytUsdError.value = ''
+  try {
+    const { data, error } = await supabase.functions.invoke('kyt-usd-rate', { body: {} })
+    if (error || !data?.rate || !data?.fetchedAt)
+      throw new Error(data?.error || 'Не удалось обновить курс КИТ Обмін.')
+    kytUsdRate.value = Number(data.rate)
+    kytUsdFetchedAt.value = data.fetchedAt
+  } catch (error) {
+    kytUsdError.value =
+      error instanceof Error ? error.message : 'Не удалось обновить курс КИТ Обмін.'
+  } finally {
+    isUpdatingKytUsdRate.value = false
+  }
+}
 const email = ref('')
 const password = ref('')
 const authError = ref('')
@@ -3610,6 +3660,7 @@ async function loadRemoteOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   user.value = session.session.user
+  void loadKytUsdRate()
   const { data: rateRows, error: rateError } = await supabase
     .from('crm_currency_rates')
     .select('effective_from, rate')
@@ -6018,19 +6069,45 @@ function orderDateTime(order: Order) {
 
       <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <button
-            class="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-950"
-            type="button"
-            :aria-expanded="isPlatformSummaryExpanded"
-            @click="isPlatformSummaryExpanded = !isPlatformSummaryExpanded"
-          >
-            <span>По площадкам</span>
-            <ChevronDown
-              class="size-4 transition-transform"
-              :class="{ 'rotate-180': isPlatformSummaryExpanded }"
-              aria-hidden="true"
-            />
-          </button>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              class="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-950"
+              type="button"
+              :aria-expanded="isPlatformSummaryExpanded"
+              @click="isPlatformSummaryExpanded = !isPlatformSummaryExpanded"
+            >
+              <span>По площадкам</span>
+              <ChevronDown
+                class="size-4 transition-transform"
+                :class="{ 'rotate-180': isPlatformSummaryExpanded }"
+                aria-hidden="true"
+              />
+            </button>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+              <span
+                >USD продажа:
+                {{ kytUsdRate === null ? '—' : kytUsdRate.toFixed(2).replace('.', ',') }} грн</span
+              >
+              <button
+                v-if="!isGuest"
+                class="inline-flex items-center gap-1 font-semibold text-indigo-700 disabled:opacity-50"
+                type="button"
+                :disabled="isUpdatingKytUsdRate"
+                @click="updateKytUsdRate"
+              >
+                <RefreshCw
+                  class="size-3.5"
+                  :class="{ 'animate-spin': isUpdatingKytUsdRate }"
+                  aria-hidden="true"
+                />
+                {{ isUpdatingKytUsdRate ? 'Обновление…' : 'Обновить' }}
+              </button>
+              <time v-if="kytUsdFetchedAt" :datetime="kytUsdFetchedAt">{{
+                kytUsdUpdatedLabel
+              }}</time>
+              <span v-if="kytUsdError" role="alert" class="text-rose-700">{{ kytUsdError }}</span>
+            </div>
+          </div>
           <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <label
               class="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"

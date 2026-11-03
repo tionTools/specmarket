@@ -377,6 +377,9 @@ verify_jwt = false
 [functions.sync-epicentr-orders]
 verify_jwt = false
 
+[functions.kyt-usd-rate]
+verify_jwt = true
+
 [functions.sync-kasta-orders]
 verify_jwt = false
 
