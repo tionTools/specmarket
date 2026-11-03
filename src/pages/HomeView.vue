@@ -4848,7 +4848,7 @@ async function copyOrderForSpreadsheet(order: Order) {
     products,
     formatSpreadsheetNumber(getNetOrderCost(order)),
     formatSpreadsheetNumber(getNetOrderAmount(order)),
-    '',
+    order.paymentAmount ? formatSpreadsheetNumber(order.paymentAmount) : '',
     formatSpreadsheetNumber(getNetRoyalty(order)),
     formatSpreadsheetNumber(order.shipping),
     '',
