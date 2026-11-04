@@ -6084,10 +6084,15 @@ function orderDateTime(order: Order) {
               />
             </button>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-              <span
-                >USD продажа:
-                {{ kytUsdRate === null ? '—' : kytUsdRate.toFixed(2).replace('.', ',') }} грн</span
-              >
+              <span>
+                <a
+                  href="https://kyt-obmin.kh.ua/ru"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-indigo-700 underline hover:text-indigo-900"
+                  >USD</a
+                >: {{ kytUsdRate === null ? '—' : kytUsdRate.toFixed(2).replace('.', ',') }} грн
+              </span>
               <button
                 v-if="!isGuest"
                 class="inline-flex items-center gap-1 font-semibold text-indigo-700 disabled:opacity-50"
