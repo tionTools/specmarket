@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { retailUsdSale } from './parse.ts'
+import { displayedUsdSale } from './parse.ts'
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -27,7 +27,7 @@ Deno.serve(async (request) => {
     if (!response.ok) throw new Error(`Сайт КИТ Обмін вернул HTTP ${response.status}.`)
     const html = await response.text()
     if (html.length > 2_000_000) throw new Error('Страница КИТ Обмін слишком большая.')
-    const rate = retailUsdSale(html)
+    const rate = displayedUsdSale(html)
     const admin = createClient(url, serviceKey)
     const { data, error } = await admin.rpc('save_crm_kyt_usd_rate', { p_rate: rate, p_requested_at: requestedAt })
     if (error || !data) throw new Error('Не удалось сохранить курс в CRM.')
