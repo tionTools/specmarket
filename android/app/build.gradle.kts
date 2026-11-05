@@ -19,8 +19,8 @@ android {
         applicationId = "ua.orders.crm"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.29"
+        versionCode = 35
+        versionName = "0.35"
     }
     signingConfigs {
         create("release") {
