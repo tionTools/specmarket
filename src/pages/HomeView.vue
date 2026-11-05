@@ -1780,6 +1780,8 @@ const matchingOrders = computed(() => {
       isPromRegistryView.value ||
       isShowingUnpaidOnly.value ||
       isShowingNotInExcel.value ||
+      isShowingCancellations.value ||
+      isShowingReturns.value ||
       (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
       matchesPlatform &&
