@@ -274,6 +274,16 @@ onUnmounted(() => {
       </header>
 
       <div v-if="orders.length" class="divide-y divide-slate-300">
+        <div v-if="mode === 'draft'" class="print-registry-actions px-4 py-3">
+          <button
+            class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            type="button"
+            :disabled="busy || checkedCount === 0"
+            @click="emit('checkAll', false)"
+          >
+            Снять все галочки
+          </button>
+        </div>
         <article
           v-for="order in orders"
           :key="order.id"
