@@ -46,7 +46,15 @@ function intervalMinutes() {
 
 function hasActiveTracking(delivery: JsonRecord) {
   const normalizedStatus = text(delivery.trackingNormalizedStatus)
-  return Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled', 'deleted'].includes(normalizedStatus)
+  return needsMeestReturnCorrection(delivery) ||
+    (Boolean(normalizedStatus) && !['delivered', 'returned', 'cancelled', 'deleted'].includes(normalizedStatus))
+}
+
+export function needsMeestReturnCorrection(delivery: JsonRecord) {
+  return carrierKind(delivery) === 'meest' &&
+    text(delivery.trackingStatusCode) === '1521' &&
+    text(delivery.trackingNormalizedStatus) === 'returned' &&
+    delivery.trackingReturnArrived !== true
 }
 
 function isDue(delivery: JsonRecord, lastCheckedAt: unknown, minutes: number, now: number) {
@@ -99,7 +107,7 @@ export async function runTrackingWorker(
     ordersQuery = ordersQuery.eq('id', orderId)
   } else {
     ordersQuery = ordersQuery
-      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled,deleted))`)
+      .or(`status.not.in.${finalOrderStatuses},and(delivery->>trackingNormalizedStatus.not.is.null,delivery->>trackingNormalizedStatus.not.in.(delivered,returned,cancelled,deleted)),and(delivery->>trackingStatusCode.eq.1521,delivery->>trackingNormalizedStatus.eq.returned,delivery->>trackingReturnArrived.eq.false)`)
       .not('delivery->>ttn', 'is', null)
     const platformFilter = bulkTrackingPlatformOrFilter(bulkTrackingEnabled!)
     if (platformFilter) ordersQuery = ordersQuery.or(platformFilter)
@@ -251,7 +259,7 @@ export async function runTrackingWorker(
           })
           if (reminderError) throw reminderError
         }
-        state.details = { ...(result.details ?? {}), pickupReminderKey: reminderKey }
+        state.details = { ...result.details, pickupReminderKey: reminderKey }
         pendingSuccessStates.push(state)
       } catch (error) {
         failed += 1
