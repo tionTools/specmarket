@@ -1,0 +1,40 @@
+Patch 186 — PROM LEGACY FINANCIAL WRITE PROTECTION. Supersedes the unsafe server-release instruction previously given for Patch 185.
+
+Repository: tionTools/specmarket
+BASE SHA: 58d00e53c51480c511e5efc3d6ce4af566b89057
+SOURCE: origin/chatgpt-patches/186.patch
+INSTRUCTIONS: origin/chatgpt-patches/186.txt
+
+FILES (exactly three):
+- supabase/functions/_shared/prom-order-financials.ts
+- supabase/functions/_shared/prom-order-financials_test.ts
+- supabase/functions/sync-prom-orders/index.ts
+
+User-approved intent:
+- For ALL previously existing Prom CRM orders WITHOUT flag delivery.promInstallmentAccountingV2, preserve the current financial results, EVEN on ordinary, full, and individual Prom synchronization. No historical backfills or recalculations.
+- Keep order status and delivery TTN/status updating through existing snapshot RPC.
+- Exception: existing Prom #437654601 is already explicitly assigned V2 accounting and must be the first corrected legacy order.
+- New orders imported after V2 introduction carry promInstallmentAccountingV2=true and remain subject to normal ongoing sync.
+- Registry payments and manual order editing remain separate from marketplace sync and must continue working normally. This patch does NOT freeze the registry or manual adjustments.
+
+Design and DB semantics:
+- Existing helper shouldUseSeparatedPromInstallmentAccounting chooses V2 only on new orders, marked V2 records, and #437654601.
+- New shouldProtectLegacyPromFinancials is true if existing CRM order and not V2.
+- Before calling apply_crm_marketplace_order_snapshot for a protected legacy order, remove shipping, acquiring, acquiring_percent, order_date and order_time from the API's p_data. In existing SQL implementation of the RPC (20260928183000_registry_financial_atomic_update.sql), jsonb_populate_record(v_current_order, p_data minus delivery/acquiring/acquiring_percent) retains existing DB values of omitted columns and update uses them under row lock. Do not replace with values from a stale read.
+- Current SQL RPC already preserves delivery.paymentAmount and rozetkaPayOperationIds atomically from the stored row (registry-owned values).
+- Do not call replace_crm_order_items for protected old orders at all; keep their existing quantity, price, cost, royalty, item identity and manual flags unchanged.
+- V2 #437654601 and new orders continue normal item sync and commission separation. Other order/date/status tracking stays intact.
+- No SQL migration, no schema modification, no extra Edge function, no change to Prom status completion code path.
+
+Tests:
+1. Read AGENTS.md and relevant code. Verify exact main BASE SHA and apply 186.patch from origin/chatgpt-patches in CLEAN separate worktree; do not confuse with already-applied local 185.patch worktree.
+2. Deno: run supabase/functions/_shared/prom-order-financials_test.ts (old tests + regression for snapshot guard and V2 exception).
+3. Deno typecheck modified Edge function/shared files; pnpm type-check, scoped lint Oxlint/ESLint for changed TS files, pnpm build, git diff --check.
+4. Validate integration paths with code-level review: old completed/paid/returned and open orders (no V2) are excluded from replace_crm_order_items, while status/TTN updates still happen; old order numeric shipping, acquiring/percent, order_date/time remain from DB after marketplace snapshot; registry and manual changes remain functional.
+5. Validate V2/exception #437654601 normal item+royalty update is still possible and expected on known sample: royalty 117.92, acquiring 23.46, both profits 108.62 with sale 690, cost 440, shipping 0.
+6. Preserve prior unrelated code. If check fails STOP without redesign or unrelated changes.
+7. No deploy or production writes without explicit approval. Do NOT deploy 185 alone; server must include BOTH merged 185 and additional protective 186.
+
+Release procedure ONLY after explicit authorization: merge reviewed 186 to main, deploy EXACT named Edge sync-prom-orders via pinned pnpm dlx supabase@2.113.0, then separate targeted sync of ONLY #437654601 after read-only verifying current finances and that royalty_manual=false. Never mass-sync historical records.
+
+Limits: Author verified source anchoring, generated patch and published. Local git apply/CI/Deno/browser and production Edge deployment NOT performed by assistant; Codex or an approved build must verify.
