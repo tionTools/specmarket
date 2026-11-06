@@ -233,6 +233,19 @@ Deno.test('Meest confirmed receipt after a return event marks the return arrived
   })
 })
 
+Deno.test('Meest return completion code 1825 marks arrival', async () => {
+  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [
+    { eventDateTime: '2026-10-17 09:38:07', eventCode: '1521', eventDescr: { descrUA: 'Готується до повернення відправнику' } },
+    { eventDateTime: '2026-10-19 18:34:35', eventCode: '1825', eventDescr: { descrUA: 'Відправлення повернуто відправнику' } },
+  ] }, async () => {
+    const result = await meestStatus('723-5268922')
+    const arrived = mergeTrackingDelivery({ ttn: '723-5268922', carrier: 'Meest' }, result, '2026-10-19T19:00:00Z', 'manual')
+    assert(result.normalizedStatus === 'returned' && result.final, 'return completion must be final')
+    assert(arrived.trackingReturnArrived === true && arrived.trackingReturnInProgress === false,
+      'completed return must be marked arrived')
+  })
+})
+
 Deno.test('Meest public code 1622 still confirms delivered', async () => {
   const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
   const xml = `<return><result_table>
