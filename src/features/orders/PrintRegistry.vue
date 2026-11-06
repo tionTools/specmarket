@@ -244,18 +244,6 @@ onUnmounted(() => {
           <div class="rounded-xl bg-slate-100 px-4 py-3">
             <p class="text-xs text-slate-500">Заказов</p>
             <p class="mt-1 text-xl font-bold">{{ orders.length }}</p>
-          </div>
-          <div class="rounded-xl bg-slate-100 px-4 py-3">
-            <p class="text-xs text-slate-500">Единиц товара</p>
-            <p class="mt-1 text-xl font-bold">{{ positionsCount }}</p>
-          </div>
-          <div class="rounded-xl bg-slate-100 px-4 py-3">
-            <p class="text-xs text-slate-500">Общая сумма</p>
-            <p class="mt-1 text-xl font-bold">{{ formatMoney(totalAmount) }}</p>
-          </div>
-          <div class="rounded-xl bg-slate-100 px-4 py-3">
-            <p class="text-xs text-slate-500">Проверено в 1С</p>
-            <p class="mt-1 text-xl font-bold">{{ checkedCount }} / {{ orders.length }}</p>
             <label
               v-if="mode === 'draft' && orders.length"
               class="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-emerald-800"
@@ -270,20 +258,22 @@ onUnmounted(() => {
               {{ allChecked ? 'Снять все' : 'Отметить все' }}
             </label>
           </div>
+          <div class="rounded-xl bg-slate-100 px-4 py-3">
+            <p class="text-xs text-slate-500">Единиц товара</p>
+            <p class="mt-1 text-xl font-bold">{{ positionsCount }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-100 px-4 py-3">
+            <p class="text-xs text-slate-500">Общая сумма</p>
+            <p class="mt-1 text-xl font-bold">{{ formatMoney(totalAmount) }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-100 px-4 py-3">
+            <p class="text-xs text-slate-500">Проверено в 1С</p>
+            <p class="mt-1 text-xl font-bold">{{ checkedCount }} / {{ orders.length }}</p>
+          </div>
         </div>
       </header>
 
       <div v-if="orders.length" class="divide-y divide-slate-300">
-        <div v-if="mode === 'draft'" class="print-registry-actions px-4 py-3">
-          <button
-            class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            type="button"
-            :disabled="busy || checkedCount === 0"
-            @click="emit('checkAll', false)"
-          >
-            Снять все галочки
-          </button>
-        </div>
         <article
           v-for="order in orders"
           :key="order.id"
