@@ -1,0 +1,265 @@
+diff --git a/supabase/functions/_shared/prom-order-financials.ts b/supabase/functions/_shared/prom-order-financials.ts
+--- a/supabase/functions/_shared/prom-order-financials.ts
++++ b/supabase/functions/_shared/prom-order-financials.ts
+@@ -35,22 +35,29 @@
+   return hasWebsiteCommissionMarker(order)
+ }
+ 
+-export function hasPromInstallmentPayment(value: unknown): boolean {
+-  const paymentData = asRecord(asRecord(value).payment_data)
+-  return Object.keys(asRecord(paymentData.rpay_parts)).length > 0
+-}
+-
+-// Order-level fixed commissions are added on top of item/catalog commission.
+-// In rpay_parts, `commission` is a percentage (3.70), while `commission_amount`
+-// is the money amount (20.54). Only the money amount belongs in royalty.
+-export function promOrderLevelCommission(value: unknown, depth = 0): number {
+-  if (depth > 4 || Array.isArray(value)) return 0
+-  const record = asRecord(value)
+-  return Object.entries(record).reduce((total, [key, candidate]) => {
+-    if (/rpay[_-]?parts/i.test(key)) {
+-      const parts = asRecord(candidate)
+-      return total + number(pick(parts, 'commission_amount', 'commissionAmount'))
+-    }
++export function hasPromInstallmentPayment(value: unknown): boolean {
++  const paymentData = asRecord(asRecord(value).payment_data)
++  return Object.keys(asRecord(paymentData.rpay_parts)).length > 0
++}
++
++export function promInstallmentCommissionAmount(value: unknown): number | undefined {
++  const paymentData = asRecord(asRecord(value).payment_data)
++  const parts = asRecord(paymentData.rpay_parts)
++  const rawAmount = pick(parts, 'commission_amount', 'commissionAmount')
++  if (rawAmount === undefined) return undefined
++  const normalized = text(rawAmount).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')
++  if (!normalized) return undefined
++  const amount = Number(normalized)
++  return Number.isFinite(amount) && amount >= 0 ? amount : undefined
++}
++
++// Order-level commissions belong in royalty; the rpay_parts fee is acquiring.
++// rpay_parts.commission is a percentage; commission_amount is the actual fee.
++export function promOrderLevelCommission(value: unknown, depth = 0): number {
++  if (depth > 4 || Array.isArray(value)) return 0
++  const record = asRecord(value)
++  return Object.entries(record).reduce((total, [key, candidate]) => {
++    if (/rpay[_-]?parts/i.test(key)) return total
+     if (/prosale/i.test(key)) {
+       const commission = asRecord(candidate)
+       const title = readable(commission.title).toLowerCase()
+diff --git a/supabase/functions/_shared/prom-order-financials_test.ts b/supabase/functions/_shared/prom-order-financials_test.ts
+--- a/supabase/functions/_shared/prom-order-financials_test.ts
++++ b/supabase/functions/_shared/prom-order-financials_test.ts
+@@ -1,44 +1,65 @@
+-import { hasPromInstallmentPayment, isPromWebsiteOrder, promOrderLevelCommission } from './prom-order-financials.ts'
+-
+-function assert(value: unknown, message = 'Assertion failed'): asserts value {
+-  if (!value) throw new Error(message)
+-}
+-
+-Deno.test('Prom mobile app installment commission uses amount, not percentage', () => {
+-  const order = {
+-    source: 'mobile_catalog_app',
+-    cpa_commission: { amount: 98.46 },
+-    payment_data: {
+-      rpay_parts: {
+-        commission: 3.70,
+-        commission_amount: 20.54,
+-      },
+-    },
+-  }
+-
+-  assert(!isPromWebsiteOrder(order))
+-  assert(hasPromInstallmentPayment(order))
+-  assert(!hasPromInstallmentPayment({ payment_data: {} }))
+-  assert(promOrderLevelCommission(order) === 20.54)
+-  assert(Math.abs(98.46 + promOrderLevelCommission(order) - 119.00) < 1e-9)
+-})
+-
+-Deno.test('Prom website marker remains separate from order-level commission amount', () => {
+-  const websiteOrder = {
+-    prosale_commission: {
+-      type: 2,
+-      title: 'Комісія за замовлення з сайту',
+-      amount: 15,
+-    },
+-  }
+-
+-  assert(isPromWebsiteOrder(websiteOrder))
+-  assert(promOrderLevelCommission(websiteOrder) === 15)
+-
+-  const mobileOrderWithMarker = {
+-    source: 'mobile_catalog_app',
+-    prosale_commission: websiteOrder.prosale_commission,
+-  }
+-  assert(!isPromWebsiteOrder(mobileOrderWithMarker))
+-  assert(promOrderLevelCommission(mobileOrderWithMarker) === 15)
+-})
++import {
++  hasPromInstallmentPayment,
++  isPromWebsiteOrder,
++  promInstallmentCommissionAmount,
++  promOrderLevelCommission,
++} from './prom-order-financials.ts'
++
++function assert(value: unknown, message = 'Assertion failed'): asserts value {
++  if (!value) throw new Error(message)
++}
++
++Deno.test('Prom mobile app installment fee is acquiring, not royalty', () => {
++  const order = {
++    source: 'mobile_catalog_app',
++    cpa_commission: { amount: 98.46 },
++    payment_data: {
++      rpay_parts: {
++        commission: 3.70,
++        commission_amount: 20.54,
++      },
++    },
++  }
++
++  assert(!isPromWebsiteOrder(order))
++  assert(hasPromInstallmentPayment(order))
++  assert(!hasPromInstallmentPayment({ payment_data: {} }))
++  assert(promOrderLevelCommission(order) === 0)
++  assert(promInstallmentCommissionAmount(order) === 20.54)
++  assert(Math.abs(98.46 + (promInstallmentCommissionAmount(order) ?? 0) - 119.00) < 1e-9)
++})
++
++Deno.test('Prom 690 UAH installment: actual amount, not 3.4 percent added twice', () => {
++  const order = {
++    cpa_commission: { amount: 117.92 },
++    payment_data: {
++      rpay_parts: { commission: 3.4, commission_amount: 23.46 },
++    },
++  }
++  assert(promOrderLevelCommission(order) === 0)
++  assert(promInstallmentCommissionAmount(order) === 23.46)
++  assert(Math.abs(690 - 440 - 117.92 - (promInstallmentCommissionAmount(order) ?? 0) - 108.62) < 1e-9)
++  assert(promInstallmentCommissionAmount({ payment_data: { rpay_parts: { commission: 3.7 } } }) === undefined)
++  assert(promInstallmentCommissionAmount({ payment_data: { rpay_parts: { commission_amount: -2 } } }) === undefined)
++})
++
++Deno.test('Prom website marker remains separate from order-level commission amount', () => {
++  const websiteOrder = {
++    prosale_commission: {
++      type: 2,
++      title: 'Комісія за замовлення з сайту',
++      amount: 15,
++    },
++  }
++
++  assert(isPromWebsiteOrder(websiteOrder))
++  assert(promOrderLevelCommission(websiteOrder) === 15)
++  assert(promInstallmentCommissionAmount(websiteOrder) === undefined)
++
++  const mobileOrderWithMarker = {
++    source: 'mobile_catalog_app',
++    prosale_commission: websiteOrder.prosale_commission,
++  }
++  assert(!isPromWebsiteOrder(mobileOrderWithMarker))
++  assert(promOrderLevelCommission(mobileOrderWithMarker) === 15)
++})
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -40,11 +40,12 @@
+   normalizePromExternalIds,
+   promConfirmedAcceptance,
+ } from '../_shared/prom-order-action.ts'
+-import {
+-  hasPromInstallmentPayment,
+-  isPromWebsiteOrder,
+-  promOrderLevelCommission,
+-} from '../_shared/prom-order-financials.ts'
++import {
++  hasPromInstallmentPayment,
++  isPromWebsiteOrder,
++  promInstallmentCommissionAmount,
++  promOrderLevelCommission,
++} from '../_shared/prom-order-financials.ts'
+ 
+ const corsHeaders = {
+   'Access-Control-Allow-Origin': '*',
+@@ -1492,10 +1493,18 @@
+       sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+     const orderLevelCommissionAmount = promOrderLevelCommission(order)
+     const isWebsiteOrder = isPromWebsiteOrder(order)
+-    const isInstallmentPayment =
+-      hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
+-    const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
+-    const hasManualShipping = previousDelivery.shippingSource === 'manual'
++    const isInstallmentPayment =
++      hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
++    const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
++    const installmentCommissionAmount = promInstallmentCommissionAmount(order)
++    const seedInstallmentAcquiring =
++      !existing &&
++      isInstallmentPayment &&
++      installmentCommissionAmount !== undefined &&
++      manual.acquiring === undefined &&
++      manual.acquiringPercent === undefined &&
++      !/(?:скас|cancel|повер|return|refund)/i.test(orderStatus)
++    const hasManualShipping = previousDelivery.shippingSource === 'manual'
+     const promoShippingWaived =
+       previousDelivery.promPromoShippingWaived === true ||
+       shouldWaivePromPromoShippingForUnclaimedReturn({
+@@ -1527,14 +1536,22 @@
+       platform: 'Пром',
+       status: orderStatus,
+       shipping: resolvedShipping.shipping,
+-      acquiring:
+-        manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
+-      acquiring_percent:
+-        manual.acquiringPercent !== undefined
+-          ? manual.acquiringPercent === null
+-            ? null
+-            : number(manual.acquiringPercent)
+-          : (existing?.acquiring_percent ?? null),
++      acquiring:
++        manual.acquiring !== undefined
++          ? number(manual.acquiring)
++          : seedInstallmentAcquiring
++            ? (installmentCommissionAmount ?? 0)
++            : number(existing?.acquiring),
++      acquiring_percent:
++        manual.acquiringPercent !== undefined
++          ? manual.acquiringPercent === null
++            ? null
++            : number(manual.acquiringPercent)
++          : seedInstallmentAcquiring
++            ? orderAmount > 0
++              ? ((installmentCommissionAmount ?? 0) / orderAmount) * 100
++              : null
++            : (existing?.acquiring_percent ?? null),
+       delivery: {
+         carrier: deliveryCarrier,
+         ttn: trackingNumber,
+diff --git a/src/pages/HomeView.vue b/src/pages/HomeView.vue
+--- a/src/pages/HomeView.vue
++++ b/src/pages/HomeView.vue
+@@ -888,14 +888,16 @@
+ }
+ const isEpicentrCancelledBeforeShipment = (order: Order) =>
+   isPreShipmentEpicentrCancellation(order, displayOrderStatus(order.status))
+-const getPlannedProfit = (order: Order) =>
+-  isFullyAcceptedReturn(order) || isEpicentrCancelledBeforeShipment(order)
+-    ? 0
+-    : getNetOrderAmount(order) * 0.983 -
+-      getNetOrderCost(order) -
+-      getNetRoyalty(order) -
+-      order.shipping -
+-      (order.extraExpenses ?? 0)
++const getPlannedProfit = (order: Order) =>
++  isFullyAcceptedReturn(order) || isEpicentrCancelledBeforeShipment(order)
++    ? 0
++    : getNetOrderAmount(order) *
++        (order.delivery.isInstallmentPayment && order.acquiring > 0 ? 1 : 0.983) -
++      getNetOrderCost(order) -
++      getNetRoyalty(order) -
++      (order.delivery.isInstallmentPayment ? order.acquiring : 0) -
++      order.shipping -
++      (order.extraExpenses ?? 0)
+ // Обычно фактическая прибыль появляется после внесения оплаты. Полностью
+ // принятый возврат — исключение: его отрицательный результат уже состоялся,
+ // даже если итоговая сумма оплаты стала нулевой.
