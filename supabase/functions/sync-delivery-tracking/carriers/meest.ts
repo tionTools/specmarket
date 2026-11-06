@@ -95,6 +95,7 @@ function meestReadableStatus(source: string, code: string) {
   if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
   if (code === '12') return { status: source, final: false, normalizedStatus: 'in_transit' }
   if (code === '1521') return { status: source, final: false, normalizedStatus: 'returning' }
+  if (code === '1825') return { status: source, final: true, normalizedStatus: 'returned' }
   if (
     code === '1622' ||
     /^доручено$/i.test(status) ||
