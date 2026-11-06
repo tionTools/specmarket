@@ -172,6 +172,20 @@ Deno.test('Meest OpenAPI code 11 is also non-final', async () => {
   })
 })
 
+Deno.test('Meest OpenAPI code 1214 is in transit, not delivered', async () => {
+  const status = 'Надходження на підрозділ доручення'
+  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [{
+    eventDateTime: '2026-11-05 17:05:29', eventCode: '1214',
+    eventDescr: { descrUA: status },
+  }] }, async () => {
+    const result = await meestStatus('723-8635593')
+    assert(result.status === status, 'actual Meest event text must be retained')
+    assert(result.normalizedStatus === 'in_transit', 'arrival at assignment division is still in transit')
+    assert(result.final === false, 'arrival at assignment division must not mark buyer receipt')
+    assert(result.details?.trackingDeliveredAt === '', 'arrival must not set a delivered timestamp')
+  })
+})
+
 Deno.test('Meest public code 1622 still confirms delivered', async () => {
   const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
   const xml = `<return><result_table>
