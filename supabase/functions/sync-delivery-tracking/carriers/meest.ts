@@ -93,6 +93,8 @@ function meestReadableStatus(source: string, code: string) {
   if (code === '8081') return { status: 'На пути к получателю', final: false, normalizedStatus: 'in_transit' }
   if (code === '1214') return { status: source, final: false, normalizedStatus: 'in_transit' }
   if (code === '11') return { status: source, final: false, normalizedStatus: 'in_transit' }
+  if (code === '12') return { status: source, final: false, normalizedStatus: 'in_transit' }
+  if (code === '1521') return { status: source, final: false, normalizedStatus: 'returning' }
   if (
     code === '1622' ||
     /^доручено$/i.test(status) ||
@@ -108,6 +110,13 @@ function meestReadableStatus(source: string, code: string) {
   return fallback.normalizedStatus === 'delivered'
     ? { status: source, final: false, normalizedStatus: 'unknown' }
     : fallback
+}
+
+function meestReturnStatus(source: string, code: string, returnStarted: boolean) {
+  const base = meestReadableStatus(source, code)
+  return returnStarted && !['delivered', 'returned'].includes(base.normalizedStatus)
+    ? { ...base, final: false, normalizedStatus: 'returning' }
+    : base
 }
 
 function decodeXml(value: string) {
@@ -178,7 +187,8 @@ async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
   const events = publicTrackingEvents(await trackingResponse.text())
   if (!events.length) throw new Error('Meest public tracking не вернул события')
   const latest = latestPublicTrackingEvent(events)
-  const base = meestReadableStatus(latest.status, latest.code)
+  const returnStarted = events.some((event) => event.code === '1521')
+  const base = meestReturnStatus(latest.status, latest.code, returnStarted)
   const final = /^(1622|1825|3|5700)$/.test(latest.code) || base.final
   return {
     ...base,
@@ -187,6 +197,7 @@ async function meestPublicTrackingStatus(ttn: string): Promise<TrackingResult> {
     provider: 'meest_public_tracking',
     source: 'public_tracking',
     activeTtn: normalizedTtn,
+    relation: returnStarted ? 'return' : undefined,
     relatedShipments: [],
     events: compactEvents(events.map((event) => ({
       at: event.at,
@@ -231,7 +242,8 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
   const source = text(record(latest?.eventDescr).descrUA) || text(latest?.eventDescr) || responseStatus
   if (!source) throw new Error('Meest API не вернул статус')
   const eventCode = text(latest?.eventCode)
-  const base = meestReadableStatus(source, eventCode)
+  const returnStarted = events.some((event) => text(event.eventCode) === '1521')
+  const base = meestReturnStatus(source, eventCode, returnStarted)
   const final = /^(1622|1825|3|5700)$/.test(eventCode) || base.final
   const trackingEvents = compactEvents(events.map((event) => ({
     at: text(event.eventDateTime),
@@ -247,6 +259,7 @@ export async function meestStatus(ttn: string): Promise<TrackingResult> {
     provider: 'meest_api',
     source: 'carrier_api',
     activeTtn: ttn.replace(/\s/g, ''),
+    relation: returnStarted ? 'return' : undefined,
     // The current v3 endpoint exposes event cities. It does not document them as the
     // recipient's final pickup point, so no destination is derived from eventCityDescr.
     relatedShipments: [],

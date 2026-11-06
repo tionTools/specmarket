@@ -186,6 +186,53 @@ Deno.test('Meest OpenAPI code 1214 is in transit, not delivered', async () => {
   })
 })
 
+Deno.test('Meest return preparation and sorting-center arrival stay in progress', async () => {
+  const events = [
+    { eventDateTime: '2026-11-02 09:38:07', eventCode: '1521', eventDescr: { descrUA: 'Готується до повернення відправнику' } },
+    { eventDateTime: '2026-11-04 13:29:16', eventCode: '12', eventDescr: { descrUA: 'Прибуло у сортувальний центр' } },
+  ]
+  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: events }, async () => {
+    const result = await meestStatus('723-8346584')
+    assert(result.status === 'Прибуло у сортувальний центр', 'latest actual event must be shown')
+    assert(result.normalizedStatus === 'returning' && !result.final, 'sorting center is not the return destination')
+    const corrected = mergeTrackingDelivery({
+      ttn: '723-8346584', carrier: 'Meest', trackingStatus: 'Готується до повернення відправнику',
+      trackingNormalizedStatus: 'returned', trackingReturnArrived: false,
+    }, result, '2026-11-04T14:00:00Z', 'manual')
+    assert(corrected.trackingReturnInProgress === true, 'return must remain in progress')
+    assert(corrected.trackingReturnArrived === false, 'sorting center must not mark return arrived')
+  })
+})
+
+Deno.test('Meest public fallback keeps a return in progress at the sorting center', async () => {
+  const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
+  const xml = `<return><result_table>
+<items><DateTimeAction>2026-11-02 09:38:07</DateTimeAction><StatusCode>1521</StatusCode><ActionMessages>Готується до повернення відправнику</ActionMessages></items>
+<items><DateTimeAction>2026-11-04 13:29:16</DateTimeAction><StatusCode>12</StatusCode><ActionMessages>Прибуло у сортувальний центр</ActionMessages></items>
+</result_table></return>`
+  await withCarrierResponses({ MEEST_API_TOKEN: 'test' }, [
+    { body: { result: [] } }, { body: html }, { body: xml },
+  ], async () => {
+    const result = await meestStatus('723-8346584')
+    assert(result.provider === 'meest_public_tracking', 'public fallback was not used')
+    assert(result.status === 'Прибуло у сортувальний центр', 'newest event must remain visible')
+    assert(result.normalizedStatus === 'returning' && result.relation === 'return', 'return must still be in progress')
+    assert(!result.final, 'sorting center must not finish a return')
+  })
+})
+
+Deno.test('Meest confirmed receipt after a return event marks the return arrived', async () => {
+  await withCarrierResponse({ MEEST_API_TOKEN: 'test' }, { result: [
+    { eventDateTime: '2026-11-02 09:38:07', eventCode: '1521', eventDescr: { descrUA: 'Готується до повернення відправнику' } },
+    { eventDateTime: '2026-11-06 13:29:16', eventCode: '1622', eventDescr: { descrUA: 'Доручено' } },
+  ] }, async () => {
+    const result = await meestStatus('723-8346584')
+    const arrived = mergeTrackingDelivery({ ttn: '723-8346584', carrier: 'Meest' }, result, '2026-11-06T14:00:00Z', 'manual')
+    assert(result.normalizedStatus === 'delivered' && result.final, 'actual receipt must remain final')
+    assert(arrived.trackingReturnArrived === true, 'confirmed return receipt must mark arrival')
+  })
+})
+
 Deno.test('Meest public code 1622 still confirms delivered', async () => {
   const html = `<script>var salt = '0123456789abcdef0123456789abcdef';</script>`
   const xml = `<return><result_table>
