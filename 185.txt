@@ -1,48 +1,35 @@
-Patch 185 — SpecMarket CRM / Prom «Оплатити частинами»: split fees without double deduction.
+Patch 185 REVISED, supersedes prior files 185.patch and 185.txt.
+Repo: tionTools/specmarket.
+BASE main: d215eccb9535ba36beb455b8545866f55a159725.
+FILES: supabase/functions/_shared/prom-order-financials.ts, supabase/functions/_shared/prom-order-financials_test.ts, supabase/functions/sync-prom-orders/index.ts, src/features/orders/types.ts, src/pages/HomeView.vue.
 
-REPOSITORY: tionTools/specmarket
-BASE: main SHA d215eccb9535ba36beb455b8545866f55a159725
-SOURCE: origin/chatgpt-patches:185.patch
-INSTRUCTIONS: origin/chatgpt-patches:185.txt
-FILES (exactly four):
-- supabase/functions/_shared/prom-order-financials.ts
-- supabase/functions/_shared/prom-order-financials_test.ts
-- supabase/functions/sync-prom-orders/index.ts
-- src/pages/HomeView.vue
+USER DECISION:
+- All already-existing CRM orders, including completed and returned orders, must keep their current old royalty, acquiring, actual/planned profit and manual/registry data, EVEN IF resynchronized later. No historic mass correction.
+- Sole explicit exception: Prom order #437654601 (external ID prom:437654601) is the FIRST order using the new separated installment-fee logic. It is already in CRM. Do not treat it as legacy.
+- New orders first imported into CRM after deployment use the new logic and receive persistent flag promInstallmentAccountingV2 in delivery JSON. No distinction by order date or Prom status. This flag also persists for exceptional order once explicitly resynchronized.
+- For other existing orders this flag stays absent and original calculations stay active.
+- In Prom rpay_parts.commission is a percentage; commission_amount is the actual UAH fee. V2 excludes the fee from royalty and accounts for it once as acquiring; no extra ordinary 1.7 percent if known installment acquiring is present.
+- New first imports with reliable installment fee seed acquiring and percent unless manual override or cancelled/returned. Existing orders, including exception, preserve acquiring amount and percent (manual/registry); only their non-manual royalty can be corrected when V2 applies.
+- Preserve other marketplace orders and regular/non-installment Prom behavior.
 
-WHY
-For Prom order #437654601 (690 UAH), provider shows ProSale 117.92 and installment fee 23.46 (3.4%). Existing synchronizer adds rpay_parts.commission_amount to royalty, while CRM also deducts acquisition 23.46; actual profit is understated by 23.46. Planned profit currently additionally assumes a default 1.7% ordinary acquiring, though Prom says installment commission already includes acquiring. https://support.prom.ua/hc/uk/articles/19362823022621
+EXCEPTION ORDER EXPECTED RESULT (after approved targeted sync and confirmation of no manual royalty override):
+Prom #437654601, sales 690, cost 440, ProSale royalty 117.92, installment fee/acquiring 23.46, shipping 0, extra 0, paid 690: actual and planned profit 108.62 UAH.
+Existing screenshot: royalty 141.38, acquiring 23.46, actual 85.16, planned 96.89.
+Prior to any production write READ ONLY verify the order's royalty_manual, royalty_amount, acquiring, acquiring_percent, delivery flag, item returns, payment and exact Prom API commissions. If data or manual flags disagree, STOP; do not overwrite.
+This exceptional existing order will need specifically approved individual sync only AFTER source deploy. No historical batch updates or full sync.
 
-DESIRED
-- Royalty/ProSale: 117.92 UAH.
-- Installment fee/acquiring: 23.46 UAH, no extra acquiring fee.
-- Total commissions: 141.38 UAH.
-- For order 437654601 with cost 440, shipping 0, extra 0: actual and planned profit 108.62 UAH when actual payment is 690 and existing acquiring is 23.46.
-- The rate in rpay_parts.commission is PERCENT (3.4/3.7 etc.), not an amount. Use rpay_parts.commission_amount; never assume fixed percentage or hardcode installment schedules.
-- For NEW imported orders with an authoritative API installment amount and no manual override, seed acquiring amount and percentage automatically.
-- Preserve acquiring and acquiring_percent in EXISTING orders, including actual registry adjustments, zeroes after refunds, and manual overrides; do not silently overwrite or backfill historical bank data.
-- If installment amount is unavailable, do not invent a fee. Planned profit keeps legacy 1.7% estimate only until actual installment acquiring becomes known; it must not count 1.7% on top of known installment fee.
-- For regular Prom, Epicentr, other marketplaces, the royalty / payment / planned financial behavior is unchanged.
-- Do not alter refund handling, return status, reconciliation, SQL, settings, service role, other functions, or shipping rules.
+TECH NOTES:
+- Old default of promOrderLevelCommission includes installment fee and stays unchanged for old orders. New V2 flag selects omission, even in recursive objects.
+- Planned profit formula preserves old behavior unless V2 flag + Prom installment + positive actual acquiring.
+- Only existing Supabase delivery JSON flag; no SQL or migration.
+- Historical records stay untouched on ordinary page reload or standard sync.
 
-VERIFICATION STEPS FOR CODEX
+CODEX VALIDATION:
 1. Read AGENTS.md and .agents/skills/frontend/SKILL.md.
-2. In a NEW CLEAN worktree from exact BASE, retrieve 185.patch and 185.txt from ROOT of origin/chatgpt-patches.
-3. Verify base SHA and git apply --check; apply 185.patch only. If base advanced or hunk conflicts STOP, report; do not redesign.
-4. Run deno test supabase/functions/_shared/prom-order-financials_test.ts; deno check for affected Edge files as possible.
-5. Run pnpm type-check; scoped lint (Oxlint+ESLint) for changed frontend and shared TS files; pnpm build; git diff --check.
-6. Verify field-level regression: Prom source with payment_data.rpay_parts.commission=3.4 and commission_amount=23.46 and cpa=117.92 yields per-item royalty=117.92 and acquiring=23.46 exactly once.
-7. Check no installment commission fields -> existing amounts preserved; other order-level commissions (website ProSale) still in royalty.
-8. Test new order with known installment fee auto-seeds acquiring/percent; existing order values (including manual/registry) stay untouched on sync. Verify cancelled/returned first-import does not seed fee.
-9. Test planned/actual result on #437654601 fixture: 108.62; non-installment legacy planned 1.7% still applies; prior refund/cancel cases preserved.
-10. No unrelated edits or format-wide changes. Report check results and exact diff. If anything fails STOP with diagnostics.
-
-DEPLOYMENT NOTE
-- Frontend merge to main triggers web Deploy to Production, but DOES NOT deploy Supabase Edge.
-- After explicit approval: deploy only sync-prom-orders Edge via the repo-established scoped CLI `pnpm dlx supabase@2.113.0 functions deploy sync-prom-orders --project-ref rtkhgldaswsclkorlyxx`, preserving JWT and config; verify source SHA and run targeted production readback. No SQL, db push, migration history changes.
-- Historical orders may require individually triggered refresh and verification against Prom plus registered acquiring; DO NOT mass-sync or overwrite historical accounts without a separate approved plan.
-- Do not merge or deploy without the user's next explicit permission.
-
-AUTHORING STATUS
-- Based on inspected source from exact main SHA; four paths, guarded unique textual replacements.
-- Unit/CI tests, real Git apply, browser with Supabase, production and Edge deployment NOT performed; they must be verified by Codex.
+2. Verify exact BASE SHA; fresh clean worktree, retrieve revised 185.patch and 185.txt from root origin/chatgpt-patches, git apply --check, git apply.
+3. Deno tests and check for changed Edge files; address lint, pnpm type-check, pnpm build, git diff --check.
+4. Regression scenarios: legacy completed/open/refunded accounts remain unchanged, even on targeted resync; only existing order #437654601 uses V2 and after selective resync matches 108.62; new orders get persistent V2; no extra acquiring for installments; missing API amount does not fabricate a fee; manual and registry acquiring stays intact; Epicentr/Kasta/other calculations unchanged.
+5. If any test fails STOP with diagnostic, no alternative edits without consent. Report exact diff.
+6. No PR, merge, SQL, Supabase Edge deploy, migration, historical correction or target order sync without explicit permission.
+RELEASE: web merge alone does not deploy sync-prom-orders. Named Edge deploy after separate approval: pnpm dlx supabase@2.113.0 functions deploy sync-prom-orders --project-ref rtkhgldaswsclkorlyxx.
+Authoring: source inspected at exact base, uniquely anchored diff, published for later Codex verification. Git apply/real Deno/type-check/lint/build/browser/production NOT run.
