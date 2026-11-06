@@ -4637,6 +4637,7 @@ function orderStatusTone(order: Order): OrderStatusTone {
 
   if (
     carrierConfirmsShipment ||
+    (order.platform === 'Пром' && !trackingNormalized && deliveryStatus === 'on_the_way') ||
     (['Каста', 'Р/С', 'Сайт'].includes(order.platform) && /в дороге/.test(status))
   )
     return 'green'
