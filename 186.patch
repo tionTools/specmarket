@@ -1,0 +1,176 @@
+diff --git a/supabase/functions/_shared/prom-order-financials.ts b/supabase/functions/_shared/prom-order-financials.ts
+--- a/supabase/functions/_shared/prom-order-financials.ts
++++ b/supabase/functions/_shared/prom-order-financials.ts
+@@ -53,7 +53,32 @@
+   )
+ }
+ 
+-export function promInstallmentCommissionAmount(value: unknown): number | undefined {
++// Historical orders retain their financial figures during any later Prom sync.
++// Orders first imported with V2, and the approved exception, are not protected.
++export function shouldProtectLegacyPromFinancials(
++  existsInCrm: boolean,
++  installmentAccountingV2: boolean,
++): boolean {
++  return existsInCrm && !installmentAccountingV2
++}
++
++// The marketplace snapshot RPC keeps current DB column values when fields are omitted.
++// Omit historic financial fields instead of copying potentially stale values.
++export function protectLegacyPromFinancialSnapshot(
++  data: Record<string, unknown>,
++  protect: boolean,
++): Record<string, unknown> {
++  if (!protect) return data
++  const snapshot = { ...data }
++  delete snapshot.shipping
++  delete snapshot.acquiring
++  delete snapshot.acquiring_percent
++  delete snapshot.order_date
++  delete snapshot.order_time
++  return snapshot
++}
++
++export function promInstallmentCommissionAmount(value: unknown): number | undefined {
+   const parts = asRecord(asRecord(asRecord(value).payment_data).rpay_parts)
+   const rawAmount = pick(parts, 'commission_amount', 'commissionAmount')
+   if (rawAmount === undefined) return undefined
+diff --git a/supabase/functions/_shared/prom-order-financials_test.ts b/supabase/functions/_shared/prom-order-financials_test.ts
+--- a/supabase/functions/_shared/prom-order-financials_test.ts
++++ b/supabase/functions/_shared/prom-order-financials_test.ts
+@@ -1,9 +1,11 @@
+ import {
+   hasPromInstallmentPayment,
+   isPromWebsiteOrder,
+-  promInstallmentCommissionAmount,
+-  promOrderLevelCommission,
+-  shouldUseSeparatedPromInstallmentAccounting,
++  promInstallmentCommissionAmount,
++  promOrderLevelCommission,
++  protectLegacyPromFinancialSnapshot,
++  shouldProtectLegacyPromFinancials,
++  shouldUseSeparatedPromInstallmentAccounting,
+ } from './prom-order-financials.ts'
+ 
+ function assert(value: unknown, message = 'Assertion failed'): asserts value {
+@@ -28,7 +30,36 @@
+   assert(!shouldUseSeparatedPromInstallmentAccounting('prom:1', true, { isInstallmentPayment: true }))
+ })
+ 
+-Deno.test('New installment fee is acquiring, not royalty', () => {
++Deno.test('Legacy Prom sync omits financial columns, retains status and delivery', () => {
++  const snapshot = {
++    external_id: 'prom:437654600',
++    order_date: '06.11.2026',
++    order_time: '18:15',
++    shipping: 50,
++    acquiring: 30,
++    acquiring_percent: 4,
++    status: 'Виконано',
++    delivery: { ttn: '123456', status: 'Вручено Одержувачу', paymentAmount: 690 },
++  }
++  const protectedData = protectLegacyPromFinancialSnapshot(snapshot, true)
++  for (const key of ['shipping', 'acquiring', 'acquiring_percent', 'order_date', 'order_time']) {
++    assert(!(key in protectedData), `Protected snapshot still contains ${key}`)
++  }
++  assert(protectedData.status === 'Виконано')
++  assert(protectedData.delivery === snapshot.delivery)
++  assert(protectedData.external_id === snapshot.external_id)
++  assert(snapshot.shipping === 50)
++  assert(snapshot.order_date === '06.11.2026')
++  assert(protectLegacyPromFinancialSnapshot(snapshot, false) === snapshot)
++  assert(shouldProtectLegacyPromFinancials(true, false))
++  assert(!shouldProtectLegacyPromFinancials(true, true))
++  assert(!shouldProtectLegacyPromFinancials(false, true))
++  assert(!shouldProtectLegacyPromFinancials(false, false))
++  assert(!shouldProtectLegacyPromFinancials(true, shouldUseSeparatedPromInstallmentAccounting('prom:437654601', true, {})))
++  assert(shouldProtectLegacyPromFinancials(true, shouldUseSeparatedPromInstallmentAccounting('prom:437654600', true, {})))
++})
++
++Deno.test('New installment fee is acquiring, not royalty', () => {
+   const order = {
+     cpa_commission: { amount: 117.92 },
+     payment_data: { rpay_parts: { commission: 3.4, commission_amount: 23.46 } },
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -43,9 +43,11 @@
+ import {
+   hasPromInstallmentPayment,
+   isPromWebsiteOrder,
+-  promInstallmentCommissionAmount,
+-  promOrderLevelCommission,
+-  shouldUseSeparatedPromInstallmentAccounting,
++  promInstallmentCommissionAmount,
++  promOrderLevelCommission,
++  protectLegacyPromFinancialSnapshot,
++  shouldProtectLegacyPromFinancials,
++  shouldUseSeparatedPromInstallmentAccounting,
+ } from '../_shared/prom-order-financials.ts'
+ 
+ const corsHeaders = {
+@@ -1492,12 +1494,16 @@
+       pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
+     const hasSellerDeliveryCost =
+       sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
+-    const installmentAccountingV2 = shouldUseSeparatedPromInstallmentAccounting(
+-      externalId,
+-      Boolean(existing),
+-      previousDelivery,
+-    )
+-    const orderLevelCommissionAmount = promOrderLevelCommission(order, 0, !installmentAccountingV2)
++    const installmentAccountingV2 = shouldUseSeparatedPromInstallmentAccounting(
++      externalId,
++      Boolean(existing),
++      previousDelivery,
++    )
++    const protectLegacyFinancials = shouldProtectLegacyPromFinancials(
++      Boolean(existing),
++      installmentAccountingV2,
++    )
++    const orderLevelCommissionAmount = promOrderLevelCommission(order, 0, !installmentAccountingV2)
+     const isWebsiteOrder = isPromWebsiteOrder(order)
+     const isInstallmentPayment =
+       hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
+@@ -1592,15 +1598,19 @@
+         labelEmailMessageId: text(previousDelivery.labelEmailMessageId) || undefined,
+       },
+     }
+-    let orderId = existing?.id
+-    const orderChanged =
+-      !existing ||
+-      !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
+-    if (orderId && orderChanged) {
+-      const { data: snapshotApplied, error } = await admin.rpc(
+-        'apply_crm_marketplace_order_snapshot',
+-        { p_order_id: orderId, p_data: data },
+-      )
++    let orderId = existing?.id
++    const snapshotData = protectLegacyPromFinancialSnapshot(data, protectLegacyFinancials)
++    const orderChanged =
++      !existing ||
++      !same(
++        Object.fromEntries(Object.keys(snapshotData).map((key) => [key, existing[key]])),
++        snapshotData,
++      )
++    if (orderId && orderChanged) {
++      const { data: snapshotApplied, error } = await admin.rpc(
++        'apply_crm_marketplace_order_snapshot',
++        { p_order_id: orderId, p_data: snapshotData },
++      )
+       if (error || snapshotApplied !== true)
+         return Response.json(
+           {
+@@ -1666,8 +1676,10 @@
+     )
+     const orderCommission = number(asRecord(order.cpa_commission).amount)
+     let needsTranslationRetry = false
+-    if (items.length) {
+-      const familyIdentities = await Promise.all(
++    // Older CRM orders keep their exact stored product, price, cost and royalty rows.
++    // Delivery and order status still synchronize through the order snapshot above.
++    if (items.length && !protectLegacyFinancials) {
++      const familyIdentities = await Promise.all(
+         items.map((item) =>
+           resolvedPromFamilyIdentity(item, promToken, productFamilyMappings, productDetailsCache),
+         ),
