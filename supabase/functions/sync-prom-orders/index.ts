@@ -16,6 +16,7 @@ import {
   type MarketplaceFamilyIdentity,
 } from '../_shared/marketplace-family.ts'
 import {
+  marketplaceDeletedCarrierReplacement,
   marketplaceMatchesCarrierDelivery,
   marketplaceMustKeepCarrierDelivery,
   marketplaceReplacementHistory,
@@ -155,6 +156,8 @@ function preserveTracking(
   ttn: string,
   destination: { city: string; address: string },
 ): RecordValue {
+  const deletedCarrierReplacement = marketplaceDeletedCarrierReplacement(delivery, carrier, ttn)
+  if (deletedCarrierReplacement) return deletedCarrierReplacement
   if (!marketplaceMatchesCarrierDelivery(delivery, carrier, ttn))
     return marketplaceReplacementHistory(delivery, carrier, ttn, destination)
   const keepCarrierDelivery = marketplaceMustKeepCarrierDelivery(delivery, carrier, ttn)

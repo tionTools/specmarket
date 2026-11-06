@@ -57,6 +57,12 @@ export function marketplaceMustKeepCarrierDelivery(delivery: Delivery, carrier: 
     marketplaceMatchesCarrierDelivery(delivery, carrier, marketplaceTtn)
 }
 
+export function marketplaceDeletedCarrierReplacement(delivery: Delivery, carrier: string, marketplaceTtn: string): Delivery | null {
+  if (text(delivery.trackingNormalizedStatus).toLowerCase() !== 'deleted' ||
+    !marketplaceMustKeepCarrierDelivery(delivery, carrier, marketplaceTtn)) return null
+  return Array.isArray(delivery.shipmentHistory) ? { shipmentHistory: delivery.shipmentHistory } : {}
+}
+
 export function marketplaceReplacementHistory(
   delivery: Delivery,
   carrier: string,
