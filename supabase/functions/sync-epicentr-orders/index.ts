@@ -27,6 +27,7 @@ import {
   isNewMarketplaceStatus,
   normalizeExternalIds,
 } from '../_shared/marketplace-accept.ts'
+import { epicentrStatusName } from './status.ts'
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
@@ -88,21 +89,6 @@ type EpicentrOrder = {
       isFree?: boolean
     }
   }
-}
-
-const statusNames: Record<string, string> = {
-  new: 'Новий',
-  confirmed_by_seller: 'Підтверджено продавцем',
-  confirmed_by_merchant: 'Підтверджено продавцем',
-  confirmed: 'Підтверджено',
-  sent: 'Відправлено',
-  ready_for_pickup: 'Готово до видачі',
-  finished: 'Завершено',
-  closed: 'Закрито',
-  canceled: 'Скасовано',
-  returned: 'Повернено',
-  return_request: 'Запит на повернення',
-  canceled_by_seller: 'Скасовано продавцем',
 }
 
 function formatOrderDate(value: string) {
@@ -488,7 +474,7 @@ Deno.serve(async (request) => {
       }
 
       const normalizedActual = actual.status.trim().toLowerCase()
-      const crmStatus = statusNames[normalizedActual] ?? 'Підтверджено'
+      const crmStatus = epicentrStatusName(normalizedActual) ?? 'Підтверджено'
       const { data: saved, error: saveError } = await admin
         .from('crm_orders')
         .update({ status: crmStatus })
@@ -738,7 +724,7 @@ Deno.serve(async (request) => {
       existing.data?.phone,
     )
     const statusCode = readableText(source.statusCode ?? (source as unknown as Record<string, unknown>).status)
-    const status = (statusNames[statusCode.toLowerCase()] ?? statusCode) || 'Не указан'
+    const status = (epicentrStatusName(statusCode) ?? statusCode) || 'Не указан'
     const orderNumber = Number(source.number)
     const apiDeliveryStatus = readableText(shipment?.status) || readableText(shipment?.statusCode) || readableText(shipment?.shipmentStatus)
     // Для Эпицентра статус finished означает, что покупатель уже получил
