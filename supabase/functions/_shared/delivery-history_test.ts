@@ -1,4 +1,4 @@
-import { marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from './delivery-history.ts'
+import { marketplaceDeletedCarrierReplacement, marketplaceMatchesCarrierDelivery, marketplaceMustKeepCarrierDelivery, marketplaceReplacementHistory } from './delivery-history.ts'
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
@@ -22,6 +22,26 @@ Deno.test('Prom, Kasta and Epicentr keep carrier-active TTN for a known redirect
       `${platform} rolled back the carrier-active TTN`,
     )
   }
+})
+
+Deno.test('Prom can restore marketplace TTN when the linked carrier TTN was deleted', () => {
+  const delivery = {
+    ...redirectedDelivery,
+    trackingNormalizedStatus: 'deleted',
+    trackingStatus: 'Видалено',
+    ttnHistory: ['A'],
+  }
+  const replacement = marketplaceDeletedCarrierReplacement(delivery, 'Новая почта', 'A')
+  assert(replacement?.shipmentHistory === delivery.shipmentHistory, 'shipment history was lost')
+  assert(!('ttn' in replacement) && !('trackingStatus' in replacement) && !('ttnHistory' in replacement), 'deleted tracking data overrides the marketplace TTN')
+  assert(marketplaceDeletedCarrierReplacement({ ...delivery, trackingNormalizedStatus: 'in_transit' }, 'Новая почта', 'A') === null, 'live redirects must stay active')
+})
+
+Deno.test('Prom accepts a newly generated TTN after deletion without treating it as a redirect', () => {
+  const delivery = { ...redirectedDelivery, trackingNormalizedStatus: 'deleted' }
+  assert(marketplaceDeletedCarrierReplacement(delivery, 'Новая почта', 'C') === null, 'unrelated TTN was treated as a linked replacement')
+  const history = marketplaceReplacementHistory(delivery, 'Новая почта', 'C')
+  assert((history.shipmentHistory as Array<{ ttn: string }>).at(-1)?.ttn === 'C', 'new marketplace TTN was not recorded')
 })
 
 Deno.test('a marketplace TTN outside the known chain is not treated as a redirect', () => {
