@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { runTrackingWorker } from './worker.ts'
+import { needsMeestReturnCorrection, runTrackingWorker } from './worker.ts'
 import {
   bulkTrackingEnabledFromRows,
   bulkTrackingPlatformOrFilter,
@@ -25,6 +25,21 @@ Deno.test('bulk tracking skips paused marketplaces, preserves enabled and manual
     bulkTrackingPlatformOrFilter(enabled) === 'platform.is.null,platform.not.in.("Каста")',
     'DB filter must exclude paused Kasta while preserving null/manual platforms',
   )
+})
+
+Deno.test('bulk tracking revisits only a Meest return falsely closed at code 1521', () => {
+  assert(needsMeestReturnCorrection({
+    carrier: 'parcel_box_epicentr', trackingStatusCode: '1521',
+    trackingNormalizedStatus: 'returned', trackingReturnArrived: false,
+  }), 'prematurely closed Meest return must be retried')
+  assert(!needsMeestReturnCorrection({
+    carrier: 'parcel_box_epicentr', trackingStatusCode: '1622',
+    trackingNormalizedStatus: 'returned', trackingReturnArrived: true,
+  }), 'confirmed return arrival must remain final')
+  assert(!needsMeestReturnCorrection({
+    carrier: 'Новая почта', trackingStatusCode: '1521',
+    trackingNormalizedStatus: 'returned', trackingReturnArrived: false,
+  }), 'other carriers must not be affected')
 })
 
 Deno.test('bulk tracking settings fail closed on incomplete or invalid rows', () => {
@@ -73,6 +88,9 @@ Deno.test('forced bulk tracking makes no carrier or tracking-state calls for pau
                 filter === 'platform.is.null,platform.not.in.("Каста")',
                 'paused marketplace must be pushed into the orders query',
               )
+            } else {
+              assert(filter.includes('and(delivery->>trackingStatusCode.eq.1521,delivery->>trackingNormalizedStatus.eq.returned,delivery->>trackingReturnArrived.eq.false)'),
+                'stale Meest return must be included in the database query')
             }
             return this
           },
