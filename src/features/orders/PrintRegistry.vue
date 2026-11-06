@@ -208,16 +208,11 @@ onUnmounted(() => {
         </div>
         <div
           v-if="mode === 'draft'"
-          class="print-registry-actions mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+          class="print-registry-actions mt-3 rounded-xl border border-amber-200 bg-amber-50 p-2 text-sm text-amber-950"
         >
-          <p>
-            В реестре только заказы с ТТН. Без ТТН для проверки:
-            <strong>{{ missingTtnCount }}</strong
-            >. Они не включены в этот список.
-          </p>
-          <div class="mt-2 flex flex-wrap items-center gap-2">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
             <button
-              class="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold disabled:opacity-50"
+              class="whitespace-nowrap rounded-lg border border-amber-400 bg-white px-3 py-1.5 font-semibold disabled:opacity-50"
               type="button"
               :disabled="busy || !missingTtnCount"
               @click="emit('checkTtn')"
@@ -226,13 +221,18 @@ onUnmounted(() => {
             </button>
             <button
               v-if="hasNewOrders"
-              class="rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-2 font-semibold text-emerald-900 disabled:opacity-50"
+              class="whitespace-nowrap rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-900 disabled:opacity-50"
               type="button"
               :disabled="busy"
               @click="emit('refreshOrders')"
             >
               Обновить реестр
             </button>
+            <p class="min-w-60 flex-1">
+              В реестре только заказы с ТТН. Без ТТН для проверки:
+              <strong>{{ missingTtnCount }}</strong
+              >. Они не включены в этот список.
+            </p>
             <span v-if="checkingTtn" role="status">
               Проверено {{ ttnProgress.checked }} / {{ ttnProgress.total }}
             </span>
