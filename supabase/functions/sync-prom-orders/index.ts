@@ -45,6 +45,8 @@ import {
   isPromWebsiteOrder,
   promInstallmentCommissionAmount,
   promOrderLevelCommission,
+  protectLegacyPromFinancialSnapshot,
+  shouldProtectLegacyPromFinancials,
   shouldUseSeparatedPromInstallmentAccounting,
 } from '../_shared/prom-order-financials.ts'
 
@@ -1497,6 +1499,10 @@ Deno.serve(async (request) => {
       Boolean(existing),
       previousDelivery,
     )
+    const protectLegacyFinancials = shouldProtectLegacyPromFinancials(
+      Boolean(existing),
+      installmentAccountingV2,
+    )
     const orderLevelCommissionAmount = promOrderLevelCommission(order, 0, !installmentAccountingV2)
     const isWebsiteOrder = isPromWebsiteOrder(order)
     const isInstallmentPayment =
@@ -1593,13 +1599,17 @@ Deno.serve(async (request) => {
       },
     }
     let orderId = existing?.id
+    const snapshotData = protectLegacyPromFinancialSnapshot(data, protectLegacyFinancials)
     const orderChanged =
       !existing ||
-      !same(Object.fromEntries(Object.keys(data).map((key) => [key, existing[key]])), data)
+      !same(
+        Object.fromEntries(Object.keys(snapshotData).map((key) => [key, existing[key]])),
+        snapshotData,
+      )
     if (orderId && orderChanged) {
       const { data: snapshotApplied, error } = await admin.rpc(
         'apply_crm_marketplace_order_snapshot',
-        { p_order_id: orderId, p_data: data },
+        { p_order_id: orderId, p_data: snapshotData },
       )
       if (error || snapshotApplied !== true)
         return Response.json(
@@ -1666,7 +1676,9 @@ Deno.serve(async (request) => {
     )
     const orderCommission = number(asRecord(order.cpa_commission).amount)
     let needsTranslationRetry = false
-    if (items.length) {
+    // Older CRM orders keep their exact stored product, price, cost and royalty rows.
+    // Delivery and order status still synchronize through the order snapshot above.
+    if (items.length && !protectLegacyFinancials) {
       const familyIdentities = await Promise.all(
         items.map((item) =>
           resolvedPromFamilyIdentity(item, promToken, productFamilyMappings, productDetailsCache),

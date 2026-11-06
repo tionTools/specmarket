@@ -53,6 +53,31 @@ export function shouldUseSeparatedPromInstallmentAccounting(
   )
 }
 
+// Historical orders retain their financial figures during any later Prom sync.
+// Orders first imported with V2, and the approved exception, are not protected.
+export function shouldProtectLegacyPromFinancials(
+  existsInCrm: boolean,
+  installmentAccountingV2: boolean,
+): boolean {
+  return existsInCrm && !installmentAccountingV2
+}
+
+// The marketplace snapshot RPC keeps current DB column values when fields are omitted.
+// Omit historic financial fields instead of copying potentially stale values.
+export function protectLegacyPromFinancialSnapshot(
+  data: Record<string, unknown>,
+  protect: boolean,
+): Record<string, unknown> {
+  if (!protect) return data
+  const snapshot = { ...data }
+  delete snapshot.shipping
+  delete snapshot.acquiring
+  delete snapshot.acquiring_percent
+  delete snapshot.order_date
+  delete snapshot.order_time
+  return snapshot
+}
+
 export function promInstallmentCommissionAmount(value: unknown): number | undefined {
   const parts = asRecord(asRecord(asRecord(value).payment_data).rpay_parts)
   const rawAmount = pick(parts, 'commission_amount', 'commissionAmount')

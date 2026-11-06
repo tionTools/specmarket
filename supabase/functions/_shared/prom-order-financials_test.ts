@@ -3,6 +3,8 @@ import {
   isPromWebsiteOrder,
   promInstallmentCommissionAmount,
   promOrderLevelCommission,
+  protectLegacyPromFinancialSnapshot,
+  shouldProtectLegacyPromFinancials,
   shouldUseSeparatedPromInstallmentAccounting,
 } from './prom-order-financials.ts'
 
@@ -26,6 +28,35 @@ Deno.test('All previous CRM orders stay on original calculation except 437654601
   assert(shouldUseSeparatedPromInstallmentAccounting('prom:437654602', false, {}))
   assert(shouldUseSeparatedPromInstallmentAccounting('prom:1', true, { promInstallmentAccountingV2: true }))
   assert(!shouldUseSeparatedPromInstallmentAccounting('prom:1', true, { isInstallmentPayment: true }))
+})
+
+Deno.test('Legacy Prom sync omits financial columns, retains status and delivery', () => {
+  const snapshot = {
+    external_id: 'prom:437654600',
+    order_date: '06.11.2026',
+    order_time: '18:15',
+    shipping: 50,
+    acquiring: 30,
+    acquiring_percent: 4,
+    status: 'Виконано',
+    delivery: { ttn: '123456', status: 'Вручено Одержувачу', paymentAmount: 690 },
+  }
+  const protectedData = protectLegacyPromFinancialSnapshot(snapshot, true)
+  for (const key of ['shipping', 'acquiring', 'acquiring_percent', 'order_date', 'order_time']) {
+    assert(!(key in protectedData), `Protected snapshot still contains ${key}`)
+  }
+  assert(protectedData.status === 'Виконано')
+  assert(protectedData.delivery === snapshot.delivery)
+  assert(protectedData.external_id === snapshot.external_id)
+  assert(snapshot.shipping === 50)
+  assert(snapshot.order_date === '06.11.2026')
+  assert(protectLegacyPromFinancialSnapshot(snapshot, false) === snapshot)
+  assert(shouldProtectLegacyPromFinancials(true, false))
+  assert(!shouldProtectLegacyPromFinancials(true, true))
+  assert(!shouldProtectLegacyPromFinancials(false, true))
+  assert(!shouldProtectLegacyPromFinancials(false, false))
+  assert(!shouldProtectLegacyPromFinancials(true, shouldUseSeparatedPromInstallmentAccounting('prom:437654601', true, {})))
+  assert(shouldProtectLegacyPromFinancials(true, shouldUseSeparatedPromInstallmentAccounting('prom:437654600', true, {})))
 })
 
 Deno.test('New installment fee is acquiring, not royalty', () => {
