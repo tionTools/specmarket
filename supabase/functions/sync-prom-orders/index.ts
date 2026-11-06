@@ -43,7 +43,9 @@ import {
 import {
   hasPromInstallmentPayment,
   isPromWebsiteOrder,
+  promInstallmentCommissionAmount,
   promOrderLevelCommission,
+  shouldUseSeparatedPromInstallmentAccounting,
 } from '../_shared/prom-order-financials.ts'
 
 const corsHeaders = {
@@ -1490,11 +1492,26 @@ Deno.serve(async (request) => {
       pick(rawDelivery, 'seller_cost', 'sender_cost', 'seller_delivery_cost')
     const hasSellerDeliveryCost =
       sellerDeliveryCost !== undefined && sellerDeliveryCost !== null && sellerDeliveryCost !== ''
-    const orderLevelCommissionAmount = promOrderLevelCommission(order)
+    const installmentAccountingV2 = shouldUseSeparatedPromInstallmentAccounting(
+      externalId,
+      Boolean(existing),
+      previousDelivery,
+    )
+    const orderLevelCommissionAmount = promOrderLevelCommission(order, 0, !installmentAccountingV2)
     const isWebsiteOrder = isPromWebsiteOrder(order)
     const isInstallmentPayment =
       hasPromInstallmentPayment(order) || previousDelivery.isInstallmentPayment === true
     const orderAmount = number(pick(order, 'price', 'full_price', 'amount'))
+    const installmentCommissionAmount = promInstallmentCommissionAmount(order)
+    // Existing manual/registry acquiring remains untouched, including approved old order.
+    const seedInstallmentAcquiring =
+      installmentAccountingV2 &&
+      !existing &&
+      isInstallmentPayment &&
+      installmentCommissionAmount !== undefined &&
+      manual.acquiring === undefined &&
+      manual.acquiringPercent === undefined &&
+      !/(?:скас|cancel|повер|return|refund)/i.test(orderStatus)
     const hasManualShipping = previousDelivery.shippingSource === 'manual'
     const promoShippingWaived =
       previousDelivery.promPromoShippingWaived === true ||
@@ -1528,13 +1545,21 @@ Deno.serve(async (request) => {
       status: orderStatus,
       shipping: resolvedShipping.shipping,
       acquiring:
-        manual.acquiring !== undefined ? number(manual.acquiring) : number(existing?.acquiring),
+        manual.acquiring !== undefined
+          ? number(manual.acquiring)
+          : seedInstallmentAcquiring
+            ? (installmentCommissionAmount ?? 0)
+            : number(existing?.acquiring),
       acquiring_percent:
         manual.acquiringPercent !== undefined
           ? manual.acquiringPercent === null
             ? null
             : number(manual.acquiringPercent)
-          : (existing?.acquiring_percent ?? null),
+          : seedInstallmentAcquiring
+            ? orderAmount > 0
+              ? ((installmentCommissionAmount ?? 0) / orderAmount) * 100
+              : null
+            : (existing?.acquiring_percent ?? null),
       delivery: {
         carrier: deliveryCarrier,
         ttn: trackingNumber,
@@ -1552,6 +1577,7 @@ Deno.serve(async (request) => {
           : undefined,
         hasWebsiteCommission: isWebsiteOrder,
         isInstallmentPayment,
+        promInstallmentAccountingV2: installmentAccountingV2 || undefined,
         shippingSource: resolvedShipping.shippingSource,
         promPromoShippingWaived:
           resolvedShipping.shippingSource === 'prom-promo' && promoShippingWaived ? true : undefined,

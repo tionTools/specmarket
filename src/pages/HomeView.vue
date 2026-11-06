@@ -888,12 +888,18 @@ const getActualRevenue = (order: Order) => {
 }
 const isEpicentrCancelledBeforeShipment = (order: Order) =>
   isPreShipmentEpicentrCancellation(order, displayOrderStatus(order.status))
+const hasSeparatedPromInstallmentFee = (order: Order) =>
+  order.platform === 'Пром' &&
+  order.delivery.promInstallmentAccountingV2 === true &&
+  order.delivery.isInstallmentPayment === true &&
+  order.acquiring > 0
 const getPlannedProfit = (order: Order) =>
   isFullyAcceptedReturn(order) || isEpicentrCancelledBeforeShipment(order)
     ? 0
-    : getNetOrderAmount(order) * 0.983 -
+    : getNetOrderAmount(order) * (hasSeparatedPromInstallmentFee(order) ? 1 : 0.983) -
       getNetOrderCost(order) -
       getNetRoyalty(order) -
+      (hasSeparatedPromInstallmentFee(order) ? order.acquiring : 0) -
       order.shipping -
       (order.extraExpenses ?? 0)
 // Обычно фактическая прибыль появляется после внесения оплаты. Полностью
