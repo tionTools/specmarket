@@ -68,6 +68,8 @@ export interface Delivery {
   rozetkaPayOperationIds?: string[]
   hasWebsiteCommission?: boolean
   isInstallmentPayment?: boolean
+  /** Explicit new Prom installment accounting: absent from legacy orders. */
+  promInstallmentAccountingV2?: boolean
   shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none' | 'unconfirmed'
   /** Последний статус, полученный из tracking перевозчика. */
   trackingStatus?: string

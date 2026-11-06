@@ -40,16 +40,44 @@ export function hasPromInstallmentPayment(value: unknown): boolean {
   return Object.keys(asRecord(paymentData.rpay_parts)).length > 0
 }
 
-// Order-level fixed commissions are added on top of item/catalog commission.
-// In rpay_parts, `commission` is a percentage (3.70), while `commission_amount`
-// is the money amount (20.54). Only the money amount belongs in royalty.
-export function promOrderLevelCommission(value: unknown, depth = 0): number {
+// Legacy orders retain original commission accounting.
+export function shouldUseSeparatedPromInstallmentAccounting(
+  externalId: string,
+  existsInCrm: boolean,
+  previousDelivery: unknown,
+): boolean {
+  return (
+    !existsInCrm ||
+    asRecord(previousDelivery).promInstallmentAccountingV2 === true ||
+    externalId === 'prom:437654601'
+  )
+}
+
+export function promInstallmentCommissionAmount(value: unknown): number | undefined {
+  const parts = asRecord(asRecord(asRecord(value).payment_data).rpay_parts)
+  const rawAmount = pick(parts, 'commission_amount', 'commissionAmount')
+  if (rawAmount === undefined) return undefined
+  const normalized = text(rawAmount).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')
+  if (!normalized) return undefined
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && amount >= 0 ? amount : undefined
+}
+
+// rpay_parts.commission is the percentage, commission_amount is the fee.
+// Preserve the previous default for legacy orders.
+export function promOrderLevelCommission(
+  value: unknown,
+  depth = 0,
+  includeInstallmentFee = true,
+): number {
   if (depth > 4 || Array.isArray(value)) return 0
   const record = asRecord(value)
   return Object.entries(record).reduce((total, [key, candidate]) => {
     if (/rpay[_-]?parts/i.test(key)) {
       const parts = asRecord(candidate)
-      return total + number(pick(parts, 'commission_amount', 'commissionAmount'))
+      return includeInstallmentFee
+        ? total + number(pick(parts, 'commission_amount', 'commissionAmount'))
+        : total
     }
     if (/prosale/i.test(key)) {
       const commission = asRecord(candidate)
@@ -65,6 +93,6 @@ export function promOrderLevelCommission(value: unknown, depth = 0): number {
       return total + amount
     }
     if (/(?:product|item|position)/i.test(key)) return total
-    return total + promOrderLevelCommission(candidate, depth + 1)
+    return total + promOrderLevelCommission(candidate, depth + 1, includeInstallmentFee)
   }, 0)
 }
