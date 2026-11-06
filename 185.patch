@@ -267,11 +267,11 @@ diff --git a/src/features/orders/types.ts b/src/features/orders/types.ts
    rozetkaPayOperationIds?: string[]
    hasWebsiteCommission?: boolean
 -  isInstallmentPayment?: boolean
--  shippingSource?:
+-  shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none' | 'unconfirmed'
 +  isInstallmentPayment?: boolean
 +  /** Explicit new Prom installment accounting: absent from legacy orders. */
 +  promInstallmentAccountingV2?: boolean
-+  shippingSource?:
++  shippingSource?: 'manual' | 'seller-api' | 'prom-promo' | 'none' | 'unconfirmed'
    /** Последний статус, полученный из tracking перевозчика. */
    trackingStatus?: string
    trackingNormalizedStatus?: string
