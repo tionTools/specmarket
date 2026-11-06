@@ -455,13 +455,15 @@ function persistRemoteOrdersSessionCache() {
   persistConfirmedRemoteOrdersSessionCache(cacheOrders)
 }
 
-function playToastSound() {
+function playToastSound(payment = false) {
   if (!audioContext || audioContext.state !== 'running') return
   try {
-    const oscillator = audioContext.createOscillator()
-    oscillator.connect(audioContext.destination)
-    oscillator.start()
-    oscillator.stop(audioContext.currentTime + 0.2)
+    for (const delay of payment ? [0, 0.28] : [0]) {
+      const oscillator = audioContext.createOscillator()
+      oscillator.connect(audioContext.destination)
+      oscillator.start(audioContext.currentTime + delay)
+      oscillator.stop(audioContext.currentTime + delay + (payment ? 0.12 : 0.2))
+    }
   } catch {}
 }
 
@@ -3617,7 +3619,7 @@ function notifyBankPayment(event: BankPaymentEvent) {
       )
       .join('\n'),
   })
-  playToastSound()
+  playToastSound(true)
 }
 
 function unlockNewOrderSound() {
