@@ -423,7 +423,7 @@ onMounted(() => {
             <h2 class="text-lg font-bold text-slate-950">Выписка за 7 дней</h2>
             <p class="mt-0.5 text-xs text-slate-500">{{ periodLabel }}</p>
             <p v-if="bank === 'monobank'" class="mt-1 text-xs text-slate-500">
-              Зелёная галочка — проведённый реестр; жёлтая — совпала сумма оплаты, включая комиссию из комментария.
+              Галочка — совпала сумма оплаты до копейки, включая комиссию из комментария, или номер реестра.
             </p>
           </div>
           <p class="text-xs text-slate-500">Только входящие поступления</p>
@@ -468,13 +468,8 @@ onMounted(() => {
                 <td class="px-4 py-3 text-center">
                   <span
                     v-if="appliedRegistryIdentifier(receipt) || matchesPaidOrderAmount(receipt)"
-                    :class="[
-                      'inline-flex size-7 items-center justify-center rounded-md text-white shadow-sm ring-1',
-                      appliedRegistryIdentifier(receipt)
-                        ? 'bg-emerald-600 ring-emerald-700/30'
-                        : 'bg-amber-600 ring-amber-700/30',
-                    ]"
-                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма с учётом комиссии совпала с оплатой заказа CRM — ориентир, операция не сверена'"
+                    class="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-700/30"
+                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма до копейки совпала с оплатой заказа CRM, включая комиссию из комментария'"
                     :aria-label="appliedRegistryIdentifier(receipt) ? 'Проведён по реестру' : 'Совпала сумма оплаты заказа CRM'"
                   >
                     <Check class="size-5 stroke-[3]" aria-hidden="true" />
