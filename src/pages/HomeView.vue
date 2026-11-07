@@ -188,6 +188,7 @@ const isComparingPreviousPeriod = ref(false)
 const isPlatformSummaryExpanded = ref(false)
 const isShowingCancellations = ref(false)
 const isShowingReturns = ref(false)
+const isShowingUnshipped = ref(false)
 const isShowingUnpaidOnly = ref(false)
 const isShowingNotInExcel = ref(false)
 const expandedOrderId = ref<string | number | null>(null)
@@ -1461,6 +1462,7 @@ async function handlePromRegistryFile(file: File) {
     platformFilter.value = 'all'
     isShowingCancellations.value = false
     isShowingReturns.value = false
+    isShowingUnshipped.value = false
     isShowingUnpaidOnly.value = false
     isShowingNotInExcel.value = false
     await persistenceQueue
@@ -1770,12 +1772,14 @@ const matchingOrders = computed(() => {
       ttnSearch.length >= 4 &&
       deliveryTtns(order.delivery).some((ttn) => ttn.replace(/\D/g, '').includes(ttnSearch))
 
-    if (search) return haystack.includes(search) || matchesTtn
+    const matchesSearch = haystack.includes(search) || matchesTtn
+    if (search && !isShowingUnshipped.value) return matchesSearch
 
     const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
     const matchesPlatform =
       isShowingCancellations.value ||
       isShowingReturns.value ||
+      isShowingUnshipped.value ||
       platformFilter.value === 'all' ||
       orderBusinessPlatform(order) === platformFilter.value
     const matchesOrderState = isShowingNotInExcel.value
@@ -1789,7 +1793,9 @@ const matchingOrders = computed(() => {
               (order.delivery.trackingReturnInProgress === true ||
                 isReturnArrivedDelivery(order.delivery) ||
                 isReturnLifecycleState(lifecycleState))
-            : isOrderVisibleInMainList(lifecycleState)
+            : isShowingUnshipped.value
+              ? orderStatusTone(order) === 'blue'
+              : isOrderVisibleInMainList(lifecycleState)
     const orderDate = parseOrderDate(order.date)
     const matchesPeriod =
       isPromRegistryView.value ||
@@ -1797,8 +1803,10 @@ const matchingOrders = computed(() => {
       isShowingNotInExcel.value ||
       isShowingCancellations.value ||
       isShowingReturns.value ||
+      isShowingUnshipped.value ||
       (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
+      (!search || matchesSearch) &&
       matchesPlatform &&
       matchesOrderState &&
       matchesPeriod &&
@@ -2161,6 +2169,7 @@ function toggleCancellations() {
   isShowingCancellations.value = !isShowingCancellations.value
   if (isShowingCancellations.value) {
     isShowingReturns.value = false
+    isShowingUnshipped.value = false
     platformFilter.value = 'all'
     isShowingUnpaidOnly.value = false
     isShowingNotInExcel.value = false
@@ -2171,9 +2180,22 @@ function toggleReturns() {
   isShowingReturns.value = !isShowingReturns.value
   if (isShowingReturns.value) {
     isShowingCancellations.value = false
+    isShowingUnshipped.value = false
     platformFilter.value = 'all'
     isShowingUnpaidOnly.value = false
     isShowingNotInExcel.value = false
+  }
+}
+
+function toggleUnshipped() {
+  isShowingUnshipped.value = !isShowingUnshipped.value
+  if (isShowingUnshipped.value) {
+    isShowingCancellations.value = false
+    isShowingReturns.value = false
+    isShowingUnpaidOnly.value = false
+    isShowingNotInExcel.value = false
+    platformFilter.value = 'all'
+    searchQuery.value = ''
   }
 }
 
@@ -2182,6 +2204,7 @@ function toggleUnpaidOrders() {
   if (isShowingUnpaidOnly.value) {
     isShowingCancellations.value = false
     isShowingReturns.value = false
+    isShowingUnshipped.value = false
     isShowingNotInExcel.value = false
   }
 }
@@ -2192,6 +2215,7 @@ function toggleNotInExcel() {
   if (isShowingNotInExcel.value) {
     isShowingCancellations.value = false
     isShowingReturns.value = false
+    isShowingUnshipped.value = false
     isShowingUnpaidOnly.value = false
     platformFilter.value = 'all'
   }
@@ -5151,6 +5175,7 @@ async function navigateToLabelOrder(remoteId: string) {
   isShowingUnpaidOnly.value = false
   isShowingCancellations.value = false
   isShowingReturns.value = false
+  isShowingUnshipped.value = false
   searchQuery.value = String(order.displayNumber ?? order.id)
   orderListPeriod.value = 'custom'
   orderListFrom.value = order.date
@@ -6412,6 +6437,18 @@ function orderDateTime(order: Order) {
             @click="toggleReturns"
           >
             Возвраты
+          </button>
+          <button
+            class="rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            :class="
+              isShowingUnshipped
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+            "
+            type="button"
+            @click="toggleUnshipped"
+          >
+            Неотправленные
           </button>
         </div>
         <div
