@@ -10,6 +10,8 @@ import {
   type NovaPayJournalRow,
 } from '@/features/banking/novapayJournal'
 import {
+  importedRegistryAmounts,
+  matchedRegistryAmountIdentifier,
   matchedRegistryImportIdentifier,
   receiptGrossAmount,
   type RegistryImportIdentifier,
@@ -37,7 +39,11 @@ const copyStatus = ref('')
 const isClearingJournal = ref(false)
 const registryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
 const paidOrderAmounts = ref<Set<number>>(new Set())
+const paidOrdersByNumber = ref<Map<string, { paymentAmount: number; acquiring: number }>>(new Map())
 const paymentMatchError = ref('')
+const importedAmounts = computed(() =>
+  importedRegistryAmounts(registryImportIdentifiers.value, paidOrdersByNumber.value),
+)
 const now = useNow({ interval: 60_000 })
 const { copy } = useClipboard()
 
@@ -56,7 +62,7 @@ async function loadRegistryImportIdentifiers() {
   if (!supabase || !bank.value) return
   const { data, error: loadError } = await supabase
     .from('crm_registry_import_identifiers')
-    .select('bank,identifier,identifier_type,label')
+    .select('bank,identifier,identifier_type,label,source,applied_at')
     .eq('bank', bank.value)
   if (loadError) return
   registryImportIdentifiers.value = (data ?? []).flatMap((row) => {
@@ -72,6 +78,8 @@ async function loadRegistryImportIdentifiers() {
         identifier: row.identifier,
         identifierType: row.identifier_type,
         label: row.label,
+        source: typeof row.source === 'string' ? row.source : undefined,
+        appliedAt: typeof row.applied_at === 'string' ? row.applied_at : undefined,
       },
     ]
   })
@@ -233,10 +241,22 @@ function isRecentReceipt(receipt: BankReceipt) {
 }
 
 function appliedRegistryIdentifier(receipt: BankReceipt) {
-  return matchedRegistryImportIdentifier(
+  const identifier = matchedRegistryImportIdentifier(
     `${receipt.description}\n${receipt.comment}`,
     registryImportIdentifiers.value,
   )
+  if (identifier || bank.value !== 'monobank') return identifier
+  const grossAmount = receiptGrossAmount(receipt.comment, receipt.amount)
+  const amountMatch =
+    matchedRegistryAmountIdentifier(Math.round(receipt.amount * 100), registryImportIdentifiers.value) ??
+    (grossAmount === null
+      ? undefined
+      : matchedRegistryAmountIdentifier(grossAmount, registryImportIdentifiers.value))
+  if (amountMatch) return amountMatch
+  if (importedAmounts.value.has(Math.round(receipt.amount * 100)) || (grossAmount !== null && importedAmounts.value.has(grossAmount))) {
+    return { label: 'Сумма проведённого реестра совпала с поступлением' }
+  }
+  return undefined
 }
 
 function matchesPaidOrderAmount(receipt: BankReceipt) {
@@ -250,15 +270,17 @@ function matchesPaidOrderAmount(receipt: BankReceipt) {
 
 async function loadPaidOrderAmounts() {
   paidOrderAmounts.value = new Set()
+  paidOrdersByNumber.value = new Map()
   paymentMatchError.value = ''
   if (!supabase || bank.value !== 'monobank') return
 
   const amounts = new Set<number>()
+  const ordersByNumber = new Map<string, { paymentAmount: number; acquiring: number }>()
   const pageSize = 1000
   for (let from = 0; ; from += pageSize) {
     const { data, error: loadError } = await supabase
       .from('crm_orders')
-      .select('payment_amount:delivery->>paymentAmount')
+      .select('order_number,acquiring,payment_amount:delivery->>paymentAmount')
       .order('id')
       .range(from, from + pageSize - 1)
     if (loadError || !data) {
@@ -267,11 +289,18 @@ async function loadPaidOrderAmounts() {
     }
     for (const row of data) {
       const amount = Number(row.payment_amount)
-      if (Number.isFinite(amount) && amount > 0) amounts.add(Math.round(amount * 100))
+      if (Number.isFinite(amount) && amount > 0) {
+        amounts.add(Math.round(amount * 100))
+        ordersByNumber.set(String(row.order_number), {
+          paymentAmount: amount,
+          acquiring: Number(row.acquiring) || 0,
+        })
+      }
     }
     if (data.length < pageSize) break
   }
   paidOrderAmounts.value = amounts
+  paidOrdersByNumber.value = ordersByNumber
 }
 
 const periodLabel = computed(() => {
@@ -423,7 +452,7 @@ onMounted(() => {
             <h2 class="text-lg font-bold text-slate-950">Выписка за 7 дней</h2>
             <p class="mt-0.5 text-xs text-slate-500">{{ periodLabel }}</p>
             <p v-if="bank === 'monobank'" class="mt-1 text-xs text-slate-500">
-              Галочка — совпала сумма оплаты до копейки, включая комиссию из комментария, или номер реестра.
+              Галочка — совпала сумма заказа или проведённого реестра до копейки, включая комиссию из комментария.
             </p>
           </div>
           <p class="text-xs text-slate-500">Только входящие поступления</p>
