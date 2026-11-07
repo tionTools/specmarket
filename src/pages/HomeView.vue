@@ -459,7 +459,7 @@ function persistRemoteOrdersSessionCache() {
 function playToastSound(payment = false) {
   if (!audioContext || audioContext.state !== 'running') return
   try {
-    for (const delay of payment ? [0, 0.28] : [0]) {
+    for (const delay of payment ? [0, 0.28, 0.56] : [0]) {
       const oscillator = audioContext.createOscillator()
       oscillator.connect(audioContext.destination)
       oscillator.start(audioContext.currentTime + delay)
