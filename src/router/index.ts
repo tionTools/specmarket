@@ -2,6 +2,14 @@ import { createRouter, createWebHistory } from 'vue-router'
 // import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import MainLayout from '@/layouts/MainLayout.vue'
 
+const loadPricesView = () => import('@/pages/PricesView.vue')
+const loadReconciliationView = () => import('@/pages/ReconciliationView.vue')
+const loadBankStatementView = () => import('@/pages/BankStatementView.vue')
+
+export function preloadPriorityRoutes() {
+  void Promise.allSettled([loadPricesView(), loadReconciliationView(), loadBankStatementView()])
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior(to, from, savedPosition) {
@@ -20,11 +28,11 @@ const router = createRouter({
       children: [
         { path: '', component: () => import('@/pages/HomeView.vue') },
         { path: 'settings', component: () => import('@/pages/SettingsView.vue') },
-        { path: 'prices', component: () => import('@/pages/PricesView.vue') },
+        { path: 'prices', component: loadPricesView },
         { path: 'epicentr-royalty', component: () => import('@/pages/EpicentrRoyaltyView.vue') },
         { path: 'currency-rates', component: () => import('@/pages/CurrencyRatesView.vue') },
-        { path: 'reconciliation', component: () => import('@/pages/ReconciliationView.vue') },
-        { path: 'banking/:bank', component: () => import('@/pages/BankStatementView.vue') },
+        { path: 'reconciliation', component: loadReconciliationView },
+        { path: 'banking/:bank', component: loadBankStatementView },
       ],
     },
   ],

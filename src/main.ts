@@ -25,6 +25,7 @@ router.afterEach((to, _from, failure) => {
 
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault()
+  if (!sessionStorage.getItem(pendingRouteKey)) return
   if (sessionStorage.getItem(staleChunkReloadKey) === '1') return
   sessionStorage.setItem(staleChunkReloadKey, '1')
   window.location.reload()
