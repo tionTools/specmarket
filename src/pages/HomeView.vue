@@ -110,6 +110,7 @@ import BankBalancesCard from '@/features/banking/BankBalancesCard.vue'
 import { useBankingMonitor } from '@/features/banking/useBankingMonitor'
 import type { BankPaymentEvent } from '@/features/banking/types'
 import {
+  registryAmountIdentifiers,
   registryImportIdentifiers,
   type RegistryImportIdentifier,
 } from '@/features/banking/registryImportIdentifiers'
@@ -1516,7 +1517,12 @@ async function confirmPromRegistryDistribution() {
     }
 
     const remoteIds = updates.map((update) => update.orderId)
-    const appliedImportIdentifiers = promRegistryImportIdentifiers.value
+    const appliedImportIdentifiers = [
+      ...promRegistryImportIdentifiers.value,
+      ...(registrySource.value !== 'NovaPay' && unmatchedPromRegistryEntries.value.length === 0
+        ? registryAmountIdentifiers(promRegistryTotals.value.paymentAmount, promRegistryNetTotal.value)
+        : []),
+    ]
     const { error: identifierError } = appliedImportIdentifiers.length
       ? await supabase.from('crm_registry_import_identifiers').upsert(
           appliedImportIdentifiers.map((identifier) => ({

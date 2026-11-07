@@ -85,4 +85,27 @@ assert.equal(
 )
 assert.equal(context.receiptGrossAmount('Оплата 345 грн без даних про комісію.', 339.13), null)
 
+const amountIdentifiers = JSON.parse(JSON.stringify(context.registryAmountIdentifiers(345, 339.13)))
+assert.equal(amountIdentifiers.length, 2)
+assert.equal(context.matchedRegistryAmountIdentifier(33913, amountIdentifiers)?.bank, 'monobank')
+assert.equal(context.matchedRegistryAmountIdentifier(34500, amountIdentifiers)?.bank, 'monobank')
+assert.equal(context.matchedRegistryAmountIdentifier(33914, amountIdentifiers), undefined)
+assert.equal(context.registryAmountIdentifiers(345, 345).length, 1)
+
+const imported = ['437654601', '437227449', '437562659', '436967113'].map((identifier) => ({
+  bank: 'monobank', identifier, identifierType: 'operation', label: identifier,
+  source: 'RozetkaPay', appliedAt: '2026-11-06T17:42:49Z',
+}))
+const paidOrders = new Map([
+  ['437654601', { paymentAmount: 690, acquiring: 23.46 }],
+  ['437227449', { paymentAmount: 145, acquiring: 2.47 }],
+  ['437562659', { paymentAmount: 210, acquiring: 3.57 }],
+  ['436967113', { paymentAmount: 1080, acquiring: 18.36 }],
+])
+const importedAmounts = context.importedRegistryAmounts(imported, paidOrders)
+assert.equal(importedAmounts.has(212500), true)
+assert.equal(importedAmounts.has(207714), true)
+assert.equal(importedAmounts.has(207715), false)
+assert.equal(context.importedRegistryAmounts(imported, new Map()).size, 0)
+
 console.log('Registry import identifiers: OK')

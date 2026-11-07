@@ -5,6 +5,8 @@ export type RegistryImportIdentifier = {
   identifier: string
   identifierType: 'registry' | 'operation'
   label: string
+  appliedAt?: string
+  source?: string
 }
 
 const registryNumberPattern =
@@ -12,6 +14,60 @@ const registryNumberPattern =
 
 function normalizeOperationIdentifier(value: string) {
   return value.replace(/[^\p{L}\p{N}]/gu, '').toLocaleUpperCase('uk-UA')
+}
+
+const registryAmountPrefix = 'REGISTRY_AMOUNT_'
+
+export function registryAmountIdentifiers(gross: number, net: number): RegistryImportIdentifier[] {
+  return [...new Set([gross, net].map((amount) => Math.round(amount * 100)))]
+    .filter((amount) => Number.isSafeInteger(amount) && amount > 0)
+    .map((amount) => ({
+      bank: 'monobank' as const,
+      identifier: `${registryAmountPrefix}${amount}`,
+      identifierType: 'operation' as const,
+      label: `Сумма проведённого реестра ${(amount / 100).toFixed(2)} грн`,
+    }))
+}
+
+export function matchedRegistryAmountIdentifier(
+  amount: number,
+  identifiers: RegistryImportIdentifier[],
+) {
+  return identifiers.find(
+    (identifier) =>
+      identifier.bank === 'monobank' &&
+      identifier.identifier === `${registryAmountPrefix}${amount}`,
+  )
+}
+
+export function importedRegistryAmounts(
+  identifiers: RegistryImportIdentifier[],
+  orders: Map<string, { paymentAmount: number; acquiring: number }>,
+) {
+  const groups = new Map<string, { gross: number; fee: number; complete: boolean }>()
+  for (const identifier of identifiers) {
+    if (
+      identifier.bank !== 'monobank' ||
+      identifier.identifierType !== 'operation' ||
+      !identifier.appliedAt ||
+      !/^\d+$/.test(identifier.identifier)
+    ) continue
+    const key = `${identifier.source ?? ''}:${identifier.appliedAt}`
+    const group = groups.get(key) ?? { gross: 0, fee: 0, complete: true }
+    const order = orders.get(identifier.identifier)
+    if (order && Number.isFinite(order.paymentAmount) && Number.isFinite(order.acquiring)) {
+      group.gross += Math.round(order.paymentAmount * 100)
+      group.fee += Math.round(order.acquiring * 100)
+    } else group.complete = false
+    groups.set(key, group)
+  }
+  const amounts = new Set<number>()
+  for (const group of groups.values()) {
+    if (!group.complete) continue
+    if (group.gross > 0) amounts.add(group.gross)
+    if (group.gross - group.fee > 0) amounts.add(group.gross - group.fee)
+  }
+  return amounts
 }
 
 export function extractRegistryNumbers(text: string) {
