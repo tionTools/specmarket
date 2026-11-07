@@ -12,6 +12,7 @@ import {
 } from 'vue'
 import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
+import { preloadPriorityRoutes } from '@/router'
 import {
   useClipboard,
   useDocumentVisibility,
@@ -3676,6 +3677,8 @@ async function loadRemoteOrders() {
   const { data: session } = await supabase.auth.getSession()
   if (!session.session) return
   user.value = session.session.user
+  if ('requestIdleCallback' in window) window.requestIdleCallback(preloadPriorityRoutes, { timeout: 2000 })
+  else setTimeout(preloadPriorityRoutes, 0)
   void loadKytUsdRate()
   const { data: rateRows, error: rateError } = await supabase
     .from('crm_currency_rates')
