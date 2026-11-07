@@ -35,6 +35,8 @@ const journalError = ref('')
 const copyStatus = ref('')
 const isClearingJournal = ref(false)
 const registryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
+const paidOrderAmounts = ref<Set<number>>(new Set())
+const paymentMatchError = ref('')
 const now = useNow({ interval: 60_000 })
 const { copy } = useClipboard()
 
@@ -234,6 +236,36 @@ function appliedRegistryIdentifier(receipt: BankReceipt) {
   )
 }
 
+function matchesPaidOrderAmount(receipt: BankReceipt) {
+  return bank.value === 'monobank' && paidOrderAmounts.value.has(Math.round(receipt.amount * 100))
+}
+
+async function loadPaidOrderAmounts() {
+  paidOrderAmounts.value = new Set()
+  paymentMatchError.value = ''
+  if (!supabase || bank.value !== 'monobank') return
+
+  const amounts = new Set<number>()
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data, error: loadError } = await supabase
+      .from('crm_orders')
+      .select('payment_amount:delivery->>paymentAmount')
+      .order('id')
+      .range(from, from + pageSize - 1)
+    if (loadError || !data) {
+      paymentMatchError.value = 'Не удалось проверить совпадение сумм с оплатами заказов.'
+      return
+    }
+    for (const row of data) {
+      const amount = Number(row.payment_amount)
+      if (Number.isFinite(amount) && amount > 0) amounts.add(Math.round(amount * 100))
+    }
+    if (data.length < pageSize) break
+  }
+  paidOrderAmounts.value = amounts
+}
+
 const periodLabel = computed(() => {
   const from = periodDate(snapshot.value?.period.from ?? null)
   const to = periodDate(snapshot.value?.period.to ?? null)
@@ -278,7 +310,7 @@ async function load(refresh: boolean) {
     if (invokeError) throw invokeError
     if (!data || data.ok === false) throw new Error(bankFunctionErrorMessage(data ?? {}))
     snapshot.value = normalizeSnapshot(data)
-    await loadRegistryImportIdentifiers()
+    await Promise.all([loadRegistryImportIdentifiers(), loadPaidOrderAmounts()])
   } catch (loadError) {
     error.value = await edgeFunctionErrorMessage(loadError)
   } finally {
@@ -358,12 +390,18 @@ onMounted(() => {
       >
         {{ error }}
       </p>
+      <p v-if="paymentMatchError" class="mt-4 text-sm text-amber-700" role="alert">
+        {{ paymentMatchError }}
+      </p>
 
       <section class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 px-5 py-4">
           <div>
             <h2 class="text-lg font-bold text-slate-950">Выписка за 7 дней</h2>
             <p class="mt-0.5 text-xs text-slate-500">{{ periodLabel }}</p>
+            <p v-if="bank === 'monobank'" class="mt-1 text-xs text-slate-500">
+              Зелёная галочка — проведённый реестр; жёлтая — совпала только сумма оплаты.
+            </p>
           </div>
           <p class="text-xs text-slate-500">Только входящие поступления</p>
         </div>
@@ -406,10 +444,15 @@ onMounted(() => {
                 <td class="min-w-[320px] px-4 py-3 text-slate-600">{{ receipt.comment || '—' }}</td>
                 <td class="px-4 py-3 text-center">
                   <span
-                    v-if="appliedRegistryIdentifier(receipt)"
-                    class="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-700/30"
-                    :title="appliedRegistryIdentifier(receipt)?.label"
-                    aria-label="Проведён"
+                    v-if="appliedRegistryIdentifier(receipt) || matchesPaidOrderAmount(receipt)"
+                    :class="[
+                      'inline-flex size-7 items-center justify-center rounded-md text-white shadow-sm ring-1',
+                      appliedRegistryIdentifier(receipt)
+                        ? 'bg-emerald-600 ring-emerald-700/30'
+                        : 'bg-amber-600 ring-amber-700/30',
+                    ]"
+                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма совпала с оплатой заказа CRM — ориентир, операция не сверена'"
+                    :aria-label="appliedRegistryIdentifier(receipt) ? 'Проведён по реестру' : 'Совпала сумма оплаты заказа CRM'"
                   >
                     <Check class="size-5 stroke-[3]" aria-hidden="true" />
                   </span>
