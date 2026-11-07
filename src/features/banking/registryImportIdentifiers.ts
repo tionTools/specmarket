@@ -71,3 +71,19 @@ export function matchedRegistryImportIdentifier(
       identifier.identifierType === 'operation' && operationIdentifiers.has(identifier.identifier),
   )
 }
+
+function cents(value: string) {
+  const amount = Number(value.replace(/\s/gu, '').replace(',', '.'))
+  return Number.isFinite(amount) ? Math.round(amount * 100) : null
+}
+
+export function receiptGrossAmount(comment: string, netAmount: number) {
+  const gross = /(?:загалом|на\s+суму)\s+(\d[\d\s]*(?:[.,]\d{1,2})?)\s*грн/iu.exec(comment)
+  const fee = /(?:комісія\s+банку|винагор\.)\s+(\d[\d\s]*(?:[.,]\d{1,2})?)\s*грн/iu.exec(comment)
+  if (!gross?.[1] || !fee?.[1]) return null
+
+  const grossCents = cents(gross[1])
+  const feeCents = cents(fee[1])
+  if (grossCents === null || feeCents === null || feeCents <= 0) return null
+  return grossCents === Math.round(netAmount * 100) + feeCents ? grossCents : null
+}

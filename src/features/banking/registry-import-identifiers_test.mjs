@@ -71,4 +71,18 @@ assert.equal(
   undefined,
 )
 
+assert.equal(
+  context.receiptGrossAmount('Загалом 1450.00 грн. Комісія банку 18.85 грн.', 1431.15),
+  145000,
+)
+assert.equal(
+  context.receiptGrossAmount('На суму 345 грн за виключ. винагор. 5.87 грн.', 339.13),
+  34500,
+)
+assert.equal(
+  context.receiptGrossAmount('Загалом 1450 грн. Комісія банку 18.85 грн.', 1431.14),
+  null,
+)
+assert.equal(context.receiptGrossAmount('Оплата 345 грн без даних про комісію.', 339.13), null)
+
 console.log('Registry import identifiers: OK')

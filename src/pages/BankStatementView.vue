@@ -11,6 +11,7 @@ import {
 } from '@/features/banking/novapayJournal'
 import {
   matchedRegistryImportIdentifier,
+  receiptGrossAmount,
   type RegistryImportIdentifier,
 } from '@/features/banking/registryImportIdentifiers'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
@@ -205,6 +206,9 @@ function periodDate(value: string | null) {
 }
 
 function receiptTimestamp(receipt: BankReceipt) {
+  const occurredAt = Date.parse(receipt.occurredAt)
+  if (Number.isFinite(occurredAt)) return occurredAt
+
   const match = /^(\d{2})\.(\d{2})\.(\d{4})(?:,\s*|\s+)(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(receipt.date)
   if (match) {
     const value = new Date(
@@ -218,8 +222,7 @@ function receiptTimestamp(receipt: BankReceipt) {
     if (Number.isFinite(value)) return value
   }
 
-  const occurredAt = Date.parse(receipt.occurredAt)
-  return Number.isFinite(occurredAt) ? occurredAt : Number.NaN
+  return Number.NaN
 }
 
 function isRecentReceipt(receipt: BankReceipt) {
@@ -237,7 +240,12 @@ function appliedRegistryIdentifier(receipt: BankReceipt) {
 }
 
 function matchesPaidOrderAmount(receipt: BankReceipt) {
-  return bank.value === 'monobank' && paidOrderAmounts.value.has(Math.round(receipt.amount * 100))
+  if (bank.value !== 'monobank') return false
+  const grossAmount = receiptGrossAmount(receipt.comment, receipt.amount)
+  return (
+    paidOrderAmounts.value.has(Math.round(receipt.amount * 100)) ||
+    (grossAmount !== null && paidOrderAmounts.value.has(grossAmount))
+  )
 }
 
 async function loadPaidOrderAmounts() {
@@ -267,9 +275,24 @@ async function loadPaidOrderAmounts() {
 }
 
 const periodLabel = computed(() => {
+  if (bank.value === 'monobank') {
+    const end = now.value.getTime()
+    return `${periodDate(new Date(end - 7 * 24 * 60 * 60 * 1000).toISOString())} — ${periodDate(new Date(end).toISOString())}`
+  }
   const from = periodDate(snapshot.value?.period.from ?? null)
   const to = periodDate(snapshot.value?.period.to ?? null)
   return from && to ? `${from} — ${to}` : 'Последние 7 дней'
+})
+
+const visibleReceipts = computed(() => {
+  const receipts = snapshot.value?.receipts ?? []
+  if (bank.value !== 'monobank') return receipts
+  const end = now.value.getTime()
+  const start = end - 7 * 24 * 60 * 60 * 1000
+  return receipts.filter((receipt) => {
+    const timestamp = receiptTimestamp(receipt)
+    return timestamp >= start && timestamp <= end
+  })
 })
 
 function bankFunctionErrorMessage(body: BankFunctionResponse) {
@@ -400,7 +423,7 @@ onMounted(() => {
             <h2 class="text-lg font-bold text-slate-950">Выписка за 7 дней</h2>
             <p class="mt-0.5 text-xs text-slate-500">{{ periodLabel }}</p>
             <p v-if="bank === 'monobank'" class="mt-1 text-xs text-slate-500">
-              Зелёная галочка — проведённый реестр; жёлтая — совпала только сумма оплаты.
+              Зелёная галочка — проведённый реестр; жёлтая — совпала сумма оплаты, включая комиссию из комментария.
             </p>
           </div>
           <p class="text-xs text-slate-500">Только входящие поступления</p>
@@ -408,7 +431,7 @@ onMounted(() => {
 
         <div v-if="isLoading" class="px-5 py-8 text-sm text-slate-500">Загрузка…</div>
         <div
-          v-else-if="!snapshot?.receipts.length"
+          v-else-if="!visibleReceipts.length"
           class="px-5 py-8 text-sm text-slate-500"
         >
           За этот период поступлений нет.
@@ -429,7 +452,7 @@ onMounted(() => {
             </thead>
             <tbody>
               <tr
-                v-for="(receipt, index) in snapshot.receipts"
+                v-for="(receipt, index) in visibleReceipts"
                 :key="receipt.id || `${receipt.date}-${index}`"
                 :class="isRecentReceipt(receipt) ? '[&>td]:font-bold' : ''"
               >
@@ -451,7 +474,7 @@ onMounted(() => {
                         ? 'bg-emerald-600 ring-emerald-700/30'
                         : 'bg-amber-600 ring-amber-700/30',
                     ]"
-                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма совпала с оплатой заказа CRM — ориентир, операция не сверена'"
+                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма с учётом комиссии совпала с оплатой заказа CRM — ориентир, операция не сверена'"
                     :aria-label="appliedRegistryIdentifier(receipt) ? 'Проведён по реестру' : 'Совпала сумма оплаты заказа CRM'"
                   >
                     <Check class="size-5 stroke-[3]" aria-hidden="true" />
