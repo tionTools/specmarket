@@ -1,0 +1,36 @@
+SPECMARKET CRM — PATCH 187: safe concurrent Prom order creation
+Repository: tionTools/specmarket
+BASE main SHA: 08eb2a335a7b11b3d7ccba330c8bd0743d7f3aa8
+Files from origin/chatgpt-patches ROOT: 187.patch and 187.txt
+Scope: ONLY:
+  supabase/functions/sync-prom-orders/index.ts
+  supabase/functions/_shared/prom-order-insert-race.ts
+  supabase/functions/_shared/prom-order-insert-race_test.ts
+
+CONFIRMED INCIDENT
+Scheduled/background and browser sync concurrently read Prom #438874198 as absent.
+The first insert succeeded; the second got PostgreSQL 23505:
+"duplicate key value violates unique constraint crm_orders_external_id_unique".
+The second request returned HTTP 500 even though the winner created the order.
+
+CHANGE
+- Only intercept duplicate insert with EXACT code 23505 and exact constraint name crm_orders_external_id_unique.
+- After such failure, read the same Prom external_id from crm_orders using service-role and confirm that an order with an ID actually exists.
+- If confirmed, do not retry insert, upsert, overwrite existing row or write items/sync-state from the losing invocation. Increase skipped counter by one and continue other candidates, returning normal success. The winner alone finishes writing its items and sync state.
+- If the winner later fails before writing sync state, the next ordinary feed sync retries since the loser did NOT write a source hash. This preserves eventual recovery.
+- If no matching row is found or read fails, preserve the original non-2xx failure; do not swallow unrelated DB errors.
+- No new locks, SQL migration, DB schema changes, retries/timeouts, background/cron changes, logs, or dependencies.
+- No changes to fees, Patch 185/186 V2 accounting, source hashes for successfully processed orders, update/delete flows, manual changes, acquiring or registry.
+- Do not process previously existing orders differently. Only handle the one narrow insert race for NEW order creation.
+
+CODEX MINIMAL EXECUTION
+1. Read AGENTS.md. Confirm origin/main SHA exactly matches BASE. If advanced or dirty state prevents clean worktree, STOP without redesign.
+2. Fetch 187.patch + 187.txt from origin/chatgpt-patches. Apply in clean worktree at BASE with git apply --check; git apply. Do NOT independently design a fix, format unrelated files or invoke Codex code-generation on other areas.
+3. Run Deno: deno test supabase/functions/_shared/prom-order-insert-race_test.ts; deno check supabase/functions/sync-prom-orders/index.ts. Run pnpm type-check, scoped Oxlint/ESLint on touched TS files, pnpm build and git diff --check (if global lint reports known unrelated errors, document them; do not fix).
+4. Inspect that only 3 files changed, no old financial paths changed, and the failing 23505 branch reads the exact external_id without creating/upserting. Confirm no sync-state write from loser, ensuring the winner handles it.
+5. Additional regression reasoning/test for two concurrent syncs: winner inserted, loser finds id => no HTTP 500; no matching id or unrelated 23505 => original failure; first writer fails after insert => no misleading source_hash from loser, later normal sync can retry.
+6. Report results, exact diff. If check fails STOP and report. No PR, merge, deploy or production calls without explicit authorization.
+
+PRODUCTION
+Function sync-prom-orders currently v163 according to most recent report. A future approved deployment must be from merged, verified code, deploy only named function with pinned Supabase CLI. Preserve verify_jwt=false, auth settings and schedule. No mass orders sync, no historical writes.
+AUTHOR STATUS: prepared patch against inspected main, checked anchor uniqueness. Deno/tests/build/live SQL not run by assistant. Codex must verify.
