@@ -11,9 +11,11 @@ import {
 } from '@/features/banking/novapayJournal'
 import {
   importedRegistryAmounts,
+  matchesPaidOrderReceipt,
   matchedRegistryAmountIdentifier,
   matchedRegistryImportIdentifier,
   receiptGrossAmount,
+  receiptOrderNumber,
   type RegistryImportIdentifier,
 } from '@/features/banking/registryImportIdentifiers'
 import type { BankName, BankReceipt, BankSnapshot } from '@/features/banking/types'
@@ -38,7 +40,6 @@ const journalError = ref('')
 const copyStatus = ref('')
 const isClearingJournal = ref(false)
 const registryImportIdentifiers = ref<RegistryImportIdentifier[]>([])
-const paidOrderAmounts = ref<Set<number>>(new Set())
 const paidOrdersByNumber = ref<Map<string, { paymentAmount: number; acquiring: number }>>(new Map())
 const paymentMatchError = ref('')
 const importedAmounts = computed(() =>
@@ -246,6 +247,7 @@ function appliedRegistryIdentifier(receipt: BankReceipt) {
     registryImportIdentifiers.value,
   )
   if (identifier || bank.value !== 'monobank') return identifier
+  if (receiptOrderNumber(`${receipt.description}\n${receipt.comment}`)) return undefined
   const grossAmount = receiptGrossAmount(receipt.comment, receipt.amount)
   const amountMatch =
     matchedRegistryAmountIdentifier(Math.round(receipt.amount * 100), registryImportIdentifiers.value) ??
@@ -259,22 +261,11 @@ function appliedRegistryIdentifier(receipt: BankReceipt) {
   return undefined
 }
 
-function matchesPaidOrderAmount(receipt: BankReceipt) {
-  if (bank.value !== 'monobank') return false
-  const grossAmount = receiptGrossAmount(receipt.comment, receipt.amount)
-  return (
-    paidOrderAmounts.value.has(Math.round(receipt.amount * 100)) ||
-    (grossAmount !== null && paidOrderAmounts.value.has(grossAmount))
-  )
-}
-
 async function loadPaidOrderAmounts() {
-  paidOrderAmounts.value = new Set()
   paidOrdersByNumber.value = new Map()
   paymentMatchError.value = ''
   if (!supabase || bank.value !== 'monobank') return
 
-  const amounts = new Set<number>()
   const ordersByNumber = new Map<string, { paymentAmount: number; acquiring: number }>()
   const pageSize = 1000
   for (let from = 0; ; from += pageSize) {
@@ -284,13 +275,12 @@ async function loadPaidOrderAmounts() {
       .order('id')
       .range(from, from + pageSize - 1)
     if (loadError || !data) {
-      paymentMatchError.value = 'Не удалось проверить совпадение сумм с оплатами заказов.'
+      paymentMatchError.value = 'Не удалось проверить оплаты заказов по номерам.'
       return
     }
     for (const row of data) {
       const amount = Number(row.payment_amount)
       if (Number.isFinite(amount) && amount > 0) {
-        amounts.add(Math.round(amount * 100))
         ordersByNumber.set(String(row.order_number), {
           paymentAmount: amount,
           acquiring: Number(row.acquiring) || 0,
@@ -299,7 +289,6 @@ async function loadPaidOrderAmounts() {
     }
     if (data.length < pageSize) break
   }
-  paidOrderAmounts.value = amounts
   paidOrdersByNumber.value = ordersByNumber
 }
 
@@ -452,7 +441,7 @@ onMounted(() => {
             <h2 class="text-lg font-bold text-slate-950">Выписка за 7 дней</h2>
             <p class="mt-0.5 text-xs text-slate-500">{{ periodLabel }}</p>
             <p v-if="bank === 'monobank'" class="mt-1 text-xs text-slate-500">
-              Галочка — совпала сумма заказа или проведённого реестра до копейки, включая комиссию из комментария.
+              Галочка — проведённый реестр или оплата заказа с тем же номером и суммой до копейки, включая комиссию из комментария.
             </p>
           </div>
           <p class="text-xs text-slate-500">Только входящие поступления</p>
@@ -496,10 +485,10 @@ onMounted(() => {
                 <td class="min-w-[320px] px-4 py-3 text-slate-600">{{ receipt.comment || '—' }}</td>
                 <td class="px-4 py-3 text-center">
                   <span
-                    v-if="appliedRegistryIdentifier(receipt) || matchesPaidOrderAmount(receipt)"
+                    v-if="appliedRegistryIdentifier(receipt) || (bank === 'monobank' && matchesPaidOrderReceipt(receipt.comment, receipt.amount, paidOrdersByNumber))"
                     class="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-700/30"
-                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Сумма до копейки совпала с оплатой заказа CRM, включая комиссию из комментария'"
-                    :aria-label="appliedRegistryIdentifier(receipt) ? 'Проведён по реестру' : 'Совпала сумма оплаты заказа CRM'"
+                    :title="appliedRegistryIdentifier(receipt)?.label ?? 'Совпал номер заказа и сумма оплаты CRM, включая комиссию из комментария'"
+                    :aria-label="appliedRegistryIdentifier(receipt) ? 'Проведён по реестру' : 'Совпали номер и сумма оплаты заказа CRM'"
                   >
                     <Check class="size-5 stroke-[3]" aria-hidden="true" />
                   </span>
