@@ -1,0 +1,120 @@
+diff --git a/supabase/functions/sync-prom-orders/index.ts b/supabase/functions/sync-prom-orders/index.ts
+--- a/supabase/functions/sync-prom-orders/index.ts
++++ b/supabase/functions/sync-prom-orders/index.ts
+@@ -21,7 +21,8 @@
+   marketplaceMustKeepCarrierDelivery,
+   marketplaceReplacementHistory,
+ } from '../_shared/delivery-history.ts'
+-import { paymentDetails } from '../_shared/payment-details.ts'
++import { paymentDetails } from '../_shared/payment-details.ts'
++import { recoverConcurrentPromInsert } from '../_shared/prom-order-insert-race.ts'
+ import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
+ import {
+   loadMarketplaceSyncAccess,
+@@ -1364,7 +1365,7 @@
+     : { byOfferId: new Map(), byUniqueAlias: new Map() }
+   let created = 0
+   let updated = 0
+-  const skipped = skippedUnchanged
++  let skipped = skippedUnchanged
+   const changedOrderIds: string[] = []
+   const productDetailsCache: PromProductCache = new Map()
+   const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
+@@ -1629,12 +1630,28 @@
+         .insert(data)
+         .select('id')
+         .single()
+-      if (error || !inserted?.id)
+-        return Response.json(
+-          { ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' },
+-          { status: 500, headers: corsHeaders },
+-        )
+-      orderId = inserted.id
++      if (error || !inserted?.id) {
++        const createdByOtherSync = await recoverConcurrentPromInsert(error, async () => {
++          const { data: concurrentOrder, error: lookupError } = await admin
++            .from('crm_orders')
++            .select('id')
++            .eq('platform', 'Пром')
++            .eq('external_id', externalId)
++            .maybeSingle()
++          return lookupError ? null : (concurrentOrder?.id ?? null)
++        })
++        if (createdByOtherSync) {
++          // The winner owns the item rows and sync-state write. Do not overwrite its work.
++          // Without the winner's sync-state write, the next normal sync retries this order.
++          skipped += 1
++          continue
++        }
++        return Response.json(
++          { ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' },
++          { status: 500, headers: corsHeaders },
++        )
++      }
++      orderId = inserted.id
+       created += 1
+     }
+     if (!orderId) continue
+diff --git a/supabase/functions/_shared/prom-order-insert-race.ts b/supabase/functions/_shared/prom-order-insert-race.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-order-insert-race.ts
+@@ -0,0 +1,16 @@
++type PromInsertError = { code?: string; message?: string } | null
++
++// Fail closed: handle only the proven external_id race, and only after reading the winner.
++export async function recoverConcurrentPromInsert(
++  error: PromInsertError,
++  readExistingId: () => Promise<string | null>,
++): Promise<boolean> {
++  if (error?.code !== '23505' || !error.message?.includes('crm_orders_external_id_unique')) {
++    return false
++  }
++  try {
++    return Boolean(await readExistingId())
++  } catch {
++    return false
++  }
++}
+diff --git a/supabase/functions/_shared/prom-order-insert-race_test.ts b/supabase/functions/_shared/prom-order-insert-race_test.ts
+new file mode 100644
+--- /dev/null
++++ b/supabase/functions/_shared/prom-order-insert-race_test.ts
+@@ -0,0 +1,37 @@
++import { recoverConcurrentPromInsert } from './prom-order-insert-race.ts'
++
++function assert(value: unknown, message: string): asserts value {
++  if (!value) throw new Error(message)
++}
++
++const conflict = {
++  code: '23505',
++  message: 'duplicate key value violates unique constraint "crm_orders_external_id_unique"',
++}
++
++Deno.test('only the crm_orders external_id uniqueness race is recoverable', async () => {
++  let lookups = 0
++  const lookup = async () => {
++    lookups += 1
++    return 'winner-id'
++  }
++  assert(!(await recoverConcurrentPromInsert(null, lookup)), 'Missing error recovered')
++  assert(!(await recoverConcurrentPromInsert({ code: '23505', message: 'other_unique_constraint' }, lookup)), 'Other unique error recovered')
++  assert(!(await recoverConcurrentPromInsert({ code: '42501', message: conflict.message }, lookup)), 'Other error code recovered')
++  assert(lookups === 0, 'Unrelated errors must not read the database')
++})
++
++Deno.test('confirmed concurrent creation skips the loser without an upsert', async () => {
++  let lookups = 0
++  const recovered = await recoverConcurrentPromInsert(conflict, async () => {
++    lookups += 1
++    return 'already-created-order-id'
++  })
++  assert(recovered, 'Existing winner must be acknowledged')
++  assert(lookups === 1, 'Only one read is necessary')
++})
++
++Deno.test('unconfirmed conflict and failed lookup remain errors', async () => {
++  assert(!(await recoverConcurrentPromInsert(conflict, async () => null)), 'Missing winner must not be ignored')
++  assert(!(await recoverConcurrentPromInsert(conflict, async () => { throw new Error('DB unavailable') })), 'Lookup failure must not be ignored')
++})
