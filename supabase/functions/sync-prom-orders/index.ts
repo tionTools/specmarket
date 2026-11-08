@@ -22,6 +22,7 @@ import {
   marketplaceReplacementHistory,
 } from '../_shared/delivery-history.ts'
 import { paymentDetails } from '../_shared/payment-details.ts'
+import { recoverConcurrentPromInsert } from '../_shared/prom-order-insert-race.ts'
 import { loadMarketplaceOrderSyncContext } from '../_shared/marketplace-order-sync-context.ts'
 import {
   loadMarketplaceSyncAccess,
@@ -1364,7 +1365,7 @@ Deno.serve(async (request) => {
     : { byOfferId: new Map(), byUniqueAlias: new Map() }
   let created = 0
   let updated = 0
-  const skipped = skippedUnchanged
+  let skipped = skippedUnchanged
   const changedOrderIds: string[] = []
   const productDetailsCache: PromProductCache = new Map()
   const productNameCache = new Map<string, Promise<ProductTranslationResult>>()
@@ -1629,11 +1630,27 @@ Deno.serve(async (request) => {
         .insert(data)
         .select('id')
         .single()
-      if (error || !inserted?.id)
+      if (error || !inserted?.id) {
+        const createdByOtherSync = await recoverConcurrentPromInsert(error, async () => {
+          const { data: concurrentOrder, error: lookupError } = await admin
+            .from('crm_orders')
+            .select('id')
+            .eq('platform', 'Пром')
+            .eq('external_id', externalId)
+            .maybeSingle()
+          return lookupError ? null : (concurrentOrder?.id ?? null)
+        })
+        if (createdByOtherSync) {
+          // The winner owns the item rows and sync-state write. Do not overwrite its work.
+          // Without the winner's sync-state write, the next normal sync retries this order.
+          skipped += 1
+          continue
+        }
         return Response.json(
           { ok: false, message: error?.message ?? 'Не удалось создать заказ Prom.' },
           { status: 500, headers: corsHeaders },
         )
+      }
       orderId = inserted.id
       created += 1
     }
