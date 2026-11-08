@@ -85,6 +85,16 @@ assert.equal(
 )
 assert.equal(context.receiptGrossAmount('Оплата 345 грн без даних про комісію.', 339.13), null)
 
+const paidEpicentrOrders = new Map([
+  ['58739889', { paymentAmount: 230, acquiring: 2.99 }],
+  ['438220838', { paymentAmount: 690, acquiring: 3.45 }],
+  ['58480580', { paymentAmount: 695, acquiring: 0 }],
+])
+assert.equal(context.matchesPaidOrderReceipt('Оплата замовлення 58739889. Загалом 230.00 грн. Комісія банку 2.99 грн.', 227.01, paidEpicentrOrders), true)
+assert.equal(context.matchesPaidOrderReceipt('Оплата замовлення 58676980. Загалом 690.00 грн. Комісія банку 8.97 грн.', 681.03, paidEpicentrOrders), false)
+assert.equal(context.matchesPaidOrderReceipt('Оплата замовлення 58637083. Загалом 695.00 грн. Комісія банку 9.04 грн.', 685.96, paidEpicentrOrders), false)
+assert.equal(context.matchesPaidOrderReceipt('Оплата замовлення 58739889. Загалом 230.00 грн. Комісія банку 2.99 грн.', 227.02, paidEpicentrOrders), false)
+
 const amountIdentifiers = JSON.parse(JSON.stringify(context.registryAmountIdentifiers(345, 339.13)))
 assert.equal(amountIdentifiers.length, 2)
 assert.equal(context.matchedRegistryAmountIdentifier(33913, amountIdentifiers)?.bank, 'monobank')

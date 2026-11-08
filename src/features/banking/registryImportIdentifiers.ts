@@ -143,3 +143,18 @@ export function receiptGrossAmount(comment: string, netAmount: number) {
   if (grossCents === null || feeCents === null || feeCents <= 0) return null
   return grossCents === Math.round(netAmount * 100) + feeCents ? grossCents : null
 }
+
+export function receiptOrderNumber(comment: string) {
+  return /(?:замовленн[яюі]|заказ[ау]?)\s*(?:№\s*)?(\d{5,20})/iu.exec(comment)?.[1]
+}
+
+export function matchesPaidOrderReceipt(
+  comment: string,
+  netAmount: number,
+  orders: Map<string, { paymentAmount: number; acquiring: number }>,
+) {
+  const order = orders.get(receiptOrderNumber(comment) ?? '')
+  if (!order) return false
+  const paidCents = Math.round(order.paymentAmount * 100)
+  return paidCents === Math.round(netAmount * 100) || paidCents === receiptGrossAmount(comment, netAmount)
+}
