@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  type ComputedRef,
   nextTick,
   onMounted,
   onScopeDispose,
@@ -14,6 +15,7 @@ import type { RealtimeChannel, User } from '@supabase/supabase-js'
 import { useRoute, useRouter } from 'vue-router'
 import { preloadPriorityRoutes } from '@/router'
 import {
+  watchDebounced,
   useClipboard,
   useDocumentVisibility,
   useEventListener,
@@ -155,6 +157,13 @@ const registryDraftNavigation = useSessionStorage<string | null>(
   null,
 )
 const searchQuery = ref('')
+const debouncedSearchQuery = ref('')
+watchDebounced(searchQuery, (value) => { debouncedSearchQuery.value = value }, { debounce: 200 })
+watch(searchQuery, (value) => {
+  if (!value.trim()) debouncedSearchQuery.value = ''
+})
+const searchLimit = ref(50)
+watch(debouncedSearchQuery, () => { searchLimit.value = 50 })
 const platformFilter = ref<'all' | Platform>('all')
 type OrderListPeriod = 'day' | 'week' | 'decade' | 'month' | 'last30' | 'custom'
 type PreferredOrderListMonthPeriod = Extract<OrderListPeriod, 'month' | 'last30'>
@@ -1752,28 +1761,37 @@ const promRegistryTotals = computed(() => ({
 const promRegistryNetTotal = computed(
   () => promRegistryTotals.value.paymentAmount - promRegistryTotals.value.acquiring,
 )
+const orderSearchCache = new WeakMap<Order, ComputedRef<{ text: string; ttns: string[] }>>()
+function searchableOrder(order: Order) {
+  let cached = orderSearchCache.get(order)
+  if (!cached) {
+    cached = computed(() => ({
+      text: [
+        JSON.stringify(order),
+        displayPaymentMethod(order.delivery.paymentMethod),
+        orderHeaderPaymentLabel(order),
+        promPaymentState(order) === 'paid' ? 'Оплачено' : '',
+        promPaymentState(order) === 'error' ? 'Ошибка оплаты' : '',
+      ].join(' ').toLowerCase(),
+      ttns: deliveryTtns(order.delivery).map((ttn) => ttn.replace(/\D/g, '')),
+    }))
+    orderSearchCache.set(order, cached)
+  }
+  return cached.value
+}
 const matchingOrders = computed(() => {
-  const search = searchQuery.value.trim().toLowerCase()
+  const search = debouncedSearchQuery.value.trim().toLowerCase()
   const ttnSearch = search.replace(/\D/g, '')
   const isTtnSearch = /^[\d\s-]+$/.test(search)
   const { from, to } = orderListRange.value
   return orders.value.filter((order) => {
-    const haystack = [
-      JSON.stringify(order),
-      displayPaymentMethod(order.delivery.paymentMethod),
-      orderHeaderPaymentLabel(order),
-      promPaymentState(order) === 'paid' ? 'Оплачено' : '',
-      promPaymentState(order) === 'error' ? 'Ошибка оплаты' : '',
-    ]
-      .join(' ')
-      .toLowerCase()
-    const matchesTtn =
-      isTtnSearch &&
-      ttnSearch.length >= 4 &&
-      deliveryTtns(order.delivery).some((ttn) => ttn.replace(/\D/g, '').includes(ttnSearch))
-
-    const matchesSearch = haystack.includes(search) || matchesTtn
-    if (search && !isShowingUnshipped.value) return matchesSearch
+    if (search) {
+      const indexed = searchableOrder(order)
+      const matchesSearch = indexed.text.includes(search) ||
+        (isTtnSearch && ttnSearch.length >= 4 && indexed.ttns.some((ttn) => ttn.includes(ttnSearch)))
+      if (!matchesSearch) return false
+      if (!isShowingUnshipped.value) return true
+    }
 
     const lifecycleState = getOrderLifecycleState(order, displayOrderStatus(order.status))
     const matchesPlatform =
@@ -1806,7 +1824,6 @@ const matchingOrders = computed(() => {
       isShowingUnshipped.value ||
       (orderDate !== null && orderDate >= from && orderDate <= to)
     return (
-      (!search || matchesSearch) &&
       matchesPlatform &&
       matchesOrderState &&
       matchesPeriod &&
@@ -1819,12 +1836,22 @@ const isOrderNotInExcel = (order: Order) =>
   !isSpreadsheetOrderCopied(order) &&
   isOrderVisibleInMainList(getOrderLifecycleState(order, displayOrderStatus(order.status)))
 const notInExcelOrdersCount = computed(() => orders.value.filter(isOrderNotInExcel).length)
-const visibleOrders = computed(() =>
-  isShowingNotInExcel.value
-    ? matchingOrders.value.filter(isOrderNotInExcel)
-    : isShowingUnpaidOnly.value
-      ? matchingOrders.value.filter(isUnpaidShipmentOrder)
-      : matchingOrders.value,
+const visibleOrders = computed(() => {
+  if (searchQuery.value.trim()) return matchingOrders.value
+  if (isShowingNotInExcel.value) return matchingOrders.value.filter(isOrderNotInExcel)
+  if (isShowingUnpaidOnly.value) return matchingOrders.value.filter(isUnpaidShipmentOrder)
+  return matchingOrders.value
+})
+const isSearchPending = computed(() =>
+  Boolean(searchQuery.value.trim()) &&
+  searchQuery.value.trim().toLowerCase() !== debouncedSearchQuery.value.trim().toLowerCase(),
+)
+const displayedOrders = computed(() =>
+  isSearchPending.value
+    ? []
+    : searchQuery.value.trim()
+      ? visibleOrders.value.slice(0, searchLimit.value)
+      : visibleOrders.value,
 )
 
 function isOpenForPrintRegistry(order: Order) {
@@ -6489,7 +6516,7 @@ function orderDateTime(order: Order) {
           </button>
         </div>
         <article
-          v-for="order in visibleOrders"
+          v-for="order in displayedOrders"
           :key="order.id"
           :id="`order-${order.id}`"
           :data-order-id="String(order.id)"
@@ -7757,7 +7784,16 @@ function orderDateTime(order: Order) {
             </aside>
           </div>
         </article>
-        <p v-if="visibleOrders.length === 0" class="p-8 text-center text-sm text-slate-500">
+        <button
+          v-if="!isSearchPending && searchQuery.trim() && displayedOrders.length < visibleOrders.length"
+          class="mb-3 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          type="button"
+          @click="searchLimit += 50"
+        >
+          Показать ещё · {{ visibleOrders.length - displayedOrders.length }}
+        </button>
+        <p v-if="isSearchPending" class="p-8 text-center text-sm text-slate-500">Поиск…</p>
+        <p v-else-if="visibleOrders.length === 0" class="p-8 text-center text-sm text-slate-500">
           Заказы не найдены.
         </p>
         <div class="mt-5">
