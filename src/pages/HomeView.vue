@@ -7796,7 +7796,7 @@ function orderDateTime(order: Order) {
         <p v-else-if="visibleOrders.length === 0" class="p-8 text-center text-sm text-slate-500">
           Заказы не найдены.
         </p>
-        <div class="mt-5">
+        <div v-show="!isPromRegistryView" class="mt-5">
           <RouterLink
             class="inline-flex rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-800"
             to="/reconciliation"
@@ -7806,6 +7806,7 @@ function orderDateTime(order: Order) {
         </div>
         <BankBalancesCard
           ref="bankBalancesCard"
+          v-show="!isPromRegistryView"
           :caches="bankCaches"
           :total-balance="bankTotalBalance"
         />
