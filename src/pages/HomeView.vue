@@ -165,7 +165,7 @@ watch(searchQuery, (value) => {
 const searchLimit = ref(50)
 watch(debouncedSearchQuery, () => { searchLimit.value = 50 })
 const platformFilter = ref<'all' | Platform>('all')
-type OrderListPeriod = 'day' | 'week' | 'decade' | 'month' | 'last30' | 'custom'
+type OrderListPeriod = 'day' | 'week' | 'decade' | 'month' | 'last30' | 'custom' | `month:${string}`
 type PreferredOrderListMonthPeriod = Extract<OrderListPeriod, 'month' | 'last30'>
 
 function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
@@ -863,6 +863,13 @@ function shiftDateByMonths(value: Date, months: number) {
 
 function formatShortDate(value: Date) {
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit' }).format(value)
+}
+
+function formatOrderMonth(month: string) {
+  const date = parseInputDate(`${month}-01`)
+  return date
+    ? new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date)
+    : month
 }
 
 const defaultOrderListDate = startOfLocalDay(new Date())
@@ -1589,6 +1596,20 @@ function isUnpaidShipmentOrder(order: Order) {
   )
 }
 const unpaidShipmentOrders = computed(() => orders.value.filter(isUnpaidShipmentOrder))
+const availableFullMonths = computed(() => {
+  const currentMonth = inputDate(new Date()).slice(0, 7)
+  return [
+    ...new Set(
+      orders.value.flatMap((order) => {
+        const date = parseOrderDate(order.date)
+        return date ? [inputDate(date).slice(0, 7)] : []
+      }),
+    ),
+  ]
+    .filter((month) => month < currentMonth)
+    .sort()
+    .reverse()
+})
 const unpaidShipmentAmount = computed(() =>
   unpaidShipmentOrders.value.reduce((total, order) => total + getNetOrderAmount(order), 0),
 )
@@ -1624,6 +1645,10 @@ const orderListRange = computed(() => {
     from.setDate(today.getDate() - 29)
     return { from, to: today }
   }
+  if (orderListPeriod.value.startsWith('month:')) {
+    const first = parseInputDate(`${orderListPeriod.value.slice(6)}-01`) ?? today
+    return { from: first, to: new Date(first.getFullYear(), first.getMonth() + 1, 0) }
+  }
   if (orderListPeriod.value === 'custom') {
     const first = parseInputDate(orderListFrom.value) ?? today
     const second = parseInputDate(orderListTo.value) ?? first
@@ -1637,11 +1662,12 @@ const orderListRange = computed(() => {
 const previousOrderListRange = computed(() => {
   const { from, to } = orderListRange.value
   if (
-    orderListPeriod.value === 'custom' &&
-    from.getDate() === 1 &&
-    from.getFullYear() === to.getFullYear() &&
-    from.getMonth() === to.getMonth() &&
-    to.getDate() === new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate()
+    orderListPeriod.value.startsWith('month:') ||
+    (orderListPeriod.value === 'custom' &&
+      from.getDate() === 1 &&
+      from.getFullYear() === to.getFullYear() &&
+      from.getMonth() === to.getMonth() &&
+      to.getDate() === new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate())
   ) {
     return {
       from: new Date(from.getFullYear(), from.getMonth() - 1, 1),
@@ -1698,7 +1724,15 @@ const orderListPeriodLabel = computed(() => {
   if (orderListPeriod.value === 'day') {
     return new Intl.DateTimeFormat('ru-RU').format(orderListRange.value.from)
   }
-  if (orderListPeriod.value !== 'custom') {
+  if (orderListPeriod.value.startsWith('month:')) {
+    return formatOrderMonth(orderListPeriod.value.slice(6))
+  }
+  if (
+    orderListPeriod.value === 'week' ||
+    orderListPeriod.value === 'decade' ||
+    orderListPeriod.value === 'month' ||
+    orderListPeriod.value === 'last30'
+  ) {
     return {
       week: 'Неделя',
       decade: 'Декада',
@@ -6207,6 +6241,11 @@ function orderDateTime(order: Order) {
               <option value="month">Месяц</option>
               <option value="last30">Последние 30 дней</option>
               <option value="custom">Произвольный период</option>
+              <optgroup label="Полные месяцы">
+                <option v-for="month in availableFullMonths" :key="month" :value="`month:${month}`">
+                  {{ formatOrderMonth(month) }}
+                </option>
+              </optgroup>
             </select>
             <template v-if="orderListPeriod === 'day'">
               <div
