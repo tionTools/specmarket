@@ -6993,6 +6993,7 @@ function orderDateTime(order: Order) {
                   </div>
                 </div>
               </section>
+              <div class="flex flex-col">
               <div
                 data-order-card
                 class="mt-4 overflow-visible rounded-xl border border-slate-300 bg-white"
@@ -7253,6 +7254,7 @@ function orderDateTime(order: Order) {
               <div
                 data-order-card
                 class="order-edit mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-300 bg-white p-4 text-sm sm:grid-cols-3 lg:grid-cols-[1fr_1fr_1fr_5rem_6rem_6.5rem_6.5rem]"
+                :class="{ '-order-1': isPromRegistryDraft }"
               >
                 <div>
                   <span class="text-slate-500">Итого продажа</span
@@ -7391,6 +7393,7 @@ function orderDateTime(order: Order) {
                     @keydown.enter.prevent="toggleOrderCell(`${order.id}-extra-expenses`, $event)"
                   /><span class="ml-1">₴</span></label
                 >
+              </div>
               </div>
               <label
                 v-if="isInternalCommentVisible(order)"
