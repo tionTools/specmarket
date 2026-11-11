@@ -97,7 +97,7 @@ fun Context.showNewOrderNotification(order: PushOrderNotification) {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val notification = Notification.Builder(this, NEW_ORDERS_CHANNEL_ID)
-        .setSmallIcon(R.drawable.ic_orders)
+        .setSmallIcon(R.drawable.ic_specmarket_notification)
         .setContentTitle("Новый заказ · ${order.platform} · ${order.total}")
         .setContentText("${order.customer} · №${order.number}")
         .setAutoCancel(true)

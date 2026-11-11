@@ -19,8 +19,8 @@ android {
         applicationId = "ua.orders.crm"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.29"
+        versionCode = 52
+        versionName = "0.52"
     }
     signingConfigs {
         create("release") {
@@ -60,6 +60,7 @@ dependencies {
     implementation("io.ktor:ktor-client-okhttp:3.4.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
     implementation("com.google.firebase:firebase-messaging")

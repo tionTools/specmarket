@@ -18,8 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,19 +52,25 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var requestedOrderId by mutableStateOf<String?>(null)
+    private var requestedReminders by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+        requestedReminders = intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)
         setContent {
             AppearanceHost {
                 OrdersApp(
                     openOrderId = requestedOrderId,
                     onOrderOpened = ::clearRequestedOrder,
+                    openReminders = requestedReminders,
+                    onRemindersOpened = ::clearRequestedReminders,
                 )
             }
         }
@@ -74,11 +80,17 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         requestedOrderId = intent.getStringExtra(EXTRA_OPEN_ORDER_ID)
+        requestedReminders = intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)
     }
 
     private fun clearRequestedOrder() {
         requestedOrderId = null
         intent.removeExtra(EXTRA_OPEN_ORDER_ID)
+    }
+
+    private fun clearRequestedReminders() {
+        requestedReminders = false
+        intent.removeExtra(EXTRA_OPEN_REMINDERS)
     }
 }
 
@@ -94,7 +106,7 @@ private fun money(value: BigDecimal) = value.setScale(2, RoundingMode.HALF_UP).t
 private fun amount(value: Double?) = value?.let { BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() } ?: "—"
 
 @Composable
-private fun PlatformLogo(platform: String?) {
+internal fun PlatformLogo(platform: String?) {
     val value = platform.orEmpty().trim()
     val key = normalizedStatus(value)
     val resource = when (key) {
@@ -122,7 +134,7 @@ private fun PlatformLogo(platform: String?) {
     )
 }
 
-private fun openDialer(context: Context, phone: String) {
+internal fun openDialer(context: Context, phone: String) {
     val value = normalizeCustomerPhone(phone)
     if (value == null) {
         Toast.makeText(context, "Некорректный номер телефона.", Toast.LENGTH_SHORT).show()
@@ -167,6 +179,8 @@ fun OrdersApp(
     vm: OrdersViewModel = viewModel(),
     openOrderId: String? = null,
     onOrderOpened: () -> Unit = {},
+    openReminders: Boolean = false,
+    onRemindersOpened: () -> Unit = {},
 ) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.foreground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.foreground(false) }
@@ -188,6 +202,17 @@ fun OrdersApp(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(OrderListFilter.ALL.name) }
+    val pickupDay by produceState(initialValue = pickupToday()) {
+        while (true) {
+            delay(millisUntilNextPickupDay())
+            value = pickupToday()
+        }
+    }
+    // One lightweight read of saved deadlines when the CRM opens, regardless of filter.
+    // Reuse the same data on filter selection; never poll carriers or add a timer.
+    LaunchedEffect(vm.email, vm.initializing, pickupDay) {
+        if (vm.email != null && !vm.initializing) vm.ensurePickupReminderCount()
+    }
     var confirmationId by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
@@ -199,6 +224,15 @@ fun OrdersApp(
             confirmationId = null
             returnAnchorId = null
             restoringFromDetail = false
+        }
+    }
+    LaunchedEffect(openReminders, vm.email, vm.initializing) {
+        if (openReminders && vm.email != null && !vm.initializing) {
+            settings = false
+            vm.closeDetail()
+            filterName = OrderListFilter.REMIND.name
+            vm.loadPickupReminders()
+            onRemindersOpened()
         }
     }
     LaunchedEffect(openOrderId, vm.email, vm.initializing) {
@@ -231,6 +265,7 @@ fun OrdersApp(
                 )
                 else -> OrdersScreen(
                     vm = vm,
+                    pickupDay = pickupDay,
                     onSettings = { settings = true },
                     listState = ordersListState,
                     searchOpen = searchOpen,
@@ -238,7 +273,10 @@ fun OrdersApp(
                     filter = OrderListFilter.entries.find { it.name == filterName } ?: OrderListFilter.ALL,
                     onSearchOpenChange = { searchOpen = it },
                     onSearchQueryChange = { searchQuery = it },
-                    onFilterChange = { filterName = it.name },
+                    onFilterChange = {
+                        filterName = it.name
+                        if (it == OrderListFilter.REMIND) vm.loadPickupReminders()
+                    },
                     restoreAnchorId = returnAnchorId.takeIf { restoringFromDetail },
                     restoreAnchorIndex = returnAnchorIndex,
                     restoreAnchorOffset = returnAnchorOffset,
@@ -337,14 +375,15 @@ private fun NotificationPermissionGate(vm: OrdersViewModel) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
     val context = LocalContext.current
     val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val pickupPushEnabled by context.pickupNotificationsEnabled().collectAsState(initial = true)
     val permissionAsked by context.notificationPermissionAsked().collectAsState(initial = false)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { vm.notificationsPermissionChanged() }
 
-    LaunchedEffect(vm.email, notificationsEnabled, permissionAsked) {
+    LaunchedEffect(vm.email, notificationsEnabled, pickupPushEnabled, permissionAsked) {
         if (
-            vm.email != null && notificationsEnabled && !permissionAsked &&
+            vm.email != null && (notificationsEnabled || pickupPushEnabled) && !permissionAsked &&
             !context.canPostOrderNotifications()
         ) {
             context.saveNotificationPermissionAsked(true)
@@ -360,6 +399,8 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val appearance by context.appearance().collectAsState(initial = Appearance.SYSTEM)
     val notificationsEnabled by context.newOrderNotifications().collectAsState(initial = true)
+    val pickupPushEnabled by context.pickupNotificationsEnabled().collectAsState(initial = true)
+    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     var notificationPermissionGranted by remember { mutableStateOf(context.canPostOrderNotifications()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -428,12 +469,53 @@ private fun Settings(vm: OrdersViewModel, onBack: () -> Unit) {
                             },
                         )
                     }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Напоминания о получении", style = MaterialTheme.typography.titleMedium)
+                            Text("Одно сводное уведомление после 08:00 по Киеву. Ночью — без звука.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = pickupPushEnabled, onCheckedChange = { enabled ->
+                            scope.launch {
+                                context.savePickupNotificationsEnabled(enabled)
+                                if (enabled) context.schedulePickupReminderCheck()
+                                else context.cancelPickupReminderChecks()
+                            }
+                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                !context.canPostOrderNotifications()) {
+                                scope.launch { context.saveNotificationPermissionAsked(true) }
+                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        })
+                    }
                     Text(
                         "Фоновое уведомление работает, пока Android не остановил процесс приложения. " +
                             "Для гарантированной доставки после полной остановки нужен серверный push.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            item {
+                SectionCard("Связь") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Мессенджеры", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Показывать Viber и Telegram на этом телефоне. " +
+                                    "Если выключено — только кнопка «Позвонить».",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = messengersEnabled,
+                            onCheckedChange = { enabled ->
+                                scope.launch { context.saveMessengersEnabled(enabled) }
+                            },
+                        )
+                    }
                 }
             }
             item {
@@ -509,42 +591,93 @@ private fun extraProductsLabel(count: Int): String = when {
 }
 
 @Composable
-private fun OrderFilters(
-    orders: List<Order>,
-    selected: OrderListFilter,
+private fun OrderFilterChip(
+    filter: OrderListFilter,
+    count: String,
+    selected: Boolean,
+    modifier: Modifier,
     onSelected: (OrderListFilter) -> Unit,
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Surface(
+        modifier = modifier.clickable { onSelected(filter) },
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.surface,
+        contentColor = if (selected) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
     ) {
-        items(OrderListFilter.entries) { filter ->
-            val active = filter == selected
-            Surface(
-                modifier = Modifier.clickable { onSelected(filter) },
-                shape = RoundedCornerShape(18.dp),
-                color = if (active) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.surface,
-                contentColor = if (active) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface,
-            ) {
-                Row(
-                    Modifier.padding(start = 14.dp, end = 9.dp, top = 9.dp, bottom = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            @Composable
+            fun CountBadge() {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selected) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
-                    Text(filter.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = if (active) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) {
-                        Text(
-                            orders.count { it.matchesListFilter(filter) }.toString(),
-                            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
+                    Text(
+                        count,
+                        Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                    )
                 }
             }
+            // Keep ALL compact so the other three chips fit narrow screens.
+            // REMIND shares exactly the same label/badge styling as NEW and WORK.
+            if (filter == OrderListFilter.ALL) {
+                Text(
+                    count,
+                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            } else {
+                Text(
+                    filter.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(4.dp))
+                CountBadge()
+            }
+        }
+    }
+}
+
+@Composable
+internal fun OrderFilters(
+    orders: List<Order>,
+    queue: List<PickupQueueRow>,
+    remindersLoaded: Boolean,
+    selected: OrderListFilter,
+    onSelected: (OrderListFilter) -> Unit,
+    remindersFailed: Boolean = false,
+) {
+    // One compact scrollable row: ALL shows only its count; reminder uses
+    // the same label/count arrangement and colors as NEW and WORK.
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        items(OrderListFilter.entries) { filter ->
+            val count = when {
+                filter == OrderListFilter.REMIND && !remindersLoaded ->
+                    if (remindersFailed) "!" else "…"
+                filter == OrderListFilter.REMIND ->
+                    pickupUrgentCount(queue).toString()
+                else -> orders.count { it.matchesListFilter(filter) }.toString()
+            }
+            OrderFilterChip(
+                filter = filter,
+                count = count,
+                selected = selected == filter,
+                modifier = Modifier,
+                onSelected = onSelected,
+            )
         }
     }
 }
@@ -553,6 +686,7 @@ private fun OrderFilters(
 @Composable
 private fun OrdersScreen(
     vm: OrdersViewModel,
+    pickupDay: LocalDate,
     onSettings: () -> Unit,
     listState: LazyListState,
     searchOpen: Boolean,
@@ -569,7 +703,8 @@ private fun OrdersScreen(
 ) {
     val orders = remember(vm.orders) { vm.orders.filter(::isOrderVisibleInMainList) }
     val visibleOrders = remember(orders, searchQuery, filter) {
-        orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
+        if (filter == OrderListFilter.REMIND) emptyList()
+        else orders.filter { it.matchesListFilter(filter) && it.matchesOrderSearch(searchQuery) }
     }
     LaunchedEffect(restoreAnchorId, visibleOrders) {
         if (restoreAnchorId == null || visibleOrders.isEmpty()) return@LaunchedEffect
@@ -626,8 +761,25 @@ private fun OrdersScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OrderFilters(orders, filter, onFilterChange)
-            PullToRefreshBox(
+            OrderFilters(
+                orders, vm.pickupQueue, vm.pickupLoaded, filter, onFilterChange,
+                remindersFailed = vm.pickupError != null,
+            )
+            if (filter == OrderListFilter.REMIND) {
+                PickupReminderContent(
+                    orders = vm.pickupOrders,
+                    queue = vm.pickupQueue,
+                    manualHistory = vm.pickupManualHistory,
+                    loading = vm.pickupLoading,
+                    busy = vm.pickupBusy,
+                    error = vm.pickupError,
+                    onRefresh = vm::loadPickupReminders,
+                    onSaveDeadline = vm::savePickupDeadline,
+                    onConfirmSent = vm::confirmPickupSent,
+                    onConfirmManualSent = vm::confirmPickupManualSent,
+                    searchQuery = searchQuery,
+                )
+            } else PullToRefreshBox(
                 isRefreshing = vm.loading,
                 onRefresh = { vm.manualRefresh() },
                 modifier = Modifier.weight(1f),
@@ -926,6 +1078,7 @@ private fun DetailsHeader(order: Order) {
 private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -> Unit) {
     val order = vm.detail
     val context = LocalContext.current
+    val messengersEnabled by context.messengersEnabled().collectAsState(initial = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var historyExpanded by rememberSaveable(order?.id) { mutableStateOf(false) }
@@ -1005,42 +1158,46 @@ private fun Details(vm: OrdersViewModel, onBack: () -> Unit, onAccept: (Order) -
                     }
                     if (normalizeCustomerPhone(rawBuyerPhone) != null) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            FilledTonalButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openDialer(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1.12f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6),
-                                ),
-                            ) { Text("Позвонить", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openViber(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7360F2), contentColor = Color.White,
-                                ),
-                            ) { Text("Viber", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-                            Button(
-                                onClick = {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                    openTelegram(context, rawBuyerPhone)
-                                },
-                                modifier = Modifier.weight(1.12f).height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF229ED9), contentColor = Color.White,
-                                ),
-                            ) { Text("Telegram", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                            contactActions(messengersEnabled).forEach { action ->
+                                when (action) {
+                                    ContactAction.VIBER -> Button(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openViber(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF7360F2), contentColor = Color.White,
+                                        ),
+                                    ) { Text("Viber", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                    ContactAction.CALL -> FilledTonalButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openDialer(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1.12f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = Color(0xFFEDE9FE), contentColor = Color(0xFF5B21B6),
+                                        ),
+                                    ) { Text("Позвонить", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                    ContactAction.TELEGRAM -> Button(
+                                        onClick = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            openTelegram(context, rawBuyerPhone)
+                                        },
+                                        modifier = Modifier.weight(1.12f).height(46.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF229ED9), contentColor = Color.White,
+                                        ),
+                                    ) { Text("Telegram", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                }
+                            }
                         }
                     }
                 }
