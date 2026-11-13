@@ -672,18 +672,17 @@ function productSize(item: RecordValue, name: string) {
   )
   if (direct) return direct
   const nested = findNestedSize(
-    pick(
-      item,
-      'product',
-      'product_data',
-      'product_variant',
-      'variants',
-      'options',
-      'attributes',
-      'characteristics',
-      'parameters',
-      'properties',
-    ),
+    [
+      item.product,
+      item.product_data,
+      item.product_variant,
+      item.variants,
+      item.options,
+      item.attributes,
+      item.characteristics,
+      item.parameters,
+      item.properties,
+    ],
   )
   if (nested) return nested
   // For text modifications Prom appends the selected value to the order item
@@ -749,13 +748,19 @@ async function resolvedProductSize(
   const fromFeed = productFromPromFeed(item, feedProducts)?.size
   if (fromFeed) return fromFeed
 
-  const rzid = text(pick(item, 'rzid', 'variation_id', 'id')).trim()
-  if (!rzid) return ''
-
-  const cached = productCache.get(rzid)
-  if (!cached && !useProductFallback) return ''
-  const product = cached ? await cached : await promProductById(rzid, promToken, productCache)
-  return product ? productSize(product, text(product.name) || name) : ''
+  const productIds = [...new Set(
+    [item.rzid, item.variation_id, item.product_id, item.productId, item.id]
+      .map((value) => text(value).trim())
+      .filter(Boolean),
+  )]
+  for (const productId of productIds) {
+    const cached = productCache.get(productId)
+    if (!cached && !useProductFallback) continue
+    const product = cached ? await cached : await promProductById(productId, promToken, productCache)
+    const size = product ? productSize(product, text(product.name) || name) : ''
+    if (size) return size
+  }
+  return ''
 }
 
 function isSizeParameter(name: string) {
