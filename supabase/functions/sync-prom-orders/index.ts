@@ -766,11 +766,7 @@ async function resolvedProductSize(
 function isSizeParameter(name: string) {
   const normalized = name.trim().toLocaleLowerCase()
   if (/(?:упаков|пакув|короб|pack|box)/i.test(normalized)) return false
-  return ['розмір', 'размер', 'size'].some((label) => {
-    if (!normalized.startsWith(label)) return false
-    const suffix = normalized.slice(label.length)
-    return suffix === '' || /^[\s:(_/-]/.test(suffix)
-  })
+  return /(?:^|[^\p{L}])(?:розмір|размер|size)(?=$|[^\p{L}])/iu.test(normalized)
 }
 
 function decodeXmlText(value: string) {

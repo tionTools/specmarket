@@ -6099,6 +6099,34 @@ function orderDateTime(order: Order) {
           </div>
         </article>
         <article
+          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        >
+          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">
+            Фактическая прибыль
+          </p>
+          <div class="border-l border-slate-300 pl-2 text-left">
+            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
+            <p class="whitespace-nowrap text-lg font-semibold leading-none">
+              {{ formatMoney(summary.period.actual) }}
+            </p>
+          </div>
+          <div
+            v-if="isComparingPreviousPeriod"
+            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
+          >
+            <span>{{ previousOrderListRangeLabel }}</span>
+            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
+              <span>{{ formatMoney(summary.previous.actual) }}</span>
+              <span
+                class="text-[10px]"
+                :class="percentageChangeClass(summary.period.actual, summary.previous.actual)"
+              >
+                {{ formatPercentageChange(summary.period.actual, summary.previous.actual) }}
+              </span>
+            </strong>
+          </div>
+        </article>
+        <article
           class="grid grid-cols-[auto_auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
         >
           <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">Плановая прибыль</p>
@@ -6126,34 +6154,6 @@ function orderDateTime(order: Order) {
                 :class="percentageChangeClass(summary.period.planned, summary.previous.planned)"
               >
                 {{ formatPercentageChange(summary.period.planned, summary.previous.planned) }}
-              </span>
-            </strong>
-          </div>
-        </article>
-        <article
-          class="grid grid-cols-[auto_auto] items-center justify-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-        >
-          <p class="max-w-28 text-sm font-medium leading-tight text-slate-600">
-            Фактическая прибыль
-          </p>
-          <div class="border-l border-slate-300 pl-2 text-left">
-            <p class="text-[10px] uppercase text-slate-400">{{ orderListPeriodLabel }}</p>
-            <p class="whitespace-nowrap text-lg font-semibold leading-none">
-              {{ formatMoney(summary.period.actual) }}
-            </p>
-          </div>
-          <div
-            v-if="isComparingPreviousPeriod"
-            class="col-span-full -mx-3 -mb-2 flex items-center justify-between border-t border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700"
-          >
-            <span>{{ previousOrderListRangeLabel }}</span>
-            <strong class="flex items-baseline justify-end gap-1 whitespace-nowrap">
-              <span>{{ formatMoney(summary.previous.actual) }}</span>
-              <span
-                class="text-[10px]"
-                :class="percentageChangeClass(summary.period.actual, summary.previous.actual)"
-              >
-                {{ formatPercentageChange(summary.period.actual, summary.previous.actual) }}
               </span>
             </strong>
           </div>
