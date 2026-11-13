@@ -18,11 +18,15 @@ fun Appearance.isDark(systemDark: Boolean) = this == Appearance.DARK || this == 
 private val Context.appearanceStore by preferencesDataStore("orders_appearance")
 private val appearanceKey = stringPreferencesKey("appearance")
 private val newOrderNotificationsKey = booleanPreferencesKey("new_order_notifications")
+private val messengersEnabledKey = booleanPreferencesKey("messengers_enabled")
 private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
 fun Context.appearance() = appearanceStore.data.map { Appearance.entries.find { mode -> mode.name == it[appearanceKey] } ?: Appearance.SYSTEM }
 suspend fun Context.saveAppearance(value: Appearance) { appearanceStore.edit { it[appearanceKey] = value.name } }
 fun Context.newOrderNotifications() = appearanceStore.data.map { it[newOrderNotificationsKey] ?: true }
 suspend fun Context.saveNewOrderNotifications(value: Boolean) { appearanceStore.edit { it[newOrderNotificationsKey] = value } }
+// Device-local setting: changing it on one phone does not affect the other.
+fun Context.messengersEnabled() = appearanceStore.data.map { it[messengersEnabledKey] ?: true }
+suspend fun Context.saveMessengersEnabled(value: Boolean) { appearanceStore.edit { it[messengersEnabledKey] = value } }
 fun Context.notificationPermissionAsked() = appearanceStore.data.map { it[notificationPermissionAskedKey] ?: false }
 suspend fun Context.saveNotificationPermissionAsked(value: Boolean) { appearanceStore.edit { it[notificationPermissionAskedKey] = value } }
 
