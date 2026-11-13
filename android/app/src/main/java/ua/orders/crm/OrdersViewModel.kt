@@ -35,6 +35,13 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
     var selectedId by mutableStateOf<String?>(null); private set
     var detail by mutableStateOf<Order?>(null); private set
     var acceptingId by mutableStateOf<String?>(null); private set
+    // Optional, lazy-loaded feature state. Core order refresh never touches it.
+    var pickupReminders by mutableStateOf<Map<String, PickupReminderState>>(emptyMap()); private set
+    var pickupLoading by mutableStateOf(false); private set
+    var pickupBusy by mutableStateOf(false); private set
+    var pickupError by mutableStateOf<String?>(null); private set
+    private var pickupGeneration = 0L
+    private var pickupJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -261,6 +268,13 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
         detail = null
         pendingNotificationIds.clear()
         initialLoadComplete = false
+        ++pickupGeneration
+        pickupJob?.cancel()
+        pickupJob = null
+        pickupReminders = emptyMap()
+        pickupLoading = false
+        pickupBusy = false
+        pickupError = null
     }
 
     private fun merge(order: Order) {
@@ -342,6 +356,75 @@ class OrdersViewModel(application: Application) : AndroidViewModel(application) 
                     refreshJob = null
                 }
             }
+        }
+    }
+
+
+    // Loaded only when reminders UI is open: no new startup dependency,
+    // no additional query on routine order sync or realtime updates.
+    fun loadPickupReminders() {
+        val account = email ?: return
+        val generation = ++pickupGeneration
+        pickupJob?.cancel()
+        pickupLoading = true
+        pickupError = null
+        pickupJob = viewModelScope.launch {
+            try {
+                val reminders = withTimeout(15_000) { repository.pickupReminders() }
+                if (email == account && generation == pickupGeneration) {
+                    pickupReminders = reminders.associateBy { it.orderId }
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                if (email == account && generation == pickupGeneration) {
+                    pickupError = "Не удалось загрузить напоминания. Заказы доступны как обычно."
+                }
+            } finally {
+                if (generation == pickupGeneration) {
+                    pickupLoading = false
+                    pickupJob = null
+                }
+            }
+        }
+    }
+
+    fun savePickupDeadline(order: Order, deadline: String) {
+        if (pickupBusy || email == null) return
+        val ttn = order.deliveryValue("ttn").trim()
+        if (ttn.isBlank()) { message = "У заказа нет ТТН."; return }
+        pickupBusy = true
+        viewModelScope.launch {
+            try {
+                repository.setPickupDeadline(order.id, ttn, deadline)
+                val all = repository.pickupReminders()
+                pickupReminders = all.associateBy { it.orderId }
+                pickupError = null
+                message = "Крайний срок сохранён."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { message = "Не удалось сохранить срок. Повторите позже." }
+            finally { pickupBusy = false }
+        }
+    }
+
+    fun confirmPickupSent(order: Order, stage: PickupReminderStage, channel: String) {
+        if (pickupBusy || email == null) return
+        val reminder = pickupReminders[order.id] ?: return
+        if (order.pendingPickupReminder(reminder) != stage) {
+            message = "Напоминание устарело. Обновите данные."
+            return
+        }
+        pickupBusy = true
+        viewModelScope.launch {
+            try {
+                repository.confirmPickupReminder(order.id, reminder.ttn, reminder.deadline, stage, channel)
+                pickupReminders = repository.pickupReminders().associateBy { it.orderId }
+                pickupError = null
+                message = "Отправка отмечена."
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                message = "Не удалось подтвердить отправку. Проверьте статус."
+                loadPickupReminders()
+            } finally { pickupBusy = false }
         }
     }
 
