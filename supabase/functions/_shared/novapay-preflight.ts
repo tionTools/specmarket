@@ -1,7 +1,15 @@
 import { NovaPayAuthError } from './novapay-auth.ts'
 
 const NOVAPAY_WSDL_URL = 'https://business.novapay.ua/Services/ClientAPIService.svc?wsdl'
-export const NOVAPAY_PREFLIGHT_TIMEOUT_MS = 8_000
+export const NOVAPAY_PREFLIGHT_TIMEOUT_MS = 12_000
+const NOVAPAY_PREFLIGHT_RETRY_DELAY_MS = 500
+const RETRYABLE_PREFLIGHT_REASONS = new Set([
+  'timeout',
+  'transport_failure',
+  'http_502',
+  'http_503',
+  'http_504',
+])
 
 function unavailable(reason: string) {
   return new NovaPayAuthError(
@@ -13,10 +21,7 @@ function unavailable(reason: string) {
 }
 
 // Read-only GET without the single-use refresh token. WSDL is not an auth health guarantee.
-export async function checkNovaPayPreflight(
-  request: typeof fetch = fetch,
-  timeoutMs = NOVAPAY_PREFLIGHT_TIMEOUT_MS,
-): Promise<void> {
+async function checkNovaPayPreflightOnce(request: typeof fetch, timeoutMs: number): Promise<void> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -35,5 +40,26 @@ export async function checkNovaPayPreflight(
     throw unavailable(controller.signal.aborted ? 'timeout' : 'transport_failure')
   } finally {
     clearTimeout(timer)
+  }
+}
+
+export async function checkNovaPayPreflight(
+  request: typeof fetch = fetch,
+  timeoutMs = NOVAPAY_PREFLIGHT_TIMEOUT_MS,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await checkNovaPayPreflightOnce(request, timeoutMs)
+      return
+    } catch (error) {
+      if (
+        attempt > 0 ||
+        !(error instanceof NovaPayAuthError) ||
+        !RETRYABLE_PREFLIGHT_REASONS.has(error.reason ?? '')
+      ) {
+        throw error
+      }
+      await new Promise((resolve) => setTimeout(resolve, NOVAPAY_PREFLIGHT_RETRY_DELAY_MS))
+    }
   }
 }
