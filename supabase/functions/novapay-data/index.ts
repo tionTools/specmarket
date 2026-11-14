@@ -973,7 +973,8 @@ Deno.serve(async (request) => {
       },
       true,
     )
-    const available = finiteNumber(balanceResult.available_balance, 'available balance')
+    const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
+    const projected = finiteNumber(balanceResult.projected_balance, 'projected balance')
 
     const now = new Date()
     const fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
@@ -1002,7 +1003,7 @@ Deno.serve(async (request) => {
     dailyBalances.set(dateTo, {
       ...todayBalances,
       opening: todayBalances.opening ?? previousClosing,
-      closing: available,
+      closing: confirmed,
     })
     const statementPaymentsResult = await soapCall(
       'GetPaymentsList',
@@ -1044,7 +1045,7 @@ Deno.serve(async (request) => {
           .filter((receipt) => receipt !== null),
       ),
       statementMovements,
-      available,
+      confirmed,
     )
 
     const updatedDocuments = parsePaymentsDocuments(updatedPaymentsResult.payments)
@@ -1061,8 +1062,6 @@ Deno.serve(async (request) => {
       receipts,
     )
 
-    const confirmed = finiteNumber(balanceResult.confirmed_balance, 'confirmed balance')
-    const projected = finiteNumber(balanceResult.projected_balance, 'projected balance')
     const updatedAt = new Date().toISOString()
     const periodFrom = fromDate.toISOString()
     const periodTo = now.toISOString()
@@ -1086,7 +1085,7 @@ Deno.serve(async (request) => {
     const { error: cacheError } = await admin
       .from('bank_account_cache')
       .update({
-        balance: available,
+        balance: confirmed,
         updated_at: updatedAt,
         account: cachedAccount,
         receipts,
@@ -1159,7 +1158,7 @@ Deno.serve(async (request) => {
         ok: true,
         refreshed: true,
         bank: 'novapay',
-        balance: available,
+        balance: confirmed,
         updatedAt,
       })
     return Response.json(
@@ -1167,7 +1166,7 @@ Deno.serve(async (request) => {
         ok: true,
         refreshed: true,
         bank: 'novapay',
-        balance: available,
+        balance: confirmed,
         updatedAt,
         account: cachedAccount,
         receipts,

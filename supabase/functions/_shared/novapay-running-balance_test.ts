@@ -38,6 +38,20 @@ assertEquals(result[0].balance, 8000.43, 'latest 19.09 receipt')
 assertEquals(result[1].balance, 7373.58, 'earlier 19.09 receipt')
 assertEquals(result[2].balance, 7248.21, '18.09 receipt')
 
+const pendingAvailableResult = assignRunningBalances(
+  [
+    { ...receipts[0], amount: 9949.8 },
+    { ...receipts[1], amount: 228.85 },
+  ],
+  [
+    { ...receipts[0], amount: 9949.8, direction: 'credit' },
+    { ...receipts[1], amount: 228.85, direction: 'credit' },
+  ],
+  12802.92,
+)
+assertEquals(pendingAvailableResult[0].balance, 12802.92, 'latest receipt uses confirmed balance')
+assertEquals(pendingAvailableResult[1].balance, 2853.12, 'earlier receipt is not shifted by pending available amount')
+
 const noAliasReceipts = receipts.map((receipt) => ({ ...receipt, providerAliases: [] }))
 const noAliasMovements = noAliasReceipts.map((receipt) => ({ ...receipt, direction: 'credit' }))
 const noAliasResult = assignRunningBalances(noAliasReceipts, noAliasMovements, 8000.43)
