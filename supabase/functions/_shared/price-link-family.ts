@@ -110,3 +110,17 @@ export function priceLinkFamilyAliases(
 
   return [...aliases]
 }
+
+export function sameProductFamilyTitle(
+  platform: string,
+  marketplaceProductKey: string,
+  leftTitle: string,
+  leftSize: string,
+  rightTitle: string,
+  rightSize: string,
+) {
+  const familyTitle = (title: string, size: string) =>
+    priceLinkFamilyAliases(platform, marketplaceProductKey, title, size)
+      .find((alias) => alias.startsWith('family:title:')) ?? normalizeFamilyText(title)
+  return familyTitle(leftTitle, leftSize) === familyTitle(rightTitle, rightSize)
+}
