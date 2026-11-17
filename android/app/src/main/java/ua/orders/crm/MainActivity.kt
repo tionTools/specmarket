@@ -180,6 +180,7 @@ fun OrdersApp(
     }
     NotificationPermissionGate(vm)
     var settings by rememberSaveable { mutableStateOf(false) }
+    var pickupOpen by rememberSaveable { mutableStateOf(false) }
     val ordersListState = rememberLazyListState()
     var returnAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
     var returnAnchorIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -196,6 +197,7 @@ fun OrdersApp(
     LaunchedEffect(vm.email) {
         if (vm.email == null) {
             settings = false
+            pickupOpen = false
             confirmationId = null
             returnAnchorId = null
             restoringFromDetail = false
@@ -209,10 +211,14 @@ fun OrdersApp(
             onOrderOpened()
         }
     }
-    BackHandler(settings || vm.selectedId != null) {
-        if (settings) settings = false else {
-            restoringFromDetail = true
-            vm.closeDetail()
+    BackHandler(settings || pickupOpen || vm.selectedId != null) {
+        when {
+            settings -> settings = false
+            pickupOpen -> pickupOpen = false
+            else -> {
+                restoringFromDetail = true
+                vm.closeDetail()
+            }
         }
     }
     Scaffold(
@@ -224,6 +230,7 @@ fun OrdersApp(
                 vm.initializing -> Initializing()
                 vm.email == null -> Login(vm)
                 settings -> Settings(vm, onBack = { settings = false })
+                pickupOpen -> PickupRemindersScreen(vm, onBack = { pickupOpen = false })
                 vm.selectedId != null -> Details(
                     vm,
                     onBack = { restoringFromDetail = true; vm.closeDetail() },
@@ -232,6 +239,7 @@ fun OrdersApp(
                 else -> OrdersScreen(
                     vm = vm,
                     onSettings = { settings = true },
+                    onReminders = { pickupOpen = true },
                     listState = ordersListState,
                     searchOpen = searchOpen,
                     searchQuery = searchQuery,
@@ -554,6 +562,7 @@ private fun OrderFilters(
 private fun OrdersScreen(
     vm: OrdersViewModel,
     onSettings: () -> Unit,
+    onReminders: () -> Unit,
     listState: LazyListState,
     searchOpen: Boolean,
     searchQuery: String,
@@ -619,6 +628,7 @@ private fun OrdersScreen(
                     IconButton(onClick = { vm.manualRefresh() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Переподключиться и обновить")
                     }
+                    TextButton(onReminders) { Text("Напомнить") }
                     TextButton(onSettings) { Text("Настройки") }
                 },
             )

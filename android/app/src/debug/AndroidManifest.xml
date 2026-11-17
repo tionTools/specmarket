@@ -4,5 +4,7 @@
             android:name=".OrderCardReviewActivity"
             android:exported="true"
             android:label="Order Card UI Review" />
+        <activity android:name=".PickupReminderPreviewActivity" android:exported="true"
+            android:label="Pickup reminder smoke fixture" />
     </application>
 </manifest>
