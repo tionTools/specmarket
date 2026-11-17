@@ -935,22 +935,12 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </button>
       </p>
 
-      <p
-        v-if="marketplaceSettingsError"
-        class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
-        role="alert"
-      >
+      <p v-if="marketplaceSettingsError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
         {{ marketplaceSettingsError }}
-        <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">
-          Повторить
-        </button>
+        <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">Повторить</button>
       </p>
-      <p
-        v-if="pausedMarketplaces.length"
-        class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-      >
-        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения
-        сохранены; ручная синхронизация доступна.
+      <p v-if="pausedMarketplaces.length" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения сохранены; ручная синхронизация доступна.
       </p>
       <section
         v-if="!user"
@@ -1054,9 +1044,7 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             Ручная себестоимость сохранится.</span
           >
         </div>
-        <p v-if="!isMarketplaceSettingsLoaded" class="px-4 py-6 text-sm text-slate-500">
-          Загрузка настроек маркетплейсов…
-        </p>
+        <p v-if="!isMarketplaceSettingsLoaded" class="px-4 py-6 text-sm text-slate-500">Загрузка настроек маркетплейсов…</p>
         <PricesTable
           v-else
           :marketplace-enabled="marketplaceEnabled"
