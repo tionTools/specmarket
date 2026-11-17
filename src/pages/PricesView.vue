@@ -13,6 +13,7 @@ import {
 } from '@/features/prices/currencyRates'
 import PricesTable from '@/features/prices/PricesTable.vue'
 import { supabase } from '@/lib/supabase'
+import { sameProductFamilyTitle } from '../../supabase/functions/_shared/price-link-family'
 import {
   defaultMarketplaceEnabled,
   marketplaceEnabledFromRows,
@@ -372,7 +373,9 @@ async function priceLinkRowsForTarget(
     ...new Set(
       (familyMappings ?? [])
         .map((mapping) => String(mapping.marketplace_product_key ?? '').trim())
-        .filter((key) => key && key !== targetKey),
+        .filter(
+          (key) => key && key !== targetKey && (platform !== 'Пром' || key.startsWith('product:')),
+        ),
     ),
   ]
   if (!legacyKeys.length) return [canonicalRow]
@@ -505,6 +508,34 @@ async function linkPriceItem(item: PriceItem) {
   let targetLinkProductKey = linkProductKey.value
   try {
     targetLinkProductKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
+    if (
+      linkPlatform.value === 'Пром' &&
+      isCanonicalPriceFamilyKey(linkPlatform.value, targetLinkProductKey)
+    ) {
+      const { data: existing, error } = await supabase
+        .from('crm_product_price_links')
+        .select('product_title,size')
+        .eq('platform', 'Пром')
+        .eq('marketplace_product_key', targetLinkProductKey)
+        .maybeSingle()
+      if (error) throw error
+      if (
+        existing?.product_title &&
+        linkTitle.value &&
+        !sameProductFamilyTitle(
+          'Пром',
+          targetLinkProductKey,
+          existing.product_title,
+          existing.size ?? '',
+          linkTitle.value,
+          linkSize.value,
+        )
+      ) {
+        linkError.value = 'Этот ключ уже связан с другим товаром. Привязка не изменена.'
+        isLinking.value = false
+        return
+      }
+    }
   } catch (error) {
     isLinking.value = false
     linkError.value = `Не удалось определить семейную привязку товара: ${

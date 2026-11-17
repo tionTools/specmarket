@@ -1,10 +1,11 @@
-import { resolvedOrderItemCost, type PriceCostSnapshot } from './price-cost.ts'
+import { findPlatformPriceCostSnapshot, resolvedOrderItemCost, type PriceCostSnapshot } from './price-cost.ts'
 import {
   epicentrFamilyIdentity,
   familyPriceLinkConflict,
   mappedFamilyKey,
   mappedLegacyKeys,
   promLegacyProductKeys,
+  promStableProductKeys,
   promVariationFamilyKey,
 } from './marketplace-family.ts'
 
@@ -41,6 +42,27 @@ assertEquals(
   ['sku:712-24-M', 'product:2999555219'],
   'Prom legacy keys',
 )
+assertEquals(
+  promStableProductKeys({ sku: '759', product_id: 3253005080 }),
+  ['product:3253005080'],
+  'Prom gloves use product ID, not shared SKU',
+)
+assertEquals(
+  promStableProductKeys({ sku: '759', product_id: 3269437698 }),
+  ['product:3269437698'],
+  'Prom jacket has a distinct product ID despite shared SKU',
+)
+assertEquals(
+  promStableProductKeys({ sku: '759', product_id: 3253005079, rzid: 3253005080 }),
+  ['product:3253005079', 'product:3253005080'],
+  'Prom parent and variant IDs remain distinct from a shared SKU',
+)
+assertEquals(
+  mappedFamilyKey(new Map([['sku:759', 'variation_group:968085463']]),
+    promStableProductKeys({ sku: '759', product_id: 3253005080 })),
+  '',
+  'A shared SKU cannot assign a jacket family to gloves',
+)
 
 const mappings = new Map([
   ['sku:712-24-M', 'variation_group:653957377'],
@@ -70,6 +92,26 @@ assertEquals(
 
 const priceA: PriceCostSnapshot = { priceItemId: 'price-a', cost: 100, costUsd: 0 }
 const priceB: PriceCostSnapshot = { priceItemId: 'price-b', cost: 100, costUsd: 0 }
+const wrongPromLink: PriceCostSnapshot = {
+  priceItemId: 'gloves', cost: 20.16, costUsd: 0.42,
+  productTitle: 'Рукавички робочі зимові Urgent 1025Y', size: '10',
+}
+assertEquals(
+  findPlatformPriceCostSnapshot(new Map([['variation_group:968085463', wrongPromLink]]),
+    'Пром', 'variation_group:968085463', 'Куртка робоча зимова YES-WIN-LJ XL', 'XL'),
+  undefined,
+  'Shared family key cannot apply gloves cost to a jacket',
+)
+const jacketLink: PriceCostSnapshot = {
+  priceItemId: 'jacket', cost: 552, costUsd: 11.5,
+  productTitle: 'Куртка робоча зимова YES-WIN-LJ XL', size: 'XL',
+}
+assertEquals(
+  findPlatformPriceCostSnapshot(new Map([['variation_group:968085463', jacketLink]]),
+    'Пром', 'variation_group:968085463', 'Куртка робоча зимова YES-WIN-LJ XXL', 'XXL')?.snapshot.priceItemId,
+  'jacket',
+  'Sizes of the same jacket still share one price link',
+)
 assertEquals(
   familyPriceLinkConflict(
     new Map([
