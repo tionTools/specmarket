@@ -1,12 +1,9 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sameProductFamilyTitle } from './price-link-family.ts'
 
 export type PriceCostSnapshot = {
   priceItemId: string
   cost: number
   costUsd: number
-  productTitle?: string
-  size?: string
 }
 
 export type PriceCostMatch = {
@@ -57,8 +54,6 @@ export async function loadPlatformPriceCostSnapshots(
       priceItemId,
       costUsd: usd ?? 0,
       cost: usd === null ? number(priceItem.cost_uah) : 0,
-      productTitle: text(link.product_title),
-      size: text(link.size),
     })
   }
   return snapshots
@@ -66,16 +61,12 @@ export async function loadPlatformPriceCostSnapshots(
 
 export function findPlatformPriceCostSnapshot(
   snapshots: Map<string, PriceCostSnapshot>,
-  platform: string,
+  _platform: string,
   marketplaceProductKey: string,
-  productTitle: string,
-  size: string,
+  _productTitle: string,
+  _size: string,
 ): PriceCostMatch | undefined {
   const direct = snapshots.get(marketplaceProductKey)
-  if (platform === 'Пром' && direct?.productTitle && productTitle) {
-    if (!sameProductFamilyTitle(platform, marketplaceProductKey, direct.productTitle, direct.size ?? '', productTitle, size))
-      return undefined
-  }
   return direct ? { snapshot: direct, matchedKey: marketplaceProductKey } : undefined
 }
 

@@ -13,7 +13,6 @@ import {
 } from '@/features/prices/currencyRates'
 import PricesTable from '@/features/prices/PricesTable.vue'
 import { supabase } from '@/lib/supabase'
-import { sameProductFamilyTitle } from '../../supabase/functions/_shared/price-link-family'
 import {
   defaultMarketplaceEnabled,
   marketplaceEnabledFromRows,
@@ -373,9 +372,7 @@ async function priceLinkRowsForTarget(
     ...new Set(
       (familyMappings ?? [])
         .map((mapping) => String(mapping.marketplace_product_key ?? '').trim())
-        .filter(
-          (key) => key && key !== targetKey && (platform !== 'Пром' || key.startsWith('product:')),
-        ),
+        .filter((key) => key && key !== targetKey),
     ),
   ]
   if (!legacyKeys.length) return [canonicalRow]
@@ -508,34 +505,6 @@ async function linkPriceItem(item: PriceItem) {
   let targetLinkProductKey = linkProductKey.value
   try {
     targetLinkProductKey = await resolvePriceLinkTargetKey(linkPlatform.value, linkProductKey.value)
-    if (
-      linkPlatform.value === 'Пром' &&
-      isCanonicalPriceFamilyKey(linkPlatform.value, targetLinkProductKey)
-    ) {
-      const { data: existing, error } = await supabase
-        .from('crm_product_price_links')
-        .select('product_title,size')
-        .eq('platform', 'Пром')
-        .eq('marketplace_product_key', targetLinkProductKey)
-        .maybeSingle()
-      if (error) throw error
-      if (
-        existing?.product_title &&
-        linkTitle.value &&
-        !sameProductFamilyTitle(
-          'Пром',
-          targetLinkProductKey,
-          existing.product_title,
-          existing.size ?? '',
-          linkTitle.value,
-          linkSize.value,
-        )
-      ) {
-        linkError.value = 'Этот ключ уже связан с другим товаром. Привязка не изменена.'
-        isLinking.value = false
-        return
-      }
-    }
   } catch (error) {
     isLinking.value = false
     linkError.value = `Не удалось определить семейную привязку товара: ${
@@ -966,12 +935,22 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
         </button>
       </p>
 
-      <p v-if="marketplaceSettingsError" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+      <p
+        v-if="marketplaceSettingsError"
+        class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+        role="alert"
+      >
         {{ marketplaceSettingsError }}
-        <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">Повторить</button>
+        <button class="ml-2 font-semibold underline" type="button" @click="loadMarketplaceSettings">
+          Повторить
+        </button>
       </p>
-      <p v-if="pausedMarketplaces.length" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения сохранены; ручная синхронизация доступна.
+      <p
+        v-if="pausedMarketplaces.length"
+        class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+      >
+        Автообновление на паузе: {{ pausedMarketplaces.join(', ') }}. Колонки цен скрыты, значения
+        сохранены; ручная синхронизация доступна.
       </p>
       <section
         v-if="!user"
@@ -1075,7 +1054,9 @@ function updatePrice(item: PriceItem, key: PriceField, event: Event) {
             Ручная себестоимость сохранится.</span
           >
         </div>
-        <p v-if="!isMarketplaceSettingsLoaded" class="px-4 py-6 text-sm text-slate-500">Загрузка настроек маркетплейсов…</p>
+        <p v-if="!isMarketplaceSettingsLoaded" class="px-4 py-6 text-sm text-slate-500">
+          Загрузка настроек маркетплейсов…
+        </p>
         <PricesTable
           v-else
           :marketplace-enabled="marketplaceEnabled"

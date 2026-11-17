@@ -50,15 +50,6 @@ export function promLegacyProductKeys(item: RecordValue, productValue?: unknown)
   ])
 }
 
-export function promStableProductKeys(item: RecordValue, productValue?: unknown) {
-  const product = asRecord(productValue)
-  return unique([
-    text(pick(item, 'product_id', 'productId')),
-    text(pick(item, 'rzid', 'variation_id')),
-    text(pick(product, 'id', 'product_id', 'productId')),
-  ]).map((productId) => `product:${productId}`)
-}
-
 export function promVariationFamilyKey(productValue: unknown) {
   const product = asRecord(productValue)
   const variationGroupId = text(pick(product, 'variation_group_id', 'variationGroupId'))
