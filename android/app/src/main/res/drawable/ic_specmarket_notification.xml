@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 24dp transparent monochrome status icon. The shield and the prominent S
+     are derived from the user's SPEC MARKET launcher artwork. The fine
+     lettering of the full logo is intentionally omitted at status-bar size. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M124,234 L124,774 L127,779 L429,846 L471,854 L502,862 L517,863 L644,834 L645,835 L666,829 L713,820 L770,806 L771,807 L825,794 L891,781 L897,778 L899,773 L899,234 L895,228 L679,188 L605,176 L513,158 L501,158 L475,164 L393,178 L389,180 L338,188 L318,193 L317,192 L283,199 L282,198 L268,202 L192,215 L172,220 L159,221 L128,228 Z M161,263 L164,260 L175,256 L187,256 L209,251 L210,252 L506,197 L546,203 L570,209 L644,221 L710,234 L711,233 L735,237 L760,243 L767,243 L855,260 L859,264 L861,269 L861,743 L859,746 L849,751 L817,756 L796,762 L795,761 L773,767 L754,770 L742,774 L741,773 L719,779 L718,778 L693,785 L639,797 L638,796 L616,802 L615,801 L516,824 L504,823 L459,812 L374,795 L165,748 L161,741 Z" />
+    <group android:pivotX="267" android:pivotY="416"
+        android:scaleX="2.45" android:scaleY="1.55"
+        android:translateX="243" android:translateY="96">
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M211,288 L206,291 L201,297 L196,313 L196,382 L199,393 L202,399 L211,409 L289,463 L292,468 L292,495 L289,498 L283,500 L248,499 L245,496 L245,467 L243,464 L200,464 L197,469 L198,519 L200,527 L203,533 L211,541 L224,546 L316,546 L323,544 L332,537 L337,529 L339,522 L339,452 L337,444 L334,438 L325,428 L248,376 L246,370 L246,339 L251,334 L287,334 L290,336 L290,367 L293,374 L336,373 L339,370 L339,323 L338,310 L334,298 L327,290 L318,286 L218,286 Z" />
+    </group>
+</vector>
