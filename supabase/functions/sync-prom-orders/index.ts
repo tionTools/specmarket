@@ -9,7 +9,7 @@ import {
   loadMarketplaceFamilyMappings,
   mappedFamilyKey,
   mappedLegacyKeys,
-  promStableProductKeys,
+  promLegacyProductKeys,
   promVariationFamilyKey,
   promoteFamilyPriceLink,
   rememberMarketplaceFamily,
@@ -91,7 +91,14 @@ const pick = (record: RecordValue, ...keys: string[]) =>
     .map((key) => record[key])
     .find((value) => value !== undefined && value !== null && value !== '')
 function promProductKey(item: RecordValue) {
-  return promStableProductKeys(item)[0] ?? ''
+  // Legacy fallback only. Canonical cost identity is variation_group:<id>.
+  const sku = text(item.sku).trim()
+  if (sku) return `sku:${sku}`
+  const externalId = text(item.external_id).trim()
+  if (externalId) return `external:${externalId}`
+  const productId = text(pick(item, 'product_id', 'productId')).trim()
+  if (productId) return `product:${productId}`
+  return ''
 }
 
 type PromProductCache = Map<string, Promise<RecordValue | null>>
@@ -132,17 +139,17 @@ async function resolvedPromFamilyIdentity(
   mappings: Map<string, string>,
   productCache: PromProductCache,
 ): Promise<MarketplaceFamilyIdentity> {
-  const orderLegacyKeys = promStableProductKeys(item)
+  const orderLegacyKeys = promLegacyProductKeys(item)
   const knownFamily = mappedFamilyKey(mappings, orderLegacyKeys)
   if (knownFamily) return { familyKey: knownFamily, legacyKeys: orderLegacyKeys }
 
-  const productId = text(pick(item, 'product_id', 'productId', 'rzid', 'variation_id')).trim()
+  const productId = text(pick(item, 'rzid', 'variation_id', 'id', 'product_id', 'productId')).trim()
   if (!productId) return { familyKey: '', legacyKeys: orderLegacyKeys }
 
   const product = await promProductById(productId, promToken, productCache)
   if (!product) return { familyKey: '', legacyKeys: orderLegacyKeys }
 
-  const legacyKeys = promStableProductKeys(item, product)
+  const legacyKeys = promLegacyProductKeys(item, product)
   return {
     familyKey: promVariationFamilyKey(product) || mappedFamilyKey(mappings, legacyKeys),
     legacyKeys,
@@ -1339,7 +1346,7 @@ Deno.serve(async (request) => {
           const sourceName = text(item.name) || text(item.product_name) || 'Товар Prom'
           const previous = previousItems.find((saved) => Number(saved.position) === position)
           const previousKey = text(previous?.marketplace_product_key)
-          const legacyKeys = promStableProductKeys(item)
+          const legacyKeys = promLegacyProductKeys(item)
           const sameProduct = Boolean(previousKey) &&
             (legacyKeys.includes(previousKey) ||
               mappedFamilyKey(productFamilyMappings, legacyKeys) === previousKey)
@@ -1721,9 +1728,7 @@ Deno.serve(async (request) => {
           admin,
           'Пром',
           familyKey,
-          mappedLegacyKeys(productFamilyMappings, familyKey).filter((key) =>
-            key.startsWith('product:'),
-          ),
+          mappedLegacyKeys(productFamilyMappings, familyKey),
           priceCostSnapshots,
           representativeName,
           representative ? productSize(representative, representativeName) : '',
@@ -1826,9 +1831,13 @@ Deno.serve(async (request) => {
             canonicalMarketplaceProductKey ||
             legacyMarketplaceProductKey ||
             previousMarketplaceProductKey
-          const priceCostMatch = [resolvedMarketplaceProductKey, ...promStableProductKeys(item)]
-            .map((key) => findPlatformPriceCostSnapshot(priceCostSnapshots, 'Пром', key, name, size))
-            .find(Boolean)
+          const priceCostMatch = findPlatformPriceCostSnapshot(
+            priceCostSnapshots,
+            'Пром',
+            resolvedMarketplaceProductKey,
+            name,
+            size,
+          )
           const linkedPriceCost = priceCostMatch?.snapshot
           const imageUrl =
             productFromPromFeed(item, feedProducts)?.imageUrl ||
