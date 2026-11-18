@@ -1866,6 +1866,9 @@ const matchingOrders = computed(() => {
   })
 })
 const unpaidOrdersCount = computed(() => orders.value.filter(isUnpaidShipmentOrder).length)
+const unshippedOrdersCount = computed(() =>
+  orders.value.filter((order) => orderStatusTone(order) === 'blue').length,
+)
 const isOrderNotInExcel = (order: Order) =>
   !isSpreadsheetOrderCopied(order) &&
   isOrderVisibleInMainList(getOrderLifecycleState(order, displayOrderStatus(order.status)))
@@ -6514,7 +6517,7 @@ function orderDateTime(order: Order) {
             type="button"
             @click="toggleUnshipped"
           >
-            Неотправленные
+            Неотправленные <span class="tabular-nums">{{ unshippedOrdersCount }}</span>
           </button>
         </div>
         <div
