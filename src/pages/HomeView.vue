@@ -8338,14 +8338,9 @@ function orderDateTime(order: Order) {
   box-shadow: 0 0 0 2px #60a5fa;
 }
 
-.order-edit .order-cell-edit.order-cell-selected[readonly] {
-  background-color: #dbeafe;
-  box-shadow: 0 0 0 2px #60a5fa;
-}
-
-.order-edit .order-cell-edit:not([readonly]) {
+.order-edit .order-cell-edit.order-cell-selected {
   outline: none;
-  background-color: #fff;
+  background-color: #dbeafe;
   box-shadow: 0 0 0 2px #60a5fa;
 }
 </style>
