@@ -7099,7 +7099,7 @@ function orderDateTime(order: Order) {
                                 selectedOrderCell === `${order.id}-${product.id}-price`,
                             }"
                             type="text"
-                            @click="selectOrderCell(`${order.id}-${product.id}-price`, $event)"
+                            @click="selectOrderCell(`${order.id}-${product.id}-price`)"
                             @input="
                               updateOrderNumber(
                                 order,
