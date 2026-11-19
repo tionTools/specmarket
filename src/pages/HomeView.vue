@@ -259,6 +259,7 @@ const authError = ref('')
 const isSigningIn = ref(false)
 const showPassword = ref(false)
 const editingOrderCell = ref<string | null>(null)
+const selectedOrderCell = ref<string | null>(null)
 const editingOrderValue = ref<Record<string, string>>({})
 const editingManualOrderId = ref<string | number | null>(null)
 const isSavingOrderDraft = ref(false)
@@ -5575,6 +5576,10 @@ async function toggleOrderCell(key: string, event: KeyboardEvent, onCommit?: () 
   ;(event.target as HTMLInputElement).select()
 }
 
+function selectOrderCell(key: string) {
+  selectedOrderCell.value = key
+}
+
 function updateOrderNumber(
   order: Order,
   product: OrderProduct,
@@ -5618,6 +5623,7 @@ function finishOrderCell(key: string, onCommit?: () => void) {
     delete editingOrderValue.value[key]
     persistOrders(order)
   }
+  selectedOrderCell.value = key
   flushDeferredRemoteOrder(order)
 }
 
@@ -7088,7 +7094,12 @@ function orderDateTime(order: Order) {
                             "
                             :readonly="editingOrderCell !== `${order.id}-${product.id}-price`"
                             class="order-cell-edit mt-1 w-full rounded-lg border border-blue-100 px-2 py-1.5 text-sm font-semibold text-slate-900"
+                            :class="{
+                              'order-cell-selected':
+                                selectedOrderCell === `${order.id}-${product.id}-price`,
+                            }"
                             type="text"
+                            @click="selectOrderCell(`${order.id}-${product.id}-price`, $event)"
                             @input="
                               updateOrderNumber(
                                 order,
@@ -8324,6 +8335,11 @@ function orderDateTime(order: Order) {
 <style scoped>
 .order-edit .order-cell-edit[readonly]:focus {
   outline: none;
+  box-shadow: 0 0 0 2px #60a5fa;
+}
+
+.order-edit .order-cell-edit.order-cell-selected[readonly] {
+  background-color: #dbeafe;
   box-shadow: 0 0 0 2px #60a5fa;
 }
 
