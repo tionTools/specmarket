@@ -8345,7 +8345,7 @@ function orderDateTime(order: Order) {
 
 .order-edit .order-cell-edit:not([readonly]) {
   outline: none;
-  background-color: #fffbeb;
-  box-shadow: 0 0 0 2px #fbbf24;
+  background-color: #fff;
+  box-shadow: 0 0 0 2px #60a5fa;
 }
 </style>
