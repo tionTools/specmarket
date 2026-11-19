@@ -52,6 +52,17 @@ void router.isReady().then(async () => {
 
 const app = createApp(App)
 
+document.addEventListener('pointerdown', (event) => {
+  const active = document.activeElement
+  if (
+    (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) &&
+    event.target instanceof Node &&
+    !active.contains(event.target)
+  ) {
+    active.blur()
+  }
+})
+
 app.use(createPinia())
 app.use(router)
 

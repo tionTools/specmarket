@@ -4446,12 +4446,14 @@ function updateInternalCommentDraft(order: Order, event: Event) {
   ).value
 }
 
-function toggleInternalCommentEdit(order: Order) {
+async function toggleInternalCommentEdit(order: Order) {
   if (isGuest.value) return
   const key = internalCommentKey(order)
   if (editingInternalCommentOrderId.value !== order.id) {
     editingInternalCommentOrderId.value = order.id
     editingInternalCommentValue.value[key] = order.internalComment ?? ''
+    await nextTick()
+    if (document.activeElement instanceof HTMLTextAreaElement) document.activeElement.select()
     return
   }
   const value = (editingInternalCommentValue.value[key] ?? '').trim()
@@ -8339,7 +8341,7 @@ function orderDateTime(order: Order) {
   box-shadow: 0 0 0 2px #60a5fa;
 }
 
-.order-edit .order-cell-edit.order-cell-selected {
+.order-edit .order-cell-edit.order-cell-selected:focus {
   outline: none;
   background-color: #dbeafe;
   box-shadow: 0 0 0 2px #60a5fa;
