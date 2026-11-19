@@ -7420,7 +7420,7 @@ function orderDateTime(order: Order) {
                   class="order-cell-edit mt-2 block min-h-0 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition"
                   :class="
                     editingInternalCommentOrderId === order.id
-                      ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-100'
+                      ? 'border-blue-400 bg-white'
                       : 'border-slate-200 bg-slate-50'
                   "
                   placeholder="Введите внутренний комментарий"

@@ -100,7 +100,7 @@ const allColumns = [
           readonly: !editing,
           class: `catalog-cell-edit w-full cursor-text rounded-lg border px-2 py-1 font-semibold transition caret-slate-900 selection:bg-blue-200 selection:text-slate-950 focus:outline-none ${
             editing
-              ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-300'
+              ? 'border-blue-400 bg-white'
               : 'border-slate-200 bg-white hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200'
           }`,
           onBlur: (event: Event) => emit('finishEdit', item, 'name', event),
