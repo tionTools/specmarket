@@ -140,16 +140,20 @@ async function resolvedPromFamilyIdentity(
   productCache: PromProductCache,
 ): Promise<MarketplaceFamilyIdentity> {
   const orderLegacyKeys = promLegacyProductKeys(item)
-  const knownFamily = mappedFamilyKey(mappings, orderLegacyKeys)
-  if (knownFamily) return { familyKey: knownFamily, legacyKeys: orderLegacyKeys }
+  // A historical order can retain a SKU that has since been changed in Prom.
+  const productKeys = orderLegacyKeys.filter((key) => key.startsWith('product:'))
+  const knownFamily = mappedFamilyKey(mappings, productKeys)
+  if (knownFamily) return { familyKey: knownFamily, legacyKeys: productKeys }
 
   const productId = text(pick(item, 'rzid', 'variation_id', 'id', 'product_id', 'productId')).trim()
-  if (!productId) return { familyKey: '', legacyKeys: orderLegacyKeys }
+  if (!productId) return { familyKey: mappedFamilyKey(mappings, orderLegacyKeys), legacyKeys: orderLegacyKeys }
 
   const product = await promProductById(productId, promToken, productCache)
-  if (!product) return { familyKey: '', legacyKeys: orderLegacyKeys }
+  if (!product) return { familyKey: '', legacyKeys: productKeys }
 
-  const legacyKeys = promLegacyProductKeys(item, product)
+  const legacyKeys = promLegacyProductKeys(item, product).filter(
+    (key) => !key.startsWith('sku:') || Boolean(text(product.sku).trim()),
+  )
   return {
     familyKey: promVariationFamilyKey(product) || mappedFamilyKey(mappings, legacyKeys),
     legacyKeys,

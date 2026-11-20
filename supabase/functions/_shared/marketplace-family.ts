@@ -35,7 +35,7 @@ export function epicentrFamilyIdentity(item: RecordValue): MarketplaceFamilyIden
 
 export function promLegacyProductKeys(item: RecordValue, productValue?: unknown) {
   const product = asRecord(productValue)
-  const sku = text(pick(item, 'sku')) || text(pick(product, 'sku'))
+  const sku = text(pick(product, 'sku')) || text(pick(item, 'sku'))
   const externalId =
     text(pick(item, 'external_id', 'externalId')) ||
     text(pick(product, 'external_id', 'externalId'))
