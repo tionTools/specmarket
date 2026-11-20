@@ -41,6 +41,11 @@ assertEquals(
   ['sku:712-24-M', 'product:2999555219'],
   'Prom legacy keys',
 )
+assertEquals(
+  promLegacyProductKeys({ sku: '759', product_id: 3269437698 }, { id: 3269437698, sku: '763' }),
+  ['sku:763', 'product:3269437698'],
+  'Current Prom variant SKU replaces a historical order SKU',
+)
 
 const mappings = new Map([
   ['sku:712-24-M', 'variation_group:653957377'],
