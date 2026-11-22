@@ -124,7 +124,8 @@ const knownRemoteOrderIdsStorageKey = 'specmarket-crm-known-remote-orders'
 const unopenedNewOrdersStorageKey = 'specmarket-crm-unopened-new-orders'
 const newOrderNotificationsStorageKey = 'specmarket-crm-new-order-notifications'
 const labelReminderStorageKey = 'specmarket-crm-label-reminders-v1'
-const preferredOrderListMonthPeriodStorageKey = 'specmarket-crm-order-list-month-period'
+const orderListPeriodStorageKey = 'specmarket-crm-order-list-month-period'
+const orderListDatesStorageKey = 'specmarket-crm-order-list-dates'
 const manualOrderPriceDraftStorageKey = 'specmarket-crm-manual-order-price-draft'
 const manualOrderPriceSelectionStorageKey = 'specmarket-crm-manual-order-price-selection'
 const route = useRoute()
@@ -166,15 +167,17 @@ const searchLimit = ref(50)
 watch(debouncedSearchQuery, () => { searchLimit.value = 50 })
 const platformFilter = ref<'all' | Platform>('all')
 type OrderListPeriod = 'day' | 'week' | 'decade' | 'month' | 'last30' | 'custom' | `month:${string}`
-type PreferredOrderListMonthPeriod = Extract<OrderListPeriod, 'month' | 'last30'>
-
-function loadPreferredOrderListMonthPeriod(): PreferredOrderListMonthPeriod {
-  return window.localStorage.getItem(preferredOrderListMonthPeriodStorageKey) === 'last30'
-    ? 'last30'
-    : 'month'
+function loadOrderListPeriod(): OrderListPeriod {
+  const saved = window.localStorage.getItem(orderListPeriodStorageKey)
+  if (saved === 'day' || saved === 'week' || saved === 'decade' || saved === 'month' ||
+      saved === 'last30' || saved === 'custom' ||
+      (saved?.startsWith('month:') && /^\d{4}-(0[1-9]|1[0-2])$/.test(saved.slice(6)))) {
+    return saved as OrderListPeriod
+  }
+  return 'month'
 }
 
-const orderListPeriod = ref<OrderListPeriod>(loadPreferredOrderListMonthPeriod())
+const orderListPeriod = ref<OrderListPeriod>(loadOrderListPeriod())
 const orderListFrom = ref('')
 const orderListTo = ref('')
 const orderListDate = ref('')
@@ -189,9 +192,7 @@ const customDatePickers = {
   orderListTo: useTemplateRef<HTMLInputElement>('orderListToPicker'),
 }
 watch(orderListPeriod, (period) => {
-  if (period === 'month' || period === 'last30') {
-    window.localStorage.setItem(preferredOrderListMonthPeriodStorageKey, period)
-  }
+  window.localStorage.setItem(orderListPeriodStorageKey, period)
 })
 const isComparingPreviousPeriod = ref(false)
 const isPlatformSummaryExpanded = ref(false)
@@ -878,6 +879,19 @@ defaultOrderListDate.setDate(defaultOrderListDate.getDate() - 1)
 orderListFrom.value = inputDate(defaultOrderListDate)
 orderListTo.value = inputDate(defaultOrderListDate)
 orderListDate.value = inputDate(defaultOrderListDate)
+try {
+  const savedDates = JSON.parse(window.localStorage.getItem(orderListDatesStorageKey) ?? '{}')
+  if (savedDates && typeof savedDates === 'object') {
+    if (typeof savedDates.from === 'string' && parseInputDate(savedDates.from)) orderListFrom.value = savedDates.from
+    if (typeof savedDates.to === 'string' && parseInputDate(savedDates.to)) orderListTo.value = savedDates.to
+    if (typeof savedDates.day === 'string' && parseInputDate(savedDates.day)) orderListDate.value = savedDates.day
+  }
+} catch {
+  // Ignore damaged browser storage.
+}
+watch([orderListFrom, orderListTo, orderListDate], ([from, to, day]) => {
+  window.localStorage.setItem(orderListDatesStorageKey, JSON.stringify({ from, to, day }))
+})
 
 for (const field of ['orderListFrom', 'orderListTo'] as const) {
   watch(
