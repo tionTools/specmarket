@@ -8045,13 +8045,6 @@ function orderDateTime(order: Order) {
                   Название обязательно. Размер можно оставить пустым.
                 </p>
               </div>
-              <button
-                class="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-                type="button"
-                @click="addProduct"
-              >
-                <Plus class="mr-1 inline size-4" aria-hidden="true" /> Добавить товар
-              </button>
             </div>
 
             <div class="mt-4 space-y-4">
@@ -8145,8 +8138,16 @@ function orderDateTime(order: Order) {
                 </div>
               </div>
             </div>
+          <div class="mt-4 flex justify-end">
+            <button
+              class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+              type="button"
+              @click="addProduct"
+            >
+              <Plus class="mr-1 inline size-4" aria-hidden="true" /> Добавить товар
+            </button>
+          </div>
           </section>
-
           <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 class="text-base font-semibold text-slate-900">Доставка</h3>
             <p class="mt-1 text-xs text-slate-500">
