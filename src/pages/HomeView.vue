@@ -6714,11 +6714,11 @@ function orderDateTime(order: Order) {
               ></span
             ><strong
               class="flex self-stretch items-center justify-end whitespace-nowrap border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><span class="order-header-money">{{ formatMoney(getOrderAmount(order)) }}</span></strong
+              ><span class="order-header-money"><span>{{ formatMoney(getOrderAmount(order)).split(',')[0] }}</span><wbr v-if="formatMoney(getOrderAmount(order)).includes(',')" /><span v-if="formatMoney(getOrderAmount(order)).includes(',')">,{{ formatMoney(getOrderAmount(order)).split(',')[1] }}</span></span></strong
             ><span
               v-if="hasActualFinancialResult(order)"
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="order-header-money">{{ formatMoney(getActualProfit(order)) }}</strong>
+              ><strong class="order-header-money"><span>{{ formatMoney(getActualProfit(order)).split(',')[0] }}</span><wbr v-if="formatMoney(getActualProfit(order)).includes(',')" /><span v-if="formatMoney(getActualProfit(order)).includes(',')">,{{ formatMoney(getActualProfit(order)).split(',')[1] }}</span></strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span
               ></span
@@ -6728,7 +6728,7 @@ function orderDateTime(order: Order) {
               >—</strong
             ><span
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="order-header-money">{{ formatMoney(getPlannedProfit(order)) }}</strong>
+              ><strong class="order-header-money"><span>{{ formatMoney(getPlannedProfit(order)).split(',')[0] }}</span><wbr v-if="formatMoney(getPlannedProfit(order)).includes(',')" /><span v-if="formatMoney(getPlannedProfit(order)).includes(',')">,{{ formatMoney(getPlannedProfit(order)).split(',')[1] }}</span></strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
               ></span

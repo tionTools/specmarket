@@ -4,10 +4,11 @@
 .order-header-money {
   display: block;
   max-width: 100%;
-  font-size: 0.875rem;
-  line-height: 1.25;
   white-space: normal;
-  overflow-wrap: anywhere;
+}
+
+.order-header-money > span {
+  white-space: nowrap;
 }
 
 :has(> .order-header-money) {
