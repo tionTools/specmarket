@@ -7,7 +7,7 @@
   color: #9a3412 !important;
 }
 
-#app .payment-mismatch:focus {
+#app input.order-cell-edit.payment-mismatch:focus {
   outline: 3px solid #f97316 !important;
   outline-offset: 2px !important;
 }
