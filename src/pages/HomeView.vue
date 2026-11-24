@@ -7332,7 +7332,15 @@ function orderDateTime(order: Order) {
                     :value="orderCellValue(`${order.id}-payment-amount`, order.paymentAmount ?? 0)"
                     :readonly="editingOrderCell !== `${order.id}-payment-amount`"
                     class="order-cell-edit mt-1 block w-full rounded-lg border px-2 py-1 text-sm font-semibold"
-                    :class="promRegistryFieldClass(order, 'paymentAmount')"
+                    :class="[
+                        promRegistryFieldClass(order, 'paymentAmount'),
+                        {
+                          'payment-mismatch':
+                            (order.paymentAmount ?? 0) > 0 &&
+                            Math.round((order.paymentAmount ?? 0) * 100) !==
+                              Math.round(getNetOrderAmount(order) * 100),
+                        },
+                      ]"
                     inputmode="decimal"
                     type="text"
                     @input="

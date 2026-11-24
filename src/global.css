@@ -1,6 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
+#app .payment-mismatch:not(:focus) {
+  background-color: #ffedd5 !important;
+  border-color: #f97316 !important;
+  color: #9a3412 !important;
+}
+
 /* Keep cell selection distinct from native text selection during editing. */
 #app :is(.order-cell-edit, .catalog-cell-edit)[readonly]:focus {
   background: #316ac5 !important;
