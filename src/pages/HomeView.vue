@@ -702,6 +702,17 @@ const currentTime = () =>
     new Date(),
   )
 const orderDraft = ref(createOrderDraft())
+watch(
+  () => [orderDraft.value.customer, orderDraft.value.phone] as const,
+  ([customer, phone], [previousCustomer, previousPhone]) => {
+    if (editingManualOrderId.value !== null) return
+    const delivery = orderDraft.value.delivery
+    if (!delivery.recipient || delivery.recipient === previousCustomer) delivery.recipient = customer
+    if (!delivery.recipientPhone || delivery.recipientPhone === previousPhone)
+      delivery.recipientPhone = phone
+  },
+  { flush: 'sync' },
+)
 
 watch(
   () => orderDraft.value,
@@ -6703,11 +6714,11 @@ function orderDateTime(order: Order) {
               ></span
             ><strong
               class="flex self-stretch items-center justify-end whitespace-nowrap border-l border-slate-200 pl-3 text-right tabular-nums"
-              >{{ formatMoney(getOrderAmount(order)) }}</strong
+              ><span class="order-header-money">{{ formatMoney(getOrderAmount(order)) }}</span></strong
             ><span
               v-if="hasActualFinancialResult(order)"
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="whitespace-nowrap">{{ formatMoney(getActualProfit(order)) }}</strong>
+              ><strong class="order-header-money">{{ formatMoney(getActualProfit(order)) }}</strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getActualProfit(order), getOrderAmount(order)) }})</span
               ></span
@@ -6717,7 +6728,7 @@ function orderDateTime(order: Order) {
               >—</strong
             ><span
               class="flex self-stretch flex-col items-end justify-center border-l border-slate-200 pl-3 text-right tabular-nums"
-              ><strong class="whitespace-nowrap">{{ formatMoney(getPlannedProfit(order)) }}</strong>
+              ><strong class="order-header-money">{{ formatMoney(getPlannedProfit(order)) }}</strong>
               <span class="mt-0.5 block whitespace-nowrap text-xs text-slate-500"
                 >({{ formatProfitPercent(getPlannedProfit(order), getOrderAmount(order)) }})</span
               ></span

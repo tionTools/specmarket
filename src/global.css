@@ -1,6 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
+.order-header-money {
+  display: block;
+  max-width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:has(> .order-header-money) {
+  min-width: 0;
+}
+
 #app .payment-mismatch:not(:focus) {
   background-color: #ffedd5 !important;
   border-color: #f97316 !important;
