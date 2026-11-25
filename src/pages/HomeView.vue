@@ -5122,6 +5122,14 @@ function labelSentForCurrentTtn(order: Order) {
 }
 
 type LabelReminderState = { ttn: string; startedAt: number; notified: number }
+function needsOrderLabelReminder(order: Order) {
+  if (!canSendOrderLabel(order) || labelSentForCurrentTtn(order)) return false
+  if (orderStatusTone(order) !== 'blue') return false
+  const status = displayOrderStatus(order.status).trim().toLowerCase()
+  const deliveryStatus = displayDeliveryStatus(order.delivery.status).trim().toLowerCase()
+  return !/отправлен|відправлен|shipped|заверш|виконан|выполнен|completed|finished|closed|закрыт|закрит/.test(status) &&
+    !/отправлен|відправлен|получен|отриман|доставлен|delivered|on_the_way|in_transit|shipped/.test(deliveryStatus)
+}
 const labelReminderThresholds = [5, 10, 15] as const
 const labelReminderStates = ref<Record<string, LabelReminderState>>({})
 const labelReminderToasts = ref<Array<{ id: number; remoteId: string; text: string }>>([])
@@ -5193,13 +5201,13 @@ function reconcileLabelReminders() {
     if (!previous || previous.ttn !== ttn) {
       next[order.remoteId] = {
         ttn,
-        startedAt: ttn && canSendOrderLabel(order) && !labelSentForCurrentTtn(order) ? now : 0,
+        startedAt: ttn && needsOrderLabelReminder(order) ? now : 0,
         notified: 0,
       }
       labelReminderToasts.value = labelReminderToasts.value.filter(
         (toast) => toast.remoteId !== order.remoteId,
       )
-    } else if (!canSendOrderLabel(order) || labelSentForCurrentTtn(order)) {
+    } else if (!needsOrderLabelReminder(order)) {
       next[order.remoteId] = { ttn, startedAt: 0, notified: 0 }
       labelReminderToasts.value = labelReminderToasts.value.filter(
         (toast) => toast.remoteId !== order.remoteId,
@@ -5221,7 +5229,7 @@ function checkLabelReminderThresholds() {
   if (documentVisibility.value !== 'visible') return
   let changed = false
   for (const order of orders.value) {
-    if (!order.remoteId || !canSendOrderLabel(order) || labelSentForCurrentTtn(order)) continue
+    if (!order.remoteId || !needsOrderLabelReminder(order)) continue
     const state = labelReminderStates.value[order.remoteId]
     if (!state?.startedAt || state.ttn !== labelTtnKey(order.delivery.ttn)) continue
     const due = labelReminderThresholds.filter(
@@ -5246,7 +5254,7 @@ function checkLabelReminderThresholds() {
 
 const overdueLabelOrders = computed(() =>
   orders.value.filter((order) => {
-    if (!order.remoteId || !canSendOrderLabel(order) || labelSentForCurrentTtn(order)) return false
+    if (!order.remoteId || !needsOrderLabelReminder(order)) return false
     const state = labelReminderStates.value[order.remoteId]
     return Boolean(
       state?.startedAt &&
